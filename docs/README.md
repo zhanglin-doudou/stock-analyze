@@ -41,6 +41,9 @@ docs/
 
 **关键数字**：80 端点 ｜ 28/28 FR + 15/15 NFR 覆盖 ｜ 36 张表 ｜ 12 扩展点 ｜ 可用性 ≥99.9% ｜ RPO ≤5min / RTO ≤30min ｜ core 覆盖 100/100。
 
+**一期验收（2026-10-20）**：[reviews/P1-CodeReview-and-Acceptance.md](reviews/P1-CodeReview-and-Acceptance.md) — 代码审查 + 一期验收报告，结论：**不通过**（5 项 P0 / 17 项 P1 待修，含真账单对账假断链、`replace_range` 数据丢失、admin PAT 越权、撤销入口缺失、verify-p1 空心）。
+> **修复进展（2026-10-21）**：[reviews/P1-Fix-Log-P0-2-P0-3.md](reviews/P1-Fix-Log-P0-2-P0-3.md) — P0-2（`replace_range` 数据丢失 / 撤销后重导）与 P0-3（admin PAT 越权）已修复并通过回归；P0-1 / P0-4 / P0-5 仍待修。
+
 ---
 
 ## 3. 历史（v1，只读）

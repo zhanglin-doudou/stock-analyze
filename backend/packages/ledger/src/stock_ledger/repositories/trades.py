@@ -219,6 +219,22 @@ class TradeRepository:
         trade = await self.by_id(user_id, trade_id, include_deleted=True)
         if trade is None:
             raise NotFoundError(detail=f"交易 {trade_id} 不存在")
+        # 去重键只在有效行上唯一：若同键有效行已存在（例如撤销后又重新导入），
+        # 直接恢复旧行会撞唯一索引；这里显式转 422，而不是把 DB 异常暴露成 500。
+        live_conflict = await self._session.scalar(
+            select(Trade.id).where(
+                Trade.user_id == user_id,
+                Trade.dedupe_key == trade.dedupe_key,
+                Trade.occurrence_idx == trade.occurrence_idx,
+                Trade.deleted_at.is_(None),
+                Trade.id != trade.id,
+            )
+        )
+        if live_conflict is not None:
+            raise ApiError(
+                ErrorCode.VALIDATION_ERROR,
+                detail="同去重键的有效流水已存在（可能已重新导入），无法恢复该行",
+            )
         trade.deleted_at = None
         trade.version += 1
         await self._session.flush()
@@ -401,11 +417,19 @@ class TradeRepository:
         return list(await self._session.scalars(stmt))
 
     async def existing_dedupe_keys(self, user_id: uuid.UUID, keys: Sequence[str]) -> set[str]:
-        """批量查已存在的去重键，供导入跳过重复行。"""
+        """批量查仍有效的去重键，供导入跳过重复行。
+
+        只统计未软删的行：已撤销/被区间替换软删的行不能继续占着去重键，否则
+        re-import 会把整批行静默 skip 掉（表现为“导入成功但流水为空”）。
+        """
         if not keys:
             return set()
         rows = await self._session.scalars(
-            select(Trade.dedupe_key).where(Trade.user_id == user_id, Trade.dedupe_key.in_(keys))
+            select(Trade.dedupe_key).where(
+                Trade.user_id == user_id,
+                Trade.deleted_at.is_(None),
+                Trade.dedupe_key.in_(keys),
+            )
         )
         return set(rows)
 

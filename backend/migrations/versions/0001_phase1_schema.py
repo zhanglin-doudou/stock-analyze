@@ -479,7 +479,6 @@ def upgrade() -> None:
         sa.CheckConstraint("version >= 1", name="ck_trade_version"),
         sa.ForeignKeyConstraint(["user_id"], ["platform.user.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("user_id", "dedupe_key", name="uq_trade_user_dedupe"),
         schema="ledger",
     )
     op.create_index(
@@ -491,6 +490,16 @@ def upgrade() -> None:
         ["user_id", "trade_date", "id"],
         unique=False,
         schema="ledger",
+    )
+    # 去重键只在“有效行”上唯一：软删（撤销/区间替换）的行不占键，才能重新导入恢复。
+    # 一期尚未发布，直接修正 0001；已存在的本地库需 `make db-reset` 或执行等价 DDL。
+    op.create_index(
+        "uq_trade_user_dedupe",
+        "trade",
+        ["user_id", "dedupe_key", "occurrence_idx"],
+        unique=True,
+        schema="ledger",
+        postgresql_where=sa.text("deleted_at IS NULL"),
     )
     op.create_table(
         "api_token",

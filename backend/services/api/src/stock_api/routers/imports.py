@@ -225,6 +225,11 @@ async def commit_import(
             ErrorCode.VALIDATION_ERROR,
             errors=[FieldError("range", "required", "replace_range 模式必须提供 range")],
         )
+    if payload.range is not None and payload.range.from_date > payload.range.to_date:
+        raise ApiError(
+            ErrorCode.VALIDATION_ERROR,
+            errors=[FieldError("range", "invalid", "range.from 不能晚于 range.to")],
+        )
 
     body_json = json.dumps(payload.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
     request_hash = hashlib.sha256(body_json.encode("utf-8")).hexdigest()
@@ -285,6 +290,9 @@ async def commit_import(
             "mode": payload.mode,
             "batch_id": batch.id,
         }
+        if payload.range is not None:
+            # 区间替换必须用请求体声明的区间（不能拿账单 min/max 代替，否则会误删区间外数据）。
+            params["range"] = payload.range.model_dump(by_alias=True, mode="json")
         if payload.note:
             params["note"] = payload.note
         job_id, reused = await state.queue.enqueue(

@@ -8,12 +8,13 @@
 from __future__ import annotations
 
 import uuid
+from datetime import date
 from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from stock_contracts.clock import Clock
 from stock_contracts.enums import ImportBatchStatus, JobStatus
-from stock_contracts.errors import ApiError, ErrorCode, NotFoundError
+from stock_contracts.errors import ApiError, ErrorCode, FieldError, NotFoundError
 from stock_platform.audit import record
 from stock_platform.jobs import JobQueue
 from stock_platform.outbox import publish
@@ -45,6 +46,36 @@ async def _fail_job(
         error = {"code": code, "detail": str(exc)}
     status = await queue.fail_or_retry(session, job_id, error_code=code, error=error)
     return {"job_id": job_id, "status": status.value, "error_code": code}
+
+
+def _requested_range(params: dict[str, Any]) -> tuple[date | None, date | None]:
+    """解析 API-011 请求里的 `range`（`{"from": .., "to": ..}`）。
+
+    缺省返回 (None, None)：兼容 CLI/seed 等未携带 range 的旧调用方（按账单日期兜底）。
+    非法格式/倒置区间一律 422 参数错误，避免静默替换错区间。
+    """
+    raw = params.get("range")
+    if raw is None:
+        return None, None
+    if not isinstance(raw, dict):
+        raise ApiError(
+            ErrorCode.VALIDATION_ERROR,
+            errors=[FieldError("range", "invalid", "range 必须是 {from,to} 对象")],
+        )
+    try:
+        start = date.fromisoformat(str(raw.get("from") or raw.get("from_date")))
+        end = date.fromisoformat(str(raw.get("to") or raw.get("to_date")))
+    except ValueError as exc:
+        raise ApiError(
+            ErrorCode.VALIDATION_ERROR,
+            errors=[FieldError("range", "invalid", "range 日期必须为 YYYY-MM-DD")],
+        ) from exc
+    if start > end:
+        raise ApiError(
+            ErrorCode.VALIDATION_ERROR,
+            errors=[FieldError("range", "invalid", "range.from 不能晚于 range.to")],
+        )
+    return start, end
 
 
 def _bill_to_trade_rows(bill: ParsedBill, batch_id: str) -> list[TradeRow]:
@@ -145,12 +176,23 @@ async def commit_batch(
             )
 
         trade_repo = TradeRepository(session)
-        date_from = min(row.trade_date for row in bill.rows) if bill.rows else None
-        date_to = max(row.trade_date for row in bill.rows) if bill.rows else None
+        bill_from = min(row.trade_date for row in bill.rows) if bill.rows else None
+        bill_to = max(row.trade_date for row in bill.rows) if bill.rows else None
+        replace_from: date | None = None
+        replace_to: date | None = None
         replaced = 0
-        if mode == "replace_range" and date_from is not None and date_to is not None:
+        if mode == "replace_range":
+            requested_from, requested_to = _requested_range(params)
+            # 旧调用方（CLI/seed）不带 range 时按账单日期兜底，保持向后兼容。
+            replace_from = requested_from or bill_from
+            replace_to = requested_to or bill_to
+            if replace_from is None or replace_to is None:
+                raise ApiError(
+                    ErrorCode.VALIDATION_ERROR,
+                    errors=[FieldError("range", "required", "replace_range 模式必须提供 range")],
+                )
             replaced = await trade_repo.soft_delete_range(
-                user_id, date_from=date_from, date_to=date_to, at=clock.now()
+                user_id, date_from=replace_from, date_to=replace_to, at=clock.now()
             )
 
         existing_keys = await trade_repo.existing_dedupe_keys(
@@ -183,9 +225,11 @@ async def commit_batch(
             )
 
         await queue.progress(session, job_id, percent=85, stage="finalizing", message=None)
+        range_from = replace_from if mode == "replace_range" else bill_from
+        range_to = replace_to if mode == "replace_range" else bill_to
         ranges: dict[str, Any] = (
-            {"from": date_from.isoformat(), "to": date_to.isoformat()}
-            if date_from is not None and date_to is not None
+            {"from": range_from.isoformat(), "to": range_to.isoformat()}
+            if range_from is not None and range_to is not None
             else {}
         )
         ranges["replaced_trades"] = replaced

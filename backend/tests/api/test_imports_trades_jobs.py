@@ -271,6 +271,37 @@ async def _preview(client, api_prefix, user) -> str:
     return resp.json()["preview_id"]
 
 
+async def _preview_with_rows(client, api_prefix, user, rows: list[str]) -> str:
+    resp = await client.post(
+        f"{api_prefix}/imports/preview",
+        headers=user.headers,
+        files={"file": ("bill.csv", _bill_bytes(rows), "text/csv")},
+    )
+    assert resp.status_code == 200, resp.text
+    return resp.json()["preview_id"]
+
+
+async def _commit_import(
+    client,
+    api_prefix,
+    user,
+    preview_id: str,
+    *,
+    mode: str = "full",
+    range_body: dict[str, str] | None = None,
+) -> dict:
+    payload: dict[str, object] = {"preview_id": preview_id, "mode": mode}
+    if range_body is not None:
+        payload["range"] = range_body
+    resp = await client.post(
+        f"{api_prefix}/imports",
+        headers={**user.headers, "Idempotency-Key": "key-" + uuid.uuid4().hex},
+        json=payload,
+    )
+    assert resp.status_code == 202, resp.text
+    return resp.json()
+
+
 async def _drain_worker(settings) -> None:
     """把队列里的任务全部领取并执行（最小复刻真实 worker 的消费循环）。
 
@@ -441,6 +472,104 @@ async def test_idempotency_key_same_key_different_body_conflicts(client, api_pre
     assert conflict.json()["code"] == ErrorCode.IDEMPOTENCY_KEY_REUSED.value
 
 
+async def test_api_011_replace_range_reinserts_without_data_loss(
+    client, api_prefix, user, settings
+) -> None:
+    """P0 回归：replace_range 清掉区间旧行后必须插回本批行，不能“删而不插”。"""
+    first = await _commit_import(client, api_prefix, user, await _preview(client, api_prefix, user))
+    await _drain_worker(settings)
+    before = (await client.get(f"{api_prefix}/trades?limit=200", headers=user.headers)).json()[
+        "items"
+    ]
+    assert len(before) == 2
+
+    second = await _commit_import(
+        client,
+        api_prefix,
+        user,
+        await _preview(client, api_prefix, user),
+        mode="replace_range",
+        range_body={"from": "2026-06-01", "to": "2026-06-30"},
+    )
+    await _drain_worker(settings)
+    job = await client.get(f"{api_prefix}/jobs/{second['job_id']}", headers=user.headers)
+    assert job.json()["status"] == "succeeded", job.text
+    batch = await client.get(f"{api_prefix}/imports/{second['batch_id']}", headers=user.headers)
+    assert batch.json()["counts"] == {"parsed": 2, "inserted": 2, "skipped": 0, "quarantined": 0}
+
+    after = (await client.get(f"{api_prefix}/trades?limit=200", headers=user.headers)).json()[
+        "items"
+    ]
+    assert len(after) == 2
+    assert {item["trade_id"] for item in after}.isdisjoint({item["trade_id"] for item in before})
+    assert {item["batch_id"] for item in after} == {second["batch_id"]}
+    assert first["batch_id"] != second["batch_id"]
+
+
+async def test_api_011_replace_range_invalid_range_422(client, api_prefix, user) -> None:
+    """倒置区间必须在同步阶段 422，而不是丢给 worker 变成失败任务。"""
+    preview_id = await _preview(client, api_prefix, user)
+    resp = await client.post(
+        f"{api_prefix}/imports",
+        headers={**user.headers, "Idempotency-Key": "key-" + uuid.uuid4().hex},
+        json={
+            "preview_id": preview_id,
+            "mode": "replace_range",
+            "range": {"from": "2026-06-30", "to": "2026-06-01"},
+        },
+    )
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["code"] == ErrorCode.VALIDATION_ERROR.value
+    assert resp.json()["errors"][0]["field"] == "range"
+
+
+async def test_api_011_replace_range_only_touches_requested_range(
+    client, api_prefix, user, settings
+) -> None:
+    """replace_range 必须用请求体 range，而不是账单 min/max（否则误删区间外流水）。"""
+    rows = [
+        "2026-06-01,600519,贵州茅台,买入,100,1500.00,150000.00,5.00,0.00,0.10,100000.00",
+        "2026-06-30,000001,平安银行,买入,200,10.00,2000.00,0.50,0.00,0.01,95000.00",
+    ]
+    first = await _commit_import(
+        client, api_prefix, user, await _preview_with_rows(client, api_prefix, user, rows)
+    )
+    await _drain_worker(settings)
+    before = {
+        item["trade_date"]: item
+        for item in (
+            await client.get(f"{api_prefix}/trades?limit=200", headers=user.headers)
+        ).json()["items"]
+    }
+    assert set(before) == {"2026-06-01", "2026-06-30"}
+
+    replacement = ["2026-06-01,600519,贵州茅台,买入,100,1600.00,160000.00,5.00,0.00,0.10,100000.00"]
+    second = await _commit_import(
+        client,
+        api_prefix,
+        user,
+        await _preview_with_rows(client, api_prefix, user, replacement),
+        mode="replace_range",
+        range_body={"from": "2026-06-01", "to": "2026-06-01"},
+    )
+    await _drain_worker(settings)
+    job = await client.get(f"{api_prefix}/jobs/{second['job_id']}", headers=user.headers)
+    assert job.json()["status"] == "succeeded", job.text
+
+    after = {
+        item["trade_date"]: item
+        for item in (
+            await client.get(f"{api_prefix}/trades?limit=200", headers=user.headers)
+        ).json()["items"]
+    }
+    assert set(after) == {"2026-06-01", "2026-06-30"}
+    assert after["2026-06-01"]["amount"] == "160000.00"
+    assert after["2026-06-01"]["batch_id"] == second["batch_id"]
+    # 区间外（06-30）行不受影响，仍属第一批次。
+    assert after["2026-06-30"]["trade_id"] == before["2026-06-30"]["trade_id"]
+    assert after["2026-06-30"]["batch_id"] == first["batch_id"]
+
+
 # ══ API-012 批次列表 ═══════════════════════════════════════
 
 
@@ -571,6 +700,35 @@ async def test_api_015_revoke_cross_user_404(
     batch_id = await _seed_batch(owner_engine, user_id=other.user_id)
     resp = await client.post(f"{api_prefix}/imports/{batch_id}/revoke", headers=user.headers)
     assert resp.status_code == 404
+
+
+async def test_api_015_reimport_after_revoke_restores_rows(
+    client, api_prefix, user, settings
+) -> None:
+    """P0 回归：撤销（软删）不能永久占住去重键，否则重导会 inserted=0 静默丢数据。"""
+    first = await _commit_import(client, api_prefix, user, await _preview(client, api_prefix, user))
+    await _drain_worker(settings)
+    before = await client.get(f"{api_prefix}/trades?limit=200", headers=user.headers)
+    assert len(before.json()["items"]) == 2
+
+    revoked = await client.post(
+        f"{api_prefix}/imports/{first['batch_id']}/revoke", headers=user.headers
+    )
+    assert revoked.status_code == 200, revoked.text
+    assert (await client.get(f"{api_prefix}/trades?limit=200", headers=user.headers)).json()[
+        "items"
+    ] == []
+
+    second = await _commit_import(
+        client, api_prefix, user, await _preview(client, api_prefix, user)
+    )
+    await _drain_worker(settings)
+    job = await client.get(f"{api_prefix}/jobs/{second['job_id']}", headers=user.headers)
+    assert job.json()["status"] == "succeeded", job.text
+    batch = await client.get(f"{api_prefix}/imports/{second['batch_id']}", headers=user.headers)
+    assert batch.json()["counts"] == {"parsed": 2, "inserted": 2, "skipped": 0, "quarantined": 0}
+    restored = await client.get(f"{api_prefix}/trades?limit=200", headers=user.headers)
+    assert len(restored.json()["items"]) == 2
 
 
 # ══ API-017 流水列表 ═══════════════════════════════════════
@@ -756,6 +914,41 @@ async def test_api_020_restore_not_deleted_422(client, api_prefix, user, owner_e
     resp = await client.post(f"{api_prefix}/trades/{trade_id}/restore", headers=user.headers)
     assert resp.status_code == 422
     assert resp.json()["code"] == ErrorCode.VALIDATION_ERROR.value
+
+
+async def test_api_020_restore_after_reimport_conflicts_422(
+    client, api_prefix, user, settings
+) -> None:
+    """撤销后重新导入会生成同去重键的有效行；此时恢复旧行必须 422，而不是 500。"""
+    first = await _commit_import(client, api_prefix, user, await _preview(client, api_prefix, user))
+    await _drain_worker(settings)
+    old_items = (await client.get(f"{api_prefix}/trades?limit=200", headers=user.headers)).json()[
+        "items"
+    ]
+    assert len(old_items) == 2
+    old_id = old_items[0]["trade_id"]
+
+    assert (
+        await client.post(f"{api_prefix}/imports/{first['batch_id']}/revoke", headers=user.headers)
+    ).status_code == 200
+    second = await _commit_import(
+        client, api_prefix, user, await _preview(client, api_prefix, user)
+    )
+    await _drain_worker(settings)
+    assert (
+        len(
+            (await client.get(f"{api_prefix}/trades?limit=200", headers=user.headers)).json()[
+                "items"
+            ]
+        )
+        == 2
+    )
+    assert second["batch_id"] != first["batch_id"]
+
+    resp = await client.post(f"{api_prefix}/trades/{old_id}/restore", headers=user.headers)
+    assert resp.status_code == 422, resp.text
+    assert resp.json()["code"] == ErrorCode.VALIDATION_ERROR.value
+    assert "同去重键" in resp.json()["detail"]
 
 
 async def test_api_020_restore_cross_user_404(

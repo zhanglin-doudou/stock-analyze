@@ -382,3 +382,50 @@ async def test_unknown_query_param_is_400(client, api_prefix, user) -> None:
     resp = await client.get(f"{api_prefix}/trades?bogus=1", headers=user.headers)
     assert resp.status_code == 400
     assert resp.json()["code"] == ErrorCode.UNKNOWN_QUERY_PARAM.value
+
+
+# ══ PAT 角色继承（安全回归：P0 admin PAT 越权）═══════════════
+
+
+async def test_admin_pat_inherits_admin_role_and_cannot_read_trades(
+    client, api_prefix, admin
+) -> None:
+    """admin 的 PAT 必须继承 admin 角色：否则可绕过 ADMIN_CANNOT_READ_TRADES。"""
+    created = await client.post(
+        f"{api_prefix}/tokens",
+        headers=admin.headers,
+        json={"name": "ops-script", "scopes": ["read", "write"]},
+    )
+    assert created.status_code == 201, created.text
+    pat = created.json()["token"]["token"]
+
+    # 同一 admin 的 JWT 被拒；PAT 也必须被拒（修复前这里是 200）。
+    via_jwt = await client.get(f"{api_prefix}/trades", headers=admin.headers)
+    assert via_jwt.status_code == 403
+    assert via_jwt.json()["code"] == ErrorCode.ADMIN_CANNOT_READ_TRADES.value
+
+    via_pat = await client.get(f"{api_prefix}/trades", headers={"Authorization": f"Bearer {pat}"})
+    assert via_pat.status_code == 403, via_pat.text
+    assert via_pat.json()["code"] == ErrorCode.ADMIN_CANNOT_READ_TRADES.value
+
+
+async def test_user_pat_inherits_user_role_and_can_read_own_trades(
+    client, api_prefix, user
+) -> None:
+    """普通用户的 PAT 仍是 user：可读自己的流水（防止修复 admin 时把 user 也锁死）。"""
+    created = await client.post(
+        f"{api_prefix}/tokens",
+        headers=user.headers,
+        json={"name": "script", "scopes": ["read"]},
+    )
+    assert created.status_code == 201, created.text
+    pat = created.json()["token"]["token"]
+    headers = {"Authorization": f"Bearer {pat}"}
+
+    me = await client.get(f"{api_prefix}/auth/me", headers=headers)
+    assert me.status_code == 200, me.text
+    assert me.json()["user"]["role"] == "user"
+
+    trades = await client.get(f"{api_prefix}/trades", headers=headers)
+    assert trades.status_code == 200, trades.text
+    assert trades.json()["items"] == []

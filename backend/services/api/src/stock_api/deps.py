@@ -17,7 +17,7 @@ from stock_platform.db import Database
 from stock_platform.idempotency import IdempotencyStore
 from stock_platform.jobs import JobQueue
 from stock_platform.ratelimit import RateLimiter
-from stock_platform.repositories import ApiTokenRepository
+from stock_platform.repositories import ApiTokenRepository, UserRepository
 from stock_platform.security import TokenService, hash_token
 from stock_platform.tenant import Credential, TenantContext, set_context
 
@@ -112,13 +112,22 @@ async def resolve_credential(
 
 
 async def _resolve_pat(request: Request, raw: str) -> Credential:
-    """PAT 查库（哈希比对）——读平台表，不需要租户上下文。"""
+    """PAT 查库（哈希比对）——读平台表，不需要租户上下文。
+
+    PAT 必须继承所属用户的真实角色：`api_token` 本身不存角色，若在这里硬编码
+    `Role.USER`，admin 用 JWT 建出的 PAT 会被降级成 user，从而绕过
+    `ADMIN_CANNOT_READ_TRADES` 等身份越权防线。
+    """
     state = get_state(request)
     async with state.db.session(begin=True) as session:
         token = await ApiTokenRepository(session).by_hash(hash_token(raw))
         if token is None:
             raise ApiError(ErrorCode.TOKEN_REVOKED, detail="令牌无效或已撤销")
+        owner = await UserRepository(session).by_id(token.user_id)
+        if owner is None or owner.status != "active":
+            raise ApiError(ErrorCode.TOKEN_REVOKED, detail="令牌所属账号不可用")
         user_id = token.user_id
+        role = Role(owner.role)
         scopes = frozenset(token.scopes)
         token_id = str(token.id)
         expired = token.expires_at
@@ -127,7 +136,7 @@ async def _resolve_pat(request: Request, raw: str) -> Credential:
         raise ApiError(ErrorCode.TOKEN_REVOKED)
     if expired < state.clock.now():
         raise ApiError(ErrorCode.TOKEN_EXPIRED)
-    return Credential(kind="pat", user_id=user_id, role=Role.USER, scopes=scopes, token_id=token_id)
+    return Credential(kind="pat", user_id=user_id, role=role, scopes=scopes, token_id=token_id)
 
 
 async def get_tenant(

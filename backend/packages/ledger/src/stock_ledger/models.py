@@ -24,6 +24,7 @@ from sqlalchemy import (
     String,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
@@ -122,14 +123,21 @@ class Trade(Base):
     """交易明细（软删 + 版本乐观锁 + 租户唯一去重键）。
 
     存在的原因：明细是所有收益/归因/报告的源数据，必须支持人工修正（version 乐观锁）、
-    误删恢复（deleted_at 软删）、重复导入幂等（(user_id, dedupe_key) 唯一约束）。
+    误删恢复（deleted_at 软删）、重复导入幂等（(user_id, dedupe_key) 仅在有效行上唯一）。
     """
 
     __tablename__ = "trade"
     __table_args__ = (
         Index("ix_trade_user_date_id", "user_id", "trade_date", "id"),
         Index("ix_trade_user_batch", "user_id", "batch_id"),
-        UniqueConstraint("user_id", "dedupe_key", name="uq_trade_user_dedupe"),
+        Index(
+            "uq_trade_user_dedupe",
+            "user_id",
+            "dedupe_key",
+            "occurrence_idx",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL"),
+        ),
         CheckConstraint("version >= 1", name="ck_trade_version"),
         {"schema": SCHEMA},
     )
