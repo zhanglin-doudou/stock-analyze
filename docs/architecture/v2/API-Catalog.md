@@ -184,7 +184,7 @@
 - 验收断言：① 200 后 GET /trades 行数 == 导入前行数；② batch.status=="revoked"；③ 再次 revoke → 409 IMPORT_ALREADY_REVOKED；④ GET /trades?include_deleted=true 可见被软删行且 batch_id 匹配；⑤ 审计出现 action=="import.revoke"。
 #### API-017 GET /trades
 - 用途：交易流水查询（完整 REST）；FR-L8/L4；认证：read；同步；游标分页。
-- 请求：query `limit`(1~200) / `cursor` / `sort`(白名单 trade_date,-trade_date,amount,-amount,created_at) / `trade_date_from`、`trade_date_to` / `security_code` / `side` / `batch_id` / `include_deleted`(默认 false) / `fields` / `include_total`。
+- 请求：query `limit`(1~200) / `cursor` / `sort`(白名单 trade_date,-trade_date,amount,-amount,created_at) / `trade_date_from`、`trade_date_to` / `security_code` / `side`(∈{buy,sell,unknown}) / `batch_id` / `include_deleted`(默认 false) / `fields` / `include_total`。
 - 响应 200：`items[]{trade_id,trade_date,security_code,security_name,side,quantity,price,amount,commission,stamp_tax,other_fee,cash_balance,cash_balance_available,account_masked,dedupe_key,version,deleted_at}` / `next_cursor` / `has_more`；响应头 `ETag`。
 - 错误码：INVALID_SORT_FIELD(400)、INVALID_CURSOR(400)、INVALID_FIELD_SELECTION(400)、UNKNOWN_QUERY_PARAM(400)、VALIDATION_ERROR(422)。
 - 验收断言：① limit=100 时 next_cursor 非空，游标翻全集无重复无遗漏（trade_id 集合与服务端总数一致）；② sort=foo → 400 INVALID_SORT_FIELD；③ fields=id,trade_date → 响应键集合恰为这两个；④ 带上次 ETag 的 If-None-Match → 304 且空 body；⑤ 用户 B 的结果集为 0 条。
@@ -395,7 +395,7 @@
 | Error | code / status / retryable | string / integer / boolean | 是 | §3 稳定码、HTTP、可重试 | `VERSION_CONFLICT` / `409` / `false` |
 | Error | user_message / what_to_do / request_id | string | 是 | 人话、行动建议、排障 ID | `"这条数据刚被改过。"` |
 | Error | errors[] | object[] | 否 | 字段级错误 `field/code/message` | `[{"field":"password","code":"too_short"}]` |
-| Trade | trade_id / trade_date / side / amount | string / date / enum / decimal-string | 是 | 流水 ID、业务日、方向、发生金额 | `trd_01J9Z6` / `sell` / `"19098.95"` |
+| Trade | trade_id / trade_date / side / amount | string / date / enum / decimal-string | 是 | 流水 ID、业务日、方向 `buy/sell/unknown`（账单可无「买卖标志」列，此时由摘要识别，仍无则 unknown）、发生金额 | `trd_01J9Z6` / `sell` / `"19098.95"` |
 | Trade | cash_balance / cash_balance_available | decimal-string\|null / bool | 否 | 缺列时 null + false | `"21415.47"` / `true` |
 | Trade | dedupe_key / version / account_masked | string / integer / string | 是 | A27 去重键 / 乐观锁 / 末 4 位 | `sha256:…` / `3` / `…1469` |
 | ImportBatch | batch_id / status / mode / counts | string / enum / object | 是 | 批次；`pending…revoked`；`full/replace_range`；`parsed/inserted/skipped/quarantined` | `imp_01J9Z6` / `succeeded` / `{"inserted":412}` |

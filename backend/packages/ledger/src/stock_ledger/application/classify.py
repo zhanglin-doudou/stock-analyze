@@ -1,0 +1,143 @@
+"""分类应用层：按摘要规则给明细打业务分类，并把未命中行送进隔离区。
+
+为什么需要它：券商摘要文本不统一，业务分类必须可复算。命中规则 → 写 `trade.category`；
+未命中 → 落隔离区 `UNKNOWN_SUMMARY` 并给出建议规则，用户在确认单上补规则后重跑。
+`seed_system_rules` 提供一期开箱即用的默认规则。
+"""
+
+from __future__ import annotations
+
+import re
+import uuid
+from typing import Any
+
+from sqlalchemy.ext.asyncio import AsyncSession
+from stock_contracts.clock import Clock
+from stock_contracts.enums import JobStatus, QuarantineReason
+from stock_platform.jobs import JobQueue
+
+from stock_ledger.models import SummaryRule
+from stock_ledger.repositories.quarantine import QuarantineRepository
+from stock_ledger.repositories.rules import SummaryRuleRepository, seed_system_rules
+from stock_ledger.repositories.trades import TradeRepository
+
+
+def _matches(rule: SummaryRule, summary: str, side: str) -> bool:
+    if rule.side != "both" and rule.side != side:
+        return False
+    pattern = rule.pattern
+    if rule.match_type == "exact":
+        return summary == pattern
+    if rule.match_type == "prefix":
+        return summary.startswith(pattern)
+    if rule.match_type == "contains":
+        return pattern in summary
+    if rule.match_type == "regex":
+        try:
+            return re.search(pattern, summary) is not None
+        except re.error:
+            return False
+    return False
+
+
+def match_rule(rules: list[SummaryRule], summary: str | None, side: str) -> SummaryRule | None:
+    """按优先级顺序返回首个命中规则（rules 已按 priority 升序）。"""
+    if not summary:
+        return None
+    for rule in rules:
+        if _matches(rule, summary, side):
+            return rule
+    return None
+
+
+def suggest_rule(rules: list[SummaryRule], summary: str | None, side: str) -> str | None:
+    """给未命中摘要推荐一条“最接近”的规则 id（无则 None）。"""
+    if not summary:
+        return None
+    best: SummaryRule | None = None
+    for rule in rules:
+        if rule.side != "both" and rule.side != side:
+            continue
+        if rule.match_type not in ("prefix", "contains"):
+            continue
+        if (summary.startswith(rule.pattern) or rule.pattern in summary) and (
+            best is None or rule.priority < best.priority
+        ):
+            best = rule
+    return best.id if best is not None else None
+
+
+async def reclassify_user(
+    queue: JobQueue, session: AsyncSession, job: dict[str, Any], clock: Clock
+) -> dict[str, Any]:
+    """全量复算某用户的业务分类；未命中送隔离区。"""
+    user_id = uuid.UUID(str(job["user_id"]))
+    job_id = str(job["id"])
+    rules_repo = SummaryRuleRepository(session)
+    trade_repo = TradeRepository(session)
+    quarantine_repo = QuarantineRepository(session)
+
+    rules = await rules_repo.list_enabled(user_id)
+    trades = await trade_repo.list_all(user_id)
+    existing_quarantine = await quarantine_repo.page(user_id, resolved=False, limit=200)
+    already_flagged = {
+        str(row.raw.get("trade_id")) for row in existing_quarantine if row.raw.get("trade_id")
+    }
+
+    total = max(len(trades), 1)
+    updated = 0
+    quarantined = 0
+    for index, trade in enumerate(trades):
+        rule = match_rule(rules, trade.summary, trade.side)
+        if rule is not None:
+            if trade.category != rule.category:
+                trade.category = rule.category
+                updated += 1
+        elif trade.id not in already_flagged:
+            await quarantine_repo.add(
+                user_id,
+                reason_code=QuarantineReason.UNKNOWN_SUMMARY.value,
+                raw={"trade_id": trade.id, "summary": trade.summary},
+                batch_id=trade.batch_id,
+                suggested_rule_id=suggest_rule(rules, trade.summary, trade.side),
+            )
+            already_flagged.add(trade.id)
+            quarantined += 1
+        if index % 25 == 0:
+            percent = min(90, 5 + int(index / total * 85))
+            await queue.progress(
+                session, job_id, percent=percent, stage="recomputing", message=None
+            )
+
+    backfilled = await _backfill_resolved(user_id, rules_repo, trade_repo, quarantine_repo)
+    await session.flush()
+
+    result = {"updated": updated, "quarantined": quarantined, "backfilled": backfilled}
+    await queue.finish(session, job_id, status=JobStatus.SUCCEEDED, result=result)
+    return result
+
+
+async def _backfill_resolved(
+    user_id: uuid.UUID,
+    rules_repo: SummaryRuleRepository,
+    trade_repo: TradeRepository,
+    quarantine_repo: QuarantineRepository,
+) -> int:
+    """已 resolve 的隔离行：把建议规则的分类回填到对应明细。"""
+    resolved_rows = await quarantine_repo.page(user_id, resolved=True, limit=200)
+    backfilled = 0
+    for row in resolved_rows:
+        if not row.resolved_trade_id or not row.suggested_rule_id:
+            continue
+        rule = await rules_repo.by_id(user_id, row.suggested_rule_id)
+        if rule is None:
+            continue
+        trade = await trade_repo.by_id(user_id, row.resolved_trade_id)
+        if trade is None or trade.category is not None:
+            continue
+        trade.category = rule.category
+        backfilled += 1
+    return backfilled
+
+
+__all__ = ["match_rule", "reclassify_user", "seed_system_rules", "suggest_rule"]

@@ -1,0 +1,244 @@
+"""导入第一阶段：上传预览（预检）。
+
+硬断言：预览**不写任何 ledger.trade 行**。这里只把原始文件落到对象存储、把解析出的
+列映射/预检计数/警告/假设/样例（≤10 行）落 `import_preview`，等用户在“需求确认单”上
+点确认才进第二阶段（commit_batch）。这样半截脏数据永远进不了统计口径。
+"""
+
+from __future__ import annotations
+
+import hashlib
+import uuid
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Any
+
+from sqlalchemy.ext.asyncio import AsyncSession
+from stock_contracts.clock import Clock
+from stock_contracts.constants import IMPORT_PREVIEW_TTL_HOURS
+from stock_core.values import Money, Price, Qty
+from stock_platform.config import Settings, get_settings
+from stock_platform.ports import ObjectStore
+
+from stock_ledger.parsers.huatai import ParsedRow, parse_bill
+from stock_ledger.repositories.imports import ImportPreviewRepository
+from stock_ledger.repositories.trades import TradeRepository
+
+SAMPLE_LIMIT = 10
+
+
+class LocalObjectStore:
+    """本地文件对象存储（实现 ObjectStore 端口）。
+
+    预览阶段原文件必须留档：提交阶段要重新解析，撤销后也便于追责/复现。
+    生产可替换为 S3 兼容实现，端口不变。
+    """
+
+    __slots__ = ("_base",)
+
+    def __init__(self, base: Path) -> None:
+        self._base = base
+
+    def _path(self, key: str) -> Path:
+        return self._base / key
+
+    async def put_bytes(self, key: str, data: bytes) -> None:
+        path = self._path(key)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+
+    async def get_bytes(self, key: str) -> bytes:
+        return self._path(key).read_bytes()
+
+    async def exists(self, key: str) -> bool:
+        return self._path(key).exists()
+
+    async def list_prefix(self, prefix: str) -> list[str]:
+        root = self._path(prefix)
+        if not root.exists():
+            return []
+        if root.is_file():
+            return [prefix]
+        return sorted(str(p.relative_to(self._base)) for p in root.rglob("*") if p.is_file())
+
+
+def default_object_store() -> LocalObjectStore:
+    """默认对象存储落点：`settings.data_dir/objects`（提交阶段与预览阶段共用）。"""
+    return LocalObjectStore(get_settings().data_dir / "objects")
+
+
+@dataclass(slots=True)
+class ImportPreviewDTO:
+    """预览返回体：需求确认单所需的全部字段。"""
+
+    preview_id: str
+    file_name: str
+    file_sha256: str
+    file_bytes: int
+    object_key: str
+    columns: dict[str, str]
+    mapping: dict[str, str]
+    date_format: str | None
+    warnings: list[str]
+    assumptions: dict[str, Any]
+    unresolved_columns: list[str]
+    row_count: int
+    parsed_count: int
+    quarantined_count: int
+    sample: list[dict[str, Any]]
+    expires_at: datetime
+    # 供 API 边界 `PreviewOut` 直接消费的扩展字段（不改变既有字段语义）
+    columns_detail: list[dict[str, Any]] = field(default_factory=list)
+    estimated_inserted: int = 0
+    estimated_skipped: int = 0
+    cash_balance_available: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "preview_id": self.preview_id,
+            "file_name": self.file_name,
+            "file_sha256": self.file_sha256,
+            "file_bytes": self.file_bytes,
+            "columns": self.columns,
+            "mapping": self.mapping,
+            "date_format": self.date_format,
+            "warnings": self.warnings,
+            "assumptions": self.assumptions,
+            "unresolved_columns": self.unresolved_columns,
+            "row_count": self.row_count,
+            "parsed_count": self.parsed_count,
+            "quarantined_count": self.quarantined_count,
+            "sample": self.sample,
+            "expires_at": self.expires_at.isoformat(),
+            "columns_detail": self.columns_detail,
+            "estimated_inserted": self.estimated_inserted,
+            "estimated_skipped": self.estimated_skipped,
+            "cash_balance_available": self.cash_balance_available,
+        }
+
+
+def row_to_sample(row: ParsedRow) -> dict[str, Any]:
+    """明细行 → 预览样例（金额/价格/数量输出定点字符串，不暴露内部标度整数）。"""
+    return {
+        "line_no": row.line_no,
+        "trade_date": row.trade_date.isoformat(),
+        "security_code": row.security_code,
+        "security_name": row.security_name,
+        "side": row.side,
+        "quantity": str(Qty(row.quantity_units)),
+        "price": str(Price(row.price_units)),
+        "amount": str(Money(row.amount_units)),
+        "fees": str(Money(row.commission_units + row.stamp_tax_units + row.other_fee_units)),
+        "cash_balance": (
+            str(Money(row.cash_balance_units)) if row.cash_balance_units is not None else None
+        ),
+        "summary": row.summary,
+        "occurrence_idx": row.occurrence_idx,
+    }
+
+
+async def create_preview(
+    session: AsyncSession,
+    *,
+    clock: Clock,
+    settings: Settings,
+    user_id: uuid.UUID,
+    data: bytes,
+    file_name: str,
+    mapping: dict[str, str] | None = None,
+    date_format: str | None = None,
+    object_store: ObjectStore,
+) -> ImportPreviewDTO:
+    """解析并落预览；不触碰 ledger.trade。"""
+    bill = parse_bill(data, file_name, mapping=mapping, date_format=date_format, clock=clock)
+    sha256 = hashlib.sha256(data).hexdigest()
+    object_key = f"previews/{user_id}/{sha256}/{file_name}"
+    await object_store.put_bytes(object_key, data)
+
+    expires_at = clock.now() + timedelta(hours=IMPORT_PREVIEW_TTL_HOURS)
+    preview = await ImportPreviewRepository(session).create(
+        user_id,
+        file_name=file_name,
+        file_sha256=sha256,
+        file_bytes=len(data),
+        object_key=object_key,
+        columns=bill.columns,
+        mapping=mapping or {},
+        date_format=bill.date_format,
+        warnings=[warning.value for warning in bill.warnings],
+        sample=[row_to_sample(row) for row in bill.rows[:SAMPLE_LIMIT]],
+        row_count=bill.row_count,
+        parsed_count=len(bill.rows),
+        quarantined_count=len(bill.quarantined),
+        unresolved_columns=bill.unresolved,
+        expires_at=expires_at,
+    )
+
+    # 表头明细：按表头顺序回填样例/建议字段，供 API 组 `PreviewColumn`。
+    first_raw = bill.rows[0].raw if bill.rows else {}
+    columns_detail = [
+        {
+            "index": index,
+            "name": header,
+            "sample": first_raw.get(header),
+            "suggested_field": bill.columns.get(header),
+            "confidence": 1.0,
+        }
+        for index, header in enumerate(first_raw.keys())
+    ]
+
+    # 只读估算：命中已有去重键或文件内重复的行计入 skipped（不写库）。
+    estimated_inserted, estimated_skipped = await _estimate_counts(
+        session, user_id=user_id, dedupe_keys=[row.dedupe_key for row in bill.rows]
+    )
+
+    return ImportPreviewDTO(
+        preview_id=preview.id,
+        file_name=preview.file_name,
+        file_sha256=preview.file_sha256,
+        file_bytes=preview.file_bytes,
+        object_key=preview.object_key,
+        columns=bill.columns,
+        mapping=mapping or {},
+        date_format=bill.date_format,
+        warnings=[warning.value for warning in bill.warnings],
+        assumptions=bill.assumptions,
+        unresolved_columns=bill.unresolved,
+        row_count=bill.row_count,
+        parsed_count=len(bill.rows),
+        quarantined_count=len(bill.quarantined),
+        sample=[row_to_sample(row) for row in bill.rows[:SAMPLE_LIMIT]],
+        expires_at=expires_at,
+        columns_detail=columns_detail,
+        estimated_inserted=estimated_inserted,
+        estimated_skipped=estimated_skipped,
+        cash_balance_available=any(row.cash_balance_available for row in bill.rows),
+    )
+
+
+async def _estimate_counts(
+    session: AsyncSession, *, user_id: uuid.UUID, dedupe_keys: list[str]
+) -> tuple[int, int]:
+    """逐行估算 inserted/skipped：已存在或文件内重复 → skipped。只读，不写库。"""
+    existing = await TradeRepository(session).existing_dedupe_keys(user_id, dedupe_keys)
+    seen: set[str] = set()
+    inserted = 0
+    skipped = 0
+    for key in dedupe_keys:
+        if key in existing or key in seen:
+            skipped += 1
+            continue
+        seen.add(key)
+        inserted += 1
+    return inserted, skipped
+
+
+__all__ = [
+    "SAMPLE_LIMIT",
+    "ImportPreviewDTO",
+    "LocalObjectStore",
+    "create_preview",
+    "default_object_store",
+    "row_to_sample",
+]

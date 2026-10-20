@@ -1,0 +1,37 @@
+# 本地开发只用 Docker 起 PostgreSQL（DEV-PLAN §0.2）
+# api / worker / web 均以宿主机进程运行（热重载快）
+name: stock-analyze-dev
+
+services:
+  db:
+    image: postgres:16
+    container_name: sa-dev-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+      # 允许非超级用户角色创建 schema/扩展（citext/pgcrypto）
+      POSTGRES_HOST_AUTH_METHOD: scram-sha-256
+    ports:
+      - "5433:5432"
+    volumes:
+      - sa-dev-pgdata:/var/lib/postgresql/data
+      - ../postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+    command:
+      - postgres
+      - -c
+      - shared_preload_libraries=pg_stat_statements
+      - -c
+      - max_connections=100
+      - -c
+      - log_min_duration_statement=200
+
+volumes:
+  sa-dev-pgdata:
