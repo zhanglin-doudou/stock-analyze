@@ -6,6 +6,7 @@ import asyncio
 import contextlib
 import os
 import signal
+import uuid
 from typing import Any
 
 from stock_contracts.clock import SystemClock
@@ -93,7 +94,9 @@ class WorkerRunner:
                 )
             log.error("worker.unsupported_kind", kind=job["kind"], job=job["id"])
             return
-        async with self.db.session(begin=True) as session:
+        # 必须带租户上下文：ledger 业务表都启用了 RLS，会话未 SET LOCAL app.user_id
+        # 时仓储查询会看不到任何行（表现为 IMPORT_PREVIEW_NOT_FOUND 之类的假 404）。
+        async with self.db.tenant_tx(uuid.UUID(str(job["user_id"]))) as session:
             await handler(self.queue, session, job, self.clock)
 
 

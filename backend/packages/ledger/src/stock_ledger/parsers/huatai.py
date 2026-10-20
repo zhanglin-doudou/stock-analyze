@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 from dataclasses import dataclass, field
 from datetime import date
@@ -227,6 +228,8 @@ def _build_candidate(
         cash_balance_units = _units(balance_text, Money)
 
     summary = value("summary") or None
+    # 账号明文已在 parse_bill 入口统一抹成 MD5（空账号留空串 → 这里转 None）。
+    # 此值同时作为 ParsedRow.account_masked（落库列）与下游去重键的业务要素。
     account_masked = value("account") or None
     security_name = value("security_name") or code
 
@@ -313,6 +316,14 @@ def parse_bill(
         if not any(cell for cell in row):
             continue
         raw = {header: (row[i] if i < len(row) else "") for i, header in enumerate(headers)}
+        # 把账号列明文替换成 MD5 摘要：隔离区 raw 和预览 columns_detail.sample
+        # 都从这里拿原始行字典，源头抹一次即可，下游都安全。
+        account_header = field_headers.get("account")
+        if account_header is not None:
+            account_text = raw.get(account_header, "")
+            raw[account_header] = (
+                hashlib.md5(account_text.encode("utf-8")).hexdigest() if account_text else ""
+            )
         try:
             parsed, amount_derived = _build_candidate(raw, field_headers, effective_format, line_no)
         except _RowError as err:

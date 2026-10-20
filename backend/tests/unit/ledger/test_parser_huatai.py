@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import io
 from datetime import UTC, date, datetime
 from decimal import Decimal
@@ -255,3 +256,34 @@ def test_mapping_override_resolves_custom_header() -> None:
     )
     assert bill.columns["日期"] == "trade_date"
     assert bill.rows[0].security_code == "600519"
+
+
+def test_account_stored_as_md5_digest() -> None:
+    # 股东账号只落 MD5 摘要，不落明文。
+    headers = [*_HEADERS, "股东账号"]
+    row = [*_buy_row(), "0327201469"]
+    bill = _parse(_xlsx(headers, [row]))
+    account_masked = bill.rows[0].account_masked
+    assert account_masked == hashlib.md5(b"0327201469").hexdigest()
+    assert len(account_masked) == 32
+
+
+def test_blank_account_stays_none() -> None:
+    # 空账号保持 None：否则所有空账号同哈希，去重键会把不同行误判为重复。
+    headers = [*_HEADERS, "股东账号"]
+    row = [*_buy_row(), ""]
+    bill = _parse(_xlsx(headers, [row]))
+    assert bill.rows[0].account_masked is None
+
+
+def test_quarantine_raw_account_already_hashed() -> None:
+    # 隔离行的 raw 里账号列也必须是 MD5，不落明文。
+    headers = [*_HEADERS, "股东账号"]
+    # 证券代码为空 → 触发 INVALID_ROW 隔离，但隔离前 raw 已被统一抹除。
+    row = [*_buy_row(证券代码=""), "0327201469"]
+    bill = _parse(_xlsx(headers, [row]))
+    assert bill.rows == []
+    assert len(bill.quarantined) == 1
+    raw = bill.quarantined[0].raw
+    assert raw["股东账号"] == hashlib.md5(b"0327201469").hexdigest()
+    assert raw["股东账号"] != "0327201469"

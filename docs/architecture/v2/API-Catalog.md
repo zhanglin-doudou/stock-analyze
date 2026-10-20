@@ -397,7 +397,7 @@
 | Error | errors[] | object[] | 否 | 字段级错误 `field/code/message` | `[{"field":"password","code":"too_short"}]` |
 | Trade | trade_id / trade_date / side / amount | string / date / enum / decimal-string | 是 | 流水 ID、业务日、方向 `buy/sell/unknown`（账单可无「买卖标志」列，此时由摘要识别，仍无则 unknown）、发生金额 | `trd_01J9Z6` / `sell` / `"19098.95"` |
 | Trade | cash_balance / cash_balance_available | decimal-string\|null / bool | 否 | 缺列时 null + false | `"21415.47"` / `true` |
-| Trade | dedupe_key / version / account_masked | string / integer / string | 是 | A27 去重键 / 乐观锁 / 末 4 位 | `sha256:…` / `3` / `…1469` |
+| Trade | dedupe_key / version / account_masked | string / integer / string | 是 | A27 去重键 / 乐观锁 / 股东账号 MD5 摘要（32 位 hex，空账号为 null） | `sha256:…` / `3` / `ab12…9f` |
 | ImportBatch | batch_id / status / mode / counts | string / enum / object | 是 | 批次；`pending…revoked`；`full/replace_range`；`parsed/inserted/skipped/quarantined` | `imp_01J9Z6` / `succeeded` / `{"inserted":412}` |
 | PatToken | token_id / prefix / scopes / expires_at / last_used_at | string / enum[] / datetime | 是/否 | 元信息；prefix 前 8 位；`read/write`；最长 365d | `tok_01J9Z6` / `pat_7Fh2` / `["read"]` / `2027-01-17T00:00:00Z` |
 

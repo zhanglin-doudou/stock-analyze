@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import date
+from pathlib import Path
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
@@ -17,6 +18,7 @@ from stock_contracts.errors import ErrorCode
 from stock_ledger.models import ImportBatch, QuarantineRow, Trade
 from stock_ledger.parsers.huatai import parse_bill
 from stock_platform.models import Job, JobEvent
+from stock_worker.runner import WorkerRunner
 
 pytestmark = pytest.mark.api
 
@@ -32,6 +34,11 @@ _BATCH_ROWS = [
 def _bill_bytes(rows: list[str] | None = None) -> bytes:
     body = "\n".join([_BATCH_HEADER, *(rows if rows is not None else _BATCH_ROWS)])
     return (body + "\n").encode("utf-8")
+
+
+# 真实形态的对账单（华泰「普通账户电子对账单」）：没有「买卖标志」列，方向靠摘要识别。
+_MOCK_BILL = Path(__file__).parent / "普通账户电子对账单_mock.xlsx"
+_XLSX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
 # ── 夹具铺场景（owner 直插）────────────────────────────────
@@ -264,6 +271,24 @@ async def _preview(client, api_prefix, user) -> str:
     return resp.json()["preview_id"]
 
 
+async def _drain_worker(settings) -> None:
+    """把队列里的任务全部领取并执行（最小复刻真实 worker 的消费循环）。
+
+    用真实 `WorkerRunner`（而非直连 `commit_batch`），从而覆盖 worker 侧会话必须
+    带租户上下文这一点：ledger 业务表都启用了 RLS，会话没 `SET LOCAL app.user_id`
+    时仓储查询会一行都看不到。
+    """
+    runner = WorkerRunner(settings)
+    try:
+        while True:
+            claimed = await runner._claim_one()
+            if claimed is None:
+                break
+            await runner._execute(claimed)
+    finally:
+        await runner.db.dispose()
+
+
 async def test_api_011_commit_accepted(client, api_prefix, user) -> None:
     preview_id = await _preview(client, api_prefix, user)
     resp = await client.post(
@@ -302,6 +327,78 @@ async def test_api_011_commit_cross_user_preview_404(
     )
     assert resp.status_code == 404
     assert resp.json()["code"] == ErrorCode.IMPORT_PREVIEW_NOT_FOUND.value
+
+
+async def test_api_010_preview_real_bill_resolves_side_from_summary(
+    client, api_prefix, user
+) -> None:
+    """真实对账单无「买卖标志」列：方向从摘要识别，全部解析成功、零隔离。"""
+    resp = await client.post(
+        f"{api_prefix}/imports/preview",
+        headers=user.headers,
+        files={"file": (_MOCK_BILL.name, _MOCK_BILL.read_bytes(), _XLSX_CONTENT_TYPE)},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert "买卖标志" not in {col["name"] for col in body["columns"]}
+    summary_col = next(col for col in body["columns"] if col["name"] == "摘要")
+    assert summary_col["suggested_field"] == "summary"
+    assert body["estimated"] == {"parsed": 10, "inserted": 10, "skipped": 0, "quarantined": 0}
+    assert body["sample"]
+    assert all(sample["side"] in {"buy", "sell"} for sample in body["sample"])
+    # 预览的 columns 里也不能回显明文账号。
+    account_detail = next((c for c in body["columns"] if c["name"] == "股东账号"), None)
+    assert account_detail is not None
+    assert account_detail["suggested_field"] == "account"
+    # API 边界把原始单个 sample 值包成 list（PreviewColumn.sample: list[str]）。
+    assert account_detail["sample"] == ["79ebc8b7c9206c977dca8319e480616d"]
+    assert account_detail["sample"] != ["0327201469"]
+
+
+async def test_api_011_commit_real_bill_worker_end_to_end(
+    client, api_prefix, user, settings
+) -> None:
+    """真实对账单提交后由 worker 执行成功（回归：worker 会话缺 RLS 租户上下文）。
+
+    缺少租户上下文时 `commit_batch` 里的预览/批次查询会被 RLS 过滤成空，
+    表现为 job 失败 + `IMPORT_PREVIEW_NOT_FOUND`（假 404），本用例专门守这一条。
+    """
+    preview = await client.post(
+        f"{api_prefix}/imports/preview",
+        headers=user.headers,
+        files={"file": (_MOCK_BILL.name, _MOCK_BILL.read_bytes(), _XLSX_CONTENT_TYPE)},
+    )
+    assert preview.status_code == 200, preview.text
+
+    accepted = await client.post(
+        f"{api_prefix}/imports",
+        headers={**user.headers, "Idempotency-Key": "key-" + uuid.uuid4().hex},
+        json={"preview_id": preview.json()["preview_id"], "mode": "full"},
+    )
+    assert accepted.status_code == 202, accepted.text
+    job_id, batch_id = accepted.json()["job_id"], accepted.json()["batch_id"]
+
+    await _drain_worker(settings)
+
+    job = await client.get(f"{api_prefix}/jobs/{job_id}", headers=user.headers)
+    assert job.status_code == 200, job.text
+    assert job.json()["status"] == "succeeded", job.text
+    assert job.json()["error"] is None
+
+    batch = (await client.get(f"{api_prefix}/imports", headers=user.headers)).json()["items"][0]
+    assert batch["batch_id"] == batch_id
+    assert batch["status"] == "succeeded"
+    assert batch["counts"] == {"parsed": 10, "inserted": 10, "skipped": 0, "quarantined": 0}
+
+    trades = await client.get(f"{api_prefix}/trades", headers=user.headers)
+    items = trades.json()["items"]
+    assert len(items) == 10
+    assert {item["side"] for item in items} <= {"buy", "sell"}
+    # 股东账号只落 MD5 摘要（32 位 hex），不落明文。
+    assert all(
+        item["account_masked"] is not None and len(item["account_masked"]) == 32 for item in items
+    )
+    assert all(item["account_masked"] != "0327201469" for item in items)
 
 
 async def test_idempotency_key_same_body_replays(client, api_prefix, user) -> None:
