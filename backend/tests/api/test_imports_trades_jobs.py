@@ -37,7 +37,7 @@ def _bill_bytes(rows: list[str] | None = None) -> bytes:
 
 
 # 真实形态的对账单（华泰「普通账户电子对账单」）：没有「买卖标志」列，方向靠摘要识别。
-_MOCK_BILL = Path(__file__).parent / "普通账户电子对账单_mock.xlsx"
+_MOCK_BILL = Path(__file__).parent / "华泰账单_mock.xlsx"
 _XLSX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 
@@ -332,7 +332,10 @@ async def test_api_011_commit_cross_user_preview_404(
 async def test_api_010_preview_real_bill_resolves_side_from_summary(
     client, api_prefix, user
 ) -> None:
-    """真实对账单无「买卖标志」列：方向从摘要识别，全部解析成功、零隔离。"""
+    """真实对账单无「买卖标志」列：方向从摘要识别，全部解析成功、零隔离。
+
+    含非交易类业务（银行转存/转取、股息入帐、利息归本等），代码空行用 CASH 占位导入。
+    """
     resp = await client.post(
         f"{api_prefix}/imports/preview",
         headers=user.headers,
@@ -343,16 +346,18 @@ async def test_api_010_preview_real_bill_resolves_side_from_summary(
     assert "买卖标志" not in {col["name"] for col in body["columns"]}
     summary_col = next(col for col in body["columns"] if col["name"] == "摘要")
     assert summary_col["suggested_field"] == "summary"
-    assert body["estimated"] == {"parsed": 10, "inserted": 10, "skipped": 0, "quarantined": 0}
+    assert body["estimated"] == {"parsed": 177, "inserted": 177, "skipped": 0, "quarantined": 0}
     assert body["sample"]
-    assert all(sample["side"] in {"buy", "sell"} for sample in body["sample"])
+    # 非交易行按资金流向分配 side（sell=流入，buy=流出），交易行正常买卖。
+    assert all(sample["side"] in {"buy", "sell", "unknown"} for sample in body["sample"])
     # 预览的 columns 里也不能回显明文账号。
     account_detail = next((c for c in body["columns"] if c["name"] == "股东账号"), None)
     assert account_detail is not None
     assert account_detail["suggested_field"] == "account"
     # API 边界把原始单个 sample 值包成 list（PreviewColumn.sample: list[str]）。
-    assert account_detail["sample"] == ["79ebc8b7c9206c977dca8319e480616d"]
-    assert account_detail["sample"] != ["0327201469"]
+    # mock 数据中股东账号为 A00000000 / A10000000，只落 MD5 不落明文。
+    assert account_detail["sample"] == ["4cda045a46c54164471b5311607f9ab8"]
+    assert account_detail["sample"] != ["A00000000"]
 
 
 async def test_api_011_commit_real_bill_worker_end_to_end(
@@ -388,17 +393,18 @@ async def test_api_011_commit_real_bill_worker_end_to_end(
     batch = (await client.get(f"{api_prefix}/imports", headers=user.headers)).json()["items"][0]
     assert batch["batch_id"] == batch_id
     assert batch["status"] == "succeeded"
-    assert batch["counts"] == {"parsed": 10, "inserted": 10, "skipped": 0, "quarantined": 0}
+    assert batch["counts"] == {"parsed": 177, "inserted": 177, "skipped": 0, "quarantined": 0}
 
-    trades = await client.get(f"{api_prefix}/trades", headers=user.headers)
+    trades = await client.get(f"{api_prefix}/trades?limit=200", headers=user.headers)
     items = trades.json()["items"]
-    assert len(items) == 10
-    assert {item["side"] for item in items} <= {"buy", "sell"}
-    # 股东账号只落 MD5 摘要（32 位 hex），不落明文。
-    assert all(
-        item["account_masked"] is not None and len(item["account_masked"]) == 32 for item in items
-    )
-    assert all(item["account_masked"] != "0327201469" for item in items)
+    assert len(items) == 177
+    # 非交易行按资金流向分配 side（sell=流入，buy=流出），交易行正常买卖，零金额转存管为 unknown。
+    assert {item["side"] for item in items} <= {"buy", "sell", "unknown"}
+    # 股东账号只落 MD5 摘要（32 位 hex），不落明文；非交易行账号为空时 account_masked 为 None。
+    for item in items:
+        if item["account_masked"] is not None:
+            assert len(item["account_masked"]) == 32
+            assert item["account_masked"] != "A00000000"
 
 
 async def test_idempotency_key_same_body_replays(client, api_prefix, user) -> None:

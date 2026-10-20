@@ -221,6 +221,109 @@ def test_side_unknown_when_nothing_matches() -> None:
     assert bill.rows[0].side == "unknown"
 
 
+def test_non_trade_bank_transfer_in() -> None:
+    """银行转存：无证券代码，资金流入 → side=sell，代码占位 CASH。"""
+    row = _buy_row(证券代码="", 证券名称="", 买卖标志="", 摘要="银行转存", 成交金额="188.58")
+    bill = _parse(_xlsx(_HEADERS, [row]))
+    assert len(bill.rows) == 1
+    assert bill.quarantined == []
+    r = bill.rows[0]
+    assert r.security_code == "CASH"
+    assert r.security_name == "银行转存"
+    assert r.side == "sell"
+    assert r.amount_units == 188_58
+
+
+def test_non_trade_bank_transfer_out() -> None:
+    """银行转取：无证券代码，资金流出 → side=buy。"""
+    row = _buy_row(证券代码="", 证券名称="", 买卖标志="", 摘要="银行转取", 成交金额="-800.00")
+    bill = _parse(_xlsx(_HEADERS, [row]))
+    assert len(bill.rows) == 1
+    assert bill.quarantined == []
+    r = bill.rows[0]
+    assert r.security_code == "CASH"
+    assert r.security_name == "银行转取"
+    assert r.side == "buy"
+    assert r.amount_units == -800_00
+
+
+def test_non_trade_dividend_with_code() -> None:
+    """股息入帐：有证券代码，资金流入 → side=sell。"""
+    row = _buy_row(
+        证券代码="603886",
+        证券名称="元祖股份",
+        买卖标志="",
+        摘要="股息入帐",
+        成交数量="0",
+        成交价格="0.00",
+        成交金额="1700.00",
+    )
+    bill = _parse(_xlsx(_HEADERS, [row]))
+    assert len(bill.rows) == 1
+    assert bill.quarantined == []
+    r = bill.rows[0]
+    assert r.security_code == "603886"
+    assert r.security_name == "元祖股份"
+    assert r.side == "sell"
+    assert r.amount_units == 1700_00
+
+
+def test_non_trade_interest() -> None:
+    """利息归本：无证券代码，资金流入 → side=sell。"""
+    row = _buy_row(证券代码="", 证券名称="", 买卖标志="", 摘要="利息归本", 成交金额="0.35")
+    bill = _parse(_xlsx(_HEADERS, [row]))
+    assert len(bill.rows) == 1
+    assert bill.quarantined == []
+    r = bill.rows[0]
+    assert r.security_code == "CASH"
+    assert r.side == "sell"
+    assert r.amount_units == 35
+
+
+def test_non_trade_dividend_tax_with_newline() -> None:
+    """股息红利税补缴（含换行符）：无证券代码，资金流出 → side=buy。"""
+    row = _buy_row(
+        证券代码="", 证券名称="", 买卖标志="", 摘要="股息红利税\n补缴", 成交金额="-60.00"
+    )
+    bill = _parse(_xlsx(_HEADERS, [row]))
+    assert len(bill.rows) == 1
+    assert bill.quarantined == []
+    r = bill.rows[0]
+    assert r.security_code == "CASH"
+    assert r.side == "buy"
+    assert r.amount_units == -60_00
+
+
+def test_non_trade_zero_amount_unknown() -> None:
+    """转存管转入/转出：金额为 0，方向无意义 → side=unknown。"""
+    for summary in ("转存管转入", "转存管转出"):
+        row = _buy_row(
+            证券代码="",
+            证券名称="",
+            买卖标志="",
+            摘要=summary,
+            成交数量="0",
+            成交价格="0.00",
+            成交金额="0.00",
+        )
+        bill = _parse(_xlsx(_HEADERS, [row]))
+        assert len(bill.rows) == 1
+        assert bill.quarantined == []
+        r = bill.rows[0]
+        assert r.security_code == "CASH"
+        assert r.side == "unknown"
+        assert r.amount_units == 0
+
+
+def test_blank_code_unknown_summary_quarantined() -> None:
+    """证券代码为空且摘要不属于非交易类 → 仍隔离（数据缺失保护）。"""
+    row = _buy_row(证券代码="", 证券名称="", 买卖标志="", 摘要="未知业务XYZ")
+    bill = _parse(_xlsx(_HEADERS, [row]))
+    assert bill.rows == []
+    assert len(bill.quarantined) == 1
+    assert bill.quarantined[0].reason_code == QuarantineReason.INVALID_ROW.value
+
+
 def test_missing_security_code_quarantined() -> None:
     bill = _parse(_xlsx(_HEADERS, [_buy_row(证券代码="")]))
     assert bill.rows == []

@@ -188,10 +188,40 @@ def classify_side_from_summary(raw: str) -> str | None:
     return None
 
 
+# 非交易类摘要 → side（按资金方向：流入=sell，流出=buy，无金额变化=unknown）
+_NON_TRADE_SUMMARY_SIDE: tuple[tuple[str, str], ...] = (
+    ("银行转存", Side.SELL.value),
+    ("银行转取", Side.BUY.value),
+    ("股息入帐", Side.SELL.value),
+    ("利息归本", Side.SELL.value),
+    ("股息红利税", Side.BUY.value),
+    ("转存管转入", Side.UNKNOWN.value),
+    ("转存管转出", Side.UNKNOWN.value),
+)
+
+
+def classify_side_from_non_trade_summary(raw: str) -> str | None:
+    """非交易摘要 → side；无匹配返回 None。
+
+    银行转存/股息入帐/利息归本等资金类业务，证券代码可为空，但摘要能判定资金方向。
+    """
+    text = normalize_header(raw).replace("\n", "").replace("\r", "")
+    for keyword, side in _NON_TRADE_SUMMARY_SIDE:
+        if keyword in text:
+            return side
+    return None
+
+
+def is_non_trade_summary(raw: str) -> bool:
+    """摘要是否属于非交易类（资金类）业务。"""
+    return classify_side_from_non_trade_summary(raw) is not None
+
+
 def resolve_side(raw_side: str, raw_summary: str) -> str:
-    """方向解析：买卖标志列优先 → 摘要兜底 → 默认 unknown。
+    """方向解析：买卖标志列优先 → 摘要兜底 → 非交易摘要 → 默认 unknown。
 
     账单可能根本没有「买卖标志」列（或该单元格为空），此时从摘要里识别方向；
+    银行转存/股息入帐等非交易类业务按资金流向分配方向；
     两边都识别不出则回落为 `unknown`，不再整行隔离。
     """
     side = classify_side(raw_side)
@@ -200,6 +230,9 @@ def resolve_side(raw_side: str, raw_summary: str) -> str:
     summary_side = classify_side_from_summary(raw_summary)
     if summary_side is not None:
         return summary_side
+    non_trade_side = classify_side_from_non_trade_summary(raw_summary)
+    if non_trade_side is not None:
+        return non_trade_side
     return Side.UNKNOWN.value
 
 
@@ -209,8 +242,10 @@ __all__ = [
     "REQUIRED_FIELDS",
     "ColumnMapping",
     "classify_side",
+    "classify_side_from_non_trade_summary",
     "classify_side_from_summary",
     "detect_date_format",
+    "is_non_trade_summary",
     "map_columns",
     "normalize_cell",
     "normalize_header",

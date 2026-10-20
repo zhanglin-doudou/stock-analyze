@@ -176,16 +176,26 @@ async def create_preview(
     )
 
     # 表头明细：按表头顺序回填样例/建议字段，供 API 组 `PreviewColumn`。
+    # 样例取所有行中第一个非空值（非交易行可能账号为空，不能只看第一行）。
     first_raw = bill.rows[0].raw if bill.rows else {}
+    all_headers = list(first_raw.keys())
+
+    def _first_non_empty(header: str) -> str:
+        for row in bill.rows:
+            value = row.raw.get(header, "")
+            if value:
+                return value
+        return first_raw.get(header, "")
+
     columns_detail = [
         {
             "index": index,
             "name": header,
-            "sample": first_raw.get(header),
+            "sample": _first_non_empty(header),
             "suggested_field": bill.columns.get(header),
             "confidence": 1.0,
         }
-        for index, header in enumerate(first_raw.keys())
+        for index, header in enumerate(all_headers)
     ]
 
     # 只读估算：命中已有去重键或文件内重复的行计入 skipped（不写库）。

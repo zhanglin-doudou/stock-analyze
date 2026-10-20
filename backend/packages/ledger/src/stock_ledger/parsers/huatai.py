@@ -27,6 +27,7 @@ from stock_core.values import Money, Price, Qty
 from stock_ledger.parsers.columns import (
     ColumnMapping,
     detect_date_format,
+    is_non_trade_summary,
     map_columns,
     normalize_cell,
     parse_date_text,
@@ -196,7 +197,11 @@ def _build_candidate(
 
     code = value("security_code")
     if not code:
-        raise _RowError(QuarantineReason.INVALID_ROW)
+        # 非交易类业务（银行转存/转取、股息入帐等）证券代码可空，用 CASH 占位导入。
+        if is_non_trade_summary(value("summary")):
+            code = "CASH"
+        else:
+            raise _RowError(QuarantineReason.INVALID_ROW)
     # 方向：买卖标志列可缺失/为空，此时回退摘要识别，仍无则 unknown（不隔离该行）。
     side = resolve_side(value("side"), value("summary"))
     try:
@@ -231,7 +236,8 @@ def _build_candidate(
     # 账号明文已在 parse_bill 入口统一抹成 MD5（空账号留空串 → 这里转 None）。
     # 此值同时作为 ParsedRow.account_masked（落库列）与下游去重键的业务要素。
     account_masked = value("account") or None
-    security_name = value("security_name") or code
+    # 非交易行证券名称为空时，用摘要填充（如「银行转存」），避免默认成 CASH 无法辨识业务。
+    security_name = value("security_name") or (summary or "资金业务" if code == "CASH" else code)
 
     row = ParsedRow(
         line_no=line_no,
