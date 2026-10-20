@@ -8,6 +8,7 @@ export function Login() {
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
 
@@ -36,7 +37,22 @@ export function Login() {
         </label>
         <label>
           密码
-          <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+          <div className="password-input-wrapper">
+            <input
+              type={showPassword ? "text" : "password"}
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              required
+            />
+            <button
+              type="button"
+              className="password-toggle"
+              onClick={() => setShowPassword((v) => !v)}
+              aria-label={showPassword ? "隐藏密码" : "显示密码"}
+            >
+              {showPassword ? "🙈" : "👁"}
+            </button>
+          </div>
         </label>
         <button className="btn" type="submit" disabled={busy}>
           {busy ? "登录中…" : "登录"}

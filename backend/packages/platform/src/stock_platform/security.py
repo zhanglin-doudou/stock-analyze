@@ -20,7 +20,7 @@ from stock_contracts.errors import ApiError, ErrorCode, FieldError
 PAT_ALPHABET: Final[str] = string.ascii_letters + string.digits
 PAT_SECRET_LENGTH: Final[int] = 43
 REFRESH_SECRET_BYTES: Final[int] = 32
-MIN_PASSWORD_LENGTH: Final[int] = 12
+MIN_PASSWORD_LENGTH: Final[int] = 8
 MAX_PASSWORD_LENGTH: Final[int] = 128
 
 

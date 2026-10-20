@@ -8,13 +8,23 @@ export function Register() {
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [acceptTos, setAcceptTos] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
 
+  const passwordsMismatch = confirmPassword.length > 0 && password !== confirmPassword;
+
   async function submit(event: FormEvent): Promise<void> {
     event.preventDefault();
+    if (password !== confirmPassword) {
+      setError({
+        code: "PASSWORD_MISMATCH",
+        user_message: "两次输入的密码不一致",
+      });
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
@@ -47,9 +57,24 @@ export function Register() {
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            placeholder="12~128 位，至少 3 类字符"
+            placeholder="8~128 位，至少 3 类字符"
+            minLength={8}
             required
           />
+        </label>
+        <label>
+          确认密码
+          <input
+            type="password"
+            value={confirmPassword}
+            onChange={(e) => setConfirmPassword(e.target.value)}
+            placeholder="请再次输入密码"
+            minLength={8}
+            required
+          />
+          {passwordsMismatch && (
+            <span className="field-error">两次输入的密码不一致</span>
+          )}
         </label>
         <label>
           昵称（可选）
@@ -59,7 +84,7 @@ export function Register() {
           <input type="checkbox" checked={acceptTos} onChange={(e) => setAcceptTos(e.target.checked)} />
           我已阅读并同意服务条款
         </label>
-        <button className="btn" type="submit" disabled={busy || !acceptTos}>
+        <button className="btn" type="submit" disabled={busy || !acceptTos || passwordsMismatch}>
           {busy ? "注册中…" : "注册"}
         </button>
         <ProblemView error={error} />
