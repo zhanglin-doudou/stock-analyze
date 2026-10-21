@@ -22,6 +22,10 @@ from stock_worker.runner import WorkerRunner
 pytestmark = pytest.mark.api
 
 _MOCK_BILL = Path(__file__).parent / "华泰账单_mock.xlsx"
+# 货币基金账单（无「买卖标志」列，摘要为「申购确认/赎回确认/红利发放」）：回归 940018 赎回误隔离。
+_FUND_BILL = Path(__file__).parent / "华泰账单_货基_mock.xlsx"
+# 真实对账单节选：摘要折行、流水末尾「合计」+ 持仓区块、完全重复行（脱敏节选）。
+_STATEMENT_BILL = Path(__file__).parent / "华泰账单_真实节选_mock.xlsx"
 _XLSX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
 # 合成账单：1 条已知摘要（证券买入）+ 1 条未知摘要 → 预览与提交必须都隔离 1 行。
@@ -168,6 +172,90 @@ async def test_real_bill_all_rows_classified_and_zero_unknown(
     assert body["status"] == "ok", body["breaks"][:3]
     assert body["checked_rows"] == 175
     assert body["break_count"] == 0
+
+
+async def test_money_fund_bill_imports_zero_quarantine(client, api_prefix, user, settings) -> None:
+    """货币基金账单：赎回/申购确认与红利发放全部命中规则，预览与提交均 0 隔离。"""
+    preview = await _preview(
+        client, api_prefix, user, _FUND_BILL.read_bytes(), _FUND_BILL.name, _XLSX_CONTENT_TYPE
+    )
+    assert preview["estimated"] == {"parsed": 7, "inserted": 7, "skipped": 0, "quarantined": 0}
+    assert "UNKNOWN_SUMMARY" not in {warning["code"] for warning in preview["warnings"]}
+
+    accepted = await _commit(client, api_prefix, user, preview["preview_id"])
+    await _drain_worker(settings)
+
+    batch = await _batch(client, api_prefix, user, accepted["batch_id"])
+    assert batch["counts"] == {"parsed": 7, "inserted": 7, "skipped": 0, "quarantined": 0}
+    assert "UNKNOWN_SUMMARY" not in set(batch["warnings"])
+    assert await _quarantine(client, api_prefix, user, accepted["batch_id"]) == []
+
+    trades = await _trades(client, api_prefix, user)
+    assert len(trades) == 7
+    assert all(item["category"] for item in trades)
+    by_summary = {(item["summary"], item["side"]): item for item in trades}
+
+    redeem = by_summary[("赎回确认", "sell")]
+    assert redeem["category"] == "sell"
+    assert redeem["summary_code"] == "sys_redeem"
+    assert redeem["amount"] == "116295.38"
+
+    subscribe = by_summary[("申购确认", "buy")]
+    assert subscribe["category"] == "buy"
+    assert subscribe["summary_code"] == "sys_fund_buy"
+    assert subscribe["amount"] == "-106708.53"
+
+    dividend = by_summary[("红利发放", "unknown")]
+    assert dividend["category"] == "dividend"
+    assert dividend["summary_code"] == "sys_div_paid"
+    assert {item["category"] for item in trades} == {"buy", "sell", "dividend", "transfer"}
+
+
+async def test_real_statement_excerpt_quarantine_only_duplicates(
+    client, api_prefix, user, settings
+) -> None:
+    """真实对账单节选：折行摘要全部命中、持仓区不入隔离，隔离区只剩完全重复行。"""
+    preview = await _preview(
+        client,
+        api_prefix,
+        user,
+        _STATEMENT_BILL.read_bytes(),
+        _STATEMENT_BILL.name,
+        _XLSX_CONTENT_TYPE,
+    )
+    assert preview["estimated"] == {"parsed": 8, "inserted": 8, "skipped": 0, "quarantined": 2}
+    assert "UNKNOWN_SUMMARY" not in {warning["code"] for warning in preview["warnings"]}
+
+    accepted = await _commit(client, api_prefix, user, preview["preview_id"])
+    await _drain_worker(settings)
+
+    batch = await _batch(client, api_prefix, user, accepted["batch_id"])
+    assert batch["counts"] == {"parsed": 8, "inserted": 8, "skipped": 0, "quarantined": 2}
+    assert "UNKNOWN_SUMMARY" not in set(batch["warnings"])
+
+    items = await _quarantine(client, api_prefix, user, accepted["batch_id"])
+    assert len(items) == 2
+    assert {item["reason_code"] for item in items} == {"DUPLICATE_IN_FILE"}
+    assert {item["line_no"] for item in items} == {18, 19}
+    # 持仓/声明区块（夹具第 27 行起）不应出现在隔离区。
+    assert all(item["line_no"] < 27 for item in items)
+
+    trades = await _trades(client, api_prefix, user)
+    assert len(trades) == 8
+    assert all(item["category"] for item in trades)
+    by_summary = {item["summary"]: item for item in trades}
+    assert by_summary["[省心投]红\n利发放"]["category"] == "dividend"
+    assert by_summary["[省心投]申\n购确认"]["category"] == "buy"
+    assert by_summary["新股申购确\n认缴款"]["category"] == "new_stock"
+    assert by_summary["[省心投]申\n购确认"]["side"] == "buy"
+    assert {item["category"] for item in trades} == {
+        "buy",
+        "sell",
+        "dividend",
+        "transfer",
+        "new_stock",
+        "other",
+    }
 
 
 async def test_unknown_summary_preview_equals_commit_quarantine(

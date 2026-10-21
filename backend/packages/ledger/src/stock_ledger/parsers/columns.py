@@ -58,6 +58,18 @@ def normalize_cell(raw: object) -> str:
     return str(raw).strip()
 
 
+def normalize_summary(raw: str) -> str:
+    """摘要归一：去换行/制表/空白。
+
+    券商常把摘要折行导出（如「[省心投]红\\n利发放」「新股申购确\\n认缴款」），
+    不归一会导致方向识别与分类规则全部失配，整片行被误判成「未知摘要」隔离。
+    """
+    text = normalize_header(raw)
+    for joiner in ("\n", "\r", "\t"):
+        text = text.replace(joiner, "")
+    return text
+
+
 def is_signed_amount_header(raw: str | None) -> bool:
     """金额列是否原生带符号（「发生金额/发生额」）。
 
@@ -190,14 +202,26 @@ def classify_side(raw: str) -> str | None:
 _SUMMARY_BUY_TOKEN = "证券买入"
 _SUMMARY_SELL_TOKEN = "证券卖出"
 
+# 货币基金申赎确认摘要 → 资金方向。
+# 货基对账单通常没有「买卖标志」列，摘要只写「申购确认/赎回确认」；不识别就会落
+# unknown，分类规则按方向匹配时命中不了。只认「确认」形态，避免把「赎回费」等
+# 费用类摘要误判成交易方向（费用仍走 unknown + 费用规则）。
+FUND_SUMMARY_SIDE: tuple[tuple[str, str], ...] = (
+    ("申购确认", Side.BUY.value),
+    ("赎回确认", Side.SELL.value),
+)
+
 
 def classify_side_from_summary(raw: str) -> str | None:
-    """摘要兜底：含「证券买入」→ buy；含「证券卖出」→ sell；否则 None。"""
-    text = normalize_header(raw)
+    """摘要兜底：证券买卖 / 基金申赎确认 → buy/sell；否则 None。"""
+    text = normalize_summary(raw)
     if _SUMMARY_BUY_TOKEN in text:
         return Side.BUY.value
     if _SUMMARY_SELL_TOKEN in text:
         return Side.SELL.value
+    for keyword, side in FUND_SUMMARY_SIDE:
+        if keyword in text:
+            return side
     return None
 
 
@@ -232,7 +256,7 @@ def classify_side_from_non_trade_summary(raw: str) -> str | None:
 
     银行转存/股息入帐/利息归本等资金类业务，证券代码可为空，但摘要能判定资金方向。
     """
-    text = normalize_header(raw).replace("\n", "").replace("\r", "")
+    text = normalize_summary(raw)
     for keyword, side in NON_TRADE_SUMMARY_SIDE:
         if keyword in text:
             return side
@@ -266,6 +290,7 @@ def resolve_side(raw_side: str, raw_summary: str) -> str:
 __all__ = [
     "COLUMN_ALIASES",
     "DATE_FORMATS",
+    "FUND_SUMMARY_SIDE",
     "NON_TRADE_SUMMARY_SIDE",
     "REQUIRED_FIELDS",
     "SIGNED_AMOUNT_HEADERS",
@@ -280,6 +305,7 @@ __all__ = [
     "map_columns",
     "normalize_cell",
     "normalize_header",
+    "normalize_summary",
     "parse_date_text",
     "resolve_side",
 ]

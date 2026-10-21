@@ -37,6 +37,7 @@ from stock_ledger.parsers.columns import (
     is_signed_amount_header,
     map_columns,
     normalize_cell,
+    normalize_header,
     parse_date_text,
     resolve_side,
 )
@@ -342,12 +343,17 @@ def parse_bill(
     assumptions: dict[str, Any] = {}
 
     trade_date_header = field_headers.get("trade_date")
+    trade_date_idx = headers.index(trade_date_header) if trade_date_header is not None else None
     samples: list[str] = []
-    if trade_date_header is not None:
+    if trade_date_idx is not None:
         for row in data_rows:
-            idx = headers.index(trade_date_header)
-            if idx < len(row) and row[idx]:
-                samples.append(row[idx])
+            if trade_date_idx < len(row):
+                cell = row[trade_date_idx]
+                # 「合计」之后不是交易行：样本遇到它即停，避免把「合计」当日期样本。
+                if normalize_header(cell) == "合计":
+                    break
+                if cell:
+                    samples.append(cell)
             if len(samples) >= 20:
                 break
 
@@ -371,6 +377,14 @@ def parse_bill(
         line_no = header_idx + offset + 2
         if not any(cell for cell in row):
             continue
+        # 流水明细以「合计」行收尾：其后是股票/基金持仓、声明等非交易区块。
+        # 不在这里停止的话，上百行持仓会被当成坏行写进隔离区，污染“隔离数据”。
+        if (
+            trade_date_idx is not None
+            and trade_date_idx < len(row)
+            and normalize_header(row[trade_date_idx]) == "合计"
+        ):
+            break
         raw = {header: (row[i] if i < len(row) else "") for i, header in enumerate(headers)}
         # 把账号列明文替换成 MD5 摘要：隔离区 raw 和预览 columns_detail.sample
         # 都从这里拿原始行字典，源头抹一次即可，下游都安全。

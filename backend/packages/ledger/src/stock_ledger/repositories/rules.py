@@ -39,13 +39,28 @@ _BASE_SYSTEM_RULES: tuple[tuple[str, str, str, str, str, str, int], ...] = (
     ("sys_sell_stock", "证券卖出→卖出", "sell", "both", "exact", "证券卖出", 10),
     ("sys_buy_plain", "买入→买入", "buy", "both", "exact", "买入", 20),
     ("sys_sell_plain", "卖出→卖出", "sell", "both", "exact", "卖出", 20),
+    # 货币基金申赎确认（货基账单通常没有「买卖标志」列，摘要只写「申购/赎回确认」）：
+    # 关键词与解析器 `FUND_SUMMARY_SIDE` 保持一致（漂移由单测锁定）。「申购确认」
+    # priority 必须高于通用「申购→新股」(50)，否则货基申购会被误分类成打新。
+    ("sys_fund_buy", "申购确认→买入", "buy", "both", "contains", "申购确认", 15),
+    ("sys_redeem", "赎回确认→卖出", "sell", "both", "contains", "赎回确认", 15),
     # 股息红利税（含「股息红利税\n补缴」）优先于通用「股息」规则：它是资金流出/费用，不是分红收入。
     ("sys_div_tax", "股息红利税→费用", "fee", "both", "contains", "红利税", 25),
     ("sys_dividend", "红利入账→分红", "dividend", "both", "exact", "红利入账", 30),
     ("sys_div_bonus", "股息→分红", "dividend", "both", "contains", "股息", 40),
+    # 货基分红发放（红利再投/现金分红）：与「红利入账」同口径，不能被宽泛「费」规则吞掉。
+    ("sys_div_paid", "红利发放→分红", "dividend", "both", "contains", "红利发放", 30),
+    # 托管划转：基金/证券份额在托管账户间转移，无资金流（发生金额 0），归入资产划转。
+    # 摘要常带「[省心投]」前缀且折行（「[省心投]转\n托管确认」），匹配前统一归一。
+    ("sys_rehold", "转托管确认→划转", "transfer", "both", "contains", "转托管", 30),
+    ("sys_hold_out", "托管转出→划转", "transfer", "both", "contains", "托管转出", 30),
+    # 证券清理（零值/退市持仓清理）：份额减少但无成交金额，不能当普通卖出计价。
+    ("sys_cleanup", "证券清理→其他", "other", "both", "contains", "证券清理", 30),
     ("sys_new_apply", "申购→新股", "new_stock", "both", "contains", "申购", 50),
-    ("sys_new_win", "中签→新股", "new_stock", "both", "exact", "中签", 40),
-    ("sys_new_stock", "新股→新股", "new_stock", "both", "contains", "新股", 60),
+    ("sys_new_win", "中签→新股", "new_stock", "both", "contains", "中签", 40),
+    # 「新股申购确认缴款」折行归一后含「申购确认」→ 必须优先于货基「申购确认→买入」(15)，
+    # 否则打新缴款会被误分类成货基申购；「新股入帐」同样归新股。
+    ("sys_new_stock", "新股→新股", "new_stock", "both", "contains", "新股", 14),
     ("sys_interest", "利息归本→利息", "interest", "both", "contains", "利息", 50),
     ("sys_rights", "配股→配股", "rights", "both", "contains", "配股", 60),
     ("sys_fee", "费用→手续费", "fee", "both", "contains", "费", 90),

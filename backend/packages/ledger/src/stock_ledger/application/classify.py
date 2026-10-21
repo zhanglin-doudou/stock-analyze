@@ -17,6 +17,7 @@ from stock_contracts.enums import JobStatus, QuarantineReason
 from stock_platform.jobs import JobQueue
 
 from stock_ledger.models import SummaryRule
+from stock_ledger.parsers.columns import normalize_summary
 from stock_ledger.repositories.quarantine import QuarantineRepository
 from stock_ledger.repositories.rules import (
     SummaryRuleRepository,
@@ -40,18 +41,20 @@ async def load_rules(session: AsyncSession, user_id: uuid.UUID) -> list[SummaryR
 def _matches(rule: SummaryRule, summary: str, side: str) -> bool:
     if rule.side != "both" and rule.side != side:
         return False
-    pattern = rule.pattern
-    if rule.match_type == "exact":
-        return summary == pattern
-    if rule.match_type == "prefix":
-        return summary.startswith(pattern)
-    if rule.match_type == "contains":
-        return pattern in summary
     if rule.match_type == "regex":
+        # 正则按原文匹配（用户可能显式依赖换行/空格）；其余匹配类型统一去折行。
         try:
-            return re.search(pattern, summary) is not None
+            return re.search(rule.pattern, summary) is not None
         except re.error:
             return False
+    text = normalize_summary(summary)
+    pattern = normalize_summary(rule.pattern)
+    if rule.match_type == "exact":
+        return text == pattern
+    if rule.match_type == "prefix":
+        return text.startswith(pattern)
+    if rule.match_type == "contains":
+        return pattern in text
     return False
 
 
@@ -69,13 +72,15 @@ def suggest_rule(rules: list[SummaryRule], summary: str | None, side: str) -> st
     """给未命中摘要推荐一条“最接近”的规则 id（无则 None）。"""
     if not summary:
         return None
+    text = normalize_summary(summary)
     best: SummaryRule | None = None
     for rule in rules:
         if rule.side != "both" and rule.side != side:
             continue
         if rule.match_type not in ("prefix", "contains"):
             continue
-        if (summary.startswith(rule.pattern) or rule.pattern in summary) and (
+        pattern = normalize_summary(rule.pattern)
+        if (text.startswith(pattern) or pattern in text) and (
             best is None or rule.priority < best.priority
         ):
             best = rule

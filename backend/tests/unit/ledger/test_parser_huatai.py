@@ -35,6 +35,10 @@ _HEADERS = [
 
 # 真实华泰账单形态：没有「买卖标志」列，金额列是「发生金额」带符号净额（已含费用）。
 _REAL_BILL = Path(__file__).parents[2] / "api" / "华泰账单_mock.xlsx"
+# 货币基金账单形态：同样没有「买卖标志」列，靠「申购确认/赎回确认」摘要定方向。
+_FUND_BILL = Path(__file__).parents[2] / "api" / "华泰账单_货基_mock.xlsx"
+# 真实对账单节选：摘要折行（[省心投]红\n利发放）、流水末尾「合计」+ 股票/基金持仓区块、重复行。
+_STATEMENT_BILL = Path(__file__).parents[2] / "api" / "华泰账单_真实节选_mock.xlsx"
 
 
 def _xlsx(headers: list[str], rows: list[list[str]]) -> bytes:
@@ -417,6 +421,59 @@ def test_real_bill_amount_is_signed_net_cash_flow() -> None:
             # 零金额转存管转入/转出：方向未知且无资金流 → 0。
             assert row.side == "unknown"
             assert row.amount_units == 0
+
+
+def test_money_fund_redemption_confirmation_not_quarantined() -> None:
+    """货币基金账单（无「买卖标志」列）：申赎确认按摘要定方向，赎回确认不能被隔离。"""
+    bill = _parse(_FUND_BILL.read_bytes(), file_name=_FUND_BILL.name)
+    assert len(bill.rows) == 7
+    assert bill.quarantined == []
+
+    by_line = {row.line_no: row for row in bill.rows}
+    redeem = by_line[17]
+    assert redeem.summary == "赎回确认"
+    assert redeem.side == "sell"
+    assert redeem.quantity_units == 116295_3800
+    # 「发生金额」原生带符号 → 直接采用，不翻号、不重复扣费。
+    assert redeem.amount_units == 116295_38
+
+    subscribe = by_line[18]
+    assert subscribe.summary == "申购确认"
+    assert subscribe.side == "buy"
+    assert subscribe.amount_units == -106708_53
+
+    # 股东账号在解析入口即脱敏：夹具里账号列为空 → 落库/隔离 raw 均不出现明文。
+    assert all(row.account_masked is None for row in bill.rows)
+
+
+def test_statement_stops_at_total_row_before_holdings_sections() -> None:
+    """流水明细「合计」之后的股票/基金持仓、声明区块不是交易行 → 不进隔离区。"""
+    bill = _parse(_STATEMENT_BILL.read_bytes(), file_name=_STATEMENT_BILL.name)
+    # 10 条明细里 3 条同日同额红利再投完全重复 → 留 1 条、隔离 2 条。
+    assert len(bill.rows) == 8
+    assert [q.line_no for q in bill.quarantined] == [18, 19]
+    assert all(q.reason_code == QuarantineReason.DUPLICATE_IN_FILE.value for q in bill.quarantined)
+    assert WarningCode.DUPLICATE_ROWS in bill.warnings
+    # 「合计」在夹具第 27 行；持仓/声明区一行都不应被解析，更不能当 INVALID_ROW 隔离。
+    assert max(row.line_no for row in bill.rows) == 26
+    assert all(q.reason_code != QuarantineReason.INVALID_ROW.value for q in bill.quarantined)
+
+
+def test_wrapped_summary_newline_normalized_for_side_and_parse() -> None:
+    """摘要被券商折行（[省心投]申\\n购确认 / 新股申购确\\n认缴款）仍能识别方向。"""
+    bill = _parse(_STATEMENT_BILL.read_bytes(), file_name=_STATEMENT_BILL.name)
+    by_line = {row.line_no: row for row in bill.rows}
+    subscribe = by_line[21]
+    assert subscribe.summary == "[省心投]申\n购确认"
+    assert subscribe.side == "buy"
+    # 打新缴款摘要同样含「申购确认」，但方向仍是买入（分类由 new_stock 规则兜底）。
+    ipo_payment = by_line[23]
+    assert ipo_payment.summary == "新股申购确\n认缴款"
+    assert ipo_payment.side == "buy"
+    assert ipo_payment.amount_units == -26630_00
+    # 份额转移/清理类零资金业务方向未知（金额 0，不伪造买卖方向）。
+    assert by_line[22].side == "unknown"
+    assert by_line[25].side == "unknown"
 
 
 def test_blank_code_unknown_summary_quarantined() -> None:
