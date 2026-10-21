@@ -191,7 +191,7 @@ export interface paths {
         };
         /**
          * Get Import Batch
-         * @description API-013：批次详情与计数；跨账号 404。
+         * @description API-013：批次详情与计数，并列出导入收尾对账自动写入的系统补差；跨账号 404。
          */
         get: operations["getImportBatch"];
         put?: never;
@@ -610,6 +610,74 @@ export interface components {
             /** Skipped */
             skipped: number;
         };
+        /** BatchDetailOut */
+        BatchDetailOut: {
+            /** Assumptions */
+            assumptions?: {
+                [key: string]: unknown;
+            };
+            /** Batch Id */
+            batch_id: string;
+            /** Broker */
+            broker: string;
+            /**
+             * Can Revoke
+             * @default false
+             */
+            can_revoke: boolean;
+            counts: components["schemas"]["BatchCounts"];
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** File Name */
+            file_name: string;
+            /**
+             * Filled Count
+             * @default 0
+             */
+            filled_count: number;
+            /** Fills */
+            fills?: components["schemas"]["BatchFill"][];
+            /** Finished At */
+            finished_at?: string | null;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "full" | "replace_range";
+            /** Revoked At */
+            revoked_at?: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "pending" | "running" | "succeeded" | "failed" | "revoked";
+            /** Warnings */
+            warnings?: string[];
+        };
+        /**
+         * BatchFill
+         * @description 系统补差行：导入对账发现账单缺少一笔资金流时自动补出的流水。
+         */
+        BatchFill: {
+            /** Amount */
+            amount: string;
+            /** Cash Balance */
+            cash_balance?: string | null;
+            /** Line No */
+            line_no?: number | null;
+            /** Summary */
+            summary?: string | null;
+            /**
+             * Trade Date
+             * Format: date
+             */
+            trade_date: string;
+            /** Trade Id */
+            trade_id: string;
+        };
         /** BatchOut */
         BatchOut: {
             /** Assumptions */
@@ -633,6 +701,11 @@ export interface components {
             created_at: string;
             /** File Name */
             file_name: string;
+            /**
+             * Filled Count
+             * @default 0
+             */
+            filled_count: number;
             /** Finished At */
             finished_at?: string | null;
             /**
@@ -1961,7 +2034,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": components["schemas"]["BatchOut"];
+                    "application/json": components["schemas"]["BatchDetailOut"];
                 };
             };
             /** @description 未认证或凭证无效 */

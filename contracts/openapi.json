@@ -87,6 +87,171 @@
         "title": "BatchCounts",
         "type": "object"
       },
+      "BatchDetailOut": {
+        "properties": {
+          "assumptions": {
+            "additionalProperties": true,
+            "title": "Assumptions",
+            "type": "object"
+          },
+          "batch_id": {
+            "title": "Batch Id",
+            "type": "string"
+          },
+          "broker": {
+            "title": "Broker",
+            "type": "string"
+          },
+          "can_revoke": {
+            "default": false,
+            "title": "Can Revoke",
+            "type": "boolean"
+          },
+          "counts": {
+            "$ref": "#/components/schemas/BatchCounts"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "file_name": {
+            "title": "File Name",
+            "type": "string"
+          },
+          "filled_count": {
+            "default": 0,
+            "title": "Filled Count",
+            "type": "integer"
+          },
+          "fills": {
+            "items": {
+              "$ref": "#/components/schemas/BatchFill"
+            },
+            "title": "Fills",
+            "type": "array"
+          },
+          "finished_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Finished At"
+          },
+          "mode": {
+            "enum": [
+              "full",
+              "replace_range"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "revoked_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Revoked At"
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "running",
+              "succeeded",
+              "failed",
+              "revoked"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "warnings": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Warnings",
+            "type": "array"
+          }
+        },
+        "required": [
+          "batch_id",
+          "status",
+          "mode",
+          "broker",
+          "file_name",
+          "counts",
+          "created_at"
+        ],
+        "title": "BatchDetailOut",
+        "type": "object"
+      },
+      "BatchFill": {
+        "description": "系统补差行：导入对账发现账单缺少一笔资金流时自动补出的流水。",
+        "properties": {
+          "amount": {
+            "title": "Amount",
+            "type": "string"
+          },
+          "cash_balance": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cash Balance"
+          },
+          "line_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line No"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "trade_date": {
+            "format": "date",
+            "title": "Trade Date",
+            "type": "string"
+          },
+          "trade_id": {
+            "title": "Trade Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "trade_id",
+          "trade_date",
+          "amount"
+        ],
+        "title": "BatchFill",
+        "type": "object"
+      },
       "BatchOut": {
         "properties": {
           "assumptions": {
@@ -118,6 +283,11 @@
           "file_name": {
             "title": "File Name",
             "type": "string"
+          },
+          "filled_count": {
+            "default": 0,
+            "title": "Filled Count",
+            "type": "integer"
           },
           "finished_at": {
             "anyOf": [
@@ -3197,6 +3367,7 @@
                       },
                       "created_at": "2026-09-30T09:30:00Z",
                       "file_name": "huatai_2026-09.xlsx",
+                      "filled_count": 0,
                       "finished_at": "2026-09-30T09:30:00Z",
                       "mode": "full",
                       "revoked_at": "2026-09-30T09:30:00Z",
@@ -3842,7 +4013,7 @@
     },
     "/api/v1/imports/{batch_id}": {
       "get": {
-        "description": "API-013：批次详情与计数；跨账号 404。",
+        "description": "API-013：批次详情与计数，并列出导入收尾对账自动写入的系统补差；跨账号 404。",
         "operationId": "getImportBatch",
         "parameters": [
           {
@@ -3906,6 +4077,17 @@
                   },
                   "created_at": "2026-09-30T09:30:00Z",
                   "file_name": "huatai_2026-09.xlsx",
+                  "filled_count": 0,
+                  "fills": [
+                    {
+                      "amount": "1234.56",
+                      "cash_balance": "1234.56",
+                      "line_no": 7,
+                      "summary": "证券买入",
+                      "trade_date": "2026-09-30",
+                      "trade_id": "trd_01J9Z6ABCDEFGHJKMNPQRSTVWX"
+                    }
+                  ],
                   "finished_at": "2026-09-30T09:30:00Z",
                   "mode": "full",
                   "revoked_at": "2026-09-30T09:30:00Z",
@@ -3915,7 +4097,7 @@
                   ]
                 },
                 "schema": {
-                  "$ref": "#/components/schemas/BatchOut"
+                  "$ref": "#/components/schemas/BatchDetailOut"
                 }
               }
             },

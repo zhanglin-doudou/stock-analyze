@@ -595,7 +595,7 @@ RETURNING *;
 
 **设计要点**：preview 与 commit 共享同一解析实现（避免两套逻辑漂移）；commit 的事务边界是"一个批次"，保证 ASR-1；stages 各自纯函数，便于 fixture 测试。
 
-**噪音行与补差行（v2.1）**：① 解析阶段（preview 与 commit 共用同一实现、早于去重）即判「佣金/印花税/其他费/发生金额/资金余额」五字段全为 0 的行 → `INVALID_AMOUNT` 隔离、不写 `trade`（零资金流噪音行既污染回合/费用口径，又会被误判成 `DUPLICATE_IN_FILE`）；② 余额链对账检出断链时写入 `side=missing`、`source=system` 的补差流水，一次补差后链闭合、重复调用幂等；此类断链的对账状态为 `degraded`（不再是 `blocked`），补差行以 `batch_id=null` / `summary=对账自动补差` 与真实成交区分。
+**噪音行与补差行（v2.1/v2.2）**：① 解析阶段（preview 与 commit 共用同一实现、早于去重）即判「佣金/印花税/其他费/发生金额/资金余额」五字段全为 0 的行 → `INVALID_AMOUNT` 隔离、不写 `trade`（零资金流噪音行既污染回合/费用口径，又会被误判成 `DUPLICATE_IN_FILE`）；② 余额链对账检出断链时写入 `side=missing`、`source=system` 的补差流水，一次补差后链闭合、重复调用幂等；此类断链的对账状态为 `degraded`（不再是 `blocked`）。③ v2.2 起 commit 收尾会主动跑一次对账：补差行归属本批次（`batch_id`=导入批次），批次 `warnings` 追加 `RECONCILIATION_AUTOFILLED`，API-013 返回 `filled_count/fills[]` 供结果页提示“账单存在缺失”；撤销导入时 `soft_delete_by_batch` 会把明细与补差一起软删，数据回到导入前。仅对账 GET 触发的补差 `batch_id=null`。
 
 ### 10.4 计算链与脏窗口
 

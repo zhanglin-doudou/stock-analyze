@@ -26,7 +26,7 @@ _BATCH_HEADER = "成交日期,证券代码,证券名称,买卖标志,成交数�
 # G3：commit 会按摘要分类——测试账单必须带可命中系统默认规则的摘要（证券买入）。
 _BATCH_ROWS = [
     "2026-06-30,600519,贵州茅台,买入,100,1500.00,150000.00,5.00,0.00,0.10,100000.00,证券买入",
-    "2026-06-30,000001,平安银行,买入,200,10.00,2000.00,0.50,0.00,0.01,95000.00,证券买入",
+    "2026-06-30,000001,平安银行,买入,200,10.00,2000.00,0.50,0.00,0.01,97999.49,证券买入",
 ]
 
 
@@ -441,6 +441,85 @@ async def test_api_011_commit_real_bill_worker_end_to_end(
             assert item["account_masked"] != "A00000000"
 
 
+async def test_import_runs_reconciliation_and_revoke_removes_fills(
+    client, api_prefix, user, settings
+) -> None:
+    """导入收尾自动对账：断链 → 生成 side=missing 补差 + 警告；撤销批次要把补差一起删除。"""
+    header = "成交日期,证券代码,证券名称,买卖标志,成交数量,成交价格,发生金额,资金余额,摘要"
+    rows = [
+        # 2026-06-01 首行只做锚点（区间首行不参与链式核对）
+        "2026-06-01,600519,贵州茅台,买入,100,1500.00,-150000.00,100000.00,证券买入",
+        # 期望余额 = 100000 - 2000 = 98000，实际 95000 → 欠 3000，导入对账应补 side=missing
+        "2026-06-02,000001,平安银行,买入,200,10.00,-2000.00,95000.00,证券买入",
+    ]
+    data = ("\n".join([header, *rows]) + "\n").encode("utf-8")
+    preview = await client.post(
+        f"{api_prefix}/imports/preview",
+        headers=user.headers,
+        files={"file": ("broken.csv", data, "text/csv")},
+    )
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["estimated"] == {
+        "parsed": 2,
+        "inserted": 2,
+        "skipped": 0,
+        "quarantined": 0,
+    }
+
+    accepted = await _commit_import(client, api_prefix, user, preview.json()["preview_id"])
+    await _drain_worker(settings)
+    batch_id = accepted["batch_id"]
+
+    batch = await client.get(f"{api_prefix}/imports/{batch_id}", headers=user.headers)
+    body = batch.json()
+    assert body["status"] == "succeeded"
+    assert body["counts"] == {"parsed": 2, "inserted": 2, "skipped": 0, "quarantined": 0}
+    assert body["filled_count"] == 1
+    assert "RECONCILIATION_AUTOFILLED" in body["warnings"]
+    fill = body["fills"][0]
+    assert fill["trade_date"] == "2026-06-02"
+    assert fill["line_no"] == 3
+    assert fill["amount"] == "-3000.00"
+    assert fill["cash_balance"] == "97000.00"
+    assert fill["summary"] == "对账自动补差"
+
+    # 补差行归属本批次：可按 side/batch 过滤，且 source=system。
+    missing = await client.get(
+        f"{api_prefix}/trades?side=missing&batch_id={batch_id}", headers=user.headers
+    )
+    items = missing.json()["items"]
+    assert len(items) == 1
+    assert items[0]["trade_id"] == fill["trade_id"]
+    assert items[0]["source"] == "system"
+    assert items[0]["batch_id"] == batch_id
+
+    # 批次列表也带 filled_count，便于前端在导入历史里提示。
+    listed = (await client.get(f"{api_prefix}/imports", headers=user.headers)).json()["items"]
+    assert listed[0]["filled_count"] == 1
+
+    # 撤销导入：补差行随批次一起软删（reverted.inserted = 2 行明细 + 1 行补差）。
+    revoke = await client.post(f"{api_prefix}/imports/{batch_id}/revoke", headers=user.headers)
+    assert revoke.status_code == 200, revoke.text
+    assert revoke.json()["reverted"]["inserted"] == 3
+
+    visible = await client.get(
+        f"{api_prefix}/trades?side=missing&batch_id={batch_id}", headers=user.headers
+    )
+    assert visible.json()["items"] == []
+    deleted = await client.get(
+        f"{api_prefix}/trades?side=missing&batch_id={batch_id}&include_deleted=true",
+        headers=user.headers,
+    )
+    deleted_items = deleted.json()["items"]
+    assert len(deleted_items) == 1
+    assert deleted_items[0]["deleted_at"] is not None
+
+    after = await client.get(f"{api_prefix}/imports/{batch_id}", headers=user.headers)
+    assert after.json()["status"] == "revoked"
+    assert after.json()["filled_count"] == 0
+    assert after.json()["fills"] == []
+
+
 async def test_idempotency_key_same_body_replays(client, api_prefix, user) -> None:
     preview_id = await _preview(client, api_prefix, user)
     key = "idem-" + uuid.uuid4().hex + "!"
@@ -532,7 +611,7 @@ async def test_api_011_replace_range_only_touches_requested_range(
     """replace_range 必须用请求体 range，而不是账单 min/max（否则误删区间外流水）。"""
     rows = [
         "2026-06-01,600519,贵州茅台,买入,100,1500.00,150000.00,5.00,0.00,0.10,100000.00,证券买入",
-        "2026-06-30,000001,平安银行,买入,200,10.00,2000.00,0.50,0.00,0.01,95000.00,证券买入",
+        "2026-06-30,000001,平安银行,买入,200,10.00,2000.00,0.50,0.00,0.01,97999.49,证券买入",
     ]
     first = await _commit_import(
         client, api_prefix, user, await _preview_with_rows(client, api_prefix, user, rows)

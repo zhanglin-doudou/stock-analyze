@@ -161,6 +161,20 @@ export function Import() {
                 批次号 <code>{batch.batch_id}</code> · 插入 {batch.counts.inserted} 行 · 隔离 {batch.counts.quarantined} 行 · 跳过{" "}
                 {batch.counts.skipped} 行
               </p>
+              {(batch.filled_count ?? 0) > 0 ? (
+                <div className="notice-warn" role="alert">
+                  <strong>账单存在缺失：系统已自动补差 {batch.filled_count} 笔</strong>
+                  <ul>
+                    {(batch.fills ?? []).map((fill) => (
+                      <li key={fill.trade_id}>
+                        第 {fill.line_no ?? "?"} 行 · {fill.trade_date} · 金额 {fill.amount} · 补差后余额{" "}
+                        {fill.cash_balance ?? "—"} · {fill.summary ?? "对账自动补差"}
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="muted">补差流水以 side=missing 标记，可在交易流水核对；撤销本次导入会一并删除。</p>
+                </div>
+              ) : null}
               <div className="row-actions">
                 <Link className="btn btn-ghost" to={`/imports?batch=${batch.batch_id}`}>
                   查看批次

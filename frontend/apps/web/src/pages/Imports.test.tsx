@@ -29,6 +29,7 @@ function makeBatch(overrides: Partial<ImportBatch> = {}): ImportBatch {
     broker: "huatai",
     file_name: "huatai_2024.xlsx",
     counts: { parsed: 328, inserted: 326, skipped: 0, quarantined: 2 },
+    filled_count: 0,
     warnings: [],
     assumptions: {},
     created_at: "2026-10-21T00:00:00Z",

@@ -187,12 +187,29 @@ class BatchOut(BaseModel):
     broker: str
     file_name: str
     counts: BatchCounts
+    # 导入收尾对账自动写入的 side=missing 补差行数（撤销后归零）。
+    filled_count: int = 0
     warnings: list[str] = Field(default_factory=list)
     assumptions: dict[str, Any] = Field(default_factory=dict)
     created_at: datetime
     finished_at: datetime | None = None
     revoked_at: datetime | None = None
     can_revoke: bool = False
+
+
+class BatchFill(BaseModel):
+    """系统补差行：导入对账发现账单缺少一笔资金流时自动补出的流水。"""
+
+    trade_id: str
+    trade_date: date
+    line_no: int | None = None
+    amount: str
+    cash_balance: str | None = None
+    summary: str | None = None
+
+
+class BatchDetailOut(BatchOut):
+    fills: list[BatchFill] = Field(default_factory=list)
 
 
 class BatchPage(BaseModel):

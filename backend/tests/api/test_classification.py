@@ -240,6 +240,9 @@ async def test_real_statement_excerpt_quarantine_only_zero_amount(
     batch = await _batch(client, api_prefix, user, accepted["batch_id"])
     assert batch["counts"] == {"parsed": 5, "inserted": 5, "skipped": 0, "quarantined": 5}
     assert "UNKNOWN_SUMMARY" not in set(batch["warnings"])
+    # 节选夹具余额链自洽 → 导入对账不产生补差。
+    assert batch["filled_count"] == 0
+    assert batch["fills"] == []
 
     items = await _quarantine(client, api_prefix, user, accepted["batch_id"])
     assert len(items) == 5
@@ -365,9 +368,15 @@ async def test_synthetic_fixture_preview_equals_commit(client, api_prefix, user,
     batch = await _batch(client, api_prefix, user, accepted["batch_id"])
     assert preview["estimated"] == batch["counts"]
 
+    fills = batch["filled_count"]
     trades = await _trades(client, api_prefix, user)
-    assert len(trades) == batch["counts"]["inserted"]
+    # 插入行 + 导入收尾对账补差行 = 实际流水总数；未知摘要行被隔离后会形成缺口并被补差。
+    assert len(trades) == batch["counts"]["inserted"] + fills
     assert trades and all(item["category"] for item in trades)
+    if fills:
+        assert "RECONCILIATION_AUTOFILLED" in batch["warnings"]
+        assert len(batch["fills"]) == fills
+        assert all(item["summary"] == "对账自动补差" for item in batch["fills"])
 
     quarantine = await _quarantine(client, api_prefix, user, accepted["batch_id"])
     assert len(quarantine) == batch["counts"]["quarantined"]

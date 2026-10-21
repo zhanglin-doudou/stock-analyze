@@ -77,6 +77,8 @@ export type PreviewFileOut = ApiSchemas["PreviewFile"];
 export type ImportCommitIn = ApiSchemas["ImportCommitIn"];
 export type ImportRange = ApiSchemas["ImportRange"];
 export type BatchOut = ApiSchemas["BatchOut"];
+export type BatchDetailOut = ApiSchemas["BatchDetailOut"];
+export type BatchFillOut = ApiSchemas["BatchFill"];
 export type BatchPageOut = ApiSchemas["BatchPage"];
 export type BatchCountsOut = ApiSchemas["BatchCounts"];
 export type RevokeOut = ApiSchemas["RevokeOut"];
@@ -145,7 +147,10 @@ export type PreviewColumn = PreviewColumnOut;
 export type PreviewWarning = PreviewWarningOut;
 export type PreviewEstimate = PreviewEstimatedOut;
 
-export type ImportBatch = BatchOut;
+export type ImportBatch = BatchDetailOut;
+/** 批次列表项（API-012 只返回 BatchOut，不含 fills[]）。 */
+export type ImportBatchListItem = BatchOut;
+export type ImportBatchFill = BatchFillOut;
 export type ImportBatchStatus = ImportBatch["status"];
 export type BatchList = BatchPageOut;
 export type BatchCounts = BatchCountsOut;
@@ -189,7 +194,7 @@ export type AssertPreviewFields = Assert<
 >;
 export type AssertPreviewEstimatedFields = Assert<FieldsPresent<PreviewEstimate, "parsed" | "inserted" | "skipped" | "quarantined">>;
 export type AssertBatchFields = Assert<
-  FieldsPresent<ImportBatch, "batch_id" | "status" | "mode" | "broker" | "file_name" | "counts" | "warnings" | "can_revoke">
+  FieldsPresent<ImportBatch, "batch_id" | "status" | "mode" | "broker" | "file_name" | "counts" | "filled_count" | "fills" | "warnings" | "can_revoke">
 >;
 export type AssertBatchCountsFields = Assert<FieldsPresent<BatchCounts, "parsed" | "inserted" | "skipped" | "quarantined">>;
 export type AssertJobFields = Assert<FieldsPresent<Job, "job_id" | "type" | "status" | "progress" | "stage" | "result_ref">>;

@@ -24,12 +24,14 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.responses import JSONResponse
-from stock_contracts.enums import ImportBatchStatus
+from stock_contracts.enums import ImportBatchStatus, Side
 from stock_contracts.errors import ApiError, ErrorCode, FieldError, NotFoundError
+from stock_core.values import Money
 from stock_ledger.application.imports import revoke_batch_now
 from stock_ledger.application.preview import ImportPreviewDTO, create_preview
 from stock_ledger.repositories.imports import ImportBatchRepository, ImportPreviewRepository
 from stock_ledger.repositories.quarantine import QuarantineRepository
+from stock_ledger.repositories.trades import TradeRepository
 from stock_platform.idempotency import IdempotencyStore
 from stock_platform.tenant import TenantContext
 
@@ -37,6 +39,8 @@ from stock_api.deps import get_state, get_tenant
 from stock_api.routing import StrictQueryRoute
 from stock_api.schemas import (
     BatchCounts,
+    BatchDetailOut,
+    BatchFill,
     BatchOut,
     BatchPage,
     ImportCommitIn,
@@ -126,7 +130,7 @@ def _preview_out(dto: ImportPreviewDTO) -> PreviewOut:
     )
 
 
-def _batch_out(batch: Any) -> BatchOut:
+def _batch_out(batch: Any, *, filled_count: int = 0) -> BatchOut:
     return BatchOut(
         batch_id=batch.id,
         status=batch.status,
@@ -139,6 +143,7 @@ def _batch_out(batch: Any) -> BatchOut:
             skipped=batch.skipped_count,
             quarantined=batch.quarantined_count,
         ),
+        filled_count=filled_count,
         warnings=list(batch.warnings),
         assumptions=dict(batch.assumptions),
         created_at=batch.created_at,
@@ -353,17 +358,20 @@ async def list_imports(
         rows, next_cursor = await ImportBatchRepository(session).list_with_cursor(
             user_id, cursor=cursor, limit=limit
         )
-        items = [_batch_out(row) for row in rows]
+        fill_counts = await TradeRepository(session).count_fills_by_batches(
+            user_id, [row.id for row in rows]
+        )
+        items = [_batch_out(row, filled_count=fill_counts.get(row.id, 0)) for row in rows]
     return BatchPage(items=items, next_cursor=next_cursor)
 
 
-@router.get("/imports/{batch_id}", response_model=BatchOut, operation_id="getImportBatch")
+@router.get("/imports/{batch_id}", response_model=BatchDetailOut, operation_id="getImportBatch")
 async def get_import_batch(
     batch_id: str,
     request: Request,
     ctx: Annotated[TenantContext, Depends(get_tenant)],
-) -> BatchOut:
-    """API-013：批次详情与计数；跨账号 404。"""
+) -> BatchDetailOut:
+    """API-013：批次详情与计数，并列出导入收尾对账自动写入的系统补差；跨账号 404。"""
     ctx.forbid_admin_trades()
     user_id = ctx.require_user()
     state = get_state(request)
@@ -371,7 +379,27 @@ async def get_import_batch(
         batch = await ImportBatchRepository(session).by_id(user_id, batch_id)
         if batch is None:
             raise NotFoundError(detail=f"导入批次 {batch_id} 不存在")
-        out = _batch_out(batch)
+        trade_repo = TradeRepository(session)
+        fill_counts = await trade_repo.count_fills_by_batches(user_id, [batch_id])
+        fill_rows = await trade_repo.list_by_batch(user_id, batch_id, side=Side.MISSING.value)
+        out = BatchDetailOut(
+            **_batch_out(batch, filled_count=fill_counts.get(batch_id, 0)).model_dump(),
+            fills=[
+                BatchFill(
+                    trade_id=row.id,
+                    trade_date=row.trade_date,
+                    line_no=row.line_no,
+                    amount=str(Money(row.amount_units)),
+                    cash_balance=(
+                        str(Money(row.cash_balance_units))
+                        if row.cash_balance_units is not None
+                        else None
+                    ),
+                    summary=row.summary,
+                )
+                for row in fill_rows
+            ],
+        )
     return out
 
 

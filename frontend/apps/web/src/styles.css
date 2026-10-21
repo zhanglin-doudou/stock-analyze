@@ -222,6 +222,21 @@ input[type="checkbox"] {
 .notice {
   color: #0a7d32;
 }
+.notice-warn {
+  margin: 10px 0;
+  padding: 10px 12px;
+  border: 1px solid #f0c36d;
+  border-radius: 6px;
+  background: #fff8e6;
+  color: #8a5a00;
+}
+.notice-warn ul {
+  margin: 8px 0;
+  padding-left: 20px;
+}
+.notice-warn p {
+  margin: 4px 0 0;
+}
 .uploader {
   display: flex;
   align-items: center;

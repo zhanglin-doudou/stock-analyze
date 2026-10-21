@@ -416,6 +416,46 @@ class TradeRepository:
         )
         return list(await self._session.scalars(stmt))
 
+    async def list_by_batch(
+        self,
+        user_id: uuid.UUID,
+        batch_id: str,
+        *,
+        side: str | None = None,
+        include_deleted: bool = False,
+        limit: int = 500,
+    ) -> list[Trade]:
+        """按批次列流水（补差行详情/审计用）；默认只看未删除行。"""
+        stmt = select(Trade).where(Trade.user_id == user_id, Trade.batch_id == batch_id)
+        if not include_deleted:
+            stmt = stmt.where(Trade.deleted_at.is_(None))
+        if side is not None:
+            stmt = stmt.where(Trade.side == side)
+        stmt = stmt.order_by(
+            Trade.trade_date.asc(), Trade.line_no.asc().nulls_first(), Trade.id.asc()
+        )
+        stmt = stmt.limit(max(1, min(limit, 1000)))
+        return list(await self._session.scalars(stmt))
+
+    async def count_fills_by_batches(
+        self, user_id: uuid.UUID, batch_ids: Sequence[str]
+    ) -> dict[str, int]:
+        """批量统计每个批次的系统补差行数（批次列表/详情的 filled_count）。"""
+        ids = [batch_id for batch_id in batch_ids if batch_id]
+        if not ids:
+            return {}
+        rows = await self._session.execute(
+            select(Trade.batch_id, func.count())
+            .where(
+                Trade.user_id == user_id,
+                Trade.batch_id.in_(ids),
+                Trade.side == Side.MISSING.value,
+                Trade.deleted_at.is_(None),
+            )
+            .group_by(Trade.batch_id)
+        )
+        return {str(batch_id): int(count) for batch_id, count in rows}
+
     async def count_by_filters(
         self,
         user_id: uuid.UUID,

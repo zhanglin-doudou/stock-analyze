@@ -34,7 +34,8 @@ function formatAssumption(value: unknown): string {
 
 function countSummary(batch: ImportBatch): string {
   const { parsed, inserted, skipped, quarantined } = batch.counts;
-  return `解析 ${parsed} · 写入 ${inserted} · 跳过 ${skipped} · 隔离 ${quarantined}`;
+  const filled = batch.filled_count ?? 0;
+  return `解析 ${parsed} · 写入 ${inserted} · 跳过 ${skipped} · 隔离 ${quarantined}${filled > 0 ? ` · 系统补差 ${filled}` : ""}`;
 }
 
 /** 导入记录（/imports）：批次列表 + 详情（计数/警告/假设与范围）+ 隔离区 + 撤销。 */
@@ -166,6 +167,35 @@ export function Imports() {
                 {detail.finished_at ? ` · 完成 ${detail.finished_at}` : ""}
                 {detail.revoked_at ? ` · 撤销 ${detail.revoked_at}` : ""}
               </p>
+
+              {(detail.filled_count ?? 0) > 0 ? (
+                <div className="notice-warn" role="alert">
+                  <h3>账单存在缺失：系统已自动补差 {detail.filled_count} 笔</h3>
+                  <table className="table">
+                    <thead>
+                      <tr>
+                        <th>日期</th>
+                        <th>行号</th>
+                        <th>补差金额</th>
+                        <th>补差后余额</th>
+                        <th>摘要</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {(detail.fills ?? []).map((fill) => (
+                        <tr key={fill.trade_id}>
+                          <td>{fill.trade_date}</td>
+                          <td>{fill.line_no ?? "—"}</td>
+                          <td>{fill.amount}</td>
+                          <td>{fill.cash_balance ?? "—"}</td>
+                          <td>{fill.summary ?? "对账自动补差"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <p className="muted">补差行 side=missing、source=system；撤销本批次会一并删除这些补差流水。</p>
+                </div>
+              ) : null}
 
               <h3>警告</h3>
               {(detail.warnings ?? []).length > 0 ? (

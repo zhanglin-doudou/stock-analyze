@@ -56,6 +56,7 @@ function makeBatch(overrides: Partial<ImportBatch> = {}): ImportBatch {
     broker: "huatai",
     file_name: "huatai_2024.xlsx",
     counts: { parsed: 328, inserted: 326, skipped: 0, quarantined: 2 },
+    filled_count: 0,
     warnings: [],
     assumptions: {},
     created_at: "2026-10-21T00:00:00Z",
@@ -122,6 +123,33 @@ describe("Import 导入页结果区", () => {
     const link = screen.getByRole("link", { name: "查看批次" });
     expect(link.getAttribute("href")).toBe("/imports?batch=bat_1");
     expect(screen.getByRole("button", { name: "撤销本次导入" })).toBeTruthy();
+  });
+
+  it("账单存在缺失时展示系统补差清单（side=missing 提示）", async () => {
+    getBatch.mockResolvedValue(
+      makeBatch({
+        filled_count: 1,
+        fills: [
+          {
+            trade_id: "trd_fill",
+            trade_date: "2026-06-02",
+            line_no: 3,
+            amount: "-3000.00",
+            cash_balance: "97000.00",
+            summary: "对账自动补差",
+          },
+        ],
+        warnings: ["RECONCILIATION_AUTOFILLED"],
+      }),
+    );
+    renderPage();
+    await uploadAndCommit();
+
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    expect(screen.getByText(/账单存在缺失/)).toBeTruthy();
+    expect(screen.getByText(/系统已自动补差 1 笔/)).toBeTruthy();
+    expect(screen.getByText(/2026-06-02/)).toBeTruthy();
+    expect(screen.getByText(/-3000.00/)).toBeTruthy();
   });
 
   it("「撤销本次导入」二次确认后调用 revoke、刷新批次并提示回退行数", async () => {

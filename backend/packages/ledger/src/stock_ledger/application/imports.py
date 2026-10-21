@@ -24,6 +24,7 @@ from stock_platform.outbox import publish
 
 from stock_ledger.application.classify import load_rules, match_rule, suggest_rule
 from stock_ledger.application.preview import default_object_store
+from stock_ledger.application.reconcile import reconcile
 from stock_ledger.models import SummaryRule
 from stock_ledger.parsers.huatai import ParsedRow, parse_bill
 from stock_ledger.repositories.imports import ImportBatchRepository, ImportPreviewRepository
@@ -147,7 +148,12 @@ async def commit_batch(
         # 短路仅针对已收口的批次；PENDING 批次是 API 侧预建的“待收养”批次，不能短路。
         existing = await batch_repo.by_preview(user_id, preview_id)
         if existing is not None and existing.status != ImportBatchStatus.PENDING.value:
-            return _committed_result(existing, reused=True)
+            fill_counts = await TradeRepository(session).count_fills_by_batches(
+                user_id, [existing.id]
+            )
+            return _committed_result(
+                existing, reused=True, filled_count=fill_counts.get(existing.id, 0)
+            )
 
         preview = await preview_repo.by_id(user_id, preview_id, now=clock.now())
         await queue.progress(session, job_id, percent=5, stage="parsing", message=None)
@@ -280,6 +286,45 @@ async def commit_batch(
             else {}
         )
         ranges["replaced_trades"] = replaced
+
+        # 导入收尾即对账：基于已入库明细跑一次余额链核对，缺口自动写 side=missing 补差行。
+        # 补差行归属本批次（batch_id=batch.id），撤销批次时随之软删；有补差则打警告让用户
+        # 知道账单存在缺失，并把补差明细挂在 assumptions.reconciliation 供批次详情展示。
+        fill_count = 0
+        fills: list[dict[str, Any]] = []
+        if range_from is not None and range_to is not None:
+            reco = await reconcile(
+                session,
+                clock=clock,
+                user_id=user_id,
+                period_start=range_from,
+                period_end=range_to,
+                fill_batch_id=batch.id,
+            )
+            fills = [
+                {
+                    "trade_id": item["filled_trade_id"],
+                    "line_no": item.get("line_no"),
+                    "trade_date": item.get("trade_date"),
+                    "amount_units": item["delta_units"],
+                    "expected_units": item["expected_units"],
+                    "actual_units": item["actual_units"],
+                }
+                for item in reco.breaks
+                if item.get("filled")
+            ]
+            fill_count = len(fills)
+            # 注意：不能用 warnings.append / assumptions[...] 原地改——它们已赋给 batch，
+            # JSONB 的快照引用同一对象，原地改会被判断成“值未变化”而漏写 UPDATE。
+            new_warnings = list(warnings)
+            if fill_count:
+                new_warnings.append(WarningCode.RECONCILIATION_AUTOFILLED.value)
+            batch.warnings = new_warnings
+            batch.assumptions = {
+                **assumptions,
+                "reconciliation": {"status": reco.status, "filled_count": fill_count},
+            }
+
         finished = await batch_repo.finish(
             user_id,
             batch.id,
@@ -304,6 +349,7 @@ async def commit_batch(
                 "inserted": inserted,
                 "skipped": skipped,
                 "quarantined": len(quarantine_payloads),
+                "filled": fill_count,
             },
         )
         await record(
@@ -312,10 +358,15 @@ async def commit_batch(
             actor_id=user_id,
             target_type="import_batch",
             target_id=finished.id,
-            meta={"mode": mode, "inserted": inserted, "skipped": skipped},
+            meta={
+                "mode": mode,
+                "inserted": inserted,
+                "skipped": skipped,
+                "filled": fill_count,
+            },
         )
 
-        result = _committed_result(finished, reused=False)
+        result = _committed_result(finished, reused=False, filled_count=fill_count)
         await queue.finish(session, job_id, status=JobStatus.SUCCEEDED, result=result)
         await savepoint.commit()
         return result
@@ -325,13 +376,14 @@ async def commit_batch(
         return await _fail_job(queue, session, job_id, exc)
 
 
-def _committed_result(batch: Any, *, reused: bool) -> dict[str, Any]:
+def _committed_result(batch: Any, *, reused: bool, filled_count: int = 0) -> dict[str, Any]:
     return {
         "batch_id": batch.id,
         "status": batch.status,
         "inserted": batch.inserted_count,
         "skipped": batch.skipped_count,
         "quarantined": batch.quarantined_count,
+        "filled_count": filled_count,
         "reused": reused,
     }
 

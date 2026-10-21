@@ -39,7 +39,7 @@
 - **必需**（所有 202 异步写 + 改变资产的 POST）：同 key + 同 body → 重放首次响应（**同一 job_id/同一 body**，`Idempotency-Replayed: true`），副作用只发生一次；同 key 不同 body → `422 IDEMPOTENCY_KEY_REUSED`；首次仍在执行 → `409 IDEMPOTENCY_IN_PROGRESS`（附 `job_id`）。
 - **支持**（PATCH/PUT/撤销/恢复/分享/建规则）：同 key 重放首次结果，不带 key 时按 HTTP 语义。**不适用**（`POST /tokens`、register/login、匿名分享）：token 明文只出现一次，超时用 `GET /tokens` 对齐。
 - 存储 `platform.idempotency`（唯一索引 `(user_id,key)`），保留 24h，只缓存 2xx/409/422，5xx 不缓存。重复 DELETE → 204；重复 restore → 200 同状态；重复 revoke → 409 `IMPORT_ALREADY_REVOKED`。
-- **自愈例外**：`GET /reconciliation`（API-026）首次调用会写入 `side=missing`、`source=system` 的补差流水，使断链闭合；该写入只发生一次（重复调用幂等）。客户端/网关不得假设该 GET 无副作用或长期缓存其响应。
+- **自愈例外**：`GET /reconciliation`（API-026）首次调用会写入 `side=missing`、`source=system` 的补差流水，使断链闭合；该写入只发生一次（重复调用幂等）。客户端/网关不得假设该 GET 无副作用或长期缓存其响应。导入提交（API-011）也会在收尾自动跑一次对账：补差行归属该批次（`batch_id`），撤销批次时一并软删；其结果通过 API-013 的 `filled_count/fills[]` 暴露。
 ### 0.7 异步任务模式
 - 长任务返回 `202` + `Location: /api/v1/jobs/{id}` + `Retry-After: 1`，body 含 `job_id/type/status/links{self,events}`；轮询 `GET /jobs/{id}` 至终态取 `result_ref`，或订阅 SSE（§5）；SSE 是优化，轮询为兜底。
 - 同类任务去重 `dedupe_key=hash(user_id,type,canonical_params)`：pending/running 已存在 → 返回同一 `job_id`（202 + `X-Job-Reused: true`）；参数不同且超并发 → `429 QUOTA_EXCEEDED`。
@@ -63,7 +63,7 @@
 | API-010 | POST | `/imports/preview` | 导入预览（不落库） | L3 | write | 支持 | 同步 | P0 | 200 |
 | API-011 | POST | `/imports` | 提交导入（commit） | L3 | write | 必需 | 异步 | P0 | 202 |
 | API-012 | GET | `/imports` | 导入批次列表 | L3 | read | — | 同步 | P0 | 200 |
-| API-013 | GET | `/imports/{batch_id}` | 批次详情与计数 | L3 | read | — | 同步 | P0 | 200 |
+| API-013 | GET | `/imports/{batch_id}` | 批次详情、计数与系统补差 | L3 | read | — | 同步 | P0 | 200 |
 | API-014 | GET | `/imports/{batch_id}/quarantine` | 隔离区行 | L5 | read | — | 同步 | P0 | 200 |
 | API-015 | POST | `/imports/{batch_id}/revoke` | 撤销该批次 | L3 | write | 支持 | 同步 | P0 | 200 |
 | API-016 | POST | `/imports/{batch_id}/reclassify` | 按新规则重跑分类 | L5 | write | 必需 | 异步 | P1 | 202 |
@@ -170,7 +170,13 @@
 - 请求：body `preview_id`(必填) / `mode`(full|replace_range) / `range{from,to}`(replace_range 必填) / `mapping`(可选)；头 `Idempotency-Key`(必填)。
 - 响应 202：`job_id` / `type:"import_commit"` / `batch_id` / `status:"pending"` / `links{self,events}`；`Location: /api/v1/jobs/{job_id}`、`Retry-After: 1`。
 - 错误码：IDEMPOTENCY_KEY_REUSED(422)、IDEMPOTENCY_IN_PROGRESS(409)、IMPORT_PREVIEW_EXPIRED(410)、IMPORT_COLUMNS_UNRESOLVED(422)、JOB_ALREADY_RUNNING(409)、QUOTA_EXCEEDED(429)。
-- 验收断言：① 202 且 job.type=="import_commit"、batch_id 非空；② 轮询至 succeeded 后 GET /imports/{batch_id}.counts.inserted == preview.estimated.inserted；③ 同文件再 commit → inserted==0 且 skipped>0；④ 同 Idempotency-Key 并发两次 → 同一 job_id 且 trades 只增一次；⑤ 首行非买入 → commit 成功且 batch.assumptions 含 back_solved 或 warnings 含 NAV_UNRELIABLE。
+- 验收断言：① 202 且 job.type=="import_commit"、batch_id 非空；② 轮询至 succeeded 后 GET /imports/{batch_id}.counts.inserted == preview.estimated.inserted；③ 同文件再 commit → inserted==0 且 skipped>0；④ 同 Idempotency-Key 并发两次 → 同一 job_id 且 trades 只增一次；⑤ 首行非买入 → commit 成功且 batch.assumptions 含 back_solved 或 warnings 含 NAV_UNRELIABLE；⑥ 断链账单 commit 收尾自动对账：批次 `filled_count≥1`、`warnings` 含 `RECONCILIATION_AUTOFILLED`、`fills[]` 行号/金额/日期精确，且补差行 `side=missing/source=system/batch_id=本批次`。
+#### API-013 GET /imports/{batch_id}
+- 用途：批次详情、计数与**导入收尾对账的系统补差清单**；FR-L3；认证：read；同步。
+- 请求：path `batch_id`。
+- 响应 200：`batch_id` / `status(pending…revoked)` / `mode` / `broker` / `file_name` / `counts{parsed,inserted,skipped,quarantined}` / `filled_count` / `fills[]{trade_id,trade_date,line_no,amount,cash_balance,summary}` / `warnings[]` / `assumptions{reconciliation{status,filled_count}}` / `created_at` / `finished_at` / `revoked_at` / `can_revoke`。`filled_count` 只统计未软删的 `side=missing` 补差行；撤销后归零、`fills=[]`。
+- 错误码：NOT_FOUND(404)。
+- 验收断言：① 200 且 counts.inserted==412、file_sha256 匹配；② 用户 B 访问 A 的 batch → 404；③ 断链账单导入后 `filled_count==len(fills)≥1` 且每项 `summary=="对账自动补差"`、金额为分转元的定点字符串；④ 正常账单 `filled_count==0`、`fills==[]` 且 warnings 不含 `RECONCILIATION_AUTOFILLED`；⑤ 撤销后 `filled_count==0`、`fills==[]`。
 #### API-014 GET /imports/{batch_id}/quarantine
 - 用途：隔离区（未知摘要、全零金额等未入库行）；FR-L5；认证：read；同步；游标分页。
 - 请求：path `batch_id`；query `limit`(默认 50) / `cursor` / `reason_code`(可选，∈`UNKNOWN_SUMMARY/UNMAPPED_COLUMN/INVALID_ROW/DUPLICATE_IN_FILE/INVALID_AMOUNT`)。
@@ -178,11 +184,11 @@
 - 错误码：NOT_FOUND(404)、INVALID_CURSOR(400)、VALIDATION_ERROR(422)。
 - 验收断言：① 200 且 fx_quarantine 第 7 行被隔离（line_no==7）；② 每项 raw.summary 与原始文件逐字一致；③ 用户 B 访问 A 的 batch → 404 且响应不含 A 任何字段；④ 新增匹配规则并 reclassify 后隔离区条目减少；⑤ 「佣金/印花税/其他费/发生金额/资金余额」五字段全为 0 的行 → `reason_code=="INVALID_AMOUNT"` 且 `line_no` 精确、该行不在 `GET /trades`；同内容重复的全零行也只记 `INVALID_AMOUNT`（判定先于 `DUPLICATE_IN_FILE`）。
 #### API-015 POST /imports/{batch_id}/revoke
-- 用途：撤销本次导入（软删该批次写入行）；FR-L3；认证：write；幂等：支持；同步。
+- 用途：撤销本次导入（软删该批次写入行 + 归属该批次的系统补差行）；FR-L3；认证：write；幂等：支持；同步。
 - 请求：path `batch_id`；body `reason`(可选,≤200)；重复调用 → 409。
 - 响应 200：`batch_id` / `status:"revoked"` / `reverted{inserted,updated}` / `revoked_at` / `affected_metrics[]{metric_id,status:"stale"}`。
 - 错误码：NOT_FOUND(404)、IMPORT_ALREADY_REVOKED(409)、VALIDATION_ERROR(422)。
-- 验收断言：① 200 后 GET /trades 行数 == 导入前行数；② batch.status=="revoked"；③ 再次 revoke → 409 IMPORT_ALREADY_REVOKED；④ GET /trades?include_deleted=true 可见被软删行且 batch_id 匹配；⑤ 审计出现 action=="import.revoke"。
+- 验收断言：① 200 后 GET /trades 行数 == 导入前行数（含补差行一起回退）；② batch.status=="revoked"；③ 再次 revoke → 409 IMPORT_ALREADY_REVOKED；④ GET /trades?include_deleted=true 可见被软删行且 batch_id 匹配；⑤ 审计出现 action=="import.revoke"；⑥ 本批次补差行被一并软删（`GET /trades?side=missing&batch_id=…` 为空，`include_deleted=true` 可见），`reverted.inserted` 包含补差行数。
 #### API-017 GET /trades
 - 用途：交易流水查询（完整 REST）；FR-L8/L4；认证：read；同步；游标分页。
 - 请求：query `limit`(1~200) / `cursor` / `sort`(白名单 trade_date,-trade_date,amount,-amount,created_at) / `trade_date_from`、`trade_date_to` / `security_code` / `side`(∈{buy,sell,unknown,missing}) / `batch_id` / `include_deleted`(默认 false) / `fields` / `include_total`。
@@ -206,8 +212,8 @@
 - 用途：余额链对账、断链精确定位与**自动补差**；FR-L6；认证：read；同步。
 - 请求：query `period`(YYYY-MM) 或 `from`/`to`；`include_ok_rows`(默认 false)。
 - 响应 200：`period` / `status(ok|degraded|blocked)` / `break_count` / `filled_count`（本次调用新增的补差流水数）/ `breaks[]{trade_id,line_no,trade_date,expected,actual,diff,filled,filled_trade_id}`（`filled=true` 表示该断链已由补差流水修复；`filled_trade_id` 为补差流水 ID，未补差为 null）/ `checked_rows` / `epsilon:"0.01"` / `data_as_of` / `generated_at`。
-- 补差语义：检出断链时，对**带账单行号的导入行**逐条写入补差流水 `side=missing`、`source=system`、`security_code=CASH`、`security_name=对账补差`、`summary=对账自动补差`、`category=other`、`batch_id=null`；`trade_date`=断链行日期、`amount`=实际余额−(上一行余额+本行发生金额)、`cash_balance`=本行余额−本行发生金额、`line_no`=断链行行号，排序保证补差行在断链行之前。落库一次后链即闭合，重复调用不再新增（幂等）。
-- 状态语义：本次补差成功或区间内存在 `side=missing` 行 → `status=degraded`（不再 `blocked`）；存在**无法补差**的断链（如手工录入行 `line_no=null`）→ `blocked` 且对应 `breaks[].filled=false`；无断链且无补差行 → `ok`；无资金余额列 → `degraded`（200 降级语义，对应 `IMPORT_MISSING_CASH_BALANCE`）。
+- 补差语义：检出断链时，对**带账单行号的导入行**逐条写入补差流水 `side=missing`、`source=system`、`security_code=CASH`、`security_name=对账补差`、`summary=对账自动补差`、`category=other`（导入收尾对账写入的补差 `batch_id`=该导入批次；对账 GET 触发的补差 `batch_id=null`）；`trade_date`=断链行日期、`amount`=实际余额−(上一行余额+本行发生金额)、`cash_balance`=本行余额−本行发生金额、`line_no`=断链行行号，排序保证补差行在断链行之前。落库一次后链即闭合，重复调用不再新增（幂等）。
+- 状态语义：本次补差成功或区间内存在 `side=missing` 行 → `status=degraded`（不再 `blocked`）；导入收尾已补差的批次可经 API-013 的 `filled_count/fills` 与 `RECONCILIATION_AUTOFILLED` 警告获知；存在**无法补差**的断链（如手工录入行 `line_no=null`）→ `blocked` 且对应 `breaks[].filled=false`；无断链且无补差行 → `ok`；无资金余额列 → `degraded`（200 降级语义，对应 `IMPORT_MISSING_CASH_BALANCE`）。
 - **副作用**：该 GET 是自愈写端点——首次调用会写入补差流水；调用方/网关不得假设它只读、也不得长期缓存响应。
 - 错误码：INVALID_PERIOD(422)、VALIDATION_ERROR(422)。
 - 验收断言：① fx_base → status=="ok"、break_count==0、filled_count==0；② fx_broken 首次 → status=="degraded"（不再 blocked）、break_count==1、filled_count==1、breaks[0].filled==true 且 breaks[0].filled_trade_id 非空、line_no 与 fixture 一致、|diff|≤0.01；③ 同一请求再次调用 → break_count==0、filled_count==0、status=="degraded"（区间内存在 missing 行），补差行仍只有 1 条；④ GET /trades?side=missing → 可查到该补差行（source=="system"、summary=="对账自动补差"、batch_id==null）；⑤ 缺资金余额列 → status=="degraded"、break_count==0（降级而非错误体）。
@@ -403,7 +409,7 @@
 | Trade | cash_balance / cash_balance_available | decimal-string\|null / bool | 否 | 缺列时 null + false | `"21415.47"` / `true` |
 | Trade | source / batch_id / line_no | enum / string\|null / integer\|null | 是/否 | 数据来源 `import/manual/system`（`system` 仅对账补差，`batch_id=null`）；来源批次；账单原始行号（补差行沿用断链行行号） | `system` / `null` / `12` |
 | Trade | dedupe_key / version / account_masked | string / integer / string | 是 | A27 去重键 / 乐观锁 / 股东账号 MD5 摘要（32 位 hex，空账号为 null） | `sha256:…` / `3` / `ab12…9f` |
-| ImportBatch | batch_id / status / mode / counts | string / enum / object | 是 | 批次；`pending…revoked`；`full/replace_range`；`parsed/inserted/skipped/quarantined` | `imp_01J9Z6` / `succeeded` / `{"inserted":412}` |
+| ImportBatch | batch_id / status / mode / counts / filled_count / fills | string / enum / object / integer / object[] | 是 | 批次；`pending…revoked`；`full/replace_range`；`parsed/inserted/skipped/quarantined`；导入收尾对账补差数；补差明细 `{trade_id,trade_date,line_no,amount,cash_balance,summary}`（撤销后清零） | `imp_01J9Z6` / `succeeded` / `{"inserted":412}` / `1` / `[{"amount":"-3000.00"}]` |
 | PatToken | token_id / prefix / scopes / expires_at / last_used_at | string / enum[] / datetime | 是/否 | 元信息；prefix 前 8 位；`read/write`；最长 365d | `tok_01J9Z6` / `pat_7Fh2` / `["read"]` / `2027-01-17T00:00:00Z` |
 
 ## §5 异步任务与 SSE 契约
@@ -453,11 +459,11 @@ data: {"job_id":"job_01J9Z6","status":"succeeded","result_ref":"/api/v1/reports/
 | API-008 | tokens_list_no_secret | 200 无明文字段，仅 prefix | fx_base | P0 |
 | API-009 | tokens_revoke | 204 后 PAT 调 /metrics→401 TOKEN_REVOKED | fx_base | P0 |
 | API-010 | imports_preview_no_write | estimated 与期望一致；预览前后 trades 不变 | fx_missing_cash | P0 |
-| API-011 | imports_commit_then_batch | 202；counts.inserted==preview；同文件再传 inserted=0 | fx_dup_rows | P0 |
+| API-011 | imports_commit_then_batch | 202；counts.inserted==preview；同文件再传 inserted=0；断链账单收尾对账 filled_count≥1、warning=RECONCILIATION_AUTOFILLED | fx_dup_rows/fx_broken | P0 |
 | API-012 | imports_list | 200 分页含 batch_id/status；仅本人 | fx_base | P1 |
-| API-013 | imports_batch_detail | 200 counts.inserted==412、file_sha256 匹配 | fx_base | P0 |
+| API-013 | imports_batch_detail | 200 counts.inserted==412、file_sha256 匹配；断链导入 filled_count==len(fills)≥1、fills 含 amount/date/line_no，撤销后归零 | fx_base/fx_broken | P0 |
 | API-014 | imports_quarantine_rows | 行号精确、raw 原样；跨用户 404 | fx_quarantine | P0 |
-| API-015 | imports_revoke_restore_count | 200 后 trades 行数回退；再撤销 409 | fx_base | P0 |
+| API-015 | imports_revoke_restore_count | 200 后 trades 行数回退（含 side=missing 补差一并软删）；再撤销 409 | fx_base/fx_broken | P0 |
 | API-016 | imports_reclassify | 202；新规则后隔离区条目减少 | fx_quarantine | P1 |
 | API-017 | trades_cursor_sort_fields | 游标无重无漏；非法 sort 400；fields 裁剪；304 | fx_round30 | P0 |
 | API-018 | trades_patch_version | version+1；旧 version 409；跨用户 404 | fx_base | P0 |

@@ -100,6 +100,7 @@ async def _insert_fill(
     *,
     previous_balance: int,
     current_balance: int,
+    fill_batch_id: str | None,
 ) -> tuple[Trade, bool]:
     """为一条断链插入 side=missing 的补差流水，返回 `(行, 是否本次新插入)`。
 
@@ -122,6 +123,7 @@ async def _insert_fill(
             cash_balance_available=True,
             category=_FILL_CATEGORY,
             dedupe_key=_fill_dedupe_key(previous, current),
+            batch_id=fill_batch_id,
             source=TradeSource.SYSTEM.value,
             line_no=current.line_no,
         ),
@@ -136,8 +138,12 @@ async def reconcile(
     period_start: date,
     period_end: date,
     epsilon: Decimal = EPS_AMT,
+    fill_batch_id: str | None = None,
 ) -> ReconciliationDTO:
-    """核对 [period_start, period_end] 区间的资金余额链、自动补差并 upsert 结果。"""
+    """核对 [period_start, period_end] 区间的资金余额链、自动补差并 upsert 结果。
+
+    `fill_batch_id` 不为空时，补差行归属到该导入批次：撤销批次会一并软删补差行。
+    """
     epsilon_units = Money.from_decimal(epsilon).units
     repo = TradeRepository(session)
     trades = await repo.balances_ordered(user_id, period_start=period_start, period_end=period_end)
@@ -189,6 +195,7 @@ async def reconcile(
                 current,
                 previous_balance=previous.cash_balance_units,
                 current_balance=actual,
+                fill_batch_id=fill_batch_id,
             )
             if created:
                 filled_count += 1
