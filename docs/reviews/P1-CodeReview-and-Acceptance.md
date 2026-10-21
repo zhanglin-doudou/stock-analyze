@@ -5,7 +5,7 @@
 > 审查日期：2026-10-20 ｜ 方式：4 名评审并行只读审查 + Lead 全量门禁实跑 + 真实 HTTP 端到端 + 数据库/纯函数复算
 > 报告分片（可追溯）：`var/review-p1/foundation.md`（地基）、`ledger.md`（导入/对账）、`api.md`（API/契约）、`frontend-qa.md`（前端/门禁）；原始日志 `var/review-p1/gates/`
 
-> **修复进展（2026-10-21）**：**P0-2（replace_range 数据丢失）与 P0-3（admin PAT 越权）已修复并通过回归**，详见 [P1-Fix-Log-P0-2-P0-3.md](P1-Fix-Log-P0-2-P0-3.md)；本报告其余结论保持原样，**P0-1 / P0-4 / P0-5 仍待修**。
+> **修复进展（2026-10-21）**：**全部 5 项 P0 已修复并复验** —— P0-2/P0-3 见 [P1-Fix-Log-P0-2-P0-3.md](P1-Fix-Log-P0-2-P0-3.md)，P0-1/P0-4/P0-5 见 [P1-Fix-Log-P0-1-P0-4-P0-5.md](P1-Fix-Log-P0-1-P0-4-P0-5.md)；`make verify-p1` 15/15 全绿、真实 HTTP 复验 14/14 + 23/23。本报告作为审查时点记录保留，P1/P2 仍待修。
 
 ---
 
@@ -160,7 +160,7 @@
 
 ### 5.1 P0（5 项，必须修复后复验）
 
-#### [P0-1] 真实账单金额口径未归一 → 对账 156/175 条假断链（P1-13 失效）
+#### [P0-1] 真实账单金额口径未归一 → 对账 156/175 条假断链（P1-13 失效）（✅ 2026-10-21 已修复，见 Fix Log）
 - **位置**：`backend/packages/ledger/src/stock_ledger/parsers/huatai.py:213-228`（成交金额原样落库）、`backend/packages/ledger/src/stock_ledger/application/reconcile.py:61-69`（`_signed_delta_units` 再反号+再扣费）
 - **问题**：真实账单的"成交金额/发生金额"是**已扣费、带符号**的现金流（买入为负），解析器原样存入 `amount_units`；对账却按 `buy: -(amount+fees) / sell: amount-fees` 计算 → 符号反转、费用重复扣减。而合成夹具 `fixtures/market/bill_huatai.xlsx` 是"毛额 + 费用单列"，所以测试全绿。
 - **实测**（真实 HTTP + SQL 复算，同一份 `backend/tests/api/华泰账单_mock.xlsx`）：
@@ -187,14 +187,14 @@
 - **建议**：`_resolve_pat` 回查 `platform.user.role`（或 token 冗余 role 并随降权失效）；补 `test_admin_pat_cannot_read_trades`；把 PAT 纳入越权矩阵。
 - **验证**：admin JWT 建 PAT → 用 PAT 读 `/trades` 应 403。
 
-#### [P0-4] "撤销本次导入"在 UI 完全不可达（§2.1 第 4 步不可完成）
+#### [P0-4] "撤销本次导入"在 UI 完全不可达（§2.1 第 4 步不可完成）（✅ 2026-10-21 已修复，见 Fix Log）
 - **位置**：`frontend/apps/web/src/pages/Import.tsx:44-118`（无批次/撤销）、`router.tsx:55-60`（无批次页路由）、`packages/api-client/src/http.ts:542-554`（`listBatches/getBatch/revoke` 已实现但零调用）、`ui/QuarantineList.tsx:20`（孤儿组件）
 - **问题**：页面只有"上传→预览→确认导入→进度"，没有导入批次列表/详情/隔离区/撤销按钮；用户无法执行文档承诺的"点撤销本次导入 → 行数回退"。
 - **影响**：P1-15 验收句与 §2.1 手工走查 1–5 不成立；后端已实现的 API-012/014/015 对用户不可达。
 - **建议**：新增 `/imports` 批次列表 + 详情/隔离区/撤销（接 `listBatches/getBatch/quarantine/revoke`），撤销后刷新流水；补页面测试。
 - **验证**：浏览器完成 §2.1 第 4 步；Vitest 覆盖 revoke 调用与行数回退。
 
-#### [P0-5] 验收证据失效：`verify-p1` 空心 + 契约快照已漂移
+#### [P0-5] 验收证据失效：`verify-p1` 空心 + 契约快照已漂移（✅ 2026-10-21 已修复，见 Fix Log）
 - **位置**：`backend/services/api/src/stock_api/cli.py:414-442`（VERIFY_STEPS 仅 4 步）、`contracts/openapi.json`（password minLength=12）vs `schemas.py:23`（8）、`cli.py:341-368`（`api-snapshot --check` 存在但未被 verify-p1/Makefile 调用）
 - **问题 A**：`make verify-p1` 只跑 ruff×2 + `pytest -m "not integration and not api"` + api-check；日志 **86 passed, 108 deselected**，把一期 API（90）与越权（18）全部排除；不含 mypy/import-linter/RLS/core 覆盖率/契约 diff/前端；不打印勾选清单。api-check 对"一期端点未实现"仅告警、不失败。
 - **问题 B**：`api-snapshot --check` **exit 1**：快照 vs 实现差 1 字节（`RegisterIn.password.minLength` 12 vs 8），说明契约已漂移而门禁未拦住；`contracts/openapi.json` 中 `example(s)`=0、`problem+json`=0、无 `Error` schema，P1-06"故意删示例→非 0"无法成立。

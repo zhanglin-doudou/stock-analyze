@@ -10,7 +10,7 @@ export interface QuarantineListProps {
 }
 
 const columns: Array<Column<QuarantineItem>> = [
-  { key: "line", header: "#", render: (row) => row.line_no },
+  { key: "line", header: "#", render: (row) => row.line_no ?? "—" },
   { key: "date", header: "日期", render: (row) => row.raw.date ?? "" },
   { key: "code", header: "代码", render: (row) => row.raw.security_code ?? "" },
   { key: "summary", header: "摘要", render: (row) => row.raw.summary ?? "" },
@@ -48,7 +48,7 @@ export function QuarantineList({ batchId }: QuarantineListProps) {
       <Table
         columns={columns}
         rows={page?.items ?? []}
-        rowKey={(row) => `${row.line_no}-${row.reason_code}`}
+        rowKey={(row) => `${row.line_no ?? "x"}-${row.reason_code}`}
         emptyText={loading ? "加载中…" : "隔离区为空"}
       />
       {page ? (

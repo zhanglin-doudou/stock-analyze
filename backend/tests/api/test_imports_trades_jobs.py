@@ -563,7 +563,8 @@ async def test_api_011_replace_range_only_touches_requested_range(
         ).json()["items"]
     }
     assert set(after) == {"2026-06-01", "2026-06-30"}
-    assert after["2026-06-01"]["amount"] == "160000.00"
+    # amount 为带符号净现金流：买入 160000.00 毛额 + 费用 5.10 → -160005.10。
+    assert after["2026-06-01"]["amount"] == "-160005.10"
     assert after["2026-06-01"]["batch_id"] == second["batch_id"]
     # 区间外（06-30）行不受影响，仍属第一批次。
     assert after["2026-06-30"]["trade_id"] == before["2026-06-30"]["trade_id"]
@@ -1000,7 +1001,7 @@ async def test_api_026_break_located_to_line(client, api_prefix, user, owner_eng
         owner_engine,
         user_id=user.user_id,
         trade_date=date(2026, 6, 1),
-        amount_units=100_000,
+        amount_units=-100_000,
         cash_balance=500_000,
         line_no=2,
         code="600519",
@@ -1009,8 +1010,8 @@ async def test_api_026_break_located_to_line(client, api_prefix, user, owner_eng
         owner_engine,
         user_id=user.user_id,
         trade_date=date(2026, 6, 2),
-        amount_units=20_000,
-        cash_balance=470_000,  # 期望 480000，实际 470000 → 断链
+        amount_units=-20_000,
+        cash_balance=470_000,  # 期望 500000-20000=480000，实际 470000 → 断链
         line_no=3,
         code="000001",
     )
@@ -1029,14 +1030,14 @@ async def test_api_026_ok_and_degraded(client, api_prefix, user, owner_engine) -
         owner_engine,
         user_id=user.user_id,
         trade_date=date(2026, 6, 1),
-        amount_units=100_000,
+        amount_units=-100_000,
         cash_balance=500_000,
     )
     await _seed_trade(
         owner_engine,
         user_id=user.user_id,
         trade_date=date(2026, 6, 2),
-        amount_units=20_000,
+        amount_units=-20_000,  # 带符号净现金流：买入为负 → 余额减少 200.00
         cash_balance=480_000,
     )
     ok = await client.get(f"{api_prefix}/reconciliation?period=2026-06", headers=user.headers)
@@ -1049,6 +1050,41 @@ async def test_api_026_ok_and_degraded(client, api_prefix, user, owner_engine) -
     degraded = await client.get(f"{api_prefix}/reconciliation?period=2026-07", headers=user.headers)
     assert degraded.json()["status"] == "degraded"
     assert degraded.json()["break_count"] == 0
+
+
+async def test_api_026_real_bill_reconciles_with_zero_breaks(
+    client, api_prefix, user, settings
+) -> None:
+    """P0-1 回归：真实账单（「发生金额」带符号净额）导入后余额链必须 0 断链。
+
+    177 行明细产生 176 次相邻转移；「转存管转出/转入」两行方向 unknown（金额 0），
+    其中只有 1 行位于链中段会被跳过核对 → checked_rows = 175，break_count = 0。
+    旧实现按 side 反号并再扣费用（真实账单已含费用），实测 156/175 假断链。
+    """
+    preview = await client.post(
+        f"{api_prefix}/imports/preview",
+        headers=user.headers,
+        files={"file": (_MOCK_BILL.name, _MOCK_BILL.read_bytes(), _XLSX_CONTENT_TYPE)},
+    )
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["estimated"]["parsed"] == 177
+
+    accepted = await client.post(
+        f"{api_prefix}/imports",
+        headers={**user.headers, "Idempotency-Key": "key-" + uuid.uuid4().hex},
+        json={"preview_id": preview.json()["preview_id"], "mode": "full"},
+    )
+    assert accepted.status_code == 202, accepted.text
+    await _drain_worker(settings)
+
+    resp = await client.get(
+        f"{api_prefix}/reconciliation?from=2021-10-29&to=2022-06-07", headers=user.headers
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["status"] == "ok", body["breaks"][:3]
+    assert body["checked_rows"] == 175
+    assert body["break_count"] == 0
 
 
 async def test_api_026_invalid_period_422(client, api_prefix, user) -> None:

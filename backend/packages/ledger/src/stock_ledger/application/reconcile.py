@@ -1,8 +1,11 @@
 """对账应用层：核对资金余额链，断链定位到具体行。
 
-思路：按业务发生顺序把明细排成链，用 `上一行余额 + 本行资金变动(含符号) == 本行余额`
+思路：按业务发生顺序把明细排成链，用 `上一行余额 + 本行带符号发生金额 == 本行余额`
 逐步核对；容差用显式标度整数 `epsilon_units`。任何偏差都记成一条含行号/交易 ID/期望值/
 实际值的 break——否则“资金对不上”只是一句无法行动的结论。
+金额口径统一在解析器已归一：`Trade.amount_units` = 带符号的净现金流（买入为负、卖出为正、
+已含费用），因此这里**不再按方向反号、也不再扣费用**（否则费用被扣两次、方向被翻两次，
+真实账单会整片假断链）。
 缺资金余额列时不做核对，返回 degraded（200 语义，IMPORT_MISSING_CASH_BALANCE）。
 """
 
@@ -58,15 +61,12 @@ class ReconciliationDTO:
         }
 
 
-def _signed_delta_units(trade: Trade) -> int:
-    """本行资金变动（分）：买入为流出（负），卖出为流入（正）；手续费随方向计入。
+def _cash_delta_units(trade: Trade) -> int:
+    """本行资金变动（分）＝带符号发生金额：买入为负（流出）、卖出为正（流入）。
 
-    方向未知（`unknown`）时资金变动无法判定，调用方应跳过该行、不调用此函数。
+    费用已含在 `amount_units` 里（解析器统一口径），这里不做任何反号/扣费。
     """
-    fees = trade.commission_units + trade.stamp_tax_units + trade.other_fee_units
-    if trade.side == "buy":
-        return -(trade.amount_units + fees)
-    return trade.amount_units - fees
+    return trade.amount_units
 
 
 async def reconcile(
@@ -94,9 +94,10 @@ async def reconcile(
             if previous.cash_balance_units is None or current.cash_balance_units is None:
                 continue
             if current.side == Side.UNKNOWN.value:
-                # 方向未知 → 资金变动不可判定，跳过本行核对（否则会把未知当卖出产生假断链）。
+                # 方向未知的行不做链式核对：金额虽带符号，但方向语义无法独立复核。
+                # 其余额仍是下一行的期初锚点，跳过本行不会造成后续假断链。
                 continue
-            expected = previous.cash_balance_units + _signed_delta_units(current)
+            expected = previous.cash_balance_units + _cash_delta_units(current)
             actual = current.cash_balance_units
             checked += 1
             if abs(expected - actual) > epsilon_units:

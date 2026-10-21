@@ -6,6 +6,7 @@ import hashlib
 import io
 from datetime import UTC, date, datetime
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 from openpyxl import Workbook
@@ -31,6 +32,9 @@ _HEADERS = [
     "资金余额",
     "摘要",
 ]
+
+# 真实华泰账单形态：没有「买卖标志」列，金额列是「发生金额」带符号净额（已含费用）。
+_REAL_BILL = Path(__file__).parents[2] / "api" / "华泰账单_mock.xlsx"
 
 
 def _xlsx(headers: list[str], rows: list[list[str]]) -> bytes:
@@ -79,14 +83,73 @@ def test_column_recognition_and_scaling() -> None:
     assert row.trade_date == date(2026, 3, 4)
     assert row.quantity_units == 100_0000
     assert row.price_units == 1680_000000
-    assert row.amount_units == 168000_00
+    # 「成交金额」是毛额：统一口径换算成带符号净现金流 → 买入 = -(168000.00 + 42.00)
+    assert row.amount_units == -168_042_00
     assert row.commission_units == 42_00
     assert row.cash_balance_units == 100000_00
 
 
 def test_amount_scaling_handles_thousands_separator() -> None:
     bill = _parse(_xlsx(_HEADERS, [_buy_row(成交金额="1,234.56")]))
-    assert bill.rows[0].amount_units == 123456
+    assert bill.rows[0].amount_units == -(123456 + 42_00)
+
+
+def test_signed_amount_header_used_directly_without_double_counting_fees() -> None:
+    """「发生金额」原生带符号净额（已含费用）→ 直接采用，绝不再扣费用。"""
+    headers = ["发生金额" if header == "成交金额" else header for header in _HEADERS]
+    row = _buy_row(佣金="5.00", 印花税="0.00", 其他费="0.15")
+    row[_HEADERS.index("成交金额")] = "-7415.15"
+    bill = _parse(_xlsx(headers, [row]))
+    r = bill.rows[0]
+    assert r.side == "buy"
+    assert r.amount_units == -7415_15  # 而不是 -(7415.15 + 5.15)
+
+
+def test_gross_amount_converted_to_signed_net_cash_flow() -> None:
+    """「成交金额」毛额 → 带符号净现金流：买入含费用为负、卖出扣费用为正。"""
+    buy = _parse(
+        _xlsx(
+            _HEADERS,
+            [_buy_row(成交金额="7410.00", 佣金="5.00", 印花税="0.00", 其他费="0.15")],
+        )
+    ).rows[0]
+    assert buy.amount_units == -7415_15  # -(7410.00 + 5.15)
+    sell = _parse(
+        _xlsx(
+            _HEADERS,
+            [
+                _buy_row(
+                    买卖标志="证券卖出",
+                    成交金额="7410.00",
+                    佣金="5.00",
+                    印花税="3.70",
+                    其他费="0.15",
+                )
+            ],
+        )
+    ).rows[0]
+    assert sell.amount_units == 7401_15  # 7410.00 - (5.00 + 3.70 + 0.15)
+
+
+def test_negative_amount_in_gross_column_treated_as_signed_net() -> None:
+    """毛额列出现负数只可能是已带符号的净额（毛额不可能为负）→ 按净额采用。"""
+    row = _parse(_xlsx(_HEADERS, [_buy_row(成交金额="-800.00")])).rows[0]
+    assert row.side == "buy"
+    assert row.amount_units == -800_00
+
+
+def test_gross_amount_with_unknown_side_has_no_sign() -> None:
+    """毛额 + 方向不可判定 → 资金流向不可知，金额保守置 0 并在 assumptions 留痕。"""
+    bill = _parse(
+        _xlsx(
+            _HEADERS,
+            [_buy_row(买卖标志="未知标志", 摘要="未知业务XYZ", 成交金额="168000.00")],
+        )
+    )
+    r = bill.rows[0]
+    assert r.side == "unknown"
+    assert r.amount_units == 0
+    assert bill.assumptions.get("amount_unsigned_rows") == 1
 
 
 def test_units_are_scale_integers_not_float() -> None:
@@ -168,7 +231,8 @@ def test_amount_derived_when_amount_column_missing() -> None:
         value for header, value in zip(_HEADERS, _buy_row(), strict=True) if header != "成交金额"
     ]
     bill = _parse(_xlsx(headers, [row]))
-    assert bill.rows[0].amount_units == 168000_00
+    # 推导出毛额 100×1680.00 后同样要按方向换算成净现金流（买入含费用为负）。
+    assert bill.rows[0].amount_units == -(168000_00 + 42_00)
     assert bill.assumptions.get("amount_derived_rows") == 1
 
 
@@ -223,7 +287,14 @@ def test_side_unknown_when_nothing_matches() -> None:
 
 def test_non_trade_bank_transfer_in() -> None:
     """银行转存：无证券代码，资金流入 → side=sell，代码占位 CASH。"""
-    row = _buy_row(证券代码="", 证券名称="", 买卖标志="", 摘要="银行转存", 成交金额="188.58")
+    row = _buy_row(
+        证券代码="",
+        证券名称="",
+        买卖标志="",
+        摘要="银行转存",
+        成交金额="188.58",
+        佣金="0.00",
+    )
     bill = _parse(_xlsx(_HEADERS, [row]))
     assert len(bill.rows) == 1
     assert bill.quarantined == []
@@ -231,6 +302,7 @@ def test_non_trade_bank_transfer_in() -> None:
     assert r.security_code == "CASH"
     assert r.security_name == "银行转存"
     assert r.side == "sell"
+    # 毛额 188.58、零费用 → 净现金流 +188.58（资金流入为正）。
     assert r.amount_units == 188_58
 
 
@@ -257,6 +329,7 @@ def test_non_trade_dividend_with_code() -> None:
         成交数量="0",
         成交价格="0.00",
         成交金额="1700.00",
+        佣金="0.00",
     )
     bill = _parse(_xlsx(_HEADERS, [row]))
     assert len(bill.rows) == 1
@@ -270,7 +343,9 @@ def test_non_trade_dividend_with_code() -> None:
 
 def test_non_trade_interest() -> None:
     """利息归本：无证券代码，资金流入 → side=sell。"""
-    row = _buy_row(证券代码="", 证券名称="", 买卖标志="", 摘要="利息归本", 成交金额="0.35")
+    row = _buy_row(
+        证券代码="", 证券名称="", 买卖标志="", 摘要="利息归本", 成交金额="0.35", 佣金="0.00"
+    )
     bill = _parse(_xlsx(_HEADERS, [row]))
     assert len(bill.rows) == 1
     assert bill.quarantined == []
@@ -315,6 +390,35 @@ def test_non_trade_zero_amount_unknown() -> None:
         assert r.amount_units == 0
 
 
+def test_real_bill_amount_is_signed_net_cash_flow() -> None:
+    """真实账单（177 行）：「发生金额」直接入 amount_units，买入负/卖出正、已含费用。"""
+    bill = _parse(_REAL_BILL.read_bytes(), file_name=_REAL_BILL.name)
+    assert len(bill.rows) == 177
+    assert bill.quarantined == []
+    # 金额列原生带符号 → 不走毛额换算（否则会重复扣费产生假断链）。
+    assert "amount_derived_rows" not in bill.assumptions
+    assert "amount_unsigned_rows" not in bill.assumptions
+
+    by_line = {row.line_no: row for row in bill.rows}
+    buy = by_line[15]
+    assert buy.side == "buy"
+    # 200 股 × 37.05 = 7410.00 毛额；佣金 5.00 + 其他费 0.15 → 净额 -7415.15。
+    assert buy.amount_units == -7415_15
+    sell = by_line[17]
+    assert sell.side == "sell"
+    assert sell.amount_units == 7031_82
+
+    for row in bill.rows:
+        if row.side == "buy":
+            assert row.amount_units < 0, row.line_no
+        elif row.side == "sell":
+            assert row.amount_units > 0, row.line_no
+        else:
+            # 零金额转存管转入/转出：方向未知且无资金流 → 0。
+            assert row.side == "unknown"
+            assert row.amount_units == 0
+
+
 def test_blank_code_unknown_summary_quarantined() -> None:
     """证券代码为空且摘要不属于非交易类 → 仍隔离（数据缺失保护）。"""
     row = _buy_row(证券代码="", 证券名称="", 买卖标志="", 摘要="未知业务XYZ")
@@ -335,7 +439,7 @@ def test_csv_parsing() -> None:
     data_line = ",".join(_buy_row())
     bill = _parse(f"{header_line}\n{data_line}\n".encode("utf-8-sig"), file_name="bill.csv")
     assert bill.columns["成交日期"] == "trade_date"
-    assert bill.rows[0].amount_units == 168000_00
+    assert bill.rows[0].amount_units == -(168000_00 + 42_00)
 
 
 def test_map_columns_reports_unresolved_headers() -> None:

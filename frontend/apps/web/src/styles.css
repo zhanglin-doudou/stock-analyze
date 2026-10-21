@@ -254,3 +254,39 @@ input[type="checkbox"] {
   word-break: break-all;
   font-family: monospace;
 }
+
+/* import batches */
+.badge {
+  display: inline-block;
+  padding: 1px 8px;
+  border-radius: 10px;
+  font-size: 12px;
+  background: #eef1f4;
+  color: #1f2328;
+  white-space: nowrap;
+}
+.badge-succeeded {
+  background: #e6f4ea;
+  color: #0a7d32;
+}
+.badge-failed {
+  background: #fde8e8;
+  color: var(--danger);
+}
+.badge-revoked {
+  background: #eceff3;
+  color: var(--muted);
+}
+.badge-pending,
+.badge-running {
+  background: #e8f0fe;
+  color: var(--accent);
+}
+.batch-result {
+  border-top: 1px solid var(--border);
+  margin-top: 10px;
+  padding-top: 8px;
+}
+.revoke-batch {
+  margin: 6px 0;
+}

@@ -3,6 +3,12 @@
 输入 bytes + file_name，输出结构化 `ParsedBill`。之所以做成纯函数：解析结果要能被
 预览（不落库）与提交（落库）两个阶段复用，并可被属性测试反复回放。
 所有金额/数量/价格都经 `Decimal(str) → 标度整数`，绝不出现 float。
+
+金额口径（全仓统一，对账直接使用）：`ParsedRow.amount_units` 一律是**带符号的发生金额
+（净现金流，已含费用）**——买入为负、卖出为正；非交易资金业务按资金方向（转入为卖出方向
+正、转出为买入方向负）；方向不可判定且没有金额流时为 0。账单里原生的「发生金额/发生额」
+列已满足该口径，直接采用；「成交金额」毛额（及按量×价推导出的毛额）则按方向换算：
+买入 `-(毛额+费用)`、卖出 `毛额-费用`，费用 = 佣金 + 印花税 + 其他费。
 """
 
 from __future__ import annotations
@@ -20,7 +26,7 @@ import xlrd  # type: ignore[import-untyped]  # 第三方 xlrd 无类型桩（typ
 from openpyxl import load_workbook  # type: ignore[import-untyped]  # 第三方 openpyxl 无类型桩
 from stock_contracts.clock import Clock
 from stock_contracts.constants import FILE_MAX_BYTES
-from stock_contracts.enums import QuarantineReason, WarningCode
+from stock_contracts.enums import QuarantineReason, Side, WarningCode
 from stock_contracts.errors import ApiError, ErrorCode, FieldError
 from stock_core.values import Money, Price, Qty
 
@@ -28,6 +34,7 @@ from stock_ledger.parsers.columns import (
     ColumnMapping,
     detect_date_format,
     is_non_trade_summary,
+    is_signed_amount_header,
     map_columns,
     normalize_cell,
     parse_date_text,
@@ -61,6 +68,7 @@ class ParsedRow:
     side: str
     quantity_units: int
     price_units: int
+    # 带符号发生金额（净现金流，含费用）：买入为负、卖出为正；对账直接用 prev+amount。
     amount_units: int
     commission_units: int
     stamp_tax_units: int
@@ -183,13 +191,47 @@ def _units(raw: str, kind: type[Money] | type[Price] | type[Qty]) -> int:
     return kind.from_decimal(_decimal(raw)).units
 
 
+def _gross_to_net_units(gross_units: int, side: str, fees_units: int) -> int:
+    """毛成交额 → 带符号净现金流（分）：买入 `-(毛额+费用)`，卖出 `毛额-费用`。"""
+    if side == Side.SELL.value:
+        return gross_units - fees_units
+    return -(gross_units + fees_units)
+
+
+def _net_from_gross_units(gross_units: int, side: str, fees_units: int) -> tuple[int, bool]:
+    """毛额 → 净现金流；方向未知时无法定号（置 0 并回报），否则按买卖方向换算。"""
+    if side == Side.UNKNOWN.value:
+        return 0, gross_units != 0
+    return _gross_to_net_units(gross_units, side, fees_units), False
+
+
+def _net_amount_units(
+    raw_text: str, *, signed: bool, side: str, fees_units: int
+) -> tuple[int, bool]:
+    """金额列原文 → 带符号净现金流；返回 `(units, 是否因方向未知而无法定号)`。
+
+    - 「发生金额/发生额」原生带符号 → 直接采用（费用已含在列内，绝不重复扣减）；
+    - 毛额列里出现负数 → 只可能是已带符号的净额（毛额不可能为负），按净额采用；
+    - 其余按方向换算；方向 unknown 时资金流向不可判定，置 0 并回报调用方留痕。
+    """
+    raw_units = _units(raw_text, Money)
+    if signed or raw_units < 0:
+        return raw_units, False
+    return _net_from_gross_units(raw_units, side, fees_units)
+
+
 def _build_candidate(
     raw: dict[str, str],
     field_headers: dict[str, str],
     date_format_code: str,
     line_no: int,
-) -> tuple[ParsedRow, bool]:
-    """单行 → ParsedRow；失败抛 _RowError 由调用方隔离。返回 (行, 金额是否派生)。"""
+    *,
+    amount_signed: bool,
+) -> tuple[ParsedRow, bool, bool]:
+    """单行 → ParsedRow；失败抛 _RowError 由调用方隔离。
+
+    返回 `(行, 金额是否按量×价派生, 金额是否因方向未知而无法定号)`。
+    """
 
     def value(name: str) -> str:
         header = field_headers.get(name)
@@ -213,19 +255,24 @@ def _build_candidate(
     quantity_units = _units(value("quantity"), Qty)
     price_units = _units(value("price"), Price)
 
-    amount_text = value("amount")
-    if amount_text:
-        amount_units = _units(amount_text, Money)
-        amount_derived = False
-    else:
-        amount_units = Money.from_decimal(
-            Qty(quantity_units).to_decimal() * Price(price_units).to_decimal()
-        ).units
-        amount_derived = True
-
     commission_units = _units(value("commission"), Money)
     stamp_tax_units = _units(value("stamp_tax"), Money)
     other_fee_units = _units(value("other_fee"), Money)
+    fees_units = commission_units + stamp_tax_units + other_fee_units
+
+    amount_text = value("amount")
+    if amount_text:
+        amount_units, amount_unsigned = _net_amount_units(
+            amount_text, signed=amount_signed, side=side, fees_units=fees_units
+        )
+        amount_derived = False
+    else:
+        # 无金额列：先按量×价推导毛额，再按方向换算成净现金流（不能用原始毛额入库）。
+        gross_units = Money.from_decimal(
+            Qty(quantity_units).to_decimal() * Price(price_units).to_decimal()
+        ).units
+        amount_units, amount_unsigned = _net_from_gross_units(gross_units, side, fees_units)
+        amount_derived = True
 
     balance_text = value("cash_balance")
     cash_balance_units: int | None = None
@@ -260,7 +307,7 @@ def _build_candidate(
         dedupe_key="",
         raw=raw,
     )
-    return row, amount_derived
+    return row, amount_derived, amount_unsigned
 
 
 def parse_bill(
@@ -288,6 +335,8 @@ def parse_bill(
             detail="账单缺少必需列",
         )
     field_headers = found.field_headers()
+    # 金额列语义由原始表头决定：「发生金额/发生额」带符号直接用，其余按毛额+方向换算。
+    amount_signed = is_signed_amount_header(field_headers.get("amount"))
 
     warnings: list[WarningCode] = []
     assumptions: dict[str, Any] = {}
@@ -316,6 +365,7 @@ def parse_bill(
     candidates: list[_Candidate] = []
     quarantined: list[QuarantineCandidate] = []
     derived_count = 0
+    unsigned_amount_count = 0
 
     for offset, row in enumerate(data_rows):
         line_no = header_idx + offset + 2
@@ -331,7 +381,13 @@ def parse_bill(
                 hashlib.md5(account_text.encode("utf-8")).hexdigest() if account_text else ""
             )
         try:
-            parsed, amount_derived = _build_candidate(raw, field_headers, effective_format, line_no)
+            parsed, amount_derived, amount_unsigned = _build_candidate(
+                raw,
+                field_headers,
+                effective_format,
+                line_no,
+                amount_signed=amount_signed,
+            )
         except _RowError as err:
             quarantined.append(
                 QuarantineCandidate(line_no=line_no, raw=raw, reason_code=err.reason.value)
@@ -339,6 +395,8 @@ def parse_bill(
             continue
         if amount_derived:
             derived_count += 1
+        if amount_unsigned:
+            unsigned_amount_count += 1
         candidates.append(
             _Candidate(parsed=parsed, raw_values=tuple(raw.get(h, "") for h in headers))
         )
@@ -376,6 +434,9 @@ def parse_bill(
         warnings.append(WarningCode.DUPLICATE_ROWS)
     if derived_count:
         assumptions["amount_derived_rows"] = derived_count
+    if unsigned_amount_count:
+        # 毛额列 + 方向 unknown：资金流向不可判定，金额保守置 0，不伪造正负号。
+        assumptions["amount_unsigned_rows"] = unsigned_amount_count
 
     return ParsedBill(
         rows=rows,

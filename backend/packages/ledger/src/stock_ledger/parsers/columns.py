@@ -31,6 +31,10 @@ COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
 
 REQUIRED_FIELDS: tuple[str, ...] = ("trade_date", "security_code", "quantity", "price")
 
+# 金额列语义：这些表头原生就是「带符号的发生金额/净现金流」（买入为负、卖出为正、已含费用），
+# 解析器直接使用；其余（典型是「成交金额」毛额）必须按方向 + 费用换算成带符号净额。
+SIGNED_AMOUNT_HEADERS: frozenset[str] = frozenset({"发生金额", "发生额"})
+
 # 已知格式：YYYYMMDD / YYYY-MM-DD / YYYY/M/D / YYYY-DD-MM（日的月份倒置）
 DATE_FORMATS: tuple[str, ...] = ("YYYYMMDD", "YYYY-MM-DD", "YYYY/M/D", "YYYY-DD-MM")
 
@@ -52,6 +56,15 @@ def normalize_cell(raw: object) -> str:
     if raw is None:
         return ""
     return str(raw).strip()
+
+
+def is_signed_amount_header(raw: str | None) -> bool:
+    """金额列是否原生带符号（「发生金额/发生额」）。
+
+    表头缺失（金额按量×价推导）或映射覆盖成未知表头时返回 False，按毛额处理；
+    毛额列若出现负数，解析器仍会按「已带符号净额」兜底（毛额不可能为负）。
+    """
+    return raw is not None and normalize_header(raw) in SIGNED_AMOUNT_HEADERS
 
 
 @dataclass(slots=True)
@@ -240,12 +253,14 @@ __all__ = [
     "COLUMN_ALIASES",
     "DATE_FORMATS",
     "REQUIRED_FIELDS",
+    "SIGNED_AMOUNT_HEADERS",
     "ColumnMapping",
     "classify_side",
     "classify_side_from_non_trade_summary",
     "classify_side_from_summary",
     "detect_date_format",
     "is_non_trade_summary",
+    "is_signed_amount_header",
     "map_columns",
     "normalize_cell",
     "normalize_header",

@@ -28,6 +28,7 @@ from stock_api.errors import (
     validation_error_handler,
 )
 from stock_api.middlewares import RequestContextMiddleware
+from stock_api.openapi_meta import apply_contract_metadata
 from stock_api.routers import auth, imports, jobs, ops, reconciliation, tokens, trades
 from stock_api.version import API_PREFIX, APP_VERSION
 
@@ -104,4 +105,7 @@ def create_app(settings: Settings | None = None, *, clock: Clock | None = None) 
         app.include_router(module.router, prefix=API_PREFIX)
     # 探针/根路由按容器惯例不带前缀（/healthz、/readyz、/version、/metrics、/）
     app.include_router(ops.root_router)
+    # P0-5：把 §7.4 契约元数据（x-*/2xx example/problem+json）缓存进 openapi_schema，
+    # 使 `app.openapi()`、`/docs`、`cli.api-snapshot` 与 `GET /api/v1/openapi.json` 同源。
+    app.openapi_schema = apply_contract_metadata(app.openapi())
     return app

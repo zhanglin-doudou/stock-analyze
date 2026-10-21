@@ -193,18 +193,47 @@ export interface Preview {
   can_commit: boolean;
 }
 
+/** 批次状态（BatchOut.status）。 */
+export type ImportBatchStatus = "pending" | "running" | "succeeded" | "failed" | "revoked";
+
+/** 批次计数：行数，仅用于展示；前端不做任何算术。 */
+export interface BatchCounts {
+  parsed: number;
+  inserted: number;
+  skipped: number;
+  quarantined: number;
+}
+
+/** API-012/013：导入批次（BatchOut）。 */
 export interface ImportBatch {
   batch_id: string;
-  status: string;
-  mode: string;
-  counts: PreviewEstimate;
-  created_at?: string;
+  status: ImportBatchStatus;
+  mode: "full" | "replace_range";
+  broker: string;
+  file_name: string;
+  counts: BatchCounts;
+  warnings: string[];
+  assumptions?: Record<string, unknown>;
+  created_at: string;
+  finished_at?: string | null;
   revoked_at?: string | null;
+  /** 后端判定：仅未撤销且 pending/running/succeeded 时为 true。 */
+  can_revoke: boolean;
 }
 
 export interface BatchList {
   items: ImportBatch[];
   next_cursor?: string | null;
+  total_estimate?: number | null;
+}
+
+/** API-015 撤销结果（RevokeOut）；`reverted` 为行数计数，仅展示。 */
+export interface RevokeResult {
+  batch_id: string;
+  status: "revoked";
+  reverted: Record<string, number>;
+  revoked_at: string;
+  affected_metrics?: Array<{ metric_id: string; status: string }>;
 }
 
 export interface QuarantineRaw {
@@ -218,10 +247,12 @@ export interface QuarantineRaw {
 }
 
 export interface QuarantineItem {
-  line_no: number;
+  line_no: number | null;
   raw: QuarantineRaw;
   reason_code: string;
   suggested_rule_id?: string | null;
+  resolved?: boolean;
+  created_at?: string | null;
 }
 
 export interface QuarantinePage {
@@ -545,9 +576,9 @@ export function createClient(options: ClientOptions) {
     getBatch(batchId: string) {
       return send<ImportBatch>({ path: `/imports/${batchId}` }).then((r) => r.data);
     },
-    /** API-015：撤销批次（同步 200）。 */
+    /** API-015：撤销批次（同步 200，返回回退行数计数）。 */
     revoke(batchId: string, body: { reason?: string } = {}) {
-      return send<ImportBatch>({ path: `/imports/${batchId}/revoke`, method: "POST", body }).then((r) => r.data);
+      return send<RevokeResult>({ path: `/imports/${batchId}/revoke`, method: "POST", body }).then((r) => r.data);
     },
     quarantine(batchId: string, query: CursorQuery & { reason_code?: string } = {}) {
       return send<QuarantinePage>({ path: `/imports/${batchId}/quarantine`, query }).then((r) => r.data);

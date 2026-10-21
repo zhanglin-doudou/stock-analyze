@@ -57,8 +57,8 @@ export function Register() {
             type="password"
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            placeholder="8~128 位，至少 3 类字符"
-            minLength={8}
+            placeholder="12~128 位，至少 3 类字符"
+            minLength={12}
             required
           />
         </label>

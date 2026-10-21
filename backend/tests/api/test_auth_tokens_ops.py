@@ -57,6 +57,23 @@ async def test_api_001_register_weak_password(client, api_prefix) -> None:
     assert resp.json()["code"] == ErrorCode.WEAK_PASSWORD.value
 
 
+async def test_api_001_register_password_shorter_than_12_rejected(client, api_prefix) -> None:
+    """契约要求 12~128：8~11 位即使复杂度够也必须 422（锁死 password 策略）。"""
+    for password in ("Ab1!abcd", "Ab1!abcd123"):
+        resp = await client.post(
+            f"{api_prefix}/auth/register",
+            json={
+                "email": f"short-{len(password)}@example.com",
+                "password": password,
+                "accept_tos": True,
+            },
+        )
+        assert resp.status_code == 422, password
+        body = resp.json()
+        assert body["code"] == ErrorCode.VALIDATION_ERROR.value, password
+        assert any(err["field"] == "password" for err in body["errors"]), body
+
+
 async def test_api_001_register_email_taken(client, api_prefix) -> None:
     payload = {"email": "dup@example.com", "password": "Str0ng-Passw0rd!", "accept_tos": True}
     assert (await client.post(f"{api_prefix}/auth/register", json=payload)).status_code == 201

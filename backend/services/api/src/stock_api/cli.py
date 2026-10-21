@@ -244,29 +244,48 @@ def _api_check() -> int:
             + "、".join(codes_extra_in_catalog)
         )
 
-    # (d) 每个端点至少一个非 2xx 错误响应（运维/元数据端点豁免）
-    without_error: list[tuple[str, str, str]] = []
+    # (d) 非运维端点必须用 application/problem+json 声明错误响应（RFC 7807）
+    without_problem: list[tuple[str, str, str]] = []
     for method, path, operation in operations:
         if "ops" in (operation.get("tags") or []):
             continue
         responses = operation.get("responses", {})
-        if any(not str(code).startswith("2") for code in responses):
-            continue
-        without_error.append((method, path, str(operation.get("operationId"))))
+        has_problem = any(
+            not str(code).startswith("2")
+            and "application/problem+json" in (response.get("content") or {})
+            for code, response in responses.items()
+        )
+        if not has_problem:
+            without_problem.append((method, path, str(operation.get("operationId"))))
     emit(
         f"[d] 错误响应：非运维端点 {len(operations) - _ops_count(operations)} 个，"
-        f"缺错误响应 {len(without_error)} 个"
+        f"缺 problem+json {len(without_problem)} 个"
     )
-    for method, path, oid in without_error:
-        emit(f"    · {method.upper()} {path}（{oid}）无任何非 2xx 响应")
+    for method, path, oid in without_problem:
+        emit(f"    · {method.upper()} {path}（{oid}）无 application/problem+json 错误响应")
+
+    # (e) §7.4 契约元数据：2xx 示例 / x-* / Error schema / problem+json 引用 / 码一致
+    from stock_api.openapi_meta import validate_contract
+
+    contract_violations = validate_contract(spec)
+    emit(f"[e] 契约元数据（§7.4）：违规 {len(contract_violations)} 条")
+    for violation in contract_violations[:20]:
+        emit(f"    · {violation}")
+    if len(contract_violations) > 20:
+        emit(f"    · … 其余 {len(contract_violations) - 20} 条省略")
 
     failures: list[str] = []
+    if missing_required:
+        missing_ids = "、".join(row["api_id"] for row in missing_required)
+        failures.append(f"一期端点未实现：{missing_ids}")
     if duplicates:
         failures.append(f"operationId 不唯一：{'、'.join(duplicates)}")
     if codes_missing_in_catalog:
         failures.append(f"§3 错误码未在 CATALOG 实现：{'、'.join(codes_missing_in_catalog)}")
-    if without_error:
-        failures.append(f"{len(without_error)} 个端点缺少错误响应")
+    if without_problem:
+        failures.append(f"{len(without_problem)} 个端点缺少 problem+json 错误响应")
+    if contract_violations:
+        failures.append(f"契约元数据违规 {len(contract_violations)} 条（见 [e]）")
 
     emit("")
     if failures:
@@ -274,7 +293,7 @@ def _api_check() -> int:
         for item in failures:
             emit(f"    - {item}")
         return 1
-    emit("✅ api-check 通过（operationId 唯一 / 错误码一致 / 错误响应齐备）")
+    emit("✅ api-check 通过（端点覆盖 / operationId 唯一 / 错误码一致 / 示例与 x-* 齐备）")
     if missing_required:
         emit(
             f"⚠ 注意：{len(missing_required)} 个一期端点尚未实现（见上文 [a] 段），"
@@ -375,13 +394,17 @@ def _sdk() -> int:
             "contracts/openapi.json 不存在；请先运行 `uv run python -m stock_api.cli api-snapshot`"
         )
     SDK_OUTPUT.parent.mkdir(parents=True, exist_ok=True)
+    # 生成器固定在 frontend/packages/api-client 的 devDependencies（7.4.4），
+    # 走 workspace 本地 bin，避免 `pnpm dlx` 临时下载导致的版本漂移/离线不可复现。
     command = [
         "pnpm",
-        "dlx",
+        "--filter",
+        "@sa/api-client",
+        "exec",
         "openapi-typescript",
-        SDK_INPUT_REL,
+        str(CONTRACTS_PATH),
         "-o",
-        str(SDK_OUTPUT.relative_to(REPO_ROOT / "frontend")),
+        str(SDK_OUTPUT),
     ]
     emit(f"→ 在 frontend/ 执行：{' '.join(command)}")
     try:
@@ -401,44 +424,88 @@ def _sdk() -> int:
         emit(result.stdout.strip())
         emit(result.stderr.strip())
         return fail(
-            "openapi-typescript 生成失败（常见原因：`pnpm dlx` 需要联网下载工具包，"
-            "或网络不可达）。请检查网络后重试："
-            "`cd frontend && pnpm dlx openapi-typescript ../contracts/openapi.json "
-            "-o packages/api-client/src/api/generated/schema.d.ts`"
+            "openapi-typescript 生成失败（常见原因：frontend 依赖未安装）。"
+            "请执行 `cd frontend && pnpm install` 后重试："
+            "`cd frontend && pnpm --filter @sa/api-client exec openapi-typescript "
+            "../contracts/openapi.json -o packages/api-client/src/api/generated/schema.d.ts`"
         )
     emit(f"✅ 已生成 {SDK_OUTPUT.relative_to(REPO_ROOT)}")
     return 0
 
 
 # ── verify-p1 ──────────────────────────────────────────────────
+# 一期 DoD 的完整门禁：静态检查 + 分层测试 + 一期 API 验收 + 越权/RLS +
+# 契约完整性/快照一致性 + 前端 tsc/vitest/build。缺任一环都不算“一期验收通过”。
 VERIFY_STEPS: tuple[tuple[str, list[str]], ...] = (
     ("ruff check", ["uv", "run", "ruff", "check", "backend"]),
     ("ruff format --check", ["uv", "run", "ruff", "format", "--check", "backend"]),
+    ("mypy (strict)", ["uv", "run", "mypy", "backend/packages", "backend/services"]),
+    ("import-linter (L1~L5)", ["uv", "run", "lint-imports"]),
     (
-        "pytest (not integration and not api)",
+        "pytest 单测（不含 api/integration）",
+        ["uv", "run", "pytest", "-m", "not integration and not api", "-q"],
+    ),
+    (
+        "core 覆盖率 100%",
         [
             "uv",
             "run",
             "pytest",
-            "-m",
-            "not integration and not api",
+            "backend/tests/unit/core",
+            "--cov=stock_core",
+            "--cov-fail-under=100",
             "-q",
         ],
     ),
-    ("api-check", ["uv", "run", "python", "-m", "stock_api.cli", "api-check"]),
+    ("pytest 一期 API 验收", ["uv", "run", "pytest", "backend/tests/api", "-q"]),
+    ("pytest 越权矩阵", ["uv", "run", "pytest", "-m", "isolation", "-q"]),
+    (
+        "pytest RLS 直连",
+        ["uv", "run", "pytest", "backend/tests/integration/test_rls_isolation.py", "-q"],
+    ),
+    ("pytest 架构约束", ["uv", "run", "pytest", "backend/tests/architecture", "-q"]),
+    (
+        "契约快照无漂移",
+        ["uv", "run", "python", "-m", "stock_api.cli", "api-snapshot", "--check"],
+    ),
+    (
+        "api-check（覆盖/错误码/示例/x-*）",
+        ["uv", "run", "python", "-m", "stock_api.cli", "api-check"],
+    ),
+    ("前端 tsc typecheck", ["pnpm", "-C", "frontend", "-r", "typecheck"]),
+    ("前端 vitest", ["pnpm", "-C", "frontend", "-r", "test"]),
+    ("前端生产构建", ["pnpm", "-C", "frontend", "-r", "build"]),
 )
 
 
 def _verify_p1() -> int:
     emit("== verify-p1：一期质量门禁（一条命令全绿）==")
-    for name, command in VERIFY_STEPS:
-        emit(f"\n→ [{name}] {' '.join(command)}")
+    emit(f"共 {len(VERIFY_STEPS)} 步；任一步失败即中止并打印已通过清单。\n")
+    passed: list[str] = []
+    for index, (name, command) in enumerate(VERIFY_STEPS, start=1):
+        emit(f"[{index}/{len(VERIFY_STEPS)}] ▶ {name}")
+        emit(f"          $ {' '.join(command)}")
         result = subprocess.run(command, cwd=REPO_ROOT, check=False)
         if result.returncode != 0:
             emit(f"\n❌ verify-p1 中止：步骤 «{name}» 失败（exit {result.returncode}）")
             emit(f"   失败命令：{' '.join(command)}")
+            emit("\n勾选清单：")
+            for done in passed:
+                emit(f"  [x] {done}")
+            emit(f"  [ ] {name}  ← 失败")
+            for remaining in VERIFY_STEPS[index:]:
+                emit(f"  [ ] {remaining[0]}")
             return 1
-    emit("\n✅ verify-p1 全绿（ruff / pytest / api-check 均通过）")
+        passed.append(name)
+        emit(f"          ✅ {name} 通过\n")
+
+    emit("✅ verify-p1 全绿（一期 DoD 全部门禁通过）")
+    emit("\n勾选清单：")
+    for done in passed:
+        emit(f"  [x] {done}")
+    emit(
+        "\n一期端点：30/30 已实现（见 api-check 输出）；API 验收用例覆盖见 backend/tests/api/*.py。"
+    )
     return 0
 
 

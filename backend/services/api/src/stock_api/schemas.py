@@ -20,7 +20,7 @@ class StrictModel(BaseModel):
 # ── 认证（API-001~006）──────────────────────────────────────
 class RegisterIn(StrictModel):
     email: EmailStr = Field(max_length=254)
-    password: str = Field(min_length=8, max_length=128)
+    password: str = Field(min_length=12, max_length=128)
     display_name: str | None = Field(default=None, max_length=40)
     accept_tos: bool
 
