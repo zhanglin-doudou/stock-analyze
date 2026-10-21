@@ -274,7 +274,7 @@ class TradeOut(BaseModel):
     trade_date: date
     security_code: str
     security_name: str
-    side: Literal["buy", "sell", "unknown"]
+    side: Literal["buy", "sell", "unknown", "missing"]
     quantity: str
     price: str
     amount: str
@@ -289,7 +289,7 @@ class TradeOut(BaseModel):
     category: str | None = None
     dedupe_key: str
     version: int
-    source: Literal["import", "manual"] = "import"
+    source: Literal["import", "manual", "system"] = "import"
     batch_id: str | None = None
     note: str | None = None
     deleted_at: datetime | None = None
@@ -381,6 +381,9 @@ class ReconciliationBreak(BaseModel):
     expected: str
     actual: str
     diff: str
+    # 断链是否已由系统补差行（side=missing）填平；filled_trade_id 指向补差流水。
+    filled: bool = False
+    filled_trade_id: str | None = None
 
 
 class ReconciliationOut(BaseModel):
@@ -389,6 +392,8 @@ class ReconciliationOut(BaseModel):
     break_count: int
     breaks: list[ReconciliationBreak] = Field(default_factory=list)
     checked_rows: int
+    # 本次对账自动插入的补差流水条数（幂等：链闭合后再次调用为 0）。
+    filled_count: int = 0
     epsilon: str = "0.01"
     data_as_of: datetime
     generated_at: datetime

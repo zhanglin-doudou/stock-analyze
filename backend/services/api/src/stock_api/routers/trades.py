@@ -148,7 +148,7 @@ async def list_trades_endpoint(
     trade_date_from: Annotated[date | None, Query()] = None,
     trade_date_to: Annotated[date | None, Query()] = None,
     security_code: Annotated[str | None, Query()] = None,
-    side: Annotated[Literal["buy", "sell", "unknown"] | None, Query()] = None,
+    side: Annotated[Literal["buy", "sell", "unknown", "missing"] | None, Query()] = None,
     batch_id: Annotated[str | None, Query()] = None,
     include_deleted: Annotated[bool, Query()] = False,
     fields: Annotated[str | None, Query()] = None,

@@ -454,7 +454,7 @@ services/api ─▶ application ─▶ domain ◀── infrastructure
 
 | 上下文 | 职责 | 聚合根 | 关键不变量 |
 |---|---|---|---|
-| **Ledger** | 导入两阶段、去重、分类、软删、对账、批次撤销、导出 | `ImportBatch`、`Trade` | 同租户 `(dedupe_key, occurrence_idx)` 唯一；软删不参与下游 |
+| **Ledger** | 导入两阶段（含全零金额噪音行隔离）、去重、分类、软删、对账（断链自动补差）、批次撤销、导出 | `ImportBatch`、`Trade` | 同租户 `(dedupe_key, occurrence_idx)` 唯一；软删不参与下游 |
 | **Review** | 期初、FIFO 回合、净值、三域指标、归因、可信度 | `Round`、`MetricResult` | 桥接恒等式；`blocked` 不出结论 |
 | **Platform** | 用户/Token/会话、租户上下文、任务队列、限流、审计、配置、备份 | `User`、`Job` | 任何业务读写必须带 `user_id`；admin 不可读明细 |
 | **Delivery** | 报告区块、对话编排、导出包 | `Report` | 只消费结构化产物，零口径 |
@@ -594,6 +594,8 @@ RETURNING *;
 ```
 
 **设计要点**：preview 与 commit 共享同一解析实现（避免两套逻辑漂移）；commit 的事务边界是"一个批次"，保证 ASR-1；stages 各自纯函数，便于 fixture 测试。
+
+**噪音行与补差行（v2.1）**：① 解析阶段（preview 与 commit 共用同一实现、早于去重）即判「佣金/印花税/其他费/发生金额/资金余额」五字段全为 0 的行 → `INVALID_AMOUNT` 隔离、不写 `trade`（零资金流噪音行既污染回合/费用口径，又会被误判成 `DUPLICATE_IN_FILE`）；② 余额链对账检出断链时写入 `side=missing`、`source=system` 的补差流水，一次补差后链闭合、重复调用幂等；此类断链的对账状态为 `degraded`（不再是 `blocked`），补差行以 `batch_id=null` / `summary=对账自动补差` 与真实成交区分。
 
 ### 10.4 计算链与脏窗口
 
@@ -821,10 +823,10 @@ frontend/apps/web/src/
 |---|---|---|---|---|
 | FR-L1 部署与服务化 | `services/api`、`infra/compose` | `/healthz` `/readyz` `/version` | 无状态 + 就绪探针 + 优雅停机 | 发布门禁、故障注入 |
 | FR-L2 认证授权隔离 | `platform`（auth/tenant） | `/auth/*` | JWT+refresh 轮换+PAT；RLS 双层 | 越权矩阵、集成 |
-| FR-L3 导入（两阶段） | `ledger` | `/imports/preview` `/imports` | 预览不落库；commit 异步；bag 去重 | golden、属性、验收 |
+| FR-L3 导入（两阶段） | `ledger` | `/imports/preview` `/imports` | 预览不落库；commit 异步；bag 去重；全零金额行隔离 | golden、属性、验收 |
 | FR-L4 流水维护 | `ledger` | `/trades/*` | 版本冲突 409；软删可恢复 | 验收、集成 |
 | FR-L5 分类与隔离区 | `ledger` | `/summary-rules` `/imports/{id}/quarantine` | 规则 CRUD + 配置化 | 单元、fixture |
-| FR-L6 对账分级阻断 | `ledger`+`review` | `/reconciliation` | 引擎门禁状态机 | fixture、快照 |
+| FR-L6 对账分级阻断 | `ledger`+`review` | `/reconciliation` | 余额链核对 + 断链自动补差 + 引擎门禁状态机 | fixture、快照 |
 | FR-L7 导出/备份/删除 | `platform`+`delivery` | `/exports/*` `/admin/backups` | 异步导出 + 签名下载 + 物理删除 | 集成、安全 |
 | FR-L8 查询 API | `ledger` | `/trades` | 游标分页 + ETag + 裁剪 | 契约、验收 |
 | FR-A1 PAT | `platform` | `/tokens/*` | 哈希存储、scope、可撤销 | 验收、安全 |

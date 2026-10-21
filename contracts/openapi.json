@@ -1407,6 +1407,22 @@
             "title": "Expected",
             "type": "string"
           },
+          "filled": {
+            "default": false,
+            "title": "Filled",
+            "type": "boolean"
+          },
+          "filled_trade_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filled Trade Id"
+          },
           "line_no": {
             "anyOf": [
               {
@@ -1470,6 +1486,11 @@
             "default": "0.01",
             "title": "Epsilon",
             "type": "string"
+          },
+          "filled_count": {
+            "default": 0,
+            "title": "Filled Count",
+            "type": "integer"
           },
           "generated_at": {
             "format": "date-time",
@@ -1865,7 +1886,8 @@
             "enum": [
               "buy",
               "sell",
-              "unknown"
+              "unknown",
+              "missing"
             ],
             "title": "Side",
             "type": "string"
@@ -1874,7 +1896,8 @@
             "default": "import",
             "enum": [
               "import",
-              "manual"
+              "manual",
+              "system"
             ],
             "title": "Source",
             "type": "string"
@@ -5408,6 +5431,8 @@
                       "actual": "1234.56",
                       "diff": "1234.56",
                       "expected": "1234.56",
+                      "filled": false,
+                      "filled_trade_id": "obj_01J9Z6ABCDEFGHJKMNPQRSTVWX",
                       "line_no": 7,
                       "trade_date": "2026-09-30",
                       "trade_id": "trd_01J9Z6ABCDEFGHJKMNPQRSTVWX"
@@ -5416,6 +5441,7 @@
                   "checked_rows": 120,
                   "data_as_of": "2026-09-30T09:30:00Z",
                   "epsilon": "0.01",
+                  "filled_count": 0,
                   "generated_at": "2026-09-30T09:30:00Z",
                   "period": "2026-09",
                   "status": "ok"
@@ -6131,7 +6157,8 @@
                   "enum": [
                     "buy",
                     "sell",
-                    "unknown"
+                    "unknown",
+                    "missing"
                   ],
                   "type": "string"
                 },

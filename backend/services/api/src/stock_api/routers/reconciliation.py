@@ -83,6 +83,8 @@ async def get_reconciliation(
             expected=str(Money(int(item["expected_units"]))),
             actual=str(Money(int(item["actual_units"]))),
             diff=str(Money(int(item["delta_units"]))),
+            filled=bool(item.get("filled", False)),
+            filled_trade_id=(str(item["filled_trade_id"]) if item.get("filled_trade_id") else None),
         )
         for item in dto.breaks
     ]
@@ -92,6 +94,7 @@ async def get_reconciliation(
         break_count=dto.break_count,
         breaks=breaks,
         checked_rows=dto.checked_rows,
+        filled_count=dto.filled_count,
         epsilon=str(Money(dto.epsilon_units)),
         data_as_of=dto.data_as_of,
         generated_at=dto.generated_at,

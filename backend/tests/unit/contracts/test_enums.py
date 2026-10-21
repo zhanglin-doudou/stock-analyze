@@ -26,8 +26,8 @@ def test_role_and_scope() -> None:
 
 
 def test_side_and_source() -> None:
-    assert {s.value for s in Side} == {"buy", "sell", "unknown"}
-    assert {s.value for s in TradeSource} == {"import", "manual"}
+    assert {s.value for s in Side} == {"buy", "sell", "unknown", "missing"}
+    assert {s.value for s in TradeSource} == {"import", "manual", "system"}
 
 
 def test_job_status_terminal() -> None:

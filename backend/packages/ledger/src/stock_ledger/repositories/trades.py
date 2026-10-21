@@ -15,9 +15,11 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import Any
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import case, func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from stock_contracts.constants import CURSOR_MAX_LIMIT
+from stock_contracts.enums import Side
 from stock_contracts.errors import ApiError, ErrorCode, NotFoundError
 from stock_platform.ids import trade_id as new_trade_id
 
@@ -118,43 +120,77 @@ class TradeRepository:
         self._session = session
 
     # ── 写入 ────────────────────────────────────────────────
+    @staticmethod
+    def _to_model(user_id: uuid.UUID, row: TradeRow) -> Trade:
+        """TradeRow（标度整数）→ ORM 行；id/version 由系统生成。"""
+        return Trade(
+            id=new_trade_id(),
+            user_id=user_id,
+            batch_id=row.batch_id,
+            trade_date=row.trade_date,
+            security_code=row.security_code,
+            security_name=row.security_name,
+            summary=row.summary,
+            summary_code=row.summary_code,
+            side=row.side,
+            quantity_units=row.quantity_units,
+            price_units=row.price_units,
+            amount_units=row.amount_units,
+            commission_units=row.commission_units,
+            stamp_tax_units=row.stamp_tax_units,
+            other_fee_units=row.other_fee_units,
+            cash_balance_units=row.cash_balance_units,
+            cash_balance_available=row.cash_balance_available,
+            category=row.category,
+            dedupe_key=row.dedupe_key,
+            occurrence_idx=row.occurrence_idx,
+            account_masked=row.account_masked,
+            note=row.note,
+            source=row.source,
+            version=1,
+            line_no=row.line_no,
+        )
+
     async def insert_many(self, user_id: uuid.UUID, rows: Sequence[TradeRow]) -> int:
         """批量插入（调用方需保证 dedupe_key 在同一 user 内不冲突）。"""
         if not rows:
             return 0
-        models = [
-            Trade(
-                id=new_trade_id(),
-                user_id=user_id,
-                batch_id=r.batch_id,
-                trade_date=r.trade_date,
-                security_code=r.security_code,
-                security_name=r.security_name,
-                summary=r.summary,
-                summary_code=r.summary_code,
-                side=r.side,
-                quantity_units=r.quantity_units,
-                price_units=r.price_units,
-                amount_units=r.amount_units,
-                commission_units=r.commission_units,
-                stamp_tax_units=r.stamp_tax_units,
-                other_fee_units=r.other_fee_units,
-                cash_balance_units=r.cash_balance_units,
-                cash_balance_available=r.cash_balance_available,
-                category=r.category,
-                dedupe_key=r.dedupe_key,
-                occurrence_idx=r.occurrence_idx,
-                account_masked=r.account_masked,
-                note=r.note,
-                source=r.source,
-                version=1,
-                line_no=r.line_no,
-            )
-            for r in rows
-        ]
+        models = [self._to_model(user_id, row) for row in rows]
         self._session.add_all(models)
         await self._session.flush()
         return len(models)
+
+    async def insert_one(self, user_id: uuid.UUID, row: TradeRow) -> Trade:
+        """插入单行并返回 ORM 行（对账补差需要回传 trade_id）。"""
+        model = self._to_model(user_id, row)
+        self._session.add(model)
+        await self._session.flush()
+        return model
+
+    async def insert_one_or_existing(self, user_id: uuid.UUID, row: TradeRow) -> tuple[Trade, bool]:
+        """插入单行；若同一去重键已有有效行则返回既有行（并发自愈用保存点兜住唯一冲突）。
+
+        返回 `(行, 是否本次新插入)`：两个对账请求同时发现同一断链时，后到者复用先到者的
+        补差行，而不是抛唯一键异常或重复补差。
+        """
+        savepoint = await self._session.begin_nested()
+        try:
+            model = await self.insert_one(user_id, row)
+        except IntegrityError:
+            await savepoint.rollback()
+            existing = await self._session.scalar(
+                select(Trade).where(
+                    Trade.user_id == user_id,
+                    Trade.dedupe_key == row.dedupe_key,
+                    Trade.occurrence_idx == row.occurrence_idx,
+                    Trade.deleted_at.is_(None),
+                )
+            )
+            if existing is None:  # pragma: no cover - 非去重键冲突
+                raise
+            return existing, False
+        await savepoint.commit()
+        return model, True
 
     async def add_history(
         self,
@@ -361,14 +397,22 @@ class TradeRepository:
         period_start: date | None = None,
         period_end: date | None = None,
     ) -> list[Trade]:
-        """对账用的余额链：按业务发生顺序升序（日期 → 行号 → id）。"""
+        """对账用的余额链：按业务发生顺序升序（日期 → 行号 → 补差行优先 → id）。
+
+        对账补差行（side=missing）与断链行共用 line_no，必须排在断链行之前，
+        这样 `上一行余额 + 补差金额 == 补差行余额` 与 `补差行余额 + 断链行金额 == 断链行余额`
+        两条链式断言都能成立。
+        """
         stmt = select(Trade).where(Trade.user_id == user_id, Trade.deleted_at.is_(None))
         if period_start is not None:
             stmt = stmt.where(Trade.trade_date >= period_start)
         if period_end is not None:
             stmt = stmt.where(Trade.trade_date <= period_end)
         stmt = stmt.order_by(
-            Trade.trade_date.asc(), Trade.line_no.asc().nulls_first(), Trade.id.asc()
+            Trade.trade_date.asc(),
+            Trade.line_no.asc().nulls_first(),
+            case((Trade.side == Side.MISSING.value, 0), else_=1).asc(),
+            Trade.id.asc(),
         )
         return list(await self._session.scalars(stmt))
 

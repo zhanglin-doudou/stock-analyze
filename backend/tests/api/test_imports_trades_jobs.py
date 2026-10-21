@@ -376,10 +376,10 @@ async def test_api_010_preview_real_bill_resolves_side_from_summary(
     assert "买卖标志" not in {col["name"] for col in body["columns"]}
     summary_col = next(col for col in body["columns"] if col["name"] == "摘要")
     assert summary_col["suggested_field"] == "summary"
-    assert body["estimated"] == {"parsed": 177, "inserted": 177, "skipped": 0, "quarantined": 0}
+    assert body["estimated"] == {"parsed": 175, "inserted": 175, "skipped": 0, "quarantined": 2}
     assert body["sample"]
     # 非交易行按资金流向分配 side（sell=流入，buy=流出），交易行正常买卖。
-    assert all(sample["side"] in {"buy", "sell", "unknown"} for sample in body["sample"])
+    assert all(sample["side"] in {"buy", "sell"} for sample in body["sample"])
     # 预览的 columns 里也不能回显明文账号。
     account_detail = next((c for c in body["columns"] if c["name"] == "股东账号"), None)
     assert account_detail is not None
@@ -423,13 +423,17 @@ async def test_api_011_commit_real_bill_worker_end_to_end(
     batch = (await client.get(f"{api_prefix}/imports", headers=user.headers)).json()["items"][0]
     assert batch["batch_id"] == batch_id
     assert batch["status"] == "succeeded"
-    assert batch["counts"] == {"parsed": 177, "inserted": 177, "skipped": 0, "quarantined": 0}
+    assert batch["counts"] == {"parsed": 175, "inserted": 175, "skipped": 0, "quarantined": 2}
 
     trades = await client.get(f"{api_prefix}/trades?limit=200", headers=user.headers)
     items = trades.json()["items"]
-    assert len(items) == 177
-    # 非交易行按资金流向分配 side（sell=流入，buy=流出），交易行正常买卖，零金额转存管为 unknown。
-    assert {item["side"] for item in items} <= {"buy", "sell", "unknown"}
+    assert len(items) == 175
+    # 全零金额的「转存管转入/转出」已按 INVALID_AMOUNT 隔离，不再进入明细。
+    quarantine = (
+        await client.get(f"{api_prefix}/imports/{batch_id}/quarantine", headers=user.headers)
+    ).json()["items"]
+    assert {item["reason_code"] for item in quarantine} == {"INVALID_AMOUNT"}
+    assert {item["side"] for item in items} <= {"buy", "sell"}
     # 股东账号只落 MD5 摘要（32 位 hex），不落明文；非交易行账号为空时 account_masked 为 None。
     for item in items:
         if item["account_masked"] is not None:
@@ -1019,11 +1023,67 @@ async def test_api_026_break_located_to_line(client, api_prefix, user, owner_eng
     resp = await client.get(f"{api_prefix}/reconciliation?period=2026-06", headers=user.headers)
     assert resp.status_code == 200, resp.text
     body = resp.json()
+    assert body["status"] == "degraded"
+    assert body["break_count"] == 1
+    assert body["filled_count"] == 1
+    item = body["breaks"][0]
+    assert item["line_no"] == 3
+    assert item["trade_id"] == second
+    assert item["actual"] == "4700.00"
+    assert item["filled"] is True
+    assert item["filled_trade_id"]
+
+    # 补差行已写入流水：side=missing、日期=断链行日期、摘要/金额/余额补齐。
+    missing_page = await client.get(f"{api_prefix}/trades?side=missing", headers=user.headers)
+    missing = missing_page.json()["items"]
+    assert len(missing) == 1
+    fill = missing[0]
+    assert fill["trade_id"] == item["filled_trade_id"]
+    assert fill["side"] == "missing"
+    assert fill["source"] == "system"
+    assert fill["trade_date"] == "2026-06-02"
+    assert fill["summary"] == "对账自动补差"
+    assert fill["amount"] == "-100.00"
+    # 补差行余额 = 本行余额 4700.00 − 本行发生金额 -200.00 = 4900.00
+    assert fill["cash_balance"] == "4900.00"
+
+    # 链已闭合：重复调用不再断链/不再补差，但仍因存在补差行保持 degraded。
+    again = await client.get(f"{api_prefix}/reconciliation?period=2026-06", headers=user.headers)
+    again_body = again.json()
+    assert again_body["status"] == "degraded"
+    assert again_body["break_count"] == 0
+    assert again_body["filled_count"] == 0
+
+
+async def test_api_026_manual_row_break_stays_blocked_without_fill(
+    client, api_prefix, user, owner_engine
+) -> None:
+    """手工录入行（line_no 为空）无法稳定插到两行之间 → 不自愈，保持 blocked。"""
+    await _seed_trade(
+        owner_engine,
+        user_id=user.user_id,
+        trade_date=date(2026, 5, 1),
+        amount_units=-100_000,
+        cash_balance=500_000,
+    )
+    await _seed_trade(
+        owner_engine,
+        user_id=user.user_id,
+        trade_date=date(2026, 5, 2),
+        amount_units=-20_000,
+        cash_balance=470_000,  # 期望 480000 → 断链
+    )
+    resp = await client.get(f"{api_prefix}/reconciliation?period=2026-05", headers=user.headers)
+    body = resp.json()
     assert body["status"] == "blocked"
     assert body["break_count"] == 1
-    assert body["breaks"][0]["line_no"] == 3
-    assert body["breaks"][0]["trade_id"] == second
-    assert body["breaks"][0]["actual"] == "4700.00"
+    assert body["filled_count"] == 0
+    assert body["breaks"][0]["filled"] is False
+    assert body["breaks"][0]["filled_trade_id"] is None
+
+    # 没有写入任何 side=missing 补差流水。
+    missing_page = await client.get(f"{api_prefix}/trades?side=missing", headers=user.headers)
+    assert missing_page.json()["items"] == []
 
 
 async def test_api_026_ok_and_degraded(client, api_prefix, user, owner_engine) -> None:
@@ -1058,8 +1118,8 @@ async def test_api_026_real_bill_reconciles_with_zero_breaks(
 ) -> None:
     """P0-1 回归：真实账单（「发生金额」带符号净额）导入后余额链必须 0 断链。
 
-    177 行明细产生 176 次相邻转移；「转存管转出/转入」两行方向 unknown（金额 0），
-    其中只有 1 行位于链中段会被跳过核对 → checked_rows = 175，break_count = 0。
+    177 行中 2 行五金额全 0（转存管转入/转出）→ INVALID_AMOUNT 隔离，剩 175 行；
+    175 行产生 174 次相邻转移，全方向已知 → checked_rows = 174，break_count = 0。
     旧实现按 side 反号并再扣费用（真实账单已含费用），实测 156/175 假断链。
     """
     preview = await client.post(
@@ -1068,7 +1128,7 @@ async def test_api_026_real_bill_reconciles_with_zero_breaks(
         files={"file": (_MOCK_BILL.name, _MOCK_BILL.read_bytes(), _XLSX_CONTENT_TYPE)},
     )
     assert preview.status_code == 200, preview.text
-    assert preview.json()["estimated"]["parsed"] == 177
+    assert preview.json()["estimated"]["parsed"] == 175
 
     accepted = await client.post(
         f"{api_prefix}/imports",
@@ -1084,8 +1144,9 @@ async def test_api_026_real_bill_reconciles_with_zero_breaks(
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["status"] == "ok", body["breaks"][:3]
-    assert body["checked_rows"] == 175
+    assert body["checked_rows"] == 174
     assert body["break_count"] == 0
+    assert body["filled_count"] == 0
 
 
 async def test_api_026_invalid_period_422(client, api_prefix, user) -> None:

@@ -280,6 +280,18 @@ def _build_candidate(
     if balance_text:
         cash_balance_units = _units(balance_text, Money)
 
+    # 五个金额字段（佣金/印花税/其他费/发生金额/资金余额）全为 0：没有资金流语义
+    # （典型是货基份额再投、转托管确认等噪音行），不入明细，隔离为 INVALID_AMOUNT。
+    # 资金余额列缺失（None）不算 0，交后续对账按 MISSING_CASH_BALANCE 降级处理。
+    if (
+        commission_units == 0
+        and stamp_tax_units == 0
+        and other_fee_units == 0
+        and amount_units == 0
+        and cash_balance_units == 0
+    ):
+        raise _RowError(QuarantineReason.INVALID_AMOUNT)
+
     summary = value("summary") or None
     # 账号明文已在 parse_bill 入口统一抹成 MD5（空账号留空串 → 这里转 None）。
     # 此值同时作为 ParsedRow.account_masked（落库列）与下游去重键的业务要素。

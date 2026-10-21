@@ -1,10 +1,10 @@
 """G3 分类链路验收：commit 分类、未知摘要预检、预览/提交计数一致、规则词表。
 
 覆盖：
-1. 真实账单（177 行）提交后 `category` 100% 非空、未知摘要 0、转账摘要命中 transfer；
+1. 真实账单（175 行入库 + 2 行全零金额隔离）`category` 100% 非空、未知摘要 0、转账摘要命中 transfer；
 2. 未知摘要 → preview 警告 + `estimated.quarantined` == commit 实际隔离；该行不写 trade；
 3. 系统默认规则在任意入口幂等自愈（无 CLI seed 也不误隔离），旧词表系统码被同步清理；
-4. P0 行为不回退：同文件重传 inserted=0、真实账对账仍 0 断链。
+4. P0 行为不回退：同文件重传 inserted=0、真实账对账仍 0 断链、全零金额行隔离 INVALID_AMOUNT。
 """
 
 from __future__ import annotations
@@ -124,35 +124,35 @@ async def _rule_count(engine: AsyncEngine) -> int:
 async def test_real_bill_all_rows_classified_and_zero_unknown(
     client, api_prefix, user, settings
 ) -> None:
-    """真实账单：177/177 category 非空、未知摘要 0、preview 计数 == commit 计数。"""
+    """真实账单：175/175 category 非空、未知摘要 0、preview 计数 == commit 计数。"""
     preview = await _preview(
         client, api_prefix, user, _MOCK_BILL.read_bytes(), _MOCK_BILL.name, _XLSX_CONTENT_TYPE
     )
-    assert preview["estimated"] == {"parsed": 177, "inserted": 177, "skipped": 0, "quarantined": 0}
+    assert preview["estimated"] == {"parsed": 175, "inserted": 175, "skipped": 0, "quarantined": 2}
     assert "UNKNOWN_SUMMARY" not in {warning["code"] for warning in preview["warnings"]}
 
     accepted = await _commit(client, api_prefix, user, preview["preview_id"])
     await _drain_worker(settings)
 
     batch = await _batch(client, api_prefix, user, accepted["batch_id"])
-    assert batch["counts"] == {"parsed": 177, "inserted": 177, "skipped": 0, "quarantined": 0}
+    assert batch["counts"] == {"parsed": 175, "inserted": 175, "skipped": 0, "quarantined": 2}
     assert "UNKNOWN_SUMMARY" not in batch["warnings"]
 
     trades = await _trades(client, api_prefix, user)
-    assert len(trades) == 177
+    assert len(trades) == 175
     assert all(item["category"] for item in trades), "真实账单必须 100% 分类"
-    # 分类分布：买入 83 / 卖出 62 / 资金划转 26（银行转存14+转取10+转存管2）/ 分红 3 / 利息 2 / 费用 1。
+    # 分类分布：买入 83 / 卖出 62 / 资金划转 24（转存管 2 行全零被隔离）/ 分红 3 / 利息 2 / 费用 1。
     assert Counter(item["category"] for item in trades) == {
         "buy": 83,
         "sell": 62,
-        "transfer": 26,
+        "transfer": 24,
         "dividend": 3,
         "interest": 2,
         "fee": 1,
     }
     # 非交易摘要命中资金划转，而不是被「费」等宽泛规则吞掉或被隔离。
     transfer_summaries = {item["summary"] for item in trades if item["category"] == "transfer"}
-    assert transfer_summaries == {"银行转存", "银行转取", "转存管转入", "转存管转出"}
+    assert transfer_summaries == {"银行转存", "银行转取"}
     # 规则短码落 summary_code（≤16 字符列宽），且与分类自洽。
     assert all(item["summary_code"] for item in trades)
     assert {item["summary_code"] for item in trades if item["summary"] == "银行转存"} == {
@@ -162,7 +162,11 @@ async def test_real_bill_all_rows_classified_and_zero_unknown(
         "sys_div_tax"
     }
 
-    assert await _quarantine(client, api_prefix, user, accepted["batch_id"]) == []
+    # 仅有的 2 条隔离 = 五金额全 0 的「转存管转入/转出」。
+    quarantine = await _quarantine(client, api_prefix, user, accepted["batch_id"])
+    assert len(quarantine) == 2
+    assert {item["reason_code"] for item in quarantine} == {"INVALID_AMOUNT"}
+    assert {item["raw"]["summary"] for item in quarantine} == {"转存管转入", "转存管转出"}
 
     # P0 回归：分类不影响余额链，真实账对账仍 0 断链。
     reco = await client.get(
@@ -170,28 +174,35 @@ async def test_real_bill_all_rows_classified_and_zero_unknown(
     )
     body = reco.json()
     assert body["status"] == "ok", body["breaks"][:3]
-    assert body["checked_rows"] == 175
+    assert body["checked_rows"] == 174
     assert body["break_count"] == 0
+    assert body["filled_count"] == 0
 
 
-async def test_money_fund_bill_imports_zero_quarantine(client, api_prefix, user, settings) -> None:
-    """货币基金账单：赎回/申购确认与红利发放全部命中规则，预览与提交均 0 隔离。"""
+async def test_money_fund_bill_imports_with_zero_amount_quarantine(
+    client, api_prefix, user, settings
+) -> None:
+    """货币基金账单：申赎确认命中规则；全零「红利发放」按 INVALID_AMOUNT 隔离。"""
     preview = await _preview(
         client, api_prefix, user, _FUND_BILL.read_bytes(), _FUND_BILL.name, _XLSX_CONTENT_TYPE
     )
-    assert preview["estimated"] == {"parsed": 7, "inserted": 7, "skipped": 0, "quarantined": 0}
+    assert preview["estimated"] == {"parsed": 6, "inserted": 6, "skipped": 0, "quarantined": 1}
     assert "UNKNOWN_SUMMARY" not in {warning["code"] for warning in preview["warnings"]}
 
     accepted = await _commit(client, api_prefix, user, preview["preview_id"])
     await _drain_worker(settings)
 
     batch = await _batch(client, api_prefix, user, accepted["batch_id"])
-    assert batch["counts"] == {"parsed": 7, "inserted": 7, "skipped": 0, "quarantined": 0}
+    assert batch["counts"] == {"parsed": 6, "inserted": 6, "skipped": 0, "quarantined": 1}
     assert "UNKNOWN_SUMMARY" not in set(batch["warnings"])
-    assert await _quarantine(client, api_prefix, user, accepted["batch_id"]) == []
+
+    items = await _quarantine(client, api_prefix, user, accepted["batch_id"])
+    assert len(items) == 1
+    assert items[0]["reason_code"] == "INVALID_AMOUNT"
+    assert items[0]["line_no"] == 19
 
     trades = await _trades(client, api_prefix, user)
-    assert len(trades) == 7
+    assert len(trades) == 6
     assert all(item["category"] for item in trades)
     by_summary = {(item["summary"], item["side"]): item for item in trades}
 
@@ -205,16 +216,13 @@ async def test_money_fund_bill_imports_zero_quarantine(client, api_prefix, user,
     assert subscribe["summary_code"] == "sys_fund_buy"
     assert subscribe["amount"] == "-106708.53"
 
-    dividend = by_summary[("红利发放", "unknown")]
-    assert dividend["category"] == "dividend"
-    assert dividend["summary_code"] == "sys_div_paid"
-    assert {item["category"] for item in trades} == {"buy", "sell", "dividend", "transfer"}
+    assert {item["category"] for item in trades} == {"buy", "sell", "transfer"}
 
 
-async def test_real_statement_excerpt_quarantine_only_duplicates(
+async def test_real_statement_excerpt_quarantine_only_zero_amount(
     client, api_prefix, user, settings
 ) -> None:
-    """真实对账单节选：折行摘要全部命中、持仓区不入隔离，隔离区只剩完全重复行。"""
+    """真实对账单节选：折行摘要全部命中、持仓区不入隔离，全零金额行隔离 INVALID_AMOUNT。"""
     preview = await _preview(
         client,
         api_prefix,
@@ -223,38 +231,35 @@ async def test_real_statement_excerpt_quarantine_only_duplicates(
         _STATEMENT_BILL.name,
         _XLSX_CONTENT_TYPE,
     )
-    assert preview["estimated"] == {"parsed": 8, "inserted": 8, "skipped": 0, "quarantined": 2}
+    assert preview["estimated"] == {"parsed": 5, "inserted": 5, "skipped": 0, "quarantined": 5}
     assert "UNKNOWN_SUMMARY" not in {warning["code"] for warning in preview["warnings"]}
 
     accepted = await _commit(client, api_prefix, user, preview["preview_id"])
     await _drain_worker(settings)
 
     batch = await _batch(client, api_prefix, user, accepted["batch_id"])
-    assert batch["counts"] == {"parsed": 8, "inserted": 8, "skipped": 0, "quarantined": 2}
+    assert batch["counts"] == {"parsed": 5, "inserted": 5, "skipped": 0, "quarantined": 5}
     assert "UNKNOWN_SUMMARY" not in set(batch["warnings"])
 
     items = await _quarantine(client, api_prefix, user, accepted["batch_id"])
-    assert len(items) == 2
-    assert {item["reason_code"] for item in items} == {"DUPLICATE_IN_FILE"}
-    assert {item["line_no"] for item in items} == {18, 19}
+    assert len(items) == 5
+    assert {item["reason_code"] for item in items} == {"INVALID_AMOUNT"}
+    assert {item["line_no"] for item in items} == {17, 18, 19, 20, 25}
     # 持仓/声明区块（夹具第 27 行起）不应出现在隔离区。
     assert all(item["line_no"] < 27 for item in items)
 
     trades = await _trades(client, api_prefix, user)
-    assert len(trades) == 8
+    assert len(trades) == 5
     assert all(item["category"] for item in trades)
     by_summary = {item["summary"]: item for item in trades}
-    assert by_summary["[省心投]红\n利发放"]["category"] == "dividend"
     assert by_summary["[省心投]申\n购确认"]["category"] == "buy"
     assert by_summary["新股申购确\n认缴款"]["category"] == "new_stock"
     assert by_summary["[省心投]申\n购确认"]["side"] == "buy"
     assert {item["category"] for item in trades} == {
         "buy",
         "sell",
-        "dividend",
         "transfer",
         "new_stock",
-        "other",
     }
 
 

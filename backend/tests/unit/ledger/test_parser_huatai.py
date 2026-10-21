@@ -373,8 +373,8 @@ def test_non_trade_dividend_tax_with_newline() -> None:
     assert r.amount_units == -60_00
 
 
-def test_non_trade_zero_amount_unknown() -> None:
-    """转存管转入/转出：金额为 0，方向无意义 → side=unknown。"""
+def test_zero_amount_rows_quarantined_as_invalid_amount() -> None:
+    """佣金/印花税/其他费/发生金额/资金余额全为 0 → 隔离为 INVALID_AMOUNT，不入明细。"""
     for summary in ("转存管转入", "转存管转出"):
         row = _buy_row(
             证券代码="",
@@ -384,21 +384,38 @@ def test_non_trade_zero_amount_unknown() -> None:
             成交数量="0",
             成交价格="0.00",
             成交金额="0.00",
+            佣金="0.00",
+            资金余额="0.00",
         )
         bill = _parse(_xlsx(_HEADERS, [row]))
-        assert len(bill.rows) == 1
-        assert bill.quarantined == []
-        r = bill.rows[0]
-        assert r.security_code == "CASH"
-        assert r.side == "unknown"
-        assert r.amount_units == 0
+        assert bill.rows == []
+        assert len(bill.quarantined) == 1
+        assert bill.quarantined[0].reason_code == QuarantineReason.INVALID_AMOUNT.value
+        # 隔离行仍保留原始内容，供人工复核。
+        assert bill.quarantined[0].raw["摘要"] == summary
+
+
+def test_zero_amount_precedes_duplicate_quarantine() -> None:
+    """全零行即使完全重复，也统一记 INVALID_AMOUNT（金额校验先于重复判定）。"""
+    row = _buy_row(
+        证券代码="",
+        证券名称="",
+        买卖标志="",
+        摘要="银行转存",
+        成交金额="0.00",
+        佣金="0.00",
+        资金余额="0.00",
+    )
+    bill = _parse(_xlsx(_HEADERS, [row, list(row)]))
+    assert bill.rows == []
+    assert {q.reason_code for q in bill.quarantined} == {QuarantineReason.INVALID_AMOUNT.value}
 
 
 def test_real_bill_amount_is_signed_net_cash_flow() -> None:
-    """真实账单（177 行）：「发生金额」直接入 amount_units，买入负/卖出正、已含费用。"""
+    """真实账单（177 行中 2 行全零）：「发生金额」直接入 amount_units，买入负/卖出正、已含费用。"""
     bill = _parse(_REAL_BILL.read_bytes(), file_name=_REAL_BILL.name)
-    assert len(bill.rows) == 177
-    assert bill.quarantined == []
+    assert len(bill.rows) == 175
+    assert {q.reason_code for q in bill.quarantined} == {QuarantineReason.INVALID_AMOUNT.value}
     # 金额列原生带符号 → 不走毛额换算（否则会重复扣费产生假断链）。
     assert "amount_derived_rows" not in bill.assumptions
     assert "amount_unsigned_rows" not in bill.assumptions
@@ -412,22 +429,22 @@ def test_real_bill_amount_is_signed_net_cash_flow() -> None:
     assert sell.side == "sell"
     assert sell.amount_units == 7031_82
 
+    # 全零的「转存管转入/转出」行已隔离，剩余行方向全为已知。
+    assert all(row.side in {"buy", "sell"} for row in bill.rows)
     for row in bill.rows:
         if row.side == "buy":
             assert row.amount_units < 0, row.line_no
         elif row.side == "sell":
             assert row.amount_units > 0, row.line_no
-        else:
-            # 零金额转存管转入/转出：方向未知且无资金流 → 0。
-            assert row.side == "unknown"
-            assert row.amount_units == 0
 
 
 def test_money_fund_redemption_confirmation_not_quarantined() -> None:
     """货币基金账单（无「买卖标志」列）：申赎确认按摘要定方向，赎回确认不能被隔离。"""
     bill = _parse(_FUND_BILL.read_bytes(), file_name=_FUND_BILL.name)
-    assert len(bill.rows) == 7
-    assert bill.quarantined == []
+    assert len(bill.rows) == 6
+    # 全零金额的「红利发放」（份额再投）按新规则隔离 INVALID_AMOUNT。
+    assert [q.line_no for q in bill.quarantined] == [19]
+    assert bill.quarantined[0].reason_code == QuarantineReason.INVALID_AMOUNT.value
 
     by_line = {row.line_no: row for row in bill.rows}
     redeem = by_line[17]
@@ -449,11 +466,10 @@ def test_money_fund_redemption_confirmation_not_quarantined() -> None:
 def test_statement_stops_at_total_row_before_holdings_sections() -> None:
     """流水明细「合计」之后的股票/基金持仓、声明区块不是交易行 → 不进隔离区。"""
     bill = _parse(_STATEMENT_BILL.read_bytes(), file_name=_STATEMENT_BILL.name)
-    # 10 条明细里 3 条同日同额红利再投完全重复 → 留 1 条、隔离 2 条。
-    assert len(bill.rows) == 8
-    assert [q.line_no for q in bill.quarantined] == [18, 19]
-    assert all(q.reason_code == QuarantineReason.DUPLICATE_IN_FILE.value for q in bill.quarantined)
-    assert WarningCode.DUPLICATE_ROWS in bill.warnings
+    # 10 条明细里 5 条五金额全 0（3 条红利再投 + 转托管确认 + 证券清理）→ INVALID_AMOUNT。
+    assert len(bill.rows) == 5
+    assert [q.line_no for q in bill.quarantined] == [17, 18, 19, 20, 25]
+    assert {q.reason_code for q in bill.quarantined} == {QuarantineReason.INVALID_AMOUNT.value}
     # 「合计」在夹具第 27 行；持仓/声明区一行都不应被解析，更不能当 INVALID_ROW 隔离。
     assert max(row.line_no for row in bill.rows) == 26
     assert all(q.reason_code != QuarantineReason.INVALID_ROW.value for q in bill.quarantined)
@@ -471,9 +487,10 @@ def test_wrapped_summary_newline_normalized_for_side_and_parse() -> None:
     assert ipo_payment.summary == "新股申购确\n认缴款"
     assert ipo_payment.side == "buy"
     assert ipo_payment.amount_units == -26630_00
-    # 份额转移/清理类零资金业务方向未知（金额 0，不伪造买卖方向）。
+    # 托管转出发生金额 0 但资金余额非 0 → 保留为 unknown 方向；证券清理全零 → 隔离。
     assert by_line[22].side == "unknown"
-    assert by_line[25].side == "unknown"
+    quarantined_lines = {q.line_no: q for q in bill.quarantined}
+    assert quarantined_lines[25].reason_code == QuarantineReason.INVALID_AMOUNT.value
 
 
 def test_blank_code_unknown_summary_quarantined() -> None:

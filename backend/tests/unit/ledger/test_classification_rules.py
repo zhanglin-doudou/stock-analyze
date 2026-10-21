@@ -218,7 +218,7 @@ def test_synthetic_fixture_rows_classified_except_intentional_unknown() -> None:
 
 
 def test_money_fund_fixture_parse_and_classify_zero_quarantine() -> None:
-    """货基账单全链路（解析→分类）：7 行全部命中，0 行进隔离区（test-bill.xlsx 回归）。"""
+    """货基账单全链路（解析→分类）：6 行命中、全零红利发放隔离（test-bill.xlsx 回归）。"""
     fixture = Path(__file__).parents[2] / "api" / "华泰账单_货基_mock.xlsx"
     bill = parse_bill(
         fixture.read_bytes(),
@@ -227,8 +227,8 @@ def test_money_fund_fixture_parse_and_classify_zero_quarantine() -> None:
         date_format=None,
         clock=FrozenClock(datetime(2026, 7, 1, 9, 0, tzinfo=UTC)),
     )
-    assert len(bill.rows) == 7
-    assert bill.quarantined == [], bill.quarantined
+    assert len(bill.rows) == 6
+    assert [item.reason_code for item in bill.quarantined] == ["INVALID_AMOUNT"]
 
     rules = _rules()
     categories: dict[str, set[str]] = {}
@@ -239,14 +239,13 @@ def test_money_fund_fixture_parse_and_classify_zero_quarantine() -> None:
     assert categories == {
         "赎回确认": {"sell"},
         "申购确认": {"buy"},
-        "红利发放": {"dividend"},
         "证券买入": {"buy"},
         "银行转存": {"transfer"},
     }
 
 
 def test_real_statement_excerpt_parse_and_classify() -> None:
-    """真实对账单节选：折行摘要全部命中，持仓/声明区块被忽略，只有重复行进隔离区。"""
+    """真实对账单节选：折行摘要全部命中，持仓/声明区块被忽略，全零金额行隔离。"""
     fixture = Path(__file__).parents[2] / "api" / "华泰账单_真实节选_mock.xlsx"
     bill = parse_bill(
         fixture.read_bytes(),
@@ -255,8 +254,9 @@ def test_real_statement_excerpt_parse_and_classify() -> None:
         date_format=None,
         clock=FrozenClock(datetime(2026, 7, 1, 9, 0, tzinfo=UTC)),
     )
-    assert len(bill.rows) == 8
-    assert all(item.reason_code == "DUPLICATE_IN_FILE" for item in bill.quarantined)
+    assert len(bill.rows) == 5
+    assert [item.line_no for item in bill.quarantined] == [17, 18, 19, 20, 25]
+    assert {item.reason_code for item in bill.quarantined} == {"INVALID_AMOUNT"}
 
     rules = _rules()
     categories: dict[str, set[str]] = {}
@@ -265,12 +265,9 @@ def test_real_statement_excerpt_parse_and_classify() -> None:
         assert rule is not None, row.summary
         categories.setdefault(row.summary or "", set()).add(rule.category)
     assert categories == {
-        "[省心投]红\n利发放": {"dividend"},
-        "[省心投]转\n托管确认": {"transfer"},
         "[省心投]申\n购确认": {"buy"},
         "托管转出": {"transfer"},
         "新股申购确\n认缴款": {"new_stock"},
         "新股入帐": {"new_stock"},
-        "证券清理": {"other"},
         "赎回确认": {"sell"},
     }

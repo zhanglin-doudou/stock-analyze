@@ -1069,6 +1069,13 @@ export interface components {
             diff: string;
             /** Expected */
             expected: string;
+            /**
+             * Filled
+             * @default false
+             */
+            filled: boolean;
+            /** Filled Trade Id */
+            filled_trade_id?: string | null;
             /** Line No */
             line_no?: number | null;
             /** Trade Date */
@@ -1094,6 +1101,11 @@ export interface components {
              * @default 0.01
              */
             epsilon: string;
+            /**
+             * Filled Count
+             * @default 0
+             */
+            filled_count: number;
             /**
              * Generated At
              * Format: date-time
@@ -1249,13 +1261,13 @@ export interface components {
              * Side
              * @enum {string}
              */
-            side: "buy" | "sell" | "unknown";
+            side: "buy" | "sell" | "unknown" | "missing";
             /**
              * Source
              * @default import
              * @enum {string}
              */
-            source: "import" | "manual";
+            source: "import" | "manual" | "system";
             /** Stamp Tax */
             stamp_tax: string;
             /** Summary */
@@ -2627,7 +2639,7 @@ export interface operations {
                 trade_date_from?: string | null;
                 trade_date_to?: string | null;
                 security_code?: string | null;
-                side?: ("buy" | "sell" | "unknown") | null;
+                side?: ("buy" | "sell" | "unknown" | "missing") | null;
                 batch_id?: string | null;
                 include_deleted?: boolean;
                 fields?: string | null;

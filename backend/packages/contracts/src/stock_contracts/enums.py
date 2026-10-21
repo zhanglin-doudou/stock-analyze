@@ -19,6 +19,8 @@ class Side(StrEnum):
     BUY = "buy"
     SELL = "sell"
     UNKNOWN = "unknown"
+    # 对账自动补差行：代表余额链里缺失的一笔资金流，由 reconcile 生成，非账单原始行。
+    MISSING = "missing"
 
 
 class JobType(StrEnum):
@@ -87,6 +89,8 @@ class ImportBatchStatus(StrEnum):
 class TradeSource(StrEnum):
     IMPORT = "import"
     MANUAL = "manual"
+    # 系统自愈写入（对账补差行），非用户导入/手工录入。
+    SYSTEM = "system"
 
 
 class ReconciliationStatus(StrEnum):
@@ -100,6 +104,8 @@ class QuarantineReason(StrEnum):
     UNMAPPED_COLUMN = "UNMAPPED_COLUMN"
     INVALID_ROW = "INVALID_ROW"
     DUPLICATE_IN_FILE = "DUPLICATE_IN_FILE"
+    # 金额字段全为 0（佣金/印花税/其他费/发生金额/资金余额）：无资金流的噪音行。
+    INVALID_AMOUNT = "INVALID_AMOUNT"
 
 
 class WarningCode(StrEnum):
