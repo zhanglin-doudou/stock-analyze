@@ -56,14 +56,23 @@ tasks = [
 ```
 **为什么要 reaper**：worker 进程崩溃后，running 状态的任务会"悬挂"——租约回收把它们标记 expired / 重试，不让它们永远卡住。
 
-### 5. DB role 必须是 `app`（不是 owner）
+### 5. 双连接池：数据面必须 `app`，队列控制面用 `owner`
+
+G7 起 platform 的 `job/idempotency_key/user_setting/outbox_event` 启用 RLS，而队列的
+claim/reap/heartbeat 本质是**跨租户控制面**（不知道自己将要跑哪个用户的任务），
+因此拆成两个池：
 
 ```python
 class WorkerRunner:
     def __init__(self, settings, ...):
-        self.db = Database(self.settings, role="app")   # ← 应用角色，受 RLS
+        self.db = Database(self.settings, role="app")        # 数据面：handler 用，受 RLS
+        self.queue_db = Database(self.settings, role="owner")  # 控制面：claim/reap/heartbeat
+        self.queue = JobQueue(self.queue_db, self.clock)
 ```
-**为什么**：owner 不受 RLS 约束，worker 用 owner 会绕过隔离；worker 是应用运行时，角色必须跟 API 一样是 stock_app。
+
+- **handler 绝不能用 owner**：`_execute` 内必须 `self.db.tenant_tx(user_id)`，否则业务表漏隔离。
+- owner 只用于 JobQueue 的 claim/reap/heartbeat；dispose 时两个池都要释放。
+- 新增任何跨租户查询前先问：它属于控制面（owner）还是数据面（app）？
 
 ### 6. 新任务类型 = 新 handler + 新 JobQueue 注册
 

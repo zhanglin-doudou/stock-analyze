@@ -13,6 +13,8 @@ function problemBody(code: string, status: number): Problem {
     type: `about:blank`,
     title: code,
     status,
+    // 契约 Error.detail 为必填（RFC 7807 扩展体），网络层兜底也补空串。
+    detail: "版本冲突",
     code,
     user_message: "这条数据刚被改过。",
     what_to_do: "刷新后重新提交。",

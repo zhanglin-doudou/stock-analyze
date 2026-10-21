@@ -54,7 +54,7 @@ export function QuarantineList({ batchId }: QuarantineListProps) {
       {page ? (
         <Cursor
           hasMore={Boolean(page.next_cursor)}
-          nextCursor={page.next_cursor}
+          nextCursor={page.next_cursor ?? null}
           disabled={loading}
           onNext={() => void load(page.next_cursor ?? undefined)}
         />

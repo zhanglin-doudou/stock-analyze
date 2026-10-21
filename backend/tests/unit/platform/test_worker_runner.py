@@ -34,7 +34,7 @@ async def runner(settings: Settings) -> AsyncIterator[WorkerRunner]:
     try:
         yield worker
     finally:
-        await worker.db.dispose()
+        await worker.close()
 
 
 async def _enqueue(
@@ -44,7 +44,8 @@ async def _enqueue(
     kind: str,
     max_attempts: int = 3,
 ) -> str:
-    async with runner.db.session(begin=True) as session:
+    # 入队是跨租户控制面动作（G7 后 job 行受 RLS；测试用 owner 控制面 Database）。
+    async with runner.queue_db.session(begin=True) as session:
         job_id, _ = await runner.queue.enqueue(
             session,
             kind=kind,

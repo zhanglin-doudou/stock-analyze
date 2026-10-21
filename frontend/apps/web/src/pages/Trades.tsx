@@ -187,7 +187,7 @@ export function Trades() {
       {page ? (
         <Cursor
           hasMore={page.has_more}
-          nextCursor={page.next_cursor}
+          nextCursor={page.next_cursor ?? null}
           disabled={loading}
           onNext={() => void load(page.next_cursor ?? undefined)}
           onReset={() => void load()}

@@ -316,7 +316,7 @@ async def _drain_worker(settings) -> None:
                 break
             await runner._execute(claimed)
     finally:
-        await runner.db.dispose()
+        await runner.close()
 
 
 async def test_api_011_commit_accepted(client, api_prefix, user) -> None:

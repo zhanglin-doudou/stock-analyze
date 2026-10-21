@@ -475,6 +475,18 @@ VERIFY_STEPS: tuple[tuple[str, list[str]], ...] = (
         "api-check（覆盖/错误码/示例/x-*）",
         ["uv", "run", "python", "-m", "stock_api.cli", "api-check"],
     ),
+    (
+        "gate 端点覆盖（Period1 30/30）",
+        ["uv", "run", "python", "scripts/ci/gate_endpoint_coverage.py"],
+    ),
+    (
+        "gate 越权覆盖（受保护端点）",
+        ["uv", "run", "python", "scripts/ci/gate_tenant_coverage.py"],
+    ),
+    (
+        "gate RLS 覆盖（platform/ledger/review）",
+        ["uv", "run", "python", "scripts/ci/gate_rls_coverage.py"],
+    ),
     ("前端 tsc typecheck", ["pnpm", "-C", "frontend", "-r", "typecheck"]),
     ("前端 vitest", ["pnpm", "-C", "frontend", "-r", "test"]),
     ("前端生产构建", ["pnpm", "-C", "frontend", "-r", "build"]),

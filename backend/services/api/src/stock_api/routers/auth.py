@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from stock_contracts.constants import LOGIN_FAILURE_MAX_ATTEMPTS, LOGIN_FAILURE_WINDOW_SECONDS
 from stock_contracts.errors import ApiError, ErrorCode, FieldError
 from stock_platform import audit
+from stock_platform.db import set_tenant
 from stock_platform.obs import get_logger
 from stock_platform.repositories import (
     RefreshTokenRepository,
@@ -125,6 +126,8 @@ async def register(
         password_hash=hasher_for(state.settings.argon2_time_cost).hash(payload.password),
         display_name=payload.display_name,
     )
+    # G7：user_setting 已启 RLS，系统 session 必须先注入新用户租户再读写默认设置。
+    await set_tenant(session, user.id)
     await UserSettingRepository(session).get(user.id)
     return await _issue_session(
         session,
@@ -263,7 +266,8 @@ async def get_me(
 ) -> MeOut:
     user_id = ctx.require_user()
     state = get_state(request)
-    async with state.db.session(begin=True) as session:
+    # G7：user_setting 已启 RLS，me 的读取/懒创建都必须在租户会话内。
+    async with state.db.session(user_id=user_id, begin=True) as session:
         user = await UserRepository(session).by_id(user_id)
         if user is None:
             raise ApiError(ErrorCode.TOKEN_REVOKED)

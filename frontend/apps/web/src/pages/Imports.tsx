@@ -168,9 +168,9 @@ export function Imports() {
               </p>
 
               <h3>警告</h3>
-              {detail.warnings.length > 0 ? (
+              {(detail.warnings ?? []).length > 0 ? (
                 <ul>
-                  {detail.warnings.map((warning, index) => (
+                  {(detail.warnings ?? []).map((warning, index) => (
                     <li key={`${warning}-${index}`}>
                       <code>{warning}</code>
                     </li>

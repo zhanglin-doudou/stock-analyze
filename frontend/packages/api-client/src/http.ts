@@ -1,25 +1,47 @@
 // 轻量 fetch 封装：Bearer 注入、RFC 7807 解析、401 刷新重放、全部一期端点。
+//
+// DTO 不再在本文件手写：统一来自 ./contract（generated SDK 类型接入层）。
+// 后端契约字段变化会通过 contract.ts 的编译期断言在 `tsc` 阶段暴露。
 
-export interface ProblemFieldError {
-  field: string;
-  code: string;
-  message: string;
-}
+import type {
+  AuthTokens,
+  BatchList,
+  CommitImportBody,
+  CreateTokenBody,
+  ErrorCatalogOut,
+  HealthOut,
+  ImportBatch,
+  Job,
+  JobAccepted,
+  JobStatus,
+  LoginIn,
+  LoginResponse,
+  MeOut,
+  PatCreateResponse,
+  Preview,
+  PreviewOptions,
+  Problem,
+  ProblemFieldError,
+  QuarantinePage,
+  ReadyOut,
+  RefreshIn,
+  RefreshOut,
+  RegisterIn,
+  RegisterResponse,
+  RestoreResult,
+  RevokeResult,
+  TokenList,
+  TradeHistoryPage,
+  TradeMutationOut,
+  TradeMutationResult,
+  TradePage,
+  TradePageDocument,
+  TradePatchIn,
+  VersionOut,
+} from "./contract";
 
-/** RFC 7807 + 扩展体（后端统一错误模型）。 */
-export interface Problem {
-  type: string;
-  title: string;
-  status: number;
-  detail?: string;
-  instance?: string;
-  code: string;
-  user_message: string;
-  what_to_do: string;
-  retryable: boolean;
-  request_id: string;
-  errors?: ProblemFieldError[];
-}
+// 对外保持原有导出名（`import type { Trade } from "@sa/api-client"` 不受影响）。
+export type * from "./contract";
 
 export function isProblem(value: unknown): value is Problem {
   if (typeof value !== "object" || value === null) return false;
@@ -59,230 +81,6 @@ export function isApiProblemError(value: unknown): value is ApiProblemError {
 export interface Tokens {
   access: string | null;
   refresh: string | null;
-}
-
-export interface AuthTokens {
-  access_token: string;
-  refresh_token: string;
-  expires_in: number;
-  token_type: string;
-}
-
-export type UserRole = "user" | "admin";
-
-export interface User {
-  id: string;
-  email: string;
-  role: UserRole;
-  email_verified?: boolean;
-  created_at?: string;
-}
-
-export interface LoginResponse extends AuthTokens {
-  user: User;
-}
-
-export interface RegisterResponse extends AuthTokens {
-  user: User;
-}
-
-export interface PatToken {
-  token_id: string;
-  name: string;
-  prefix: string;
-  scopes: Array<"read" | "write">;
-  expires_at: string;
-  created_at: string;
-  last_used_at?: string | null;
-}
-
-/** 仅创建时返回一次明文 token。 */
-export interface CreatedPatToken extends PatToken {
-  token: string;
-}
-
-export interface TokenList {
-  items: PatToken[];
-}
-
-export interface Trade {
-  trade_id: string;
-  trade_date: string;
-  security_code: string;
-  security_name?: string;
-  side: string;
-  /** 定点字符串，禁止参与数值计算 */
-  quantity: string;
-  price: string;
-  amount: string;
-  commission: string;
-  stamp_tax: string;
-  other_fee: string;
-  cash_balance: string | null;
-  cash_balance_available: boolean;
-  account_masked?: string;
-  dedupe_key: string;
-  version: number;
-  deleted_at: string | null;
-}
-
-export interface AffectedMetric {
-  metric_id: string;
-  status: string;
-}
-
-export interface TradePage {
-  items: Trade[];
-  next_cursor: string | null;
-  has_more: boolean;
-  meta: { data_as_of: string };
-  etag: string | null;
-}
-
-export interface TradeResult extends Trade {
-  affected_metrics?: AffectedMetric[];
-}
-
-export interface RestoreResult {
-  trade: Trade;
-  recompute_job_id?: string;
-  status: string;
-}
-
-export interface TradeHistoryRecord {
-  version: number;
-  changed_at?: string;
-  changes?: Record<string, unknown>;
-}
-
-export interface TradeHistoryPage {
-  items: TradeHistoryRecord[];
-  next_cursor?: string | null;
-}
-
-export interface PreviewColumn {
-  index: number;
-  name: string;
-  sample: string[];
-  suggested_field: string | null;
-  confidence: number;
-}
-
-export interface PreviewWarning {
-  code: string;
-  row?: number;
-  column?: string;
-  message: string;
-}
-
-export interface PreviewEstimate {
-  parsed: number;
-  inserted: number;
-  skipped: number;
-  quarantined: number;
-}
-
-export interface Preview {
-  preview_id: string;
-  file: { name: string; sha256: string; bytes: number };
-  columns: PreviewColumn[];
-  date_format?: string;
-  warnings: PreviewWarning[];
-  estimated: PreviewEstimate;
-  cash_balance_available: boolean;
-  can_commit: boolean;
-}
-
-/** 批次状态（BatchOut.status）。 */
-export type ImportBatchStatus = "pending" | "running" | "succeeded" | "failed" | "revoked";
-
-/** 批次计数：行数，仅用于展示；前端不做任何算术。 */
-export interface BatchCounts {
-  parsed: number;
-  inserted: number;
-  skipped: number;
-  quarantined: number;
-}
-
-/** API-012/013：导入批次（BatchOut）。 */
-export interface ImportBatch {
-  batch_id: string;
-  status: ImportBatchStatus;
-  mode: "full" | "replace_range";
-  broker: string;
-  file_name: string;
-  counts: BatchCounts;
-  warnings: string[];
-  assumptions?: Record<string, unknown>;
-  created_at: string;
-  finished_at?: string | null;
-  revoked_at?: string | null;
-  /** 后端判定：仅未撤销且 pending/running/succeeded 时为 true。 */
-  can_revoke: boolean;
-}
-
-export interface BatchList {
-  items: ImportBatch[];
-  next_cursor?: string | null;
-  total_estimate?: number | null;
-}
-
-/** API-015 撤销结果（RevokeOut）；`reverted` 为行数计数，仅展示。 */
-export interface RevokeResult {
-  batch_id: string;
-  status: "revoked";
-  reverted: Record<string, number>;
-  revoked_at: string;
-  affected_metrics?: Array<{ metric_id: string; status: string }>;
-}
-
-export interface QuarantineRaw {
-  date?: string;
-  security_code?: string;
-  summary?: string;
-  quantity?: string;
-  price?: string;
-  amount?: string;
-  cash_balance?: string;
-}
-
-export interface QuarantineItem {
-  line_no: number | null;
-  raw: QuarantineRaw;
-  reason_code: string;
-  suggested_rule_id?: string | null;
-  resolved?: boolean;
-  created_at?: string | null;
-}
-
-export interface QuarantinePage {
-  items: QuarantineItem[];
-  next_cursor: string | null;
-  total_estimate?: number;
-}
-
-export type JobStatus = "pending" | "running" | "succeeded" | "failed" | "cancelled";
-
-export type JobType =
-  | "import_commit"
-  | "rebuild_rounds"
-  | "diagnostics_selection"
-  | "report_generate"
-  | "export_create"
-  | "backup"
-  | "restore_drill"
-  | "reclassify";
-
-export interface Job {
-  job_id: string;
-  type: JobType;
-  status: JobStatus;
-  progress?: number;
-  stage?: string;
-  batch_id?: string;
-  result_ref?: string | null;
-  error?: Problem | null;
-  links?: { self?: string; events?: string };
 }
 
 export type JobEventName = "progress" | "done" | "error" | "reconnect";
@@ -330,26 +128,6 @@ export interface CursorQuery {
   [key: string]: QueryValue;
   limit?: number;
   cursor?: string;
-}
-
-export interface CommitImportBody {
-  preview_id: string;
-  mode: "full" | "replace_range";
-  range?: { from: string; to: string };
-  mapping?: Record<string, string>;
-}
-
-export interface PreviewOptions {
-  columns?: string;
-  date_format?: string;
-  mode?: "full" | "replace_range";
-  broker?: string;
-}
-
-export interface CreateTokenBody {
-  name: string;
-  scopes: Array<"read" | "write">;
-  expires_at?: string;
 }
 
 export type QueryValue = string | number | boolean | null | undefined;
@@ -417,7 +195,7 @@ async function readProblem(res: Response): Promise<Problem> {
     type: p?.type ?? "about:blank",
     title: p?.title ?? res.statusText ?? "Request failed",
     status: p?.status ?? res.status,
-    detail: p?.detail,
+    detail: p?.detail ?? res.statusText ?? "",
     instance: p?.instance,
     code: p?.code ?? `HTTP_${res.status}`,
     user_message: p?.user_message ?? `请求失败（HTTP ${res.status}）。`,
@@ -476,7 +254,7 @@ export function createClient(options: ClientOptions) {
             body: JSON.stringify({ refresh_token: refresh }),
           });
           if (!res.ok) return null;
-          const tokens = await parseJson<AuthTokens>(res);
+          const tokens = await parseJson<RefreshOut>(res);
           options.onTokens?.(tokens);
           return tokens;
         } catch {
@@ -526,22 +304,22 @@ export function createClient(options: ClientOptions) {
   }
 
   const auth = {
-    register(body: { email: string; password: string; display_name?: string; accept_tos: boolean }) {
+    register(body: RegisterIn) {
       return send<RegisterResponse>({ path: "/auth/register", method: "POST", body, omitAuth: true }).then((r) => r.data);
     },
-    login(body: { email: string; password: string; device_name?: string }) {
+    login(body: LoginIn) {
       return send<LoginResponse>({ path: "/auth/login", method: "POST", body, omitAuth: true }).then((r) => r.data);
     },
     refresh(refreshToken: string) {
-      return send<AuthTokens>({ path: "/auth/refresh", method: "POST", body: { refresh_token: refreshToken }, omitAuth: true }).then(
-        (r) => r.data,
-      );
+      const body = { refresh_token: refreshToken } satisfies RefreshIn;
+      return send<RefreshOut>({ path: "/auth/refresh", method: "POST", body, omitAuth: true }).then((r) => r.data);
     },
     logout() {
       return send<void>({ path: "/auth/logout", method: "POST" }).then(() => undefined);
     },
     me() {
-      return send<User>({ path: "/account/me" }).then((r) => r.data);
+      // API-005 的路径是 /auth/me（此前误写 /account/me，由契约测试防回归）。
+      return send<MeOut>({ path: "/auth/me" }).then((r) => r.data);
     },
   };
 
@@ -550,7 +328,7 @@ export function createClient(options: ClientOptions) {
       return send<TokenList>({ path: "/tokens", query }).then((r) => r.data);
     },
     create(body: CreateTokenBody) {
-      return send<{ token: CreatedPatToken }>({ path: "/tokens", method: "POST", body }).then((r) => r.data.token);
+      return send<PatCreateResponse>({ path: "/tokens", method: "POST", body }).then((r) => r.data.token);
     },
     revoke(tokenId: string) {
       return send<void>({ path: `/tokens/${tokenId}`, method: "DELETE" }).then(() => undefined);
@@ -561,14 +339,13 @@ export function createClient(options: ClientOptions) {
     preview(file: File, opts: PreviewOptions = {}) {
       const form = new FormData();
       form.append("file", file);
-      if (opts.columns) form.append("columns", opts.columns);
+      // 仅使用契约 Body_previewImport 声明的字段（此前多余的 columns/mode/broker 后端并不读取）。
+      if (opts.mapping) form.append("mapping", opts.mapping);
       if (opts.date_format) form.append("date_format", opts.date_format);
-      if (opts.mode) form.append("mode", opts.mode);
-      if (opts.broker) form.append("broker", opts.broker);
       return send<Preview>({ path: "/imports/preview", method: "POST", formData: form }).then((r) => r.data);
     },
     commit(body: CommitImportBody, idempotencyKey: string) {
-      return send<Job>({ path: "/imports", method: "POST", body, idempotencyKey }).then((r) => r.data);
+      return send<JobAccepted>({ path: "/imports", method: "POST", body, idempotencyKey }).then((r) => r.data);
     },
     listBatches(query: CursorQuery = {}) {
       return send<BatchList>({ path: "/imports", query }).then((r) => r.data);
@@ -653,12 +430,8 @@ export function createClient(options: ClientOptions) {
 
   const trades = {
     async list(query: ListTradesQuery = {}): Promise<TradePage> {
-      const { data, headers } = await send<{
-        items?: Trade[];
-        next_cursor?: string | null;
-        has_more?: boolean;
-        meta?: { data_as_of?: string };
-      }>({
+      // 契约 TradePage + 客户端附加的 meta（响应头 data_as_of 由后端 meta 中间件注入）。
+      const { data, headers } = await send<TradePageDocument & { meta?: { data_as_of?: string } }>({
         path: "/trades",
         query: {
           limit: query.limit,
@@ -683,15 +456,16 @@ export function createClient(options: ClientOptions) {
         etag: headers.get("ETag"),
       };
     },
-    async patch(tradeId: string, body: Record<string, string>, opts: { version: number; idempotencyKey: string }) {
-      const { data, headers } = await send<TradeResult>({
+    async patch(tradeId: string, body: TradePatchIn, opts: { version: number; idempotencyKey: string }): Promise<TradeMutationResult> {
+      // API-018 响应体是 TradeMutationOut { trade, affected_metrics }，不是裸 TradeOut。
+      const { data, headers } = await send<TradeMutationOut>({
         path: `/trades/${tradeId}`,
         method: "PATCH",
         body,
         ifMatch: `"${opts.version}"`,
         idempotencyKey: opts.idempotencyKey,
       });
-      return { trade: data, etag: headers.get("ETag") };
+      return { trade: data.trade, affected_metrics: data.affected_metrics ?? [], etag: headers.get("ETag") };
     },
     remove(tradeId: string) {
       return send<void>({ path: `/trades/${tradeId}`, method: "DELETE" }).then(() => undefined);
@@ -710,16 +484,16 @@ export function createClient(options: ClientOptions) {
 
   const ops = {
     healthz() {
-      return send<Record<string, unknown>>({ path: "/healthz", root: true, omitAuth: true }).then((r) => r.data);
+      return send<HealthOut>({ path: "/healthz", root: true, omitAuth: true }).then((r) => r.data);
     },
     readyz() {
-      return send<Record<string, unknown>>({ path: "/readyz", root: true, omitAuth: true }).then((r) => r.data);
+      return send<ReadyOut>({ path: "/readyz", root: true, omitAuth: true }).then((r) => r.data);
     },
     version() {
-      return send<Record<string, unknown>>({ path: "/version", root: true, omitAuth: true }).then((r) => r.data);
+      return send<VersionOut>({ path: "/version", root: true, omitAuth: true }).then((r) => r.data);
     },
     errors() {
-      return send<Record<string, unknown>>({ path: "/errors", omitAuth: true }).then((r) => r.data);
+      return send<ErrorCatalogOut>({ path: "/errors", omitAuth: true }).then((r) => r.data);
     },
     openapi() {
       return send<Record<string, unknown>>({ path: "/openapi.json", omitAuth: true }).then((r) => r.data);

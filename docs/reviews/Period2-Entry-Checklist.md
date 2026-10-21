@@ -8,7 +8,7 @@
 **有条件通过（Conditional Go，G2/G3/G4 已关闭）**：
 
 - 5 项 P0 已全部修复并复验（数据口径/去重/权限/撤销 UI/验收门禁与契约）；
-- **G1（数据基线）/ G2（队列语义）/ G3（分类闭环）/ G4（replay 行情）/ G5（seed/demo）已完成并验证**（见 [G2-G4 Fix Log](Period2-Hardening-Fix-Log-G2-G3-G4.md)、[G5-G1 Fix Log](Period2-Hardening-Fix-Log-G5-G1.md)）；剩余 G6/G7。
+- **G1~G7 全部关闭**：G1 数据基线、G2 队列语义、G3 分类闭环、G4 replay 行情、G5 seed/demo、G6 SDK/覆盖门禁、G7 platform RLS 均已完成并验证（见 [G2-G4](Period2-Hardening-Fix-Log-G2-G3-G4.md)、[G5-G1](Period2-Hardening-Fix-Log-G5-G1.md)、[G6-G7](Period2-Hardening-Fix-Log-G6-G7.md)）。可开始 Period2-01/02。
 - `verify-p1` 已扩为 15 步全绿（含 API 验收、越权、RLS、契约快照、前端 tsc/vitest/build）；
 - 剩余 17 项 P1 中，有 6 类构成二期任务的**显式硬依赖**：G1~G7 完成前，不进入对应二期任务；
 - **Period2-01（FIFO 纯核心 + Oracle）可立即并行启动**（只依赖已修复的金额口径与 core 标度整数）。
@@ -21,9 +21,9 @@
 | Period2-02 回合落库 / rebuild-rounds / 规则 CRUD | ⚠️ G7 完成后 | G2 ✅、G7（review RLS） |
 | Period2-03 净值与收益（NAV/TWR/XIRR） | ⚠️ Period2-02 后 | G3 ✅（分类/现金流识别）、Period2-02 |
 | Period2-04 行情适配与校验（replay/live） | ✅ 可开始 | G4 ✅（replay 适配器 + 确定性夹具；live 留 Period2-04） |
-| Period2-05 指标注册表与执行引擎 | ⚠️ Period2-03/Period2-04 后 | 同上 + G6（契约/覆盖门禁） |
+| Period2-05 指标注册表与执行引擎 | ⚠️ Period2-03/04 后 | G6 ✅；P2-03/04 完成 |
 | Period2-06~Period2-13 端点/前端/报告/导出 | ⚠️ 随 Period2-05 | G6、前端 token/eslint 收口 |
-| Period2-14 二期越权全量 / `make verify-p2` | ⚠️ 门禁先行 | G6（tools/ci 端点覆盖 + 越权矩阵） |
+| Period2-14 二期越权全量 / `make verify-p2` | ⚠️ 随端点增长 | G6 ✅（门禁已有，新端点自动纳入） |
 | Period2-15 前端零口径门禁 | ⚠️ 先有 eslint | eslint 基础设施（P1-15 残余） |
 
 ---
@@ -130,7 +130,8 @@
 - **为什么**：二期一次新增 ~35 个端点；Period2-14 要求"受保护端点越权 100%"，Period2-15 要求前端零口径；当前前端仍手写 DTO、`tools/ci` 缺位。
 - **动作**：前端类型改用生成 SDK；新增 `tools/ci/gate_endpoint_coverage.py` 与 `gate_tenant_coverage.py`（或 pytest 等价门禁）；`verify-p1`/`verify-p2` 纳入；API-075/072 等缺口用例补齐。
 - **验收**：新增端点未加验收/越权用例即门禁失败；`make verify-p2` 可跑。
-- **状态**：⬜ 待做
+- **状态**：✅ 已完成（2026-10-21）
+- **证据**：`contract.ts` 编译期契约断言 + 7 条 contract.test；`gate_endpoint_coverage` 30/30；`gate_tenant_coverage` 23/23、401 23/23、列表隔离 4/4；`verify-p1` 18/18。详见 [G6-G7 Fix Log](Period2-Hardening-Fix-Log-G6-G7.md)
 - **估时**：1d
 
 ### G7 review schema 与 platform 租户表 RLS
@@ -138,7 +139,8 @@
 - **为什么**：Period2-02 起新增 `review.round/round_fill/nav_daily` 等表；当前 RLS 只覆盖 ledger，platform 的 job/api_token/idempotency 等无策略。
 - **动作**：新表迁移同批创建 `tenant_isolation` 策略 + WITH CHECK；为 platform 租户表补策略（认证前置表单独处理）；RLS 测试补 Testing §4.3 八类场景。
 - **验收**：`information_schema` 枚举租户表策略 100%；未设 `app.user_id` 读 review/platform 租户表 0 行；跨租户写被拒。
-- **状态**：⬜ 待做
+- **状态**：✅ 已完成（2026-10-21）
+- **证据**：0002 迁移启用 platform 4 表 RLS；worker 双池；`gate_rls_coverage` 11/11；RLS 测试 20 条；详见 [G6-G7 Fix Log](Period2-Hardening-Fix-Log-G6-G7.md)
 - **估时**：0.5–1d
 
 ---
@@ -147,10 +149,10 @@
 
 ```
 Day 0        G1 已完成（清库重 seed + tag `period1-baseline`）；Period2-01 FIFO 纯核心 + oracle 开工
-Sprint 1     G7 review RLS；Period2-01 对拍（属性测试 + 28 边界 fixture ≤0.01）
-Sprint 2     Period2-02 回合落库/rebuild（依赖 G2 ✅、G7 完成）
+Sprint 1     Period2-01 对拍（属性测试 + 28 边界 fixture ≤0.01）
+Sprint 2     Period2-02 回合落库/rebuild（依赖 G2/G7 ✅）
 Sprint 3     Period2-03 NAV（依赖 G3/Period2-02）；Period2-04 行情（依赖 G4）
-Sprint 4     Period2-05 指标引擎 + Period2-06 端点；G6 契约/越权门禁随端点增长
+Sprint 4     Period2-05 指标引擎 + Period2-06 端点；新增端点由 G6 门禁强制覆盖
 Sprint 5+    Period2-07~Period2-13；Period2-14 二期越权全量；Period2-15 前端零口径
 ```
 
@@ -186,4 +188,5 @@ Sprint 5+    Period2-07~Period2-13；Period2-14 二期越权全量；Period2-15 
 |---|---|
 | 2026-10-21 | 初版：5 项 P0 已修复；G2/G3/G4 进入修复 |
 | 2026-10-21 | G2/G3/G4 已完成并集成验证（verify-p1 15/15；真实 HTTP G2 7/7、G3/G4 16/16） |
-| 2026-10-21 | G5 seed/demo + G1 清库基线完成（3 用户/238 流水/2 批次，tag `period1-baseline`）；剩余 G6/G7 |
+| 2026-10-21 | G5 seed/demo + G1 清库基线完成（3 用户/238 流水/2 批次，tag `period1-baseline`） |
+| 2026-10-21 | G6（SDK/端点/越权门禁）+ G7（platform RLS/review 门禁）完成；verify-p1 18/18；G1~G7 全部关闭 |

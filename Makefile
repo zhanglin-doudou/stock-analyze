@@ -36,6 +36,9 @@ help:
 	@echo "  make test-rls       RLS 隔离集成测试"
 	@echo "  make test-isolation 越权负向矩阵"
 	@echo "  make api-check      契约完整性检查（示例/错误码/operationId）"
+	@echo "  make gate-endpoint  一期 30 端点实现/测试引用覆盖门禁"
+	@echo "  make gate-tenant    受保护端点越权（跨租户/401/admin）覆盖门禁"
+	@echo "  make gate-rls       租户表 RLS 策略覆盖门禁"
 	@echo "  make sdk            由 openapi.json 生成前端 SDK"
 	@echo "  make verify-p1      一期全部断言（一条命令全绿）"
 	@echo "  make demo-p1        5 分钟演示脚本"
@@ -168,6 +171,18 @@ sdk:
 .PHONY: api-coverage
 api-coverage:
 	@$(PY) -m stock_api.cli api-coverage
+
+.PHONY: gate-endpoint
+gate-endpoint:
+	@$(PY) scripts/ci/gate_endpoint_coverage.py
+
+.PHONY: gate-tenant
+gate-tenant:
+	@$(PY) scripts/ci/gate_tenant_coverage.py
+
+.PHONY: gate-rls
+gate-rls:
+	@$(PY) scripts/ci/gate_rls_coverage.py
 
 .PHONY: verify-p1
 verify-p1:

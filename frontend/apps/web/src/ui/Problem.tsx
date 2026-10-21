@@ -21,6 +21,7 @@ export function toProblem(error: unknown): Problem {
     type: "about:blank",
     title: "Unknown error",
     status: 0,
+    detail: "",
     code: "UNEXPECTED_ERROR",
     user_message: "发生了未预期的错误。",
     what_to_do: "请重试。",

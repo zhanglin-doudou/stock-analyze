@@ -2,13 +2,13 @@
 
 本文是 [README](../README.md) 的数据库专项文档：本地 PostgreSQL 的两种安装方式、三角色模型、迁移执行、日常 SQL 操作与故障排查。
 
-一期 schema 布局（4 个业务 schema，由 Alembic 迁移 `0001_phase1` 创建）：
+一期 schema 布局（4 个业务 schema，由 Alembic 迁移 `0001_phase1` 创建；`0002_platform_tenant_rls` 补 platform 租户表 RLS）：
 
 | Schema | 内容 |
 |---|---|
-| `platform` | 用户 / 令牌 / 任务 / 幂等键 / 审计 / 配置等平台表 |
-| `ledger` | 流水 / 批次 / 预览 / 隔离区 / 摘要规则 / 对账（**启 RLS**） |
-| `review` | 复盘域（二期启用） |
+| `platform` | 用户 / 令牌 / 任务 / 幂等键 / 审计 / 配置等平台表；**租户表 job / idempotency_key / user_setting / outbox_event 启 RLS**，认证/系统表不启（见 §2.1） |
+| `ledger` | 流水 / 批次 / 预览 / 隔离区 / 摘要规则 / 对账（**全部启 RLS**） |
+| `review` | 复盘域（二期启用；新表由 `scripts/ci/gate_rls_coverage.py` 强制纳入 RLS 覆盖） |
 | `delivery` | 交付域（三期启用） |
 
 ---
@@ -65,6 +65,35 @@ STOCK_DB_APP_DSN=postgresql+asyncpg://stock_app:stock_app_pw@127.0.0.1:5432/stoc
 
 关键设计：应用运行时走 `stock_app`，即使代码漏掉 `user_id` 过滤，RLS 也会兜底（`user_id = current_setting('app.user_id')::uuid` 谓词）；迁移/造数才用 `stock_owner`。**任何代码路径都不要用 postgres 超级用户**——超级用户绕过 RLS，会掩盖隔离缺陷。
 
+**worker 的例外（G7 之后）**：`WorkerRunner` 持有两套连接池——`db`（`stock_app`，handler 的租户事务，受 RLS）与 `queue_db`（`stock_owner`，**仅**用于跨租户的 `claim / reap_expired_leases / heartbeat` 队列控制面）。owner 不下发业务读写；handler 仍只拿 app 会话。
+
+### 2.1 RLS 覆盖范围与例外（G7 / `0002_platform_tenant_rls`）
+
+启用 RLS 的租户表（策略名统一 `tenant_isolation`，`USING` 与 `WITH CHECK` 同一谓词，未设变量时 fail-closed）：
+
+| Schema | 表 |
+|---|---|
+| `ledger` | `trade` / `trade_history` / `import_batch` / `import_preview` / `quarantine_row` / `summary_rule`（系统规则放行 `user_id IS NULL`）/ `reconciliation` |
+| `platform` | `job` / `idempotency_key` / `user_setting` / `outbox_event`（`user_id IS NULL` 的系统事件只有 owner 可读写） |
+
+**按设计不启用 RLS 的认证/系统表**（原因见迁移 `0002` docstring；`scripts/ci/gate_rls_coverage.py` 内显式 allowlist）：
+
+| 表 | 原因 |
+|---|---|
+| `platform.user` | 登录按 email 查用户时尚未知 `user_id`，无法 `SET LOCAL`（认证前置） |
+| `platform.refresh_token` / `platform.api_token` | 刷新/PAT 校验按 `token_hash` 查（认证前置，未知 `user_id`） |
+| `platform.login_attempt` / `platform.rate_limit_bucket` | 按 email/IP/窗口键计数，认证前即需读写，无 `user_id` 语义 |
+| `platform.config_release` / `platform.schema_version` / `platform.backup_run` | 全局系统状态，无 `user_id` |
+| `platform.audit_log` | 含登录失败等 actor 未知事件；跨租户不可见由 API 层 actor 过滤保证 |
+| `platform.job_event` | 无 `user_id` 列（从属于 `job`，按 `job_id` 访问；写入发生在 job 的租户事务内） |
+
+覆盖门禁（新增租户表未补 RLS 即 CI fail；review 当前 0 张表，P2-02 建表后自动纳入）：
+
+```bash
+.venv/bin/python scripts/ci/gate_rls_coverage.py        # 默认取 .env / STOCK_DB_* 的 owner DSN
+# 输出形如：platform: 4/4、ledger: 7/7、review: 0/0，exit 0；缺策略时列出表名并 exit 1
+```
+
 ## 3. 执行迁移
 
 ```bash
@@ -82,6 +111,7 @@ uv run alembic -c backend/alembic.ini heads
 ```
 
 - 新增迁移：`uv run alembic -c backend/alembic.ini revision --autogenerate -m "xxx"`，生成后**必须人工审阅**（RLS/授权语句不在 autogenerate 范围内）。
+- 迁移 `0002_platform_tenant_rls`：为 `platform.job / idempotency_key / user_setting / outbox_event` 补 `tenant_isolation` 策略（`ENABLE RLS` + `CREATE POLICY`，可重复执行）。新增**带 `user_id` 的业务表**必须同批补 RLS，并跑 `scripts/ci/gate_rls_coverage.py`。
 - 启动即校验：API 启动时会核对 `platform.schema_version` 与代码版本，不匹配直接拒绝启动——先跑迁移再起服务。
 
 ## 4. 连接与执行 SQL
@@ -133,17 +163,23 @@ asyncio.run(main())
 BEGIN;
 SELECT set_config('app.user_id', '<A的uuid>', true);   -- true = 仅本事务生效
 SELECT count(*) FROM ledger.trade;                      -- 只返回 A 的行
+SELECT count(*) FROM platform.job;                      -- 同上（G7 起 job 也启 RLS）
 ROLLBACK;
 
 -- 未设置 app.user_id：默认拒绝，读到 0 行
 SELECT count(*) FROM ledger.trade;                      -- 0
+SELECT count(*) FROM platform.job;                      -- 0
+SELECT count(*) FROM platform.user_setting;             -- 0
 ```
+
+> worker 的 `claim / reap / heartbeat` 是唯一允许跨租户读写 `platform.job` 的路径，
+> 走 owner 连接（`WorkerRunner.queue_db`）；业务代码/排查仍应用 app 角色 + `SET LOCAL`。
 
 ### 排查任务队列
 
 ```sql
 -- 近期任务与失败原因
-SELECT id, kind, status, attempt, max_attempts, stage, progress, last_error, created_at
+SELECT id, kind, status, attempt, max_attempts, stage, progress, error_code, created_at
 FROM platform.job ORDER BY created_at DESC LIMIT 20;
 
 -- 事件流（seq 即 SSE 的 event id）
@@ -170,8 +206,8 @@ SELECT batch_id, line_no, reason_code, raw FROM ledger.quarantine_row
 WHERE user_id = '<uuid>' AND NOT resolved ORDER BY created_at DESC;
 
 -- 幂等键 / 审计
-SELECT key, status, created_at FROM platform.idempotency_key ORDER BY created_at DESC LIMIT 10;
-SELECT action, user_id, created_at FROM platform.audit_log ORDER BY created_at DESC LIMIT 10;
+SELECT key, status_code, created_at FROM platform.idempotency_key ORDER BY created_at DESC LIMIT 10;
+SELECT action, actor_id, at FROM platform.audit_log ORDER BY at DESC LIMIT 10;
 ```
 
 ### 慢查询定位（Docker compose 已启用 pg_stat_statements）
@@ -215,6 +251,9 @@ RESTART IDENTITY CASCADE;
 | 应用查不到刚插入的数据 | 多半用 `stock_app` 连接但没设 `app.user_id`（RLS 默认拒绝）——运行时请走 API，直连排查用 §5 的租户会话写法 |
 | `permission denied for schema ledger` | 用 `stock_owner` 跑迁移（`make migrate`）；`stock_app` 的 DML 授权由迁移 `GRANT` 完成，若手工删过授权需重跑迁移 |
 | RLS 好像"失效"了 | 检查是否用 owner/超级用户连接（owner 不受 RLS 约束）；验证请用 `stock_app` |
+| `new row violates row-level security policy` | 写入会话没带租户上下文：API 一律 `db.session(user_id=..., begin=True)`，auth 注册的 `user_setting` 在 `set_tenant(user.id)` 之后写；worker handler 用 `tenant_tx(user_id)` |
+| `/jobs` 列表为空但 `platform.job` 有行 | 用 app 角色直连时没设 `app.user_id`（G7 起 job 受 RLS）；API 端点已强制租户会话，直连排查用 §5 写法 |
+| 新增 review/platform 表后 CI 报 RLS 缺失 | 迁移里补 `ENABLE ROW LEVEL SECURITY` + `tenant_isolation` 策略，再跑 `scripts/ci/gate_rls_coverage.py` |
 | 迁移卡住 / 状态异常 | `alembic current` 看版本；必要时 `alembic downgrade` 回退一版，或 `make db-reset` 重建 |
 
 ## 8. 备份提示（本地）

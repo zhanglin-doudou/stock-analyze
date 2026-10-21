@@ -55,8 +55,8 @@ def _to_out(job: Job) -> JobOut:
 
 
 async def _load_job(state: AppState, user_id: uuid.UUID, job_id: str) -> Job:
-    """取任务并强制归属校验（跨账号 → 404）。"""
-    async with state.db.session(begin=True) as session:
+    """取任务并强制归属校验（跨账号 → 404）。job 已启 RLS，必须带租户会话。"""
+    async with state.db.session(user_id=user_id, begin=True) as session:
         job = await state.queue.get_for_user(session, user_id, job_id)
     if job is None:
         raise NotFoundError(detail=f"任务 {job_id} 不存在")
@@ -84,7 +84,7 @@ async def list_jobs(
                 ErrorCode.VALIDATION_ERROR, detail=f"非法的 status 过滤值: {', '.join(invalid)}"
             )
         statuses = tuple(parsed)
-    async with state.db.session(begin=True) as session:
+    async with state.db.session(user_id=user_id, begin=True) as session:
         rows, next_cursor = await state.queue.list_for_user(
             session, user_id, statuses=statuses, cursor=cursor, limit=limit
         )
@@ -166,7 +166,7 @@ async def _event_stream(
             emitted_terminal = False
             result_ref: str | None = None
             progress_snapshot = {"progress": 0, "stage": JobStage.QUEUED.value, "message": None}
-            async with state.db.session(begin=True) as session:
+            async with state.db.session(user_id=user_id, begin=True) as session:
                 job = await queue.get_for_user(session, user_id, job_id)
                 if job is None:
                     status = JobStatus.FAILED.value

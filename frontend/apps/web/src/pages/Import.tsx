@@ -1,6 +1,6 @@
 import { useCallback, useState } from "react";
 import { Link } from "react-router-dom";
-import { newIdempotencyKey, type ImportBatch, type Job, type JobStatus, type Preview, type RevokeResult } from "@sa/api-client";
+import { newIdempotencyKey, type ImportBatch, type JobAccepted, type JobStatus, type Preview, type RevokeResult } from "@sa/api-client";
 import { api } from "../client";
 import { JobProgress } from "../ui/JobProgress";
 import { ProblemView } from "../ui/Problem";
@@ -9,7 +9,7 @@ import { Uploader } from "../ui/Uploader";
 
 export function Import() {
   const [preview, setPreview] = useState<Preview | null>(null);
-  const [job, setJob] = useState<Job | null>(null);
+  const [job, setJob] = useState<JobAccepted | null>(null);
   const [batchId, setBatchId] = useState<string | null>(null);
   const [batch, setBatch] = useState<ImportBatch | null>(null);
   const [batchError, setBatchError] = useState<unknown>(null);
@@ -117,7 +117,7 @@ export function Import() {
                   <td>{column.name}</td>
                   <td>{column.suggested_field ?? "（未识别）"}</td>
                   <td>{column.confidence}</td>
-                  <td className="muted">{column.sample.join(" / ")}</td>
+                  <td className="muted">{(column.sample ?? []).join(" / ")}</td>
                 </tr>
               ))}
             </tbody>
@@ -129,11 +129,11 @@ export function Import() {
             {preview.estimated.quarantined}
           </p>
 
-          {preview.warnings.length > 0 ? (
+          {(preview.warnings ?? []).length > 0 ? (
             <>
               <h3>警告</h3>
               <ul>
-                {preview.warnings.map((warning, index) => (
+                {(preview.warnings ?? []).map((warning, index) => (
                   <li key={`${warning.code}-${index}`}>
                     <code>{warning.code}</code> {warning.row ? `第 ${warning.row} 行` : ""} {warning.message}
                   </li>

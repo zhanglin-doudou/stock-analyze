@@ -10,6 +10,7 @@ function versionConflict(): Problem {
     type: "https://api.example.com/problems/v1/version-conflict",
     title: "Version conflict",
     status: 409,
+    detail: "版本冲突",
     code: "VERSION_CONFLICT",
     user_message: "这条数据刚被改过。",
     what_to_do: "重新获取最新版本后再提交。",

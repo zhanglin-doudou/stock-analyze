@@ -22,8 +22,14 @@ from stock_platform.jobs import JobQueue
 
 @pytest_asyncio.fixture
 async def db(settings: Settings) -> AsyncIterator[Database]:
-    """应用角色数据库（与 API/worker 同权限，验证 RLS 下队列可用）。"""
-    database = Database(settings, role="app")
+    """队列控制面数据库（owner 角色）。
+
+    G7 起 `platform.job` 启用 RLS；unit 用例直接驱动的是 **worker 控制面**
+    （claim/reap/heartbeat 跨租户动作，生产同样走 owner Database），因此这里
+    用 owner 角色。租户面（app + SET LOCAL）的 job 可见性由
+    `backend/tests/integration/test_platform_rls.py` 覆盖。
+    """
+    database = Database(settings, role="owner")
     try:
         yield database
     finally:

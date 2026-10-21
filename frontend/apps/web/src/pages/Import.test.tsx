@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import type { ImportBatch, Job, JobEvent, Preview, RevokeResult } from "@sa/api-client";
+import type { ImportBatch, JobAccepted, JobEvent, Preview, RevokeResult } from "@sa/api-client";
 import { Import } from "./Import";
 import { api } from "../client";
 
@@ -44,6 +44,7 @@ function makePreview(): Preview {
     estimated: { parsed: 328, inserted: 326, skipped: 0, quarantined: 2 },
     cash_balance_available: true,
     can_commit: true,
+    expires_at: "2026-10-21T01:00:00Z",
   };
 }
 
@@ -65,7 +66,13 @@ function makeBatch(overrides: Partial<ImportBatch> = {}): ImportBatch {
   };
 }
 
-const acceptedJob: Job = { job_id: "job_1", type: "import_commit", status: "pending", batch_id: "bat_1" };
+const acceptedJob: JobAccepted = {
+  job_id: "job_1",
+  type: "import_commit",
+  status: "pending",
+  batch_id: "bat_1",
+  links: { self: "/api/v1/jobs/job_1", events: "/api/v1/jobs/job_1/events" },
+};
 
 function revokeResult(): RevokeResult {
   return {

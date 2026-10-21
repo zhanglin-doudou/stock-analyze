@@ -24,11 +24,19 @@ log = get_logger("stock_worker")
 
 
 class WorkerRunner:
-    """单进程消费者：并发度受 PG 池限制，横向扩展即多进程。"""
+    """单进程消费者：并发度受 PG 池限制，横向扩展即多进程。
+
+    G7（platform 租户表 RLS）后角色双轨：
+    - `db`（stock_app）：handler 的租户事务，受 RLS 约束（业务读写唯一入口）；
+    - `queue_db`（stock_owner）：**队列控制面**（claim / reap / heartbeat）跨租户，
+      必须能读写任意用户的任务行；owner 绕过 RLS，因此只用于这三个内部动作，
+      绝不下发给 handler。这不是“应用运行时时用 owner”，而是控制面与数据面的分离。
+    """
 
     def __init__(self, settings: Settings | None = None, *, concurrency: int = 2) -> None:
         self.settings = settings or get_settings()
         self.db = Database(self.settings, role="app")
+        self.queue_db = Database(self.settings, role="owner")
         self.clock = SystemClock()
         self.queue = JobQueue(self.db, self.clock)
         self.concurrency = concurrency
@@ -38,21 +46,28 @@ class WorkerRunner:
     async def stop(self) -> None:
         self._stopping = True
 
+    async def close(self) -> None:
+        """释放两套连接池（测试/短生命周期入口用）。"""
+        await self.queue_db.dispose()
+        await self.db.dispose()
+
     async def run(self) -> None:  # pragma: no cover - 长驻进程
         configure_logging(self.settings.log_level, json_output=self.settings.env == "prod")
         log.info("worker.start", worker=self.worker_id, concurrency=self.concurrency)
         tasks = [asyncio.create_task(self._loop()) for _ in range(self.concurrency)]
         tasks.append(asyncio.create_task(self._reaper()))
-        with contextlib.suppress(asyncio.CancelledError):
-            await asyncio.gather(*tasks)
-        await self.db.dispose()
+        try:
+            with contextlib.suppress(asyncio.CancelledError):
+                await asyncio.gather(*tasks)
+        finally:
+            await self.close()
         log.info("worker.stop")
 
     async def _reaper(self) -> None:
-        """租约回收：崩溃/被杀的任务不悬挂（§5.1）。"""
+        """租约回收：崩溃/被杀的任务不悬挂（§5.1）。队列控制面走 owner。"""
         while not self._stopping:
             await asyncio.sleep(15)
-            async with self.db.session(begin=True) as session:
+            async with self.queue_db.session(begin=True) as session:
                 reaped = await self.queue.reap_expired_leases(session)
             if reaped:
                 log.warning("worker.lease_reaped", count=reaped)
@@ -77,7 +92,8 @@ class WorkerRunner:
                 log.error("worker.execute_crashed", job=claimed.get("id"), error=str(exc))
 
     async def _claim_one(self) -> dict[str, Any] | None:
-        async with self.db.session(begin=True) as session:
+        # 跨租户认领：任何用户的 pending 任务都要能被本 worker 领走 → owner 控制面。
+        async with self.queue_db.session(begin=True) as session:
             job = await self.queue.claim(session)
             if job is None:
                 return None
@@ -92,13 +108,14 @@ class WorkerRunner:
     async def _heartbeat_loop(self, job_id: str) -> None:
         """执行期间独立事务续租（`LEASE_SECONDS` 内必有 `HEARTBEAT_SECONDS` 一次心跳）。
 
-        每次心跳用**独立 session**：handler 的事务可能长期不提交，心跳不能被它绑架；
+        每次心跳用**独立 owner session**：job 行受 RLS 约束，心跳是跨租户控制面动作；
+        handler 的事务可能长期不提交，心跳不能被它绑架；
         任务结束/异常时由 `_execute` 的 finally 取消本协程。
         """
         while True:
             await asyncio.sleep(max(0.01, float(jobs_module.HEARTBEAT_SECONDS)))
             try:
-                async with self.db.session(begin=True) as session:
+                async with self.queue_db.session(begin=True) as session:
                     await self.queue.heartbeat(session, job_id)
             except asyncio.CancelledError:
                 raise
@@ -139,7 +156,8 @@ class WorkerRunner:
         job_id = str(job["id"])
         handler = HANDLERS.get(job["kind"])
         if handler is None:
-            async with self.db.session(begin=True) as session:
+            # job 行受 RLS 约束：收口必须在该任务所属租户的会话里做。
+            async with self.db.tenant_tx(uuid.UUID(str(job["user_id"]))) as session:
                 await self.queue.finish(
                     session,
                     job_id,

@@ -42,7 +42,7 @@ async def _drain_worker(settings) -> None:
                 break
             await runner._execute(claimed)
     finally:
-        await runner.db.dispose()
+        await runner.close()
 
 
 async def _preview(

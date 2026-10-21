@@ -9,11 +9,47 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import pytest
+from sqlalchemy import text
+from stock_api.version import SCHEMA_VERSION
 from stock_contracts.errors import CATALOG, ErrorCode
 
 pytestmark = pytest.mark.api
 
 API = "/api/v1"
+
+#: DEV-PLAN A.1 一期 30 个 API-ID 中，除 API-075（FastAPI 自引用、不在 paths）外的 29 个
+#: 端点必须在 `GET /api/v1/openapi.json` 的 paths 中出现（gate_endpoint_coverage.py 同口径）。
+OPENAPI_PERIOD1_ENDPOINTS: list[tuple[str, str]] = [
+    ("post", f"{API}/auth/register"),
+    ("post", f"{API}/auth/login"),
+    ("post", f"{API}/auth/refresh"),
+    ("post", f"{API}/auth/logout"),
+    ("get", f"{API}/auth/me"),
+    ("post", f"{API}/tokens"),
+    ("get", f"{API}/tokens"),
+    ("delete", f"{API}/tokens/{{token_id}}"),
+    ("post", f"{API}/imports/preview"),
+    ("post", f"{API}/imports"),
+    ("get", f"{API}/imports"),
+    ("get", f"{API}/imports/{{batch_id}}"),
+    ("get", f"{API}/imports/{{batch_id}}/quarantine"),
+    ("post", f"{API}/imports/{{batch_id}}/revoke"),
+    ("get", f"{API}/trades"),
+    ("patch", f"{API}/trades/{{trade_id}}"),
+    ("delete", f"{API}/trades/{{trade_id}}"),
+    ("post", f"{API}/trades/{{trade_id}}/restore"),
+    ("get", f"{API}/trades/{{trade_id}}/history"),
+    ("get", f"{API}/reconciliation"),
+    ("get", f"{API}/jobs"),
+    ("get", f"{API}/jobs/{{job_id}}"),
+    ("get", f"{API}/jobs/{{job_id}}/events"),
+    ("post", f"{API}/jobs/{{job_id}}/cancel"),
+    ("get", "/healthz"),
+    ("get", "/readyz"),
+    ("get", "/version"),
+    ("get", f"{API}/errors"),
+    ("get", f"{API}/trades/{{trade_id}}"),
+]
 
 
 # ══ API-001 注册 ═══════════════════════════════════════════
@@ -358,7 +394,7 @@ async def test_api_009_revoke_other_users_token_is_404(
 # ══ 运维（API-071~076）与全局契约 ═══════════════════════════
 
 
-async def test_healthz_and_readyz_root(client) -> None:
+async def test_api_071_healthz_and_readyz_root(client) -> None:
     health = await client.get("/healthz")
     assert health.status_code == 200, health.text
     assert health.json()["status"] == "ok"
@@ -367,7 +403,38 @@ async def test_healthz_and_readyz_root(client) -> None:
     assert ready.json()["status"] == "ready"
 
 
-async def test_version_at_root_and_prefix(client, api_prefix) -> None:
+async def test_api_072_readyz_schema_mismatch_503(client, owner_engine) -> None:
+    """API-072：迁移版本落后 → /readyz 503 SCHEMA_VERSION_MISMATCH（finally 恢复版本）。"""
+    async with owner_engine.begin() as conn:
+        original = await conn.scalar(
+            text("select version from platform.schema_version where id = 1")
+        )
+    assert original == SCHEMA_VERSION, f"库版本应与代码一致，实际 {original!r}"
+    try:
+        async with owner_engine.begin() as conn:
+            await conn.execute(
+                text("update platform.schema_version set version = :version where id = 1"),
+                {"version": "9999_deliberate_mismatch"},
+            )
+        resp = await client.get("/readyz")
+        assert resp.status_code == 503, resp.text
+        body = resp.json()
+        assert body["code"] == ErrorCode.SCHEMA_VERSION_MISMATCH.value
+        assert body["status"] == 503
+        assert body["checks"]["database"] == "ok"
+        assert body["checks"]["schema"].startswith("mismatch:")
+    finally:
+        async with owner_engine.begin() as conn:
+            await conn.execute(
+                text("update platform.schema_version set version = :version where id = 1"),
+                {"version": original},
+            )
+    recovered = await client.get("/readyz")
+    assert recovered.status_code == 200, recovered.text
+    assert recovered.json()["status"] == "ready"
+
+
+async def test_api_073_version_at_root_and_prefix(client, api_prefix) -> None:
     root = await client.get("/version")
     assert root.status_code == 200
     pref = await client.get(f"{api_prefix}/version")
@@ -375,7 +442,29 @@ async def test_version_at_root_and_prefix(client, api_prefix) -> None:
     assert pref.json()["app_version"] == root.json()["app_version"]
 
 
-async def test_errors_catalog_is_complete(client, api_prefix) -> None:
+async def test_api_075_openapi_snapshot(client, api_prefix) -> None:
+    """API-075：/api/v1/openapi.json 200、info.version 与 /version.app_version 一致、含一期端点。"""
+    resp = await client.get(f"{api_prefix}/openapi.json")
+    assert resp.status_code == 200, resp.text
+    spec = resp.json()
+    assert spec["openapi"].startswith("3.1")
+    version = (await client.get("/version")).json()
+    assert spec["info"]["version"] == version["app_version"]
+
+    paths = spec["paths"]
+    missing = [
+        f"{method.upper()} {path}"
+        for method, path in OPENAPI_PERIOD1_ENDPOINTS
+        if path not in paths or method not in paths[path]
+    ]
+    assert not missing, f"一期端点未出现在 OpenAPI paths：{missing}"
+
+    # 契约元数据（P0-5a enrich）随快照生效：gate_tenant_coverage.py 依赖 x-required-scope。
+    assert paths[f"{api_prefix}/trades"]["get"]["x-required-scope"] == "read"
+    assert "Error" in spec["components"]["schemas"]
+
+
+async def test_api_076_errors_catalog_is_complete(client, api_prefix) -> None:
     resp = await client.get(f"{api_prefix}/errors")
     assert resp.status_code == 200
     body = resp.json()
