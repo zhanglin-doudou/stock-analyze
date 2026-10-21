@@ -38,8 +38,19 @@ def canonical_params(params: dict[str, Any]) -> str:
     )
 
 
+# 服务端内部参数：同一业务请求重试时会重新生成，不能参与单飞语义比较。
+# 例：/imports 每次请求预建 PENDING 批次并写入 params.batch_id；若把它算进 digest，
+# 同 preview 同参数的第二次提交会被误判为“异参”而 409，而不是复用同一 job。
+_INTERNAL_PARAMS = frozenset({"batch_id"})
+
+
+def semantic_params(params: dict[str, Any]) -> dict[str, Any]:
+    """去掉服务端内部参数后的业务语义参数（单飞/幂等比较用）。"""
+    return {k: v for k, v in params.items() if k not in _INTERNAL_PARAMS}
+
+
 def params_digest(params: dict[str, Any]) -> str:
-    return hashlib.sha256(canonical_params(params).encode("utf-8")).hexdigest()
+    return hashlib.sha256(canonical_params(semantic_params(params)).encode("utf-8")).hexdigest()
 
 
 class JobQueue:
@@ -71,7 +82,11 @@ class JobQueue:
         if existing is not None:
             if params_digest(existing.params) == digest:
                 return existing.id, True
-            return existing.id, True
+            # 单飞但参数不同：静默复用会跑错参数（如 rebuild 的区间/模式），必须 409。
+            raise ApiError(
+                ErrorCode.JOB_ALREADY_RUNNING,
+                detail=f"已有任务 {existing.id} 正在执行",
+            )
 
         running = await session.scalar(
             select(func.count())
@@ -109,10 +124,15 @@ class JobQueue:
             await self.emit(session, inserted, "queued", {"kind": kind})
             return inserted, False
 
-        # 竞态：并发入队被单飞索引挡住 → 复用
+        # 竞态：并发入队被单飞索引挡住 → 同参复用；异参同样 409（不能返回旧 job 骗调用方）。
         raced = await self._find_active(session, kind=kind, scope_key=scope_key)
         if raced is None:  # pragma: no cover - 理论上不可达
             raise ApiError(ErrorCode.INTERNAL_ERROR)
+        if params_digest(raced.params) != digest:
+            raise ApiError(
+                ErrorCode.JOB_ALREADY_RUNNING,
+                detail=f"已有任务 {raced.id} 正在执行",
+            )
         return raced.id, True
 
     async def _find_active(self, session: AsyncSession, *, kind: str, scope_key: str) -> Job | None:
@@ -226,17 +246,57 @@ class JobQueue:
     async def progress(
         self, session: AsyncSession, job_id: str, *, percent: int, stage: str, message: str | None
     ) -> None:
+        # 顺带续租：handler 在长循环里上报进度时刷新租约，避免被 reaper 误回收。
+        now = self._clock.now()
         await session.execute(
             update(Job)
             .where(Job.id == job_id)
-            .values(progress=percent, stage=stage, message=message)
+            .values(
+                progress=percent,
+                stage=stage,
+                message=message,
+                heartbeat_at=now,
+                lease_until=now + timedelta(seconds=LEASE_SECONDS),
+            )
         )
         await self.emit(
             session, job_id, "progress", {"progress": percent, "stage": stage, "message": message}
         )
 
-    async def request_cancel(self, session: AsyncSession, job_id: str) -> None:
-        await session.execute(update(Job).where(Job.id == job_id).values(cancel_requested=True))
+    async def request_cancel(self, session: AsyncSession, job_id: str) -> JobStatus | None:
+        """请求取消：PENDING 直接终态 cancelled（立即可见）；RUNNING 仅置 flag。
+
+        返回取消请求后的实际状态；任务不存在返回 None。条件 UPDATE 保证与 worker
+        的 claim 不打架（claim 用 status='pending' 做条件，谁先赢谁生效）。
+        """
+        now = self._clock.now()
+        cancelled = await session.scalar(
+            update(Job)
+            .where(Job.id == job_id, Job.status == JobStatus.PENDING.value)
+            .values(
+                status=JobStatus.CANCELLED.value,
+                cancel_requested=True,
+                finished_at=now,
+                lease_until=None,
+                heartbeat_at=None,
+            )
+            .returning(Job.id)
+        )
+        if cancelled is not None:
+            await self.emit(session, job_id, JobStatus.CANCELLED.value, {"cancelled": True})
+            return JobStatus.CANCELLED
+        current = await session.scalar(select(Job.status).where(Job.id == job_id))
+        if current is None:
+            return None
+        status = JobStatus(current)
+        if status is JobStatus.RUNNING:
+            # RUNNING 不能由 API 直接改终态（handler 正在写库）；由 worker 在检查点收口。
+            await session.execute(
+                update(Job)
+                .where(Job.id == job_id, Job.status == JobStatus.RUNNING.value)
+                .values(cancel_requested=True)
+            )
+        return status
 
     async def is_cancel_requested(self, session: AsyncSession, job_id: str) -> bool:
         value = await session.scalar(select(Job.cancel_requested).where(Job.id == job_id))
@@ -280,6 +340,10 @@ class JobQueue:
         job = await self.get(session, job_id)
         if job is None:  # pragma: no cover
             return JobStatus.FAILED
+        current = JobStatus(job.status)
+        if current.is_terminal:
+            # 已被取消/已完成：外层兜底收口不能覆盖终态（handler 自己已收口后抛异常的场景）。
+            return current
         now = self._clock.now()
         if job.attempt < job.max_attempts and not job.cancel_requested:
             job.status = JobStatus.PENDING.value
@@ -298,32 +362,57 @@ class JobQueue:
         return JobStatus.FAILED
 
     async def reap_expired_leases(self, session: AsyncSession) -> int:
-        """崩溃恢复：心跳超时 → 重投或 JOB_LEASE_EXPIRED 终态。"""
+        """崩溃恢复：心跳超时 → 重投或 JOB_LEASE_EXPIRED 终态。
+
+        并发安全（§5.1）：先用 `FOR UPDATE SKIP LOCKED` 锁住过期行（另一个 worker 正在
+        回收的行直接跳过），再用条件 UPDATE（仍要求 status='running' 且 lease_until < now）
+        二次校验后落终态/重投——即使两个 reaper 同时扫到，也只有一个能改到行。
+        """
         now = self._clock.now()
-        rows = await session.scalars(
-            select(Job).where(
-                Job.status == JobStatus.RUNNING.value,
-                Job.lease_until.is_not(None),
-                Job.lease_until < now,
+        expired = (
+            Job.status == JobStatus.RUNNING.value,
+            Job.lease_until.is_not(None),
+            Job.lease_until < now,
+        )
+        locked_ids = list(
+            await session.scalars(select(Job.id).where(*expired).with_for_update(skip_locked=True))
+        )
+        if not locked_ids:
+            return 0
+
+        retried = list(
+            await session.execute(
+                update(Job)
+                .where(*expired, Job.id.in_(locked_ids), Job.attempt < Job.max_attempts)
+                .values(
+                    status=JobStatus.PENDING.value,
+                    available_at=now,
+                    lease_until=None,
+                    heartbeat_at=None,
+                )
+                .returning(Job.id, Job.attempt)
             )
         )
-        count = 0
-        for job in rows:
-            count += 1
-            if job.attempt >= job.max_attempts:
-                job.status = JobStatus.FAILED.value
-                job.finished_at = now
-                job.error_code = ErrorCode.JOB_LEASE_EXPIRED.value
-                job.error = {"lease_expired_at": now.isoformat()}
-                await self.emit(
-                    session, job.id, "failed", {"code": ErrorCode.JOB_LEASE_EXPIRED.value}
+        failed = list(
+            await session.execute(
+                update(Job)
+                .where(*expired, Job.id.in_(locked_ids), Job.attempt >= Job.max_attempts)
+                .values(
+                    status=JobStatus.FAILED.value,
+                    finished_at=now,
+                    lease_until=None,
+                    heartbeat_at=None,
+                    error_code=ErrorCode.JOB_LEASE_EXPIRED.value,
+                    error={"lease_expired_at": now.isoformat()},
                 )
-            else:
-                job.status = JobStatus.PENDING.value
-                job.available_at = now
-                job.lease_until = None
-                await self.emit(session, job.id, "retrying", {"attempt": job.attempt})
-        return count
+                .returning(Job.id, Job.attempt)
+            )
+        )
+        for job_id, attempt in retried:
+            await self.emit(session, job_id, "retrying", {"attempt": attempt})
+        for job_id, _attempt in failed:
+            await self.emit(session, job_id, "failed", {"code": ErrorCode.JOB_LEASE_EXPIRED.value})
+        return len(retried) + len(failed)
 
     # ── 事件（SSE 重放）─────────────────────────────────────
     async def emit(

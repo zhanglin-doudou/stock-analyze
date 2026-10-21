@@ -28,7 +28,7 @@ from stock_contracts.errors import CATALOG
 from stock_ledger.application.classify import reclassify_user
 from stock_ledger.application.imports import commit_batch
 from stock_ledger.application.preview import create_preview, default_object_store
-from stock_ledger.fixtures import generate_huatai_bill
+from stock_ledger.fixtures import generate_huatai_bill, generate_market_quotes
 from stock_ledger.repositories.imports import ImportBatchRepository
 from stock_ledger.repositories.rules import seed_system_rules
 from stock_platform.config import REPO_ROOT, get_settings
@@ -600,22 +600,17 @@ async def _seed(db: Database, clock: FrozenClock, market_bill: bool) -> int:
 
 
 def write_market_fixtures() -> dict[str, Path]:
-    """确定性行情/账单夹具（离线可复现，写入 fixtures/market/）。"""
+    """确定性行情/账单夹具（离线可复现，写入 fixtures/market/）。
+
+    行情 JSON 与 `stock_ledger.market.ReplayMarketDataSource` 的读取契约同源：
+    由 `generate_market_quotes()` 生成（固定日期/排序、无运行时刻戳），
+    重复执行写出的 bytes 完全一致，不产生非确定性 git diff。
+    """
     MARKET_DIR.mkdir(parents=True, exist_ok=True)
     bill = MARKET_DIR / "bill_huatai.xlsx"
     bill.write_bytes(generate_huatai_bill(seed=42, months=3, count=120))
     quotes = MARKET_DIR / "quotes.json"
-    payload = {
-        "mode": "replay",
-        "benchmark": "hs300_tr",
-        "note": "确定性行情回放夹具（演示用；价格/收益一律定点字符串）",
-        "series": [
-            {"date": "2026-09-01", "close": "3180.55", "return": "0.00000000"},
-            {"date": "2026-09-15", "close": "3221.30", "return": "0.01281028"},
-            {"date": "2026-09-30", "close": "3245.12", "return": "0.00739069"},
-        ],
-    }
-    quotes.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    quotes.write_bytes(generate_market_quotes())
     return {"bill": bill, "quotes": quotes}
 
 

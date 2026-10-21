@@ -18,8 +18,23 @@ from stock_platform.jobs import JobQueue
 
 from stock_ledger.models import SummaryRule
 from stock_ledger.repositories.quarantine import QuarantineRepository
-from stock_ledger.repositories.rules import SummaryRuleRepository, seed_system_rules
+from stock_ledger.repositories.rules import (
+    SummaryRuleRepository,
+    rule_summary_code,
+    seed_system_rules,
+)
 from stock_ledger.repositories.trades import TradeRepository
+
+
+async def load_rules(session: AsyncSession, user_id: uuid.UUID) -> list[SummaryRule]:
+    """确保系统默认规则存在，并返回该用户生效规则（预览 / 提交 / 复算共用）。
+
+    为什么在应用层自愈：系统规则是代码资产，新环境或老库若没跑过 CLI seed，分类会全量
+    未命中（真实账单整片误隔离）。`seed_system_rules` 幂等 upsert + 清理废弃码，
+    因此任何入口先调它都能保证词表与代码一致，且重复调用无副作用。
+    """
+    await seed_system_rules(session)
+    return await SummaryRuleRepository(session).list_enabled(user_id)
 
 
 def _matches(rule: SummaryRule, summary: str, side: str) -> bool:
@@ -77,7 +92,7 @@ async def reclassify_user(
     trade_repo = TradeRepository(session)
     quarantine_repo = QuarantineRepository(session)
 
-    rules = await rules_repo.list_enabled(user_id)
+    rules = await load_rules(session, user_id)
     trades = await trade_repo.list_all(user_id)
     existing_quarantine = await quarantine_repo.page(user_id, resolved=False, limit=200)
     already_flagged = {
@@ -90,8 +105,10 @@ async def reclassify_user(
     for index, trade in enumerate(trades):
         rule = match_rule(rules, trade.summary, trade.side)
         if rule is not None:
-            if trade.category != rule.category:
+            summary_code = rule_summary_code(rule)
+            if trade.category != rule.category or trade.summary_code != summary_code:
                 trade.category = rule.category
+                trade.summary_code = summary_code
                 updated += 1
         elif trade.id not in already_flagged:
             await quarantine_repo.add(
@@ -140,4 +157,10 @@ async def _backfill_resolved(
     return backfilled
 
 
-__all__ = ["match_rule", "reclassify_user", "seed_system_rules", "suggest_rule"]
+__all__ = [
+    "load_rules",
+    "match_rule",
+    "reclassify_user",
+    "seed_system_rules",
+    "suggest_rule",
+]

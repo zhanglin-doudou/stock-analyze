@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
+from datetime import date
 from typing import Any, Protocol, runtime_checkable
 
 from stock_contracts.clock import Clock  # noqa: F401  (跨上下文端口，统一从 contracts 取)
@@ -79,3 +80,66 @@ class BackupTarget(Protocol):
     async def read(self, name: str) -> bytes: ...
 
     async def verify(self, name: str, checksum: str) -> bool: ...
+
+
+# ── 行情端口（G4 / P2-04 前置）───────────────────────────────────
+# 价格/收益一律用标度整数：价格 10^-6 元（SCALE_PRICE）、比率 10^-8（SCALE_RATIO）。
+# 端口层禁止 float；只有序列化到 API/夹具边界时才转定点字符串（stock_core.values.Price/Ratio）。
+
+
+@dataclass(frozen=True, slots=True)
+class MarketCapabilities:
+    """数据源能力声明（NFR-9）：调用方据此决定取数与降级，不得猜。"""
+
+    mode: str  # "replay" | "live"
+    symbols: tuple[str, ...] = ()
+    supports_daily_bars: bool = True
+    supports_latest_quote: bool = True
+    supports_adjusted: bool = False
+    max_lookback_days: int | None = None
+
+    def supports_symbol(self, symbol: str) -> bool:
+        return symbol in self.symbols
+
+
+@dataclass(frozen=True, slots=True)
+class Bar:
+    """单标的一天日线。`close_units` 标度 10^-6 元；`return_units` 标度 10^-8。"""
+
+    symbol: str
+    trade_date: date
+    close_units: int
+    return_units: int
+
+
+@dataclass(frozen=True, slots=True)
+class Quote:
+    """`as_of` 时点的最新收盘快照（`close_units` 标度同 `Bar`）。"""
+
+    symbol: str
+    as_of: date
+    close_units: int
+
+
+@runtime_checkable
+class MarketDataSource(Protocol):
+    """行情端口：replay / live 适配器实现同一契约，P2-04 起消费。"""
+
+    @property
+    def capabilities(self) -> MarketCapabilities: ...
+
+    @property
+    def as_of(self) -> date:
+        """数据覆盖到的最后交易日；调用方据此判 stale，不得自行读系统时间。"""
+        ...
+
+    @property
+    def provenance(self) -> str:
+        """来源留痕（replay: 文件+sha256；live: source/version/fetched_at）。"""
+        ...
+
+    async def get_daily_bars(
+        self, symbols: Sequence[str], start: date, end: date
+    ) -> Sequence[Bar]: ...
+
+    async def get_latest_quotes(self, symbols: Sequence[str]) -> Sequence[Quote]: ...

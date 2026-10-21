@@ -10,7 +10,11 @@ from __future__ import annotations
 from stock_ledger.repositories.imports import ImportBatchRepository, ImportPreviewRepository
 from stock_ledger.repositories.quarantine import QuarantineRepository
 from stock_ledger.repositories.reconciliation import ReconciliationRepository
-from stock_ledger.repositories.rules import SummaryRuleRepository, seed_system_rules
+from stock_ledger.repositories.rules import (
+    SummaryRuleRepository,
+    rule_summary_code,
+    seed_system_rules,
+)
 from stock_ledger.repositories.trades import TradeRepository, TradeRow, decode_cursor, encode_cursor
 
 __all__ = [
@@ -23,5 +27,6 @@ __all__ = [
     "TradeRow",
     "decode_cursor",
     "encode_cursor",
+    "rule_summary_code",
     "seed_system_rules",
 ]

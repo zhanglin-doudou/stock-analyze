@@ -1,6 +1,6 @@
 # 一期 P0 修复记录：P0-2（replace_range 数据丢失）/ P0-3（admin PAT 越权）
 
-> 日期：2026-10-21 ｜ 基线：`b61d441` + 本次工作区修改 ｜ 关联报告：[P1-CodeReview-and-Acceptance.md](P1-CodeReview-and-Acceptance.md)
+> 日期：2026-10-21 ｜ 基线：`b61d441` + 本次工作区修改 ｜ 关联报告：[Period1-CodeReview-and-Acceptance.md](Period1-CodeReview-and-Acceptance.md)
 > 范围：仅修 P0-2 / P0-3 及其直接耦合缺陷（撤销后重导、restore 冲突），未动 P0-1 / P0-4 / P0-5。
 > 未提交 git；所有改动在工作区，供审阅后自行提交。
 

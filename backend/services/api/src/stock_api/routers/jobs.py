@@ -242,8 +242,8 @@ async def cancel_job(
             raise ApiError(
                 ErrorCode.JOB_NOT_CANCELLABLE, detail=f"任务已处于终态 {job.status}，无法取消"
             )
-        if not job.cancel_requested:
-            await state.queue.request_cancel(session, job_id)
-            job.cancel_requested = True
+        # PENDING 会直接迁移到 cancelled（终态立即可见）；RUNNING 只置取消标记。
+        await state.queue.request_cancel(session, job_id)
+        await session.refresh(job)
         snapshot = _to_out(job)
     return snapshot

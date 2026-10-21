@@ -9,13 +9,14 @@
 from __future__ import annotations
 
 import io
+import json
 import random
 from datetime import timedelta
 from decimal import Decimal
 
 from openpyxl import Workbook  # type: ignore[import-untyped]  # 第三方 openpyxl 无类型桩
 from stock_contracts.clock import FrozenClock
-from stock_core.values import Money, Price, Qty, money_mul
+from stock_core.values import Money, Price, Qty, Ratio, money_mul
 
 HEADERS: tuple[str, ...] = (
     "成交日期",
@@ -144,4 +145,81 @@ def generate_broken_bill(seed: int, *, months: int = 1, count: int = 30) -> byte
     return _to_xlsx_bytes(_build_rows(seed, months, count, break_at=max(1, count // 2)))
 
 
-__all__ = ["HEADERS", "generate_broken_bill", "generate_huatai_bill"]
+# ── 确定性行情夹具（G4：replay 适配器的唯一数据源）─────────────────
+# 纯确定性：日期固定、收盘由固定「首日收盘 + 月度漂移」推导、排序固定、
+# 不写任何运行时刻戳/随机数；同一解释器重复调用 bytes 完全一致。
+# 价格/收益一律定点字符串（价格 10^-6 元、比率 10^-8），生成与读取全链路禁 float。
+
+_MARKET_DATES: tuple[str, ...] = (
+    "2026-01-30",
+    "2026-02-27",
+    "2026-03-31",
+    "2026-04-30",
+    "2026-05-29",
+    "2026-06-30",
+    "2026-07-31",
+    "2026-08-31",
+    "2026-09-30",
+)
+MARKET_AS_OF: str = _MARKET_DATES[-1]
+MARKET_BENCHMARK: str = "hs300_tr"
+MARKET_PROVENANCE: str = "deterministic-fixtures/v1"
+
+# (symbol, 首日收盘, 月度漂移)：固定参数表，无随机、无时间依赖。
+_MARKET_SERIES_SPEC: tuple[tuple[str, str, str], ...] = (
+    (MARKET_BENCHMARK, "3150.20", "0.0042"),
+    ("600519", "1680.00", "0.0031"),
+    ("000001", "12.50", "-0.0018"),
+    ("300750", "213.00", "0.0056"),
+)
+
+
+def _market_rows(first_close: str, monthly_drift: str) -> list[dict[str, str]]:
+    """按固定日期序列推导一条日线序列（每周期的收盘价与环比收益）。"""
+    factor = Decimal("1") + Decimal(monthly_drift)
+    closes: list[Price] = [Price.from_str(first_close)]
+    for _ in range(1, len(_MARKET_DATES)):
+        grown = closes[-1].to_decimal() * factor
+        closes.append(Price.from_decimal(grown.quantize(Decimal("0.01"))))
+
+    rows: list[dict[str, str]] = []
+    for index, (day, close) in enumerate(zip(_MARKET_DATES, closes, strict=True)):
+        daily = (
+            Ratio.zero()
+            if index == 0
+            else Ratio.from_decimal(
+                close.to_decimal() / closes[index - 1].to_decimal() - Decimal("1")
+            )
+        )
+        rows.append({"date": day, "close": str(close), "return": str(daily)})
+    return rows
+
+
+def generate_market_quotes() -> bytes:
+    """生成确定性行情回放夹具（JSON bytes，可直接落盘 `fixtures/market/quotes.json`）。"""
+    series = {
+        symbol: _market_rows(first_close, monthly_drift)
+        for symbol, first_close, monthly_drift in _MARKET_SERIES_SPEC
+    }
+    payload = {
+        "schema_version": 1,
+        "mode": "replay",
+        "benchmark": MARKET_BENCHMARK,
+        "as_of": MARKET_AS_OF,
+        "provenance": MARKET_PROVENANCE,
+        "note": "确定性行情回放夹具（价格/收益一律定点字符串；固定日期与排序，无运行时刻戳）",
+        "series": series,
+    }
+    return (json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode(
+        "utf-8"
+    )
+
+
+__all__ = [
+    "HEADERS",
+    "MARKET_AS_OF",
+    "MARKET_BENCHMARK",
+    "generate_broken_bill",
+    "generate_huatai_bill",
+    "generate_market_quotes",
+]

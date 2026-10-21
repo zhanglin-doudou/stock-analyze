@@ -3,6 +3,10 @@
 硬断言：预览**不写任何 ledger.trade 行**。这里只把原始文件落到对象存储、把解析出的
 列映射/预检计数/警告/假设/样例（≤10 行）落 `import_preview`，等用户在“需求确认单”上
 点确认才进第二阶段（commit_batch）。这样半截脏数据永远进不了统计口径。
+
+G3：预览阶段要做**分类 dry-run**（默认+用户摘要规则），未知摘要计入
+`estimated.quarantined` 并给 `UNKNOWN_SUMMARY` 警告（行号/摘要明细在
+`assumptions.unknown_summary_rows`），保证「预览的隔离数 == commit 的实际隔离数」。
 """
 
 from __future__ import annotations
@@ -17,10 +21,13 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from stock_contracts.clock import Clock
 from stock_contracts.constants import IMPORT_PREVIEW_TTL_HOURS
+from stock_contracts.enums import WarningCode
 from stock_core.values import Money, Price, Qty
 from stock_platform.config import Settings, get_settings
 from stock_platform.ports import ObjectStore
 
+from stock_ledger.application.classify import load_rules, match_rule
+from stock_ledger.models import SummaryRule
 from stock_ledger.parsers.huatai import ParsedRow, parse_bill
 from stock_ledger.repositories.imports import ImportPreviewRepository
 from stock_ledger.repositories.trades import TradeRepository
@@ -85,6 +92,7 @@ class ImportPreviewDTO:
     unresolved_columns: list[str]
     row_count: int
     parsed_count: int
+    # 预估隔离总数 = 解析隔离 + 分类未知摘要（与 commit 的 batch.quarantined_count 同口径）
     quarantined_count: int
     sample: list[dict[str, Any]]
     expires_at: datetime
@@ -150,11 +158,31 @@ async def create_preview(
     date_format: str | None = None,
     object_store: ObjectStore,
 ) -> ImportPreviewDTO:
-    """解析并落预览；不触碰 ledger.trade。"""
+    """解析并落预览；不触碰 ledger.trade（只读 dry-run 分类，不写业务行）。"""
     bill = parse_bill(data, file_name, mapping=mapping, date_format=date_format, clock=clock)
     sha256 = hashlib.sha256(data).hexdigest()
     object_key = f"previews/{user_id}/{sha256}/{file_name}"
     await object_store.put_bytes(object_key, data)
+
+    # 分类 dry-run：与 commit 完全同一套规则 + 同一套去重判定，保证隔离计数一致。
+    rules = await load_rules(session, user_id)
+    existing_keys = await TradeRepository(session).existing_dedupe_keys(
+        user_id, [row.dedupe_key for row in bill.rows]
+    )
+    estimated_inserted, estimated_skipped, unknown_rows = _estimate_counts(
+        bill.rows, existing_keys=existing_keys, rules=rules
+    )
+
+    warnings = [warning.value for warning in bill.warnings]
+    assumptions: dict[str, Any] = dict(bill.assumptions)
+    if unknown_rows:
+        warnings.append(WarningCode.UNKNOWN_SUMMARY.value)
+        assumptions["unknown_summary_rows"] = [
+            {"line_no": row.line_no, "summary": row.summary, "side": row.side}
+            for row in unknown_rows
+        ]
+    # 解析隔离（重复行/坏行）+ 分类未知摘要，与 commit 的 quarantine 条数同口径。
+    estimated_quarantined = len(bill.quarantined) + len(unknown_rows)
 
     expires_at = clock.now() + timedelta(hours=IMPORT_PREVIEW_TTL_HOURS)
     preview = await ImportPreviewRepository(session).create(
@@ -166,11 +194,11 @@ async def create_preview(
         columns=bill.columns,
         mapping=mapping or {},
         date_format=bill.date_format,
-        warnings=[warning.value for warning in bill.warnings],
+        warnings=warnings,
         sample=[row_to_sample(row) for row in bill.rows[:SAMPLE_LIMIT]],
         row_count=bill.row_count,
         parsed_count=len(bill.rows),
-        quarantined_count=len(bill.quarantined),
+        quarantined_count=estimated_quarantined,
         unresolved_columns=bill.unresolved,
         expires_at=expires_at,
     )
@@ -198,9 +226,10 @@ async def create_preview(
         for index, header in enumerate(all_headers)
     ]
 
-    # 只读估算：命中已有去重键或文件内重复的行计入 skipped（不写库）。
-    estimated_inserted, estimated_skipped = await _estimate_counts(
-        session, user_id=user_id, dedupe_keys=[row.dedupe_key for row in bill.rows]
+    # 只读估算：命中已有去重键或文件内重复的行计入 skipped（不写库）；
+    # 其余行做分类 dry-run，未命中规则的计入预估隔离。
+    estimated_inserted, estimated_skipped, unknown_rows = _estimate_counts(
+        bill.rows, existing_keys=existing_keys, rules=rules
     )
 
     return ImportPreviewDTO(
@@ -212,14 +241,14 @@ async def create_preview(
         columns=bill.columns,
         mapping=mapping or {},
         date_format=bill.date_format,
-        warnings=[warning.value for warning in bill.warnings],
-        assumptions=bill.assumptions,
+        warnings=warnings,
+        assumptions=assumptions,
         unresolved_columns=bill.unresolved,
         row_count=bill.row_count,
         parsed_count=len(bill.rows),
-        quarantined_count=len(bill.quarantined),
+        quarantined_count=estimated_quarantined,
         sample=[row_to_sample(row) for row in bill.rows[:SAMPLE_LIMIT]],
-        expires_at=expires_at,
+        expires_at=preview.expires_at,
         columns_detail=columns_detail,
         estimated_inserted=estimated_inserted,
         estimated_skipped=estimated_skipped,
@@ -227,21 +256,28 @@ async def create_preview(
     )
 
 
-async def _estimate_counts(
-    session: AsyncSession, *, user_id: uuid.UUID, dedupe_keys: list[str]
-) -> tuple[int, int]:
-    """逐行估算 inserted/skipped：已存在或文件内重复 → skipped。只读，不写库。"""
-    existing = await TradeRepository(session).existing_dedupe_keys(user_id, dedupe_keys)
+def _estimate_counts(
+    rows: list[ParsedRow], *, existing_keys: set[str], rules: list[SummaryRule]
+) -> tuple[int, int, list[ParsedRow]]:
+    """逐行预估 `(inserted, skipped, unknown_rows)`。
+
+    与 commit 的执行顺序保持一致：先 dedupe（已存在/文件内重复 → skipped），
+    再分类（未命中 → 预估隔离），其余才计入 inserted。`skipped` 行不会被重复隔离。
+    """
     seen: set[str] = set()
     inserted = 0
     skipped = 0
-    for key in dedupe_keys:
-        if key in existing or key in seen:
+    unknown_rows: list[ParsedRow] = []
+    for row in rows:
+        if row.dedupe_key in existing_keys or row.dedupe_key in seen:
             skipped += 1
             continue
-        seen.add(key)
+        seen.add(row.dedupe_key)
+        if match_rule(rules, row.summary, row.side) is None:
+            unknown_rows.append(row)
+            continue
         inserted += 1
-    return inserted, skipped
+    return inserted, skipped, unknown_rows
 
 
 __all__ = [

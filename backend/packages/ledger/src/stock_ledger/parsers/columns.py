@@ -201,8 +201,10 @@ def classify_side_from_summary(raw: str) -> str | None:
     return None
 
 
-# 非交易类摘要 → side（按资金方向：流入=sell，流出=buy，无金额变化=unknown）
-_NON_TRADE_SUMMARY_SIDE: tuple[tuple[str, str], ...] = (
+# 非交易类摘要 → side（按资金方向：流入=sell，流出=buy，无金额变化=unknown）。
+# 分类规则（repositories/rules.py SYSTEM_RULES）复用同一份词汇，避免「解析器认识、分类器不认识」
+# 导致的真实账单误隔离（P1-8 / G3）。
+NON_TRADE_SUMMARY_SIDE: tuple[tuple[str, str], ...] = (
     ("银行转存", Side.SELL.value),
     ("银行转取", Side.BUY.value),
     ("股息入帐", Side.SELL.value),
@@ -212,6 +214,18 @@ _NON_TRADE_SUMMARY_SIDE: tuple[tuple[str, str], ...] = (
     ("转存管转出", Side.UNKNOWN.value),
 )
 
+# 资金划转（银证转账 / 转存管）摘要关键词：分类规则与方向识别共用同一词表。
+# 「银行转存/银行转取/转存管转入/转存管转出」直接取自上面的非交易词汇；
+# 「银行转证券/证券转银行」是一期历史摘要（合成夹具仍使用），保留兼容。
+TRANSFER_SUMMARY_KEYWORDS: tuple[str, ...] = (
+    "银行转证券",
+    "证券转银行",
+    "银行转存",
+    "银行转取",
+    "转存管转入",
+    "转存管转出",
+)
+
 
 def classify_side_from_non_trade_summary(raw: str) -> str | None:
     """非交易摘要 → side；无匹配返回 None。
@@ -219,7 +233,7 @@ def classify_side_from_non_trade_summary(raw: str) -> str | None:
     银行转存/股息入帐/利息归本等资金类业务，证券代码可为空，但摘要能判定资金方向。
     """
     text = normalize_header(raw).replace("\n", "").replace("\r", "")
-    for keyword, side in _NON_TRADE_SUMMARY_SIDE:
+    for keyword, side in NON_TRADE_SUMMARY_SIDE:
         if keyword in text:
             return side
     return None
@@ -252,8 +266,10 @@ def resolve_side(raw_side: str, raw_summary: str) -> str:
 __all__ = [
     "COLUMN_ALIASES",
     "DATE_FORMATS",
+    "NON_TRADE_SUMMARY_SIDE",
     "REQUIRED_FIELDS",
     "SIGNED_AMOUNT_HEADERS",
+    "TRANSFER_SUMMARY_KEYWORDS",
     "ColumnMapping",
     "classify_side",
     "classify_side_from_non_trade_summary",

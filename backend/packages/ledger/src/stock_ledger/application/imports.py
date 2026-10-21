@@ -2,7 +2,10 @@
 
 提交必须幂等（`preview.consumed_at` 是锚点）、可中断（progress + 取消检查）、可撤销
 （记录写入批次，撤销时只软删“本批次写入且未被人工改过”的行）。中途把进度通过
-`queue.progress/emit` 上报，是为了让前端 SSE 能实时看到“解析→写入→收尾”。
+`queue.progress/emit` 上报，是为了让前端 SSE 能实时看到“解析→分类→写入→收尾”。
+
+G3：提交阶段逐行分类（默认+用户摘要规则）——命中写 `category/summary_code` 并落库；
+未命中不写 trade，改落隔离区 `UNKNOWN_SUMMARY`（含建议规则/行号），计数与 preview 一致。
 """
 
 from __future__ import annotations
@@ -13,16 +16,19 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from stock_contracts.clock import Clock
-from stock_contracts.enums import ImportBatchStatus, JobStatus
+from stock_contracts.enums import ImportBatchStatus, JobStatus, QuarantineReason, WarningCode
 from stock_contracts.errors import ApiError, ErrorCode, FieldError, NotFoundError
 from stock_platform.audit import record
 from stock_platform.jobs import JobQueue
 from stock_platform.outbox import publish
 
+from stock_ledger.application.classify import load_rules, match_rule, suggest_rule
 from stock_ledger.application.preview import default_object_store
-from stock_ledger.parsers.huatai import ParsedBill, parse_bill
+from stock_ledger.models import SummaryRule
+from stock_ledger.parsers.huatai import ParsedRow, parse_bill
 from stock_ledger.repositories.imports import ImportBatchRepository, ImportPreviewRepository
 from stock_ledger.repositories.quarantine import QuarantineRepository
+from stock_ledger.repositories.rules import rule_summary_code
 from stock_ledger.repositories.trades import TradeRepository, TradeRow
 
 EVENT_COMMITTED = "ledger.import.committed"
@@ -78,30 +84,48 @@ def _requested_range(params: dict[str, Any]) -> tuple[date | None, date | None]:
     return start, end
 
 
-def _bill_to_trade_rows(bill: ParsedBill, batch_id: str) -> list[TradeRow]:
+def _parsed_to_trade_row(parsed: ParsedRow, batch_id: str) -> TradeRow:
+    """解析行 → 待插入流水行（分类字段由调用方按规则写入）。"""
+    return TradeRow(
+        trade_date=parsed.trade_date,
+        security_code=parsed.security_code,
+        security_name=parsed.security_name,
+        side=parsed.side,
+        quantity_units=parsed.quantity_units,
+        price_units=parsed.price_units,
+        amount_units=parsed.amount_units,
+        dedupe_key=parsed.dedupe_key,
+        batch_id=batch_id,
+        summary=parsed.summary,
+        summary_code=parsed.summary_code,
+        commission_units=parsed.commission_units,
+        stamp_tax_units=parsed.stamp_tax_units,
+        other_fee_units=parsed.other_fee_units,
+        cash_balance_units=parsed.cash_balance_units,
+        cash_balance_available=parsed.cash_balance_available,
+        occurrence_idx=parsed.occurrence_idx,
+        account_masked=parsed.account_masked,
+        line_no=parsed.line_no,
+    )
+
+
+def _unknown_summary_quarantine_rows(
+    parsed_rows: list[ParsedRow], *, batch_id: str, rules: list[SummaryRule]
+) -> list[dict[str, Any]]:
+    """分类未命中的行 → 隔离区记录（不写 trade，避免未分类数据污染统计）。"""
     return [
-        TradeRow(
-            trade_date=row.trade_date,
-            security_code=row.security_code,
-            security_name=row.security_name,
-            side=row.side,
-            quantity_units=row.quantity_units,
-            price_units=row.price_units,
-            amount_units=row.amount_units,
-            dedupe_key=row.dedupe_key,
-            batch_id=batch_id,
-            summary=row.summary,
-            summary_code=row.summary_code,
-            commission_units=row.commission_units,
-            stamp_tax_units=row.stamp_tax_units,
-            other_fee_units=row.other_fee_units,
-            cash_balance_units=row.cash_balance_units,
-            cash_balance_available=row.cash_balance_available,
-            occurrence_idx=row.occurrence_idx,
-            account_masked=row.account_masked,
-            line_no=row.line_no,
-        )
-        for row in bill.rows
+        {
+            "batch_id": batch_id,
+            "line_no": parsed.line_no,
+            "raw": {
+                **parsed.raw,
+                "summary": parsed.summary or "",
+                "line_no": parsed.line_no,
+            },
+            "reason_code": QuarantineReason.UNKNOWN_SUMMARY.value,
+            "suggested_rule_id": suggest_rule(rules, parsed.summary, parsed.side),
+        }
+        for parsed in parsed_rows
     ]
 
 
@@ -195,34 +219,57 @@ async def commit_batch(
                 user_id, date_from=replace_from, date_to=replace_to, at=clock.now()
             )
 
+        # 分类：与 preview 同一套规则与同一执行顺序（dedupe → 分类），保证隔离计数一致。
+        rules = await load_rules(session, user_id)
         existing_keys = await trade_repo.existing_dedupe_keys(
             user_id, [row.dedupe_key for row in bill.rows]
         )
         seen: set[str] = set()
         to_insert: list[TradeRow] = []
+        unknown_summary_rows: list[ParsedRow] = []
         skipped = 0
-        for row in _bill_to_trade_rows(bill, batch.id):
-            if row.dedupe_key in existing_keys or row.dedupe_key in seen:
+        for parsed in bill.rows:
+            if parsed.dedupe_key in existing_keys or parsed.dedupe_key in seen:
                 skipped += 1
                 continue
-            seen.add(row.dedupe_key)
-            to_insert.append(row)
+            seen.add(parsed.dedupe_key)
+            rule = match_rule(rules, parsed.summary, parsed.side)
+            if rule is None:
+                unknown_summary_rows.append(parsed)
+                continue
+            trade_row = _parsed_to_trade_row(parsed, batch.id)
+            trade_row.category = rule.category
+            trade_row.summary_code = rule_summary_code(rule)
+            to_insert.append(trade_row)
         inserted = await trade_repo.insert_many(user_id, to_insert)
 
-        if bill.quarantined:
-            await QuarantineRepository(session).add_many(
-                user_id,
-                [
-                    {
-                        "batch_id": batch.id,
-                        "line_no": item.line_no,
-                        "raw": item.raw,
-                        "reason_code": item.reason_code,
-                        "suggested_rule_id": item.suggested_rule_id,
-                    }
-                    for item in bill.quarantined
-                ],
-            )
+        # 批次警告/假设与 preview 对齐：未知摘要也要打 UNKNOWN_SUMMARY 并留行号明细。
+        warnings = [warning.value for warning in bill.warnings]
+        assumptions: dict[str, Any] = dict(bill.assumptions)
+        if unknown_summary_rows:
+            warnings.append(WarningCode.UNKNOWN_SUMMARY.value)
+            assumptions["unknown_summary_rows"] = [
+                {"line_no": row.line_no, "summary": row.summary, "side": row.side}
+                for row in unknown_summary_rows
+            ]
+        batch.warnings = warnings
+        batch.assumptions = assumptions
+
+        quarantine_payloads: list[dict[str, Any]] = [
+            {
+                "batch_id": batch.id,
+                "line_no": item.line_no,
+                "raw": item.raw,
+                "reason_code": item.reason_code,
+                "suggested_rule_id": item.suggested_rule_id,
+            }
+            for item in bill.quarantined
+        ]
+        quarantine_payloads.extend(
+            _unknown_summary_quarantine_rows(unknown_summary_rows, batch_id=batch.id, rules=rules)
+        )
+        if quarantine_payloads:
+            await QuarantineRepository(session).add_many(user_id, quarantine_payloads)
 
         await queue.progress(session, job_id, percent=85, stage="finalizing", message=None)
         range_from = replace_from if mode == "replace_range" else bill_from
@@ -240,7 +287,7 @@ async def commit_batch(
             parsed_count=len(bill.rows),
             inserted_count=inserted,
             skipped_count=skipped,
-            quarantined_count=len(bill.quarantined),
+            quarantined_count=len(quarantine_payloads),
             ranges=ranges,
             at=clock.now(),
         )
@@ -256,7 +303,7 @@ async def commit_batch(
                 "batch_id": finished.id,
                 "inserted": inserted,
                 "skipped": skipped,
-                "quarantined": len(bill.quarantined),
+                "quarantined": len(quarantine_payloads),
             },
         )
         await record(

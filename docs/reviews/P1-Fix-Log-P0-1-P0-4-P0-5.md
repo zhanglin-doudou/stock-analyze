@@ -1,6 +1,6 @@
 # 一期 P0 修复记录：P0-1 / P0-4 / P0-5
 
-> 日期：2026-10-21 ｜ 基线：`6bfc4f4`（P0-2/P0-3 修复已提交）+ 本次工作区修改 ｜ 关联报告：[P1-CodeReview-and-Acceptance.md](P1-CodeReview-and-Acceptance.md) ｜ 前序修复：[P1-Fix-Log-P0-2-P0-3.md](P1-Fix-Log-P0-2-P0-3.md)
+> 日期：2026-10-21 ｜ 基线：`6bfc4f4`（P0-2/P0-3 修复已提交）+ 本次工作区修改 ｜ 关联报告：[Period1-CodeReview-and-Acceptance.md](Period1-CodeReview-and-Acceptance.md) ｜ 前序修复：[P1-Fix-Log-P0-2-P0-3.md](P1-Fix-Log-P0-2-P0-3.md)
 > 范围：修复审查报告中剩余 3 项 P0（真实账单对账假断链、前端撤销入口缺失、验收门禁/契约证据失效）。**未提交 git**。
 
 ## 0. 结论

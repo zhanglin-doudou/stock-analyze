@@ -41,8 +41,9 @@ docs/
 
 **关键数字**：80 端点 ｜ 28/28 FR + 15/15 NFR 覆盖 ｜ 36 张表 ｜ 12 扩展点 ｜ 可用性 ≥99.9% ｜ RPO ≤5min / RTO ≤30min ｜ core 覆盖 100/100。
 
-**一期验收（2026-10-20）**：[reviews/P1-CodeReview-and-Acceptance.md](reviews/P1-CodeReview-and-Acceptance.md) — 代码审查 + 一期验收报告，结论：**不通过**（5 项 P0 / 17 项 P1 待修，含真账单对账假断链、`replace_range` 数据丢失、admin PAT 越权、撤销入口缺失、verify-p1 空心）。
+**一期验收（2026-10-20）**：[reviews/Period1-CodeReview-and-Acceptance.md](reviews/Period1-CodeReview-and-Acceptance.md) — 代码审查 + 一期验收报告，结论：**不通过**（5 项 P0 / 17 项 P1 待修，含真账单对账假断链、`replace_range` 数据丢失、admin PAT 越权、撤销入口缺失、verify-p1 空心）。
 > **修复进展（2026-10-21）**：5 项 P0 已全部修复并复验 — [P0-2/P0-3](reviews/P1-Fix-Log-P0-2-P0-3.md)（数据丢失 / admin PAT）、[P0-1/P0-4/P0-5](reviews/P1-Fix-Log-P0-1-P0-4-P0-5.md)（真实账对账 / 撤销 UI / 门禁与契约）；`make verify-p1` 15/15 全绿。剩余 P1/P2 见审查报告。
+> **二期准入（2026-10-21）**：[reviews/P2-Entry-Checklist.md](reviews/P2-Entry-Checklist.md)（G1~G7 准入检查单）｜[reviews/P2-Hardening-Fix-Log-G2-G3-G4.md](reviews/P2-Hardening-Fix-Log-G2-G3-G4.md)（G2 队列语义 / G3 分类闭环 / G4 replay 行情已修复并集成验证；剩余 G1/G5/G6/G7）。
 
 ---
 
