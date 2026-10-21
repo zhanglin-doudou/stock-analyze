@@ -16,8 +16,10 @@ import os
 import re
 import subprocess
 import sys
+import time
 import urllib.error
 import urllib.request
+import uuid
 from collections.abc import Callable, Coroutine
 from pathlib import Path
 from typing import Any
@@ -25,7 +27,6 @@ from typing import Any
 from stock_contracts.clock import FrozenClock
 from stock_contracts.enums import Role
 from stock_contracts.errors import CATALOG
-from stock_ledger.application.classify import reclassify_user
 from stock_ledger.application.imports import commit_batch
 from stock_ledger.application.preview import create_preview, default_object_store
 from stock_ledger.fixtures import generate_huatai_bill, generate_market_quotes
@@ -43,11 +44,13 @@ ROOT_MARK = "（根）"
 OPENAPI_SELF_REF = "/openapi.json"
 DEMO_CLOCK = "2026-10-01T09:30:00+08:00"
 DEFAULT_PASSWORD = "Demo!Passw0rd2026"
+# 邮箱必须满足 EmailStr（带点的域名），否则 seed 出来的账号无法经 API 登录。
 DEMO_ACCOUNTS: tuple[tuple[str, str, Role, int | None], ...] = (
-    ("a@local", "演示账号 A（有业务数据）", Role.USER, 7),
-    ("b@local", "演示账号 B（有业务数据）", Role.USER, 13),
-    ("admin@local", "运维管理员（不可读写业务明细）", Role.ADMIN, None),
+    ("a@demo.example.com", "演示账号 A（有业务数据）", Role.USER, 7),
+    ("b@demo.example.com", "演示账号 B（有业务数据）", Role.USER, 13),
+    ("admin@demo.example.com", "运维管理员（不可读写业务明细）", Role.ADMIN, None),
 )
+DEMO_EMAIL = "demo@demo.example.com"
 
 CATALOG_PATH = REPO_ROOT / "docs/architecture/v2/API-Catalog.md"
 DEV_PLAN_PATH = REPO_ROOT / "docs/DEV-PLAN-v2.md"
@@ -513,9 +516,9 @@ def _verify_p1() -> int:
 def _seed_plan() -> list[str]:
     return [
         "1. 写入系统分类规则（ledger.summary_rule，幂等）",
-        "2. 账号 A a@local（user）：导入一份正常账单",
-        "3. 账号 B b@local（user）：导入一份正常账单",
-        "4. 账号 admin@local（admin）：仅建账号，无业务数据",
+        "2. 账号 A a@demo.example.com（user）：导入一份正常账单",
+        "3. 账号 B b@demo.example.com（user）：导入一份正常账单",
+        "4. 账号 admin@demo.example.com（admin）：仅建账号，无业务数据",
         f"统一口令：{DEFAULT_PASSWORD}（三个账号共用）",
     ]
 
@@ -557,28 +560,19 @@ async def _import_bill(
             f"  预览：{preview.row_count} 行 / 解析 {preview.parsed_count} 行 / "
             f"隔离 {preview.quarantined_count} 行 / 预估新增 {preview.estimated_inserted} 行"
         )
-        params = {"preview_id": preview.preview_id, "mode": "append"}
+        params = {"preview_id": preview.preview_id, "mode": "full"}
         job_id, _ = await queue.enqueue(
             session,
             kind="import_commit",
             user_id=user_id,
-            scope_key=f"import:{preview.preview_id}",
+            scope_key=f"{user_id}:{preview.preview_id}",
             params=params,
         )
         job = {"id": job_id, "user_id": str(user_id), "params": params}
         result = await commit_batch(queue, session, job, clock)
         emit(f"  提交结果：{json.dumps(result, ensure_ascii=False, default=str)}")
 
-        reclass_job_id, _ = await queue.enqueue(
-            session,
-            kind="reclassify",
-            user_id=user_id,
-            scope_key=f"user:{user_id}",
-            params={},
-        )
-        reclass_job = {"id": reclass_job_id, "user_id": str(user_id), "params": {}}
-        classified = await reclassify_user(queue, session, reclass_job, clock)
-        emit(f"  分类结果：{json.dumps(classified, ensure_ascii=False, default=str)}")
+        emit("  分类：已在 commit 阶段按规则写入（未命中摘要进隔离区）")
 
 
 async def _seed(db: Database, clock: FrozenClock, market_bill: bool) -> int:
@@ -664,27 +658,28 @@ def demo_steps(base: str, bill: Path) -> list[tuple[str, str, str]]:
             "2) 注册演示账号",
             f"curl -s -X POST {base}{API_PREFIX}/auth/register "
             "-H 'Content-Type: application/json' "
-            f"""-d '{{"email":"demo@local","password":"{DEFAULT_PASSWORD}"}}'""",
+            f"""-d '{{"email":"{DEMO_EMAIL}","password":"{DEFAULT_PASSWORD}","accept_tos":true}}'""",
             "201 + role=user（重复注册返回 409 EMAIL_TAKEN）",
         ),
         (
             "3) 登录换取令牌",
             f"curl -s -X POST {base}{API_PREFIX}/auth/login "
             "-H 'Content-Type: application/json' "
-            f"""-d '{{"email":"demo@local","password":"{DEFAULT_PASSWORD}"}}'""",
+            f"""-d '{{"email":"{DEMO_EMAIL}","password":"{DEFAULT_PASSWORD}"}}'""",
             "200 + access_token / refresh_token / expires_in=900",
         ),
         (
             "4) 上传预览（同步）",
             f"curl -s -X POST {base}{API_PREFIX}/imports/preview "
             f'-H "Authorization: Bearer $TOKEN" -F "file=@{rel_bill}"',
-            "201 + preview_id / columns / row_count / quarantined_count",
+            "200 + preview_id / columns / estimated / quarantined_count",
         ),
         (
             "5) 确认导入（异步）",
             f"curl -s -X POST {base}{API_PREFIX}/imports "
             "-H \"Authorization: Bearer $TOKEN\" -H 'Content-Type: application/json' "
-            """-d '{"preview_id":"<preview_id>","mode":"append"}'""",
+            "-H 'Idempotency-Key: <32+ chars>' "
+            """-d '{"preview_id":"<preview_id>","mode":"full"}'""",
             "202 + batch_id / job_id",
         ),
         (
@@ -704,7 +699,7 @@ def demo_steps(base: str, bill: Path) -> list[tuple[str, str, str]]:
         ),
         (
             "9) 越权核对",
-            "用 b@local 令牌 GET /trades（应只见自己的数据）；用 admin@local 令牌 GET /trades",
+            "用 b@demo.example.com 令牌 GET /trades（应只见自己的数据）；用 admin@demo.example.com 令牌 GET /trades",
             "B 看不到 A（隔离）；admin 读业务明细被拒",
         ),
     ]
@@ -723,10 +718,13 @@ def _http_json(
     url: str,
     payload: dict[str, Any] | None = None,
     token: str | None = None,
+    headers: dict[str, str] | None = None,
 ) -> tuple[int, Any]:
     data = json.dumps(payload).encode("utf-8") if payload is not None else None
     request = urllib.request.Request(url, data=data, method=method)
     request.add_header("Content-Type", "application/json")
+    for name, value in (headers or {}).items():
+        request.add_header(name, value)
     if token:
         request.add_header("Authorization", f"Bearer {token}")
     try:
@@ -744,13 +742,15 @@ def _run_demo(base: str, bill: Path) -> int:
     status, body = _http_json(
         "POST",
         f"{base}{API_PREFIX}/auth/register",
-        {"email": "demo@local", "password": DEFAULT_PASSWORD},
+        {"email": DEMO_EMAIL, "password": DEFAULT_PASSWORD, "accept_tos": True},
     )
     emit(f"  [2] register → {status} {json.dumps(body, ensure_ascii=False)[:160]}")
+    if status not in (201, 409):
+        return fail(f"注册演示账号失败（{status}）：{json.dumps(body, ensure_ascii=False)}")
     status, body = _http_json(
         "POST",
         f"{base}{API_PREFIX}/auth/login",
-        {"email": "demo@local", "password": DEFAULT_PASSWORD},
+        {"email": DEMO_EMAIL, "password": DEFAULT_PASSWORD},
     )
     if status != 200:
         return fail(f"登录失败（{status}）：{json.dumps(body, ensure_ascii=False)}")
@@ -776,19 +776,34 @@ def _run_demo(base: str, bill: Path) -> int:
     if upload.returncode != 0:
         return fail(f"上传预览失败：{upload.stderr.strip()}")
     preview_id = json.loads(upload.stdout)["preview_id"]
+    idem_key = "demo-" + uuid.uuid4().hex
     status, body = _http_json(
         "POST",
         f"{base}{API_PREFIX}/imports",
-        {"preview_id": preview_id, "mode": "append"},
+        {"preview_id": preview_id, "mode": "full"},
         token=token,
+        headers={"Idempotency-Key": idem_key},
     )
     emit(f"  [5] commit → {status} {json.dumps(body, ensure_ascii=False)}")
     job_id = body.get("job_id")
-    status, body = _http_json("GET", f"{base}{API_PREFIX}/jobs/{job_id}", token=token)
-    emit(f"  [6] job → {status} status={body.get('status')} progress={body.get('progress')}")
+    if status != 202 or not job_id:
+        return fail(f"提交导入失败（{status}）：{json.dumps(body, ensure_ascii=False)}")
+
+    job: dict[str, Any] = {}
+    deadline = time.time() + 30
+    while time.time() < deadline:
+        status, job = _http_json("GET", f"{base}{API_PREFIX}/jobs/{job_id}", token=token)
+        if job.get("status") in ("succeeded", "failed", "cancelled"):
+            break
+        time.sleep(0.5)
+    emit(f"  [6] job → {status} status={job.get('status')} progress={job.get('progress')}")
+    if job.get("status") != "succeeded":
+        return fail(f"导入任务未成功：{json.dumps(job, ensure_ascii=False)}")
     status, body = _http_json("GET", f"{base}{API_PREFIX}/trades?limit=5", token=token)
     count = len(body.get("items", [])) if isinstance(body, dict) else 0
     emit(f"  [7] trades → {status} items={count}")
+    if status != 200 or count == 0:
+        return fail(f"导入后流水为空（{status}）：{json.dumps(body, ensure_ascii=False)[:200]}")
     emit(
         f"  [8] SSE：curl -N {base}{API_PREFIX}/jobs/{job_id}/events "
         f'-H "Authorization: Bearer $TOKEN"（用 -N 观察事件流）'

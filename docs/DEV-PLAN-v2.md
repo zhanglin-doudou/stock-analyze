@@ -1,5 +1,8 @@
 # 开发清单（DEV PLAN）v2.0
 
+> **命名约定**：期次写全称 `Period1/Period2/Period3`，期次任务 ID 为 `Period1-01`；优先级仍可简写 `P0/P1/P2/P3`。
+
+
 > 依据：[PRD-v2.md](prd/PRD-v2.md)（28 FR + 15 NFR）｜[Architecture-v2.md](Architecture-v2.md)｜[API-Catalog.md](architecture/v2/API-Catalog.md)（80 端点）
 > 编排原则：**本地可验证优先，部署与交付最后做**。
 > 估时口径：1 名资深全栈 + AI 编码辅助；1 人日 = 6 小时有效开发。总计 **≈ 93.5 人日**（单线程约 19 周；并行轨道可压到 ≈ 12–14 周）。
@@ -33,7 +36,7 @@
 |---|---|---|
 | 注册/登录/刷新/PAT | `curl` + pytest 验收套件 | 无 |
 | **多租户越权** | `make seed-tenants` 造 A/B/admin，A 的 token 打 B 的资源断言 404 | 无 |
-| 账单解析/预览/去重/撤销 | `fixtures/bills/*`（含 28 类边界）+ 断言行数 | 无 |
+| 账单解析/预览/去重/撤销 | `fixtures/market/*`（合成账单/行情）+ 断言行数 | 无 |
 | 口径指标（回合/净值/费用/行为） | `fixtures/market/` 冻结快照 + `FrozenClock` → 期望值写死 | 无 |
 | 异步任务/进度/取消 | 本地 worker + 轮询/SSE | 无 |
 | 报告生成/下载 | 本地生成 HTML，浏览器直接打开 | 无 |
@@ -50,7 +53,7 @@
 | 轨道 | 负责内容 | 可并行的前提 |
 |---|---|---|
 | **B 后端** | 领域计算、API、队列、DB | — |
-| **F 前端** | 页面、交互、图表 | OpenAPI 快照已定（一期 P1-06 后即可并行） |
+| **F 前端** | 页面、交互、图表 | OpenAPI 快照已定（一期 Period1-06 后即可并行） |
 | **D 数据/夹具** | 账单生成器、行情快照、期望值（oracle） | 口径公式已定（PRD 附录 A） |
 | **T 测试/门禁** | 验收套件、越权矩阵、契约检查、CI | API 骨架可跑即开始 |
 
@@ -97,11 +100,11 @@ make verify-p1      # 一期全部断言
 
 # 手工走查
 open http://localhost:5173
-# 1) 用 a@local 登录（密码 demo1234）
-# 2) 上传 fixtures/bills/huatai_2024.xlsx → 预览显示「识别 13 列 / 328 行 / 2 行将在隔离区」
+# 1) 用 a@demo.example.com 登录（密码 Demo!Passw0rd2026）
+# 2) 上传 fixtures/market/bill_huatai.xlsx → 预览显示识别列/行数/隔离数与实际一致
 # 3) 确认导入 → 任务进度 → 流水列表出现数据
 # 4) 点「撤销本次导入」→ 列表行数回到导入前
-# 5) 换 b@local 登录 → 看不到 A 的任何数据（越权拦在 404）
+# 5) 换 b@demo.example.com 登录 → 看不到 A 的任何数据（越权拦在 404）
 # 6) curl 用 A 的 PAT 调 B 的资源 → 404
 ```
 
@@ -109,22 +112,22 @@ open http://localhost:5173
 
 | ID | 任务 | 产出 | 依赖 | 本地验证 | 人日 |
 |---|---|---|---|---|---|
-| **P1-01** | Monorepo 骨架与工具链 | `backend/`(uv workspace: contracts/core/ledger/review/delivery/platform + services/api,worker)、`frontend/`(pnpm: apps/web + packages/api-client)、`Makefile`、ruff/mypy/eslint/tsc、import-linter 基线 | — | `make lint && make typecheck` 零错误；`import-linter` 分层契约通过 | 1.5 |
-| **P1-02** | 本地环境编排 | `infra/compose/docker-compose.dev.yml`（仅 PG）、`.env.example`、`make dev/db-up/db-reset` | P1-01 | `make db-up` 后 `psql` 可连；`make db-reset` 可重建 | 1 |
-| **P1-03** | DB schema + 迁移 + 多租户隔离 | Alembic 多 schema 基线（`platform`/`ledger`/`review`）、`user/refresh_token/api_token/job/import_batch/trade/quarantine_row/summary_rule/reconciliation`、RLS 策略 `tenant_isolation`、应用角色（非 owner、无 BYPASSRLS） | P1-02 | `make migrate` 幂等；`make test-rls`：未设 `app.user_id` 读租户表返回 0 行 | 2.5 |
-| **P1-04** | contracts + core 值对象 | `contracts`：错误码枚举（47 个 seed）、常量（`EPS_AMT/EPS_R/EPS_CUM/A`）、DTO 基座；`core`：标度整数 `Money/Qty/Price/Ratio`、`Clock` 端口、确定性随机 | P1-01 | `make test-core`：标度整数属性测试（往返/舍入/溢出）+ core 覆盖 100% | 2 |
-| **P1-05** | API 骨架 | FastAPI 装配根、中间件链（request_id→认证→租户→限流占位）、RFC7807 错误处理（`user_message/what_to_do` 必填）、`/healthz` `/readyz` `/version` `/api/v1/errors`、`/api/v1/openapi.json`、`GET /` 占位 | P1-03/P1-04 | `curl /readyz` 含 `db:ok, schema_version`；迁移滞后时 503；`/version` 与 openapi `info.version` 一致 | 1.5 |
-| **P1-06** | 契约链路 | OpenAPI 快照生成与提交、`make api-check`（示例/错误码/operationId 完整性）、`openapi-typescript` 生成 `packages/api-client`、契约 diff 门禁 | P1-05 | `make api-check` 退出码 0；故意删示例 → 非 0（元测试）；`make sdk` 后 git diff=0 | 1.5 |
-| **P1-07** | 认证与 PAT | 注册/登录/刷新（轮换+复用检测）/登出/me、Argon2id、PAT 创建（明文一次）/列表/撤销、登录失败限速 | P1-05/P1-06 | API-001~005、007~009 验收全绿；refresh 复用 → 401；PAT 撤销 → 401 | 2.5 |
-| **P1-08** | 租户上下文 + 仓储基座 | `TenantContext`（仅从 token 取，不可由参数覆盖）、`SET LOCAL app.user_id` + 连接归还 `RESET`、Repository 基类强制注入 `user_id`、越权测试骨架 | P1-03/P1-07 | **连接池串号测试**：并发 A/B 请求交错 100 次，无一次读到对方数据 | 1.5 |
-| **P1-09** | 华泰解析器 + 预览 | `BillParser` 注册表、列别名、多日期格式、表头探测、资金余额缺失/首行非买入/未知摘要预检、`POST /imports/preview`（不落库） | P1-08 | API-010 验收；预览后 `trade` 表行数不变；`fixtures/bills` 各格式解析成功 | 2 |
-| **P1-10** | 导入提交 + 去重 + 撤销 | `POST /imports`（202+job）、bag 去重（`dedupe_key+occurrence_idx`）、隔离区落库、批次记录、`revoke` 同步软删 + 失效标记、`GET imports/{id}`、`quarantine` | P1-09/P1-11 | API-011~013、015 验收；重复上传 inserted=0；同日同价同量多笔不吞并；撤销后行数回退 | 2.5 |
-| **P1-11** | 任务队列 + worker + jobs 端点 | `platform.job`、`FOR UPDATE SKIP LOCKED` 出队、租约/心跳/退避、单飞部分唯一索引、worker 入口、`GET /jobs`、`GET /jobs/{id}`、`cancel`、SSE `events` | P1-03 | API-061~064 验收；kill worker 后任务被回收重跑；同参并发只跑一个 | 2 |
-| **P1-12** | 流水查询与维护 | 游标分页、过滤/排序白名单/`fields`、`ETag`/304、`GET /trades`、`GET /trades/{id}`、`PATCH`（版本冲突 409）、软删/恢复、`history` | P1-08 | API-017~021、080 验收；翻页无重无漏；旧 version PATCH → 409 | 1.5 |
-| **P1-13** | 分类、隔离区、对账 | 默认摘要规则 seed、分类流水线、打新流、未知摘要入隔离区、余额链对账 `GET /reconciliation`（断链定位到行） | P1-10 | API-014、026 验收；断链 fixture `diff≤0.01` 且 `trade_id` 正确 | 2 |
-| **P1-14** | 数据夹具与回放 | `MARKET_MODE=replay` 适配器骨架 + `fixtures/market/` 快照格式、10 年合成账单生成器、`make seed-tenants`/`seed-demo`、`FrozenClock` | P1-04 | `make seed-tenants` 幂等；断网跑 `make seed-demo` 成功 | 1.5 |
-| **P1-15** | 前端骨架 | Vite+React+TS+Router+TanStack Query、生成 client 接入、登录/注册页、上传+预览+结果页、流水列表、错误边界（`code/user_message/what_to_do`）、路由守卫、token 内存+静默刷新 | P1-06/P1-07 | 浏览器完成 §2.1 手工走查 1–5 步 | 2 |
-| **P1-16** | 一期验收套件 | `backend/tests/api/`（一期端点逐条）、越权负向、`make verify-p1`、`make demo-p1`、`docs` 同步 | 全部 P1 | `make verify-p1` 全绿并打印勾选清单 | 1.5 |
+| **Period1-01** | Monorepo 骨架与工具链 | `backend/`(uv workspace: contracts/core/ledger/review/delivery/platform + services/api,worker)、`frontend/`(pnpm: apps/web + packages/api-client)、`Makefile`、ruff/mypy/eslint/tsc、import-linter 基线 | — | `make lint && make typecheck` 零错误；`import-linter` 分层契约通过 | 1.5 |
+| **Period1-02** | 本地环境编排 | `infra/compose/docker-compose.dev.yml`（仅 PG）、`.env.example`、`make dev/db-up/db-reset` | Period1-01 | `make db-up` 后 `psql` 可连；`make db-reset` 可重建 | 1 |
+| **Period1-03** | DB schema + 迁移 + 多租户隔离 | Alembic 多 schema 基线（`platform`/`ledger`/`review`）、`user/refresh_token/api_token/job/import_batch/trade/quarantine_row/summary_rule/reconciliation`、RLS 策略 `tenant_isolation`、应用角色（非 owner、无 BYPASSRLS） | Period1-02 | `make migrate` 幂等；`make test-rls`：未设 `app.user_id` 读租户表返回 0 行 | 2.5 |
+| **Period1-04** | contracts + core 值对象 | `contracts`：错误码枚举（47 个 seed）、常量（`EPS_AMT/EPS_R/EPS_CUM/A`）、DTO 基座；`core`：标度整数 `Money/Qty/Price/Ratio`、`Clock` 端口、确定性随机 | Period1-01 | `make test-core`：标度整数属性测试（往返/舍入/溢出）+ core 覆盖 100% | 2 |
+| **Period1-05** | API 骨架 | FastAPI 装配根、中间件链（request_id→认证→租户→限流占位）、RFC7807 错误处理（`user_message/what_to_do` 必填）、`/healthz` `/readyz` `/version` `/api/v1/errors`、`/api/v1/openapi.json`、`GET /` 占位 | Period1-03/Period1-04 | `curl /readyz` 含 `db:ok, schema_version`；迁移滞后时 503；`/version` 与 openapi `info.version` 一致 | 1.5 |
+| **Period1-06** | 契约链路 | OpenAPI 快照生成与提交、`make api-check`（示例/错误码/operationId 完整性）、`openapi-typescript` 生成 `packages/api-client`、契约 diff 门禁 | Period1-05 | `make api-check` 退出码 0；故意删示例 → 非 0（元测试）；`make sdk` 后 git diff=0 | 1.5 |
+| **Period1-07** | 认证与 PAT | 注册/登录/刷新（轮换+复用检测）/登出/me、Argon2id、PAT 创建（明文一次）/列表/撤销、登录失败限速 | Period1-05/Period1-06 | API-001~005、007~009 验收全绿；refresh 复用 → 401；PAT 撤销 → 401 | 2.5 |
+| **Period1-08** | 租户上下文 + 仓储基座 | `TenantContext`（仅从 token 取，不可由参数覆盖）、`SET LOCAL app.user_id` + 连接归还 `RESET`、Repository 基类强制注入 `user_id`、越权测试骨架 | Period1-03/Period1-07 | **连接池串号测试**：并发 A/B 请求交错 100 次，无一次读到对方数据 | 1.5 |
+| **Period1-09** | 华泰解析器 + 预览 | `BillParser` 注册表、列别名、多日期格式、表头探测、资金余额缺失/首行非买入/未知摘要预检、`POST /imports/preview`（不落库） | Period1-08 | API-010 验收；预览后 `trade` 表行数不变；`fixtures/market` 各格式解析成功 | 2 |
+| **Period1-10** | 导入提交 + 去重 + 撤销 | `POST /imports`（202+job）、bag 去重（`dedupe_key+occurrence_idx`）、隔离区落库、批次记录、`revoke` 同步软删 + 失效标记、`GET imports/{id}`、`quarantine` | Period1-09/Period1-11 | API-011~013、015 验收；重复上传 inserted=0；同日同价同量多笔不吞并；撤销后行数回退 | 2.5 |
+| **Period1-11** | 任务队列 + worker + jobs 端点 | `platform.job`、`FOR UPDATE SKIP LOCKED` 出队、租约/心跳/退避、单飞部分唯一索引、worker 入口、`GET /jobs`、`GET /jobs/{id}`、`cancel`、SSE `events` | Period1-03 | API-061~064 验收；kill worker 后任务被回收重跑；同参并发只跑一个 | 2 |
+| **Period1-12** | 流水查询与维护 | 游标分页、过滤/排序白名单/`fields`、`ETag`/304、`GET /trades`、`GET /trades/{id}`、`PATCH`（版本冲突 409）、软删/恢复、`history` | Period1-08 | API-017~021、080 验收；翻页无重无漏；旧 version PATCH → 409 | 1.5 |
+| **Period1-13** | 分类、隔离区、对账 | 默认摘要规则 seed、分类流水线、打新流、未知摘要入隔离区、余额链对账 `GET /reconciliation`（断链定位到行） | Period1-10 | API-014、026 验收；断链 fixture `diff≤0.01` 且 `trade_id` 正确 | 2 |
+| **Period1-14** | 数据夹具与回放 | `MARKET_MODE=replay` 适配器骨架 + `fixtures/market/` 快照格式、10 年合成账单生成器、`make seed-tenants`/`seed-demo`、`FrozenClock` | Period1-04 | `make seed-tenants` 幂等；断网跑 `make seed-demo` 成功 | 1.5 |
+| **Period1-15** | 前端骨架 | Vite+React+TS+Router+TanStack Query、生成 client 接入、登录/注册页、上传+预览+结果页、流水列表、错误边界（`code/user_message/what_to_do`）、路由守卫、token 内存+静默刷新 | Period1-06/Period1-07 | 浏览器完成 §2.1 手工走查 1–5 步 | 2 |
+| **Period1-16** | 一期验收套件 | `backend/tests/api/`（一期端点逐条）、越权负向、`make verify-p1`、`make demo-p1`、`docs` 同步 | 全部 P1 | `make verify-p1` 全绿并打印勾选清单 | 1.5 |
 
 ### 2.3 一期不做（范围围栏）
 
@@ -134,8 +137,8 @@ open http://localhost:5173
 
 | 风险 | 应对 |
 |---|---|
-| RLS 与连接池串号（最隐蔽） | P1-08 专项并发测试；连接归还钩子 `RESET`；越权用例进 CI |
-| 契约与实现漂移 | P1-06 门禁先立；生成 client 后手写类型即报错 |
+| RLS 与连接池串号（最隐蔽） | Period1-08 专项并发测试；连接归还钩子 `RESET`；越权用例进 CI |
+| 契约与实现漂移 | Period1-06 门禁先立；生成 client 后手写类型即报错 |
 | 解析器被真实账单打脸 | 先拿 3 份真实脱敏账单做 fixture；字段别名表可配置 |
 | 估时超支 | 一期若超时，先砍 SSE（改轮询）与 `history` 端点 |
 
@@ -163,21 +166,21 @@ open http://localhost:5173/dashboard
 
 | ID | 任务 | 产出 | 依赖 | 本地验证 | 人日 |
 |---|---|---|---|---|---|
-| **P2-01** | FIFO 回合引擎 | `core/fifo`：稳定序配对、分批减仓、股息归属（除息日按持股数）、送转/配股调整、桥接恒等式；独立 oracle `tests/oracle/naive_fifo.py` | P1-04 | 属性测试：数量/成本守恒；28 条边界 fixture 与 oracle 对拍 ≤0.01 元 | 3 |
-| **P2-02** | 回合构建与数据落库 | `review.round/round_fill`、`rebuild-rounds` job、脏窗口算法与安全回看、`GET /rounds`、`/{id}`、`/{id}/fills`、规则 CRUD（补一期） | P2-01/P1-11 | API-027~031、022~025、016 验收；加仓/分批场景 fills 与期望一致 | 2.5 |
-| **P2-03** | 净值与收益 | `review.nav_daily/cashflow`、期初资产反推（`back_solved`）、份额法 TWR、XIRR/MWR、`MWR−TWR`、`GET /nav` | P2-02 | API-032 验收；大额入金遇上涨方向正确；`NAV_UNRELIABLE` 区间无资产值；日收益 vs oracle ≤1bp | 3 |
-| **P2-04** | 行情适配与校验 | `MarketDataSource` 能力协商、akshare live 实现、本地缓存 L2、`provenance` 留痕、后复权/as-of 因子、涨跌停与复权跳变校验、replay 切换 | P1-14 | `make test-market`：恶意 fixture（复权不一致/越界/因子跳变）被拦截；`MARKET_MODE=live` 可选手测 | 2.5 |
-| **P2-05** | 指标注册表与执行引擎 | `MetricDef` 13 字段、注册发现、框架代算 `n/CI/inputs_hash/sample_status/status`、DAG 拓扑与环检测、`definition_version` 失效、`metric_result` 物化、门禁状态机 | P2-03/P2-04 | `make test-engine`：N<10 → `insufficient` 且 `conclusion=null`；口径 bump → 旧结果 100% `stale` | 3 |
-| **P2-06** | 指标端点 + 三段式 | `GET /metrics`（批量/过滤）、`/{id}`、`/explain`、`/drilldown`、`ETag`、`data_as_of` 透出 | P2-05 | API-033~035、079 验收；`blocked` 时无 `value`；`conclusion` 无裸术语（词表断言） | 2 |
-| **P2-07** | 三域指标实现 | 绩效（胜率含全样本、盈亏比、持仓天数、集中度 CR1/Gini、费用占比/回本门槛）、择时（追涨分位、卖飞率 z、β/α/IR、回撤族）、行为（PGR/PLR DE + bootstrap、换手、摊平、HHI）、选股（PIT cohort BHAR 20/60） | P2-05 | 每个指标 1 份 golden（期望值来自手算表/独立实现）+ mutation ≥80% | 3.5 |
-| **P2-08** | 五因子归因 | `core/attribution/five_factor`：选股/板块/买点/卖点/费用 +残差、`GET /attribution`、排序结论生成 | P2-07 | API-036 验收：Σ因子+残差 = 区间损益（≤0.01）；单因子主导 fixture 排序正确 | 2 |
-| **P2-09** | 月度报告 | `report` 表、`ReportSpec`、区块组装（概览/归因/最赚最亏/行为/重复错误/一条行动/口径脚注）、异步生成、HTML 自包含、`ETag`/下载、`blocked` 降级为说明单 | P2-06/P2-08 | API-039~042 验收；离线打开 HTML；报告数字与 `/metrics` 逐一相等（脚本比对）；同 `spec_hash` 复用 | 2.5 |
-| **P2-10** | 数据导出 | `POST /exports`（异步）、Excel+JSON 打包、签名下载与 410 过期 | P2-09 | API-059/060 验收；导出→清库→导入后行数/回合/净值一致 | 1 |
-| **P2-11** | 设置 | `GET /settings`、`PUT /settings/benchmark`、`PUT /settings/privacy`、默认基准沪深300全收益、切换即触发失效重算 | P2-03 | API-055~057 验收；切基准后历史趋势分段 | 1 |
-| **P2-12** | 前端看板与下钻 | 五卡（净值/四数字/费用/行为/最赚最亏）、状态徽标（ok/stale/blocked）、下钻抽屉、回合列表与详情、对账横幅、可信度标签 | P2-06 | 浏览器走查 §3.1 第 1–2、4 步；`blocked` 卡片不渲染数值（快照断言） | 3 |
-| **P2-13** | 前端报告与导出页 | 报告列表/预览/下载、导出任务与下载、空态与失败态 | P2-09 | 浏览器走查 §3.1 第 3 步 | 1.5 |
-| **P2-14** | 二期验收与越权全量 | 二期端点验收补齐、**受保护端点越权用例 100%**、golden 回归、`make verify-p2` | 全部 P2 | `make verify-p2` 全绿；`make test-isolation` 覆盖全部受保护端点 | 2 |
-| **P2-15** | 前端零口径门禁 | ESLint 自定义规则（禁算术/禁结论拼接/禁裸 fetch/禁裸术语）+ AST 断言 | P2-12 | 故意在页面算一次 `a-b` → `make lint` 失败 | 1 |
+| **Period2-01** | FIFO 回合引擎 | `core/fifo`：稳定序配对、分批减仓、股息归属（除息日按持股数）、送转/配股调整、桥接恒等式；独立 oracle `tests/oracle/naive_fifo.py` | Period1-04 | 属性测试：数量/成本守恒；28 条边界 fixture 与 oracle 对拍 ≤0.01 元 | 3 |
+| **Period2-02** | 回合构建与数据落库 | `review.round/round_fill`、`rebuild-rounds` job、脏窗口算法与安全回看、`GET /rounds`、`/{id}`、`/{id}/fills`、规则 CRUD（补一期） | Period2-01/Period1-11 | API-027~031、022~025、016 验收；加仓/分批场景 fills 与期望一致 | 2.5 |
+| **Period2-03** | 净值与收益 | `review.nav_daily/cashflow`、期初资产反推（`back_solved`）、份额法 TWR、XIRR/MWR、`MWR−TWR`、`GET /nav` | Period2-02 | API-032 验收；大额入金遇上涨方向正确；`NAV_UNRELIABLE` 区间无资产值；日收益 vs oracle ≤1bp | 3 |
+| **Period2-04** | 行情适配与校验 | `MarketDataSource` 能力协商、akshare live 实现、本地缓存 L2、`provenance` 留痕、后复权/as-of 因子、涨跌停与复权跳变校验、replay 切换 | Period1-14 | `make test-market`：恶意 fixture（复权不一致/越界/因子跳变）被拦截；`MARKET_MODE=live` 可选手测 | 2.5 |
+| **Period2-05** | 指标注册表与执行引擎 | `MetricDef` 13 字段、注册发现、框架代算 `n/CI/inputs_hash/sample_status/status`、DAG 拓扑与环检测、`definition_version` 失效、`metric_result` 物化、门禁状态机 | Period2-03/Period2-04 | `make test-engine`：N<10 → `insufficient` 且 `conclusion=null`；口径 bump → 旧结果 100% `stale` | 3 |
+| **Period2-06** | 指标端点 + 三段式 | `GET /metrics`（批量/过滤）、`/{id}`、`/explain`、`/drilldown`、`ETag`、`data_as_of` 透出 | Period2-05 | API-033~035、079 验收；`blocked` 时无 `value`；`conclusion` 无裸术语（词表断言） | 2 |
+| **Period2-07** | 三域指标实现 | 绩效（胜率含全样本、盈亏比、持仓天数、集中度 CR1/Gini、费用占比/回本门槛）、择时（追涨分位、卖飞率 z、β/α/IR、回撤族）、行为（PGR/PLR DE + bootstrap、换手、摊平、HHI）、选股（PIT cohort BHAR 20/60） | Period2-05 | 每个指标 1 份 golden（期望值来自手算表/独立实现）+ mutation ≥80% | 3.5 |
+| **Period2-08** | 五因子归因 | `core/attribution/five_factor`：选股/板块/买点/卖点/费用 +残差、`GET /attribution`、排序结论生成 | Period2-07 | API-036 验收：Σ因子+残差 = 区间损益（≤0.01）；单因子主导 fixture 排序正确 | 2 |
+| **Period2-09** | 月度报告 | `report` 表、`ReportSpec`、区块组装（概览/归因/最赚最亏/行为/重复错误/一条行动/口径脚注）、异步生成、HTML 自包含、`ETag`/下载、`blocked` 降级为说明单 | Period2-06/Period2-08 | API-039~042 验收；离线打开 HTML；报告数字与 `/metrics` 逐一相等（脚本比对）；同 `spec_hash` 复用 | 2.5 |
+| **Period2-10** | 数据导出 | `POST /exports`（异步）、Excel+JSON 打包、签名下载与 410 过期 | Period2-09 | API-059/060 验收；导出→清库→导入后行数/回合/净值一致 | 1 |
+| **Period2-11** | 设置 | `GET /settings`、`PUT /settings/benchmark`、`PUT /settings/privacy`、默认基准沪深300全收益、切换即触发失效重算 | Period2-03 | API-055~057 验收；切基准后历史趋势分段 | 1 |
+| **Period2-12** | 前端看板与下钻 | 五卡（净值/四数字/费用/行为/最赚最亏）、状态徽标（ok/stale/blocked）、下钻抽屉、回合列表与详情、对账横幅、可信度标签 | Period2-06 | 浏览器走查 §3.1 第 1–2、4 步；`blocked` 卡片不渲染数值（快照断言） | 3 |
+| **Period2-13** | 前端报告与导出页 | 报告列表/预览/下载、导出任务与下载、空态与失败态 | Period2-09 | 浏览器走查 §3.1 第 3 步 | 1.5 |
+| **Period2-14** | 二期验收与越权全量 | 二期端点验收补齐、**受保护端点越权用例 100%**、golden 回归、`make verify-p2` | 全部 P2 | `make verify-p2` 全绿；`make test-isolation` 覆盖全部受保护端点 | 2 |
+| **Period2-15** | 前端零口径门禁 | ESLint 自定义规则（禁算术/禁结论拼接/禁裸 fetch/禁裸术语）+ AST 断言 | Period2-12 | 故意在页面算一次 `a-b` → `make lint` 失败 | 1 |
 
 ### 3.3 二期不做
 
@@ -189,7 +192,7 @@ Brinson 多期链接、日志/趋势/提醒、分享、对话、限流实装、�
 |---|---|
 | 口径实现与期望值互相"自证" | 期望值必须来自**手算表或独立朴素实现**，禁止用被测代码生成 |
 | 行情语义漂移导致数字不稳 | replay 固定快照为准；live 仅作可选抽查 |
-| 前端悄悄算数 | P2-15 门禁提前到二期收尾（不等三期） |
+| 前端悄悄算数 | Period2-15 门禁提前到二期收尾（不等三期） |
 | 指标太多导致战线拉长 | 核心指标锁 8–12 个进"行动建议"，其余标 `exploratory` |
 
 ---
@@ -214,18 +217,18 @@ make verify-p3
 
 | ID | 任务 | 产出 | 依赖 | 本地验证 | 人日 |
 |---|---|---|---|---|---|
-| **P3-01** | 交易日志与闭环 | `journal_entry`、CRUD、平仓事件触发对照提示、季度 summary | P2-02 | API-046~051 验收；事件→提示可回放 | 2 |
-| **P3-02** | 纵向趋势 | `GET /trends`、按季度聚合、`definition_version` 断点（`breaks`+`segment`） | P2-06 | API-037 验收；口径 bump 后出现断点且不跨段连线 | 1.5 |
-| **P3-03** | 行为规则与提醒 | 规则阈值配置、`AnomalyDetected` 评估器、`alerts`、`notifications`、ack；文案白名单（无买卖建议） | P2-07/P3-01 | API-052~054、058 验收；词表断言通过 | 2.5 |
-| **P3-04** | 报告分享 | 签名分享链接、匿名受限读取、撤销、过期 | P2-09 | API-043~045 验收；匿名只能看该报告；撤销后 410 | 1 |
-| **P3-05** | 审计 | `audit_log` 全写操作留痕、本人/管理员双视图、admin 无明细 | P1-07/P1-10 | API-065/066 验收；跨用户不可见 | 1.5 |
-| **P3-06** | 管理端 | `/admin/system/status`、备份触发/列表/校验、恢复演练端点（不读明细） | P3-05 | API-067~070 验收；admin 读 trades → 403 | 2 |
-| **P3-07** | 对话子系统 | `ToolGateway` 白名单、`ResponseComposer` 本地填值、`EgressGuard` 出站断言、Provider 适配、模板降级、`chat` 端点、`llm_call` 留痕 | P2-06 | API-077/078 验收；`LLM_PROVIDER=none` 仍答金额；构造含金额上下文 → 出站被拦（测试钩子） | 3 |
-| **P3-08** | 归因增强 | Brinson-Fachler（配置/选择/交互）+ Carino 多期链接 + 行业偏离 | P2-08 | 三效应之和与区间超额 ≤1bp | 2 |
-| **P3-09** | 限流 | 按用户/PAT 令牌桶（PG 计数）、`429+Retry-After+X-RateLimit-*`、并发任务上限 | P1-11 | 第 N+1 次 429；同参重算返回同 `job_id` | 1.5 |
-| **P3-10** | 性能 | 索引复核、连接池算式、必要处分区、查询计划审查、`make load-test` 脚本 | P2-14 | 看板 50 并发 p95 ≤300ms；导入 5000 行任务 ≤30s；全量重算 ≤60s | 2 |
-| **P3-11** | 可观测性 | 结构化日志（脱敏）、Prometheus 指标（队列/延迟/降级/越权拒绝）、trace、告警阈值表 | P3-06 | `/metrics` 有数；日志含 `request_id/user_id/job_id` 且无金额明文 | 2 |
-| **P3-12** | 端到端与三期满验 | Playwright 8 条关键路径、`make verify-p3`、全量变异测试 | 全部 P3 | `make e2e` 全绿；core 变异分 ≥80% | 2 |
+| **Period3-01** | 交易日志与闭环 | `journal_entry`、CRUD、平仓事件触发对照提示、季度 summary | Period2-02 | API-046~051 验收；事件→提示可回放 | 2 |
+| **Period3-02** | 纵向趋势 | `GET /trends`、按季度聚合、`definition_version` 断点（`breaks`+`segment`） | Period2-06 | API-037 验收；口径 bump 后出现断点且不跨段连线 | 1.5 |
+| **Period3-03** | 行为规则与提醒 | 规则阈值配置、`AnomalyDetected` 评估器、`alerts`、`notifications`、ack；文案白名单（无买卖建议） | Period2-07/Period3-01 | API-052~054、058 验收；词表断言通过 | 2.5 |
+| **Period3-04** | 报告分享 | 签名分享链接、匿名受限读取、撤销、过期 | Period2-09 | API-043~045 验收；匿名只能看该报告；撤销后 410 | 1 |
+| **Period3-05** | 审计 | `audit_log` 全写操作留痕、本人/管理员双视图、admin 无明细 | Period1-07/Period1-10 | API-065/066 验收；跨用户不可见 | 1.5 |
+| **Period3-06** | 管理端 | `/admin/system/status`、备份触发/列表/校验、恢复演练端点（不读明细） | Period3-05 | API-067~070 验收；admin 读 trades → 403 | 2 |
+| **Period3-07** | 对话子系统 | `ToolGateway` 白名单、`ResponseComposer` 本地填值、`EgressGuard` 出站断言、Provider 适配、模板降级、`chat` 端点、`llm_call` 留痕 | Period2-06 | API-077/078 验收；`LLM_PROVIDER=none` 仍答金额；构造含金额上下文 → 出站被拦（测试钩子） | 3 |
+| **Period3-08** | 归因增强 | Brinson-Fachler（配置/选择/交互）+ Carino 多期链接 + 行业偏离 | Period2-08 | 三效应之和与区间超额 ≤1bp | 2 |
+| **Period3-09** | 限流 | 按用户/PAT 令牌桶（PG 计数）、`429+Retry-After+X-RateLimit-*`、并发任务上限 | Period1-11 | 第 N+1 次 429；同参重算返回同 `job_id` | 1.5 |
+| **Period3-10** | 性能 | 索引复核、连接池算式、必要处分区、查询计划审查、`make load-test` 脚本 | Period2-14 | 看板 50 并发 p95 ≤300ms；导入 5000 行任务 ≤30s；全量重算 ≤60s | 2 |
+| **Period3-11** | 可观测性 | 结构化日志（脱敏）、Prometheus 指标（队列/延迟/降级/越权拒绝）、trace、告警阈值表 | Period3-06 | `/metrics` 有数；日志含 `request_id/user_id/job_id` 且无金额明文 | 2 |
+| **Period3-12** | 端到端与三期满验 | Playwright 8 条关键路径、`make verify-p3`、全量变异测试 | 全部 P3 | `make e2e` 全绿；core 变异分 ≥80% | 2 |
 
 ### 4.3 三期不做
 
@@ -296,7 +299,7 @@ make verify-p3
 |---|---|---|---|
 | 一期地基拖长 | RLS/连接池、契约链路两处最耗时 | 后续全部顺延 | 这两项排在最先；若超时先砍 `history`/SSE |
 | 口径返工 | 期望值来源不独立 | 二期重做 | 先写 oracle 与手算表，再写实现 |
-| 前端与后端节奏错位 | 契约未定就开工前端 | 返工 | P1-06 完成即冻结一期契约 |
+| 前端与后端节奏错位 | 契约未定就开工前端 | 返工 | Period1-06 完成即冻结一期契约 |
 | 真实账单兼容 | 只有样例数据 | 上线即崩 | 一期就要 ≥3 份真实脱敏账单做 fixture |
 | 估时乐观 | 单人 + 双栈 | 交付延期 | 按 §6 顺序裁剪，不动不可砍项 |
 | 上线事故 | 只在本地验过 | 生产故障 | 交付阶段"上云必验清单"逐项签字 |
@@ -309,46 +312,46 @@ make verify-p3
 
 | 端点 | 期次 | 任务 | 端点 | 期次 | 任务 |
 |---|---|---|---|---|---|
-| API-001 | 一 | P1-07 | API-002 | 一 | P1-07 |
-| API-003 | 一 | P1-07 | API-004 | 一 | P1-07 |
-| API-005 | 一 | P1-07 | API-006 | 三 | P3-05 |
-| API-007 | 一 | P1-07 | API-008 | 一 | P1-07 |
-| API-009 | 一 | P1-07 | API-010 | 一 | P1-09 |
-| API-011 | 一 | P1-10 | API-012 | 一 | P1-10 |
-| API-013 | 一 | P1-10 | API-014 | 一 | P1-13 |
-| API-015 | 一 | P1-10 | API-016 | 二 | P2-02 |
-| API-017 | 一 | P1-12 | API-018 | 一 | P1-12 |
-| API-019 | 一 | P1-12 | API-020 | 一 | P1-12 |
-| API-021 | 一 | P1-12 | API-022 | 二 | P2-02 |
-| API-023 | 二 | P2-02 | API-024 | 二 | P2-02 |
-| API-025 | 二 | P2-02 | API-026 | 一 | P1-13 |
-| API-027 | 二 | P2-02 | API-028 | 二 | P2-02 |
-| API-029 | 二 | P2-02 | API-030 | 二 | P2-02 |
-| API-031 | 二 | P2-02 | API-032 | 二 | P2-03 |
-| API-033 | 二 | P2-06 | API-034 | 二 | P2-06 |
-| API-035 | 二 | P2-06 | API-036 | 二 | P2-08 |
-| API-037 | 三 | P3-02 | API-038 | 二 | P2-07 |
-| API-039 | 二 | P2-09 | API-040 | 二 | P2-09 |
-| API-041 | 二 | P2-09 | API-042 | 二 | P2-09 |
-| API-043 | 三 | P3-04 | API-044 | 三 | P3-04 |
-| API-045 | 三 | P3-04 | API-046 | 三 | P3-01 |
-| API-047 | 三 | P3-01 | API-048 | 三 | P3-01 |
-| API-049 | 三 | P3-01 | API-050 | 三 | P3-01 |
-| API-051 | 三 | P3-01 | API-052 | 三 | P3-03 |
-| API-053 | 三 | P3-03 | API-054 | 三 | P3-03 |
-| API-055 | 二 | P2-11 | API-056 | 二 | P2-11 |
-| API-057 | 二 | P2-11 | API-058 | 三 | P3-03 |
-| API-059 | 二 | P2-10 | API-060 | 二 | P2-10 |
-| API-061 | 一 | P1-11 | API-062 | 一 | P1-11 |
-| API-063 | 一 | P1-11 | API-064 | 一 | P1-11 |
-| API-065 | 三 | P3-05 | API-066 | 三 | P3-05 |
-| API-067 | 三 | P3-06 | API-068 | 三 | P3-06 |
-| API-069 | 三 | P3-06 | API-070 | 三 | P3-06 |
-| API-071 | 一 | P1-05 | API-072 | 一 | P1-05 |
-| API-073 | 一 | P1-05 | API-074 | 三 | P3-11 |
-| API-075 | 一 | P1-06 | API-076 | 一 | P1-05 |
-| API-077 | 三 | P3-07 | API-078 | 三 | P3-07 |
-| API-079 | 二 | P2-06 | API-080 | 一 | P1-12 |
+| API-001 | 一 | Period1-07 | API-002 | 一 | Period1-07 |
+| API-003 | 一 | Period1-07 | API-004 | 一 | Period1-07 |
+| API-005 | 一 | Period1-07 | API-006 | 三 | Period3-05 |
+| API-007 | 一 | Period1-07 | API-008 | 一 | Period1-07 |
+| API-009 | 一 | Period1-07 | API-010 | 一 | Period1-09 |
+| API-011 | 一 | Period1-10 | API-012 | 一 | Period1-10 |
+| API-013 | 一 | Period1-10 | API-014 | 一 | Period1-13 |
+| API-015 | 一 | Period1-10 | API-016 | 二 | Period2-02 |
+| API-017 | 一 | Period1-12 | API-018 | 一 | Period1-12 |
+| API-019 | 一 | Period1-12 | API-020 | 一 | Period1-12 |
+| API-021 | 一 | Period1-12 | API-022 | 二 | Period2-02 |
+| API-023 | 二 | Period2-02 | API-024 | 二 | Period2-02 |
+| API-025 | 二 | Period2-02 | API-026 | 一 | Period1-13 |
+| API-027 | 二 | Period2-02 | API-028 | 二 | Period2-02 |
+| API-029 | 二 | Period2-02 | API-030 | 二 | Period2-02 |
+| API-031 | 二 | Period2-02 | API-032 | 二 | Period2-03 |
+| API-033 | 二 | Period2-06 | API-034 | 二 | Period2-06 |
+| API-035 | 二 | Period2-06 | API-036 | 二 | Period2-08 |
+| API-037 | 三 | Period3-02 | API-038 | 二 | Period2-07 |
+| API-039 | 二 | Period2-09 | API-040 | 二 | Period2-09 |
+| API-041 | 二 | Period2-09 | API-042 | 二 | Period2-09 |
+| API-043 | 三 | Period3-04 | API-044 | 三 | Period3-04 |
+| API-045 | 三 | Period3-04 | API-046 | 三 | Period3-01 |
+| API-047 | 三 | Period3-01 | API-048 | 三 | Period3-01 |
+| API-049 | 三 | Period3-01 | API-050 | 三 | Period3-01 |
+| API-051 | 三 | Period3-01 | API-052 | 三 | Period3-03 |
+| API-053 | 三 | Period3-03 | API-054 | 三 | Period3-03 |
+| API-055 | 二 | Period2-11 | API-056 | 二 | Period2-11 |
+| API-057 | 二 | Period2-11 | API-058 | 三 | Period3-03 |
+| API-059 | 二 | Period2-10 | API-060 | 二 | Period2-10 |
+| API-061 | 一 | Period1-11 | API-062 | 一 | Period1-11 |
+| API-063 | 一 | Period1-11 | API-064 | 一 | Period1-11 |
+| API-065 | 三 | Period3-05 | API-066 | 三 | Period3-05 |
+| API-067 | 三 | Period3-06 | API-068 | 三 | Period3-06 |
+| API-069 | 三 | Period3-06 | API-070 | 三 | Period3-06 |
+| API-071 | 一 | Period1-05 | API-072 | 一 | Period1-05 |
+| API-073 | 一 | Period1-05 | API-074 | 三 | Period3-11 |
+| API-075 | 一 | Period1-06 | API-076 | 一 | Period1-05 |
+| API-077 | 三 | Period3-07 | API-078 | 三 | Period3-07 |
+| API-079 | 二 | Period2-06 | API-080 | 一 | Period1-12 |
 
 > 校验：`make api-coverage` 读取本表与 [API-Catalog §1](architecture/v2/API-Catalog.md) 比对，断言 `已映射 / 总数 == 1.0`。
 
@@ -356,34 +359,34 @@ make verify-p3
 
 | FR | 期次 | 主任务 | 覆盖端点 |
 |---|---|---|---|
-| FR-L1 | 一 | P1-05/P1-06 | API-071~074、API-067 |
-| FR-L2 | 一 | P1-07/P1-08 | API-001~006、API-017、API-030、API-065、API-066 |
-| FR-L3 | 一 | P1-09/P1-10 | API-010~016、API-061~063 |
-| FR-L4 | 一 | P1-12 | API-017~021、API-080 |
-| FR-L5 | 一 | P1-13/P2-02 | API-014、API-016、API-022~025 |
-| FR-L6 | 一 | P1-13 | API-026、API-033 |
-| FR-L7 | 一 | P2-10/P3-05 | API-006、API-059、API-060、API-068~070 |
-| FR-L8 | 一 | P1-12 | API-017、API-080 |
-| FR-A1 | 一 | P1-07 | API-007~009、API-033 |
-| FR-A2 | 一 | P1-06 | API-073、API-075、API-076 |
-| FR-A3 | 一 | P3-09 | API-028、API-038、API-039、API-059、API-061、API-067 |
-| FR-A4 | 一 | P3-05 | API-065、API-066 |
-| FR-R1 | 一 | P2-02 | API-029、API-030 |
-| FR-R2 | 一 | P2-01/P2-02 | API-027~031、API-062~064 |
-| FR-R3 | 一 | P2-03 | API-032 |
-| FR-R4 | 二 | P2-07 | API-033、API-038 |
-| FR-R5 | 二 | P2-03/P2-07 | API-033、API-056、API-079 |
-| FR-R6 | 二 | P2-07 | API-033 |
-| FR-R7 | 二 | P2-08 | API-036 |
-| FR-R8 | 二 | P2-05/P2-06 | API-033、API-034、API-052、API-079 |
-| FR-D1 | 二 | P1-15/P2-12/P2-13 | 全部读端点（API-005、029、032、033、036、040、047、055 等） |
-| FR-D2 | 二 | P2-09 | API-039~042、API-062 |
-| FR-D3 | 二 | P2-06 | API-033~035 |
-| FR-D4 | 三 | P3-01 | API-046~051 |
-| FR-D5 | 三 | P3-02 | API-037 |
-| FR-D6 | 三 | P3-03 | API-052、API-053、API-057、API-058 |
-| FR-D7 | 三 | P3-07 | API-077、API-078 |
-| FR-D8 | 三 | P3-04 | API-043~045、API-054 |
+| FR-L1 | 一 | Period1-05/Period1-06 | API-071~074、API-067 |
+| FR-L2 | 一 | Period1-07/Period1-08 | API-001~006、API-017、API-030、API-065、API-066 |
+| FR-L3 | 一 | Period1-09/Period1-10 | API-010~016、API-061~063 |
+| FR-L4 | 一 | Period1-12 | API-017~021、API-080 |
+| FR-L5 | 一 | Period1-13/Period2-02 | API-014、API-016、API-022~025 |
+| FR-L6 | 一 | Period1-13 | API-026、API-033 |
+| FR-L7 | 一 | Period2-10/Period3-05 | API-006、API-059、API-060、API-068~070 |
+| FR-L8 | 一 | Period1-12 | API-017、API-080 |
+| FR-A1 | 一 | Period1-07 | API-007~009、API-033 |
+| FR-A2 | 一 | Period1-06 | API-073、API-075、API-076 |
+| FR-A3 | 一 | Period3-09 | API-028、API-038、API-039、API-059、API-061、API-067 |
+| FR-A4 | 一 | Period3-05 | API-065、API-066 |
+| FR-R1 | 一 | Period2-02 | API-029、API-030 |
+| FR-R2 | 一 | Period2-01/Period2-02 | API-027~031、API-062~064 |
+| FR-R3 | 一 | Period2-03 | API-032 |
+| FR-R4 | 二 | Period2-07 | API-033、API-038 |
+| FR-R5 | 二 | Period2-03/Period2-07 | API-033、API-056、API-079 |
+| FR-R6 | 二 | Period2-07 | API-033 |
+| FR-R7 | 二 | Period2-08 | API-036 |
+| FR-R8 | 二 | Period2-05/Period2-06 | API-033、API-034、API-052、API-079 |
+| FR-D1 | 二 | Period1-15/Period2-12/Period2-13 | 全部读端点（API-005、029、032、033、036、040、047、055 等） |
+| FR-D2 | 二 | Period2-09 | API-039~042、API-062 |
+| FR-D3 | 二 | Period2-06 | API-033~035 |
+| FR-D4 | 三 | Period3-01 | API-046~051 |
+| FR-D5 | 三 | Period3-02 | API-037 |
+| FR-D6 | 三 | Period3-03 | API-052、API-053、API-057、API-058 |
+| FR-D7 | 三 | Period3-07 | API-077、API-078 |
+| FR-D8 | 三 | Period3-04 | API-043~045、API-054 |
 
 > FR 与端点的权威对应见 [API-Catalog §8](architecture/v2/API-Catalog.md)，本表把其折算到开发期次。
 

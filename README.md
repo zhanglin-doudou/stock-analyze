@@ -95,9 +95,9 @@ make dev
 
 | 账号 | 角色 | 说明 |
 |---|---|---|
-| a@local | user | 演示账号 A（有业务数据） |
-| b@local | user | 演示账号 B（有业务数据） |
-| admin@local | admin | 运维管理员（不可读写业务明细） |
+| a@demo.example.com | user | 演示账号 A（有业务数据） |
+| b@demo.example.com | user | 演示账号 B（有业务数据） |
+| admin@demo.example.com | admin | 运维管理员（不可读写业务明细） |
 
 ## 常用命令
 
@@ -251,7 +251,7 @@ make lint         # ruff + eslint
 ## 文档索引
 
 - [Architecture-v2](docs/Architecture-v2.md) — 架构总纲（分层 / 隔离 / 任务 / 可靠性）
-- [DEV-PLAN-v2](docs/DEV-PLAN-v2.md) — 开发计划（P1~P3 任务拆解与验收）
+- [DEV-PLAN-v2](docs/DEV-PLAN-v2.md) — 开发计划（Period1~Period3 任务拆解与验收）
 - [API-Catalog](docs/architecture/v2/API-Catalog.md) — 端点总表 / 错误码表 / 验收矩阵
 - [数据库安装与 SQL 指引](docs/DATABASE.md) — 本文档配套的数据库专项文档
 - [Testing](docs/architecture/v2/Testing.md) / [Reliability](docs/architecture/v2/Reliability.md) / [Extensibility](docs/architecture/v2/Extensibility.md) / [ADR](docs/architecture/v2/ADR.md)

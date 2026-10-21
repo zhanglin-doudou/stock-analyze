@@ -11,7 +11,9 @@ from __future__ import annotations
 import io
 import json
 import random
-from datetime import timedelta
+import re
+import zipfile
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
 from openpyxl import Workbook  # type: ignore[import-untyped]  # 第三方 openpyxl 无类型桩
@@ -123,8 +125,20 @@ def _build_rows(seed: int, months: int, count: int, *, break_at: int | None) -> 
     return rows
 
 
+_XLSX_FIXED_TIME = datetime(2026, 1, 1, tzinfo=UTC)  # 固定文档/zip 时间戳，保证字节可复现
+
+
 def _to_xlsx_bytes(rows: list[list[str]]) -> bytes:
+    """xlsx bytes：内容 + docProps + zip 条目时间戳全部固定，重复生成字节一致。
+
+    openpyxl 默认把 `created/modified` 与 zip member 的 mtime 写成当前时间，
+    会让 `seed-demo`/`demo-p1` 每次重写 fixtures 产生 git diff。这里统一固定，
+    使夹具既是内容确定性的也是字节确定性的。
+    """
     workbook = Workbook()
+    workbook.properties.creator = "stock-analyze-fixtures"
+    workbook.properties.created = _XLSX_FIXED_TIME
+    workbook.properties.modified = _XLSX_FIXED_TIME
     sheet = workbook.active
     sheet.title = "对账单"
     sheet.append(list(HEADERS))
@@ -132,7 +146,26 @@ def _to_xlsx_bytes(rows: list[list[str]]) -> bytes:
         sheet.append(row)
     buffer = io.BytesIO()
     workbook.save(buffer)
-    return buffer.getvalue()
+
+    source = zipfile.ZipFile(io.BytesIO(buffer.getvalue()))
+    normalized = io.BytesIO()
+    with zipfile.ZipFile(normalized, "w", compression=zipfile.ZIP_DEFLATED) as target:
+        for info in source.infolist():
+            entry = zipfile.ZipInfo(info.filename, date_time=(1980, 1, 1, 0, 0, 0))
+            entry.compress_type = zipfile.ZIP_DEFLATED
+            entry.external_attr = info.external_attr
+            data = source.read(info.filename)
+            if info.filename == "docProps/core.xml":
+                # openpyxl 在 save() 时会把 modified 覆盖成当前时间，必须最后再钉死。
+                data = re.sub(
+                    rb"<dcterms:modified[^>]*>.*?</dcterms:modified>",
+                    b'<dcterms:modified xsi:type="dcterms:W3CDTF">'
+                    b"2026-01-01T00:00:00Z</dcterms:modified>",
+                    data,
+                )
+            target.writestr(entry, data)
+    source.close()
+    return normalized.getvalue()
 
 
 def generate_huatai_bill(seed: int, *, months: int = 3, count: int = 120) -> bytes:

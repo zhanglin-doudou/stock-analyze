@@ -1,6 +1,6 @@
 # 二期硬依赖修复记录：G2 / G3 / G4
 
-> 日期：2026-10-21 ｜ 基线：`4e2456f`（一期 P0 修复已提交）+ 本次工作区修改 ｜ 准入检查单：[P2-Entry-Checklist.md](P2-Entry-Checklist.md)
+> 日期：2026-10-21 ｜ 基线：`4e2456f`（一期 P0 修复已提交）+ 本次工作区修改 ｜ 准入检查单：[Period2-Entry-Checklist.md](Period2-Entry-Checklist.md)
 > 范围：只修 G2（队列语义）、G3（分类闭环）、G4（replay 行情）；G1/G5/G6/G7 未做。**未提交 git。**
 
 ## 0. 结论
@@ -73,9 +73,9 @@
 
 ### 2.3 设计决策/风险
 
-1. **系统规则应用层自愈**：preview 首次会写 19 条 `user_id IS NULL` 配置行（不写 trade）。一期原设计只在 `seed-tenants` 写规则；不 auto-seed 会让真实账整片误隔离。若要求 preview 严格零写入，P2-02 可改为启动/迁移 seed。
-2. `summary_code` = 命中规则短码；买卖类规则 `side=both`（分类由摘要决定，避免合成夹具摘要/买卖标志矛盾误隔离）。P2-02 规则 CRUD 规格需对齐。
-3. 未知摘要行号目前只在 `assumptions.unknown_summary_rows`；`warnings[].row` 需改 `routers/imports.py`（未在本次范围，P2-12 如需行内定位再放开）。
+1. **系统规则应用层自愈**：preview 首次会写 19 条 `user_id IS NULL` 配置行（不写 trade）。一期原设计只在 `seed-tenants` 写规则；不 auto-seed 会让真实账整片误隔离。若要求 preview 严格零写入，Period2-02 可改为启动/迁移 seed。
+2. `summary_code` = 命中规则短码；买卖类规则 `side=both`（分类由摘要决定，避免合成夹具摘要/买卖标志矛盾误隔离）。Period2-02 规则 CRUD 规格需对齐。
+3. 未知摘要行号目前只在 `assumptions.unknown_summary_rows`；`warnings[].row` 需改 `routers/imports.py`（未在本次范围，Period2-12 如需行内定位再放开）。
 4. 旧库 `category` NULL 数据需重导或 CLI reclassify；G1 清库重 seed 可覆盖。
 5. 未知摘要重传会在新批次再留一条隔离（inserted=0 不回退）。
 
@@ -86,7 +86,7 @@
 ### 3.1 改动
 
 - `platform/ports.py` 新增 `MarketCapabilities` / `Bar` / `Quote` / `MarketDataSource` Protocol（标度整数、禁 float）。
-- 新增 `stock_ledger/market.py`：`ReplayMarketDataSource`（懒加载、闭区间过滤、as_of 截断、fail-closed：缺文件/坏 JSON/非法定点/未来数据 → INTERNAL_ERROR；未知 symbol → NOT_FOUND；参数错 → VALIDATION_ERROR）+ `create_market_source(settings)`（replay/live；live 现为 `NotImplementedError`，P2-04 再实现）。
+- 新增 `stock_ledger/market.py`：`ReplayMarketDataSource`（懒加载、闭区间过滤、as_of 截断、fail-closed：缺文件/坏 JSON/非法定点/未来数据 → INTERNAL_ERROR；未知 symbol → NOT_FOUND；参数错 → VALIDATION_ERROR）+ `create_market_source(settings)`（replay/live；live 现为 `NotImplementedError`，Period2-04 再实现）。
 - `fixtures.py`：`generate_market_quotes()` 纯确定性（固定 9 个交易日 2026-01-30~09-30、4 标的、固定首日+漂移、sort_keys、无时刻戳）。
 - `cli.write_market_fixtures()` 复用该生成器；`fixtures/market/quotes.json` 重新生成（4318 B）。
 - 新增 `backend/tests/unit/ledger/test_market_replay.py` 25 例。
@@ -98,7 +98,7 @@
 
 ### 3.3 风险
 
-- 尚未接线消费方：P2-04 在 AppState 装配 `create_market_source(settings)`；建议 `MARKET_AS_OF` 与 FrozenClock 基准日对齐。
+- 尚未接线消费方：Period2-04 在 AppState 装配 `create_market_source(settings)`；建议 `MARKET_AS_OF` 与 FrozenClock 基准日对齐。
 - live 模式装配即抛 `NotImplementedError`（fail-closed，不静默空数据）。
 - 既有 `fixtures/market/bill_huatai.xlsx` 与生成器当前输出仍不一致（seed-demo 会重写一次 diff）——属 G5/夹具治理，本次未改 bill（避免影响 G3 对账用例）。
 
@@ -124,7 +124,7 @@
 - G5 seed/demo 契约（mode=append、合法邮箱/口令）
 - G6 前端接 SDK + 端点覆盖/越权门禁
 - G7 review schema/platform 租户表 RLS
-- P2-01 FIFO 纯核心 + oracle 可立即开始
+- Period2-01 FIFO 纯核心 + oracle 可立即开始
 
 ## 6. 操作提示
 

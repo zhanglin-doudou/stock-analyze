@@ -1,11 +1,13 @@
-# 一期（P1）代码审查与验收报告
+# 一期（Period1）代码审查与验收报告
 
 > 审查对象：HEAD `b61d441`。相关提交：`f27e645`（文档底座）、`9dd2b1e`（一期功能）、`6b72b9a`（真账单/测试）、`7194854`（注册登录优化）、`b61d441`（非交易账单）
 > 验收依据：`docs/DEV-PLAN-v2.md` §0.5 DoD / §2 一期、`docs/architecture/v2/API-Catalog.md`、`docs/architecture/v2/Testing.md`、根 `AGENTS.md` 与各子系统 `AGENTS.md`
 > 审查日期：2026-10-20 ｜ 方式：4 名评审并行只读审查 + Lead 全量门禁实跑 + 真实 HTTP 端到端 + 数据库/纯函数复算
 > 报告分片（可追溯）：`var/review-p1/foundation.md`（地基）、`ledger.md`（导入/对账）、`api.md`（API/契约）、`frontend-qa.md`（前端/门禁）；原始日志 `var/review-p1/gates/`
 
-> **修复进展（2026-10-21）**：**全部 5 项 P0 已修复并复验** —— P0-2/P0-3 见 [P1-Fix-Log-P0-2-P0-3.md](P1-Fix-Log-P0-2-P0-3.md)，P0-1/P0-4/P0-5 见 [P1-Fix-Log-P0-1-P0-4-P0-5.md](P1-Fix-Log-P0-1-P0-4-P0-5.md)；`make verify-p1` 15/15 全绿、真实 HTTP 复验 14/14 + 23/23。本报告作为审查时点记录保留，P1/P2 仍待修。
+> **修复进展（2026-10-21）**：**全部 5 项 P0 已修复并复验** —— P0-2/P0-3 见 [Period1-Fix-Log-P0-2-P0-3.md](Period1-Fix-Log-P0-2-P0-3.md)，P0-1/P0-4/P0-5 见 [Period1-Fix-Log-P0-1-P0-4-P0-5.md](Period1-Fix-Log-P0-1-P0-4-P0-5.md)；`make verify-p1` 15/15 全绿、真实 HTTP 复验 14/14 + 23/23。本报告作为审查时点记录保留，P1/P2 仍待修。
+
+> **命名说明**：本报告为历史审查快照，其中期次任务 ID 使用旧写法 `P1-xx`（等价 `Period1-xx`）；优先级仍为 `P0/P1/P2/P3`。新文档统一 Period 全称。
 
 ---
 
