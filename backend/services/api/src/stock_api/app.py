@@ -29,7 +29,17 @@ from stock_api.errors import (
 )
 from stock_api.middlewares import RequestContextMiddleware
 from stock_api.openapi_meta import apply_contract_metadata
-from stock_api.routers import auth, imports, jobs, ops, reconciliation, tokens, trades
+from stock_api.routers import (
+    auth,
+    imports,
+    jobs,
+    ops,
+    reconciliation,
+    rounds,
+    rules,
+    tokens,
+    trades,
+)
 from stock_api.version import API_PREFIX, APP_VERSION
 
 log = get_logger("stock_api")
@@ -101,7 +111,7 @@ def create_app(settings: Settings | None = None, *, clock: Clock | None = None) 
     app.add_exception_handler(StarletteHTTPException, http_exception_handler)
     app.add_exception_handler(Exception, unhandled_error_handler)
 
-    for module in (ops, auth, tokens, jobs, trades, reconciliation, imports):
+    for module in (ops, auth, tokens, jobs, trades, reconciliation, imports, rules, rounds):
         app.include_router(module.router, prefix=API_PREFIX)
     # 探针/根路由按容器惯例不带前缀（/healthz、/readyz、/version、/metrics、/）
     app.include_router(ops.root_router)

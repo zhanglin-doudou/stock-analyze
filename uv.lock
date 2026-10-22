@@ -1914,6 +1914,7 @@ source = { editable = "backend/packages/review" }
 dependencies = [
     { name = "stock-contracts" },
     { name = "stock-core" },
+    { name = "stock-ledger" },
     { name = "stock-platform" },
 ]
 
@@ -1921,6 +1922,7 @@ dependencies = [
 requires-dist = [
     { name = "stock-contracts", editable = "backend/packages/contracts" },
     { name = "stock-core", editable = "backend/packages/core" },
+    { name = "stock-ledger", editable = "backend/packages/ledger" },
     { name = "stock-platform", editable = "backend/packages/platform" },
 ]
 

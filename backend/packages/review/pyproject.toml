@@ -3,7 +3,7 @@ name = "stock-review"
 version = "0.1.0"
 description = "度量层上下文：回合、净值、指标、归因、可信度"
 requires-python = ">=3.12"
-dependencies = ["stock-contracts", "stock-core", "stock-platform"]
+dependencies = ["stock-contracts", "stock-core", "stock-platform", "stock-ledger"]
 
 [build-system]
 requires = ["hatchling"]

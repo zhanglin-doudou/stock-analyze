@@ -1,24 +1,25 @@
 # 二期（Period2）准入检查单
 
-> 版本：2026-10-21 ｜ 依据：[DEV-PLAN-v2.md](../DEV-PLAN-v2.md) §3、[API-Catalog.md](../architecture/v2/API-Catalog.md)、[Period1-CodeReview-and-Acceptance.md](Period1-CodeReview-and-Acceptance.md)、[Period1-Fix-Log-P0-2-P0-3.md](Period1-Fix-Log-P0-2-P0-3.md)、[Period1-Fix-Log-P0-1-P0-4-P0-5.md](Period1-Fix-Log-P0-1-P0-4-P0-5.md)
+> 版本：2026-10-22 ｜ 依据：[DEV-PLAN-v2.md](../DEV-PLAN-v2.md) §3、[API-Catalog.md](../architecture/v2/API-Catalog.md)、[Period1-CodeReview-and-Acceptance.md](Period1-CodeReview-and-Acceptance.md)、[Period1-Fix-Log-P0-2-P0-3.md](Period1-Fix-Log-P0-2-P0-3.md)、[Period1-Fix-Log-P0-1-P0-4-P0-5.md](Period1-Fix-Log-P0-1-P0-4-P0-5.md)
 > 用途：判断"一期是否可退出、二期是否可进入"，以及二期启动前必须补齐的依赖项。**每次状态变化请更新本表。**
 
 ## 0. 当前结论
 
-**有条件通过（Conditional Go，G2/G3/G4 已关闭）**：
+**有条件通过（Conditional Go，G2/G3/G4 已关闭）；Period2-01/02 已完成（2026-10-22）**：
 
 - 5 项 P0 已全部修复并复验（数据口径/去重/权限/撤销 UI/验收门禁与契约）；
-- **G1~G7 全部关闭**：G1 数据基线、G2 队列语义、G3 分类闭环、G4 replay 行情、G5 seed/demo、G6 SDK/覆盖门禁、G7 platform RLS 均已完成并验证（见 [G2-G4](Period2-Hardening-Fix-Log-G2-G3-G4.md)、[G5-G1](Period2-Hardening-Fix-Log-G5-G1.md)、[G6-G7](Period2-Hardening-Fix-Log-G6-G7.md)）。可开始 Period2-01/02。
-- `verify-p1` 已扩为 15 步全绿（含 API 验收、越权、RLS、契约快照、前端 tsc/vitest/build）；
-- 剩余 17 项 P1 中，有 6 类构成二期任务的**显式硬依赖**：G1~G7 完成前，不进入对应二期任务；
-- **Period2-01（FIFO 纯核心 + Oracle）可立即并行启动**（只依赖已修复的金额口径与 core 标度整数）。
+- **G1~G7 全部关闭**：G1 数据基线、G2 队列语义、G3 分类闭环、G4 replay 行情、G5 seed/demo、G6 SDK/覆盖门禁、G7 platform RLS 均已完成并验证（见 [G2-G4](Period2-Hardening-Fix-Log-G2-G3-G4.md)、[G5-G1](Period2-Hardening-Fix-Log-G5-G1.md)、[G6-G7](Period2-Hardening-Fix-Log-G6-G7.md)）。
+- **Period2-01（core/fifo 纯引擎 + 独立 oracle）与 Period2-02（review.round/round_fill、rebuild-rounds job、脏窗口重建、GET /rounds/*
+、规则 CRUD、reclassify、bridge）已完成**：后端全量 `pytest` 590 passed；`stock_core` 覆盖率 100%；受保护端点 33/33、跨租户资源 17/17、RLS 14/14（review 3/3）全绿。证据见 [Period2-01/02 实施日志](Period2-01-02-Implementation-Log.md)。
+- `verify-p1` 已扩为 18 步全绿（含 API 验收、越权、RLS、契约快照、前端 tsc/vitest/build）；
+- 剩余 P1 中构成后续二期任务硬依赖的项已逐条在矩阵标注；下一批可启动 Period2-03（NAV）与 Period2-04（行情）。
 
 **Go / No-Go 矩阵：**
 
 | 二期任务 | 现在能否开始 | 前置条件 |
 |---|---|---|
-| Period2-01 FIFO 回合引擎（core 纯函数 + oracle） | ✅ 可以 | 无（P0-1 口径已修） |
-| Period2-02 回合落库 / rebuild-rounds / 规则 CRUD | ⚠️ G7 完成后 | G2 ✅、G7（review RLS） |
+| Period2-01 FIFO 回合引擎（core 纯函数 + oracle） | ✅ **已完成（2026-10-22）** | 无（P0-1 口径已修） |
+| Period2-02 回合落库 / rebuild-rounds / 规则 CRUD | ✅ **已完成（2026-10-22）** | G2 ✅、G7 ✅ |
 | Period2-03 净值与收益（NAV/TWR/XIRR） | ⚠️ Period2-02 后 | G3 ✅（分类/现金流识别）、Period2-02 |
 | Period2-04 行情适配与校验（replay/live） | ✅ 可开始 | G4 ✅（replay 适配器 + 确定性夹具；live 留 Period2-04） |
 | Period2-05 指标注册表与执行引擎 | ⚠️ Period2-03/04 后 | G6 ✅；P2-03/04 完成 |
@@ -148,10 +149,10 @@
 ## 3. 二期启动排期（建议）
 
 ```
-Day 0        G1 已完成（清库重 seed + tag `period1-baseline`）；Period2-01 FIFO 纯核心 + oracle 开工
-Sprint 1     Period2-01 对拍（属性测试 + 28 边界 fixture ≤0.01）
-Sprint 2     Period2-02 回合落库/rebuild（依赖 G2/G7 ✅）
-Sprint 3     Period2-03 NAV（依赖 G3/Period2-02）；Period2-04 行情（依赖 G4）
+Day 0        G1 已完成（清库重 seed + tag `period1-baseline`）
+Sprint 1     ✅ Period2-01 已完成（2026-10-22）：稳定序/分批减仓/股息/送转/配股/桥接；独立 oracle 对拍 + 属性测试
+Sprint 2     ✅ Period2-02 已完成（2026-10-22）：review.round/round_fill + rebuild-rounds job + 脏窗口 + /rounds/* + 规则 CRUD + reclassify + bridge
+Sprint 3     Period2-03 NAV（依赖 G3/Period2-02 ✅）；Period2-04 行情（依赖 G4）
 Sprint 4     Period2-05 指标引擎 + Period2-06 端点；新增端点由 G6 门禁强制覆盖
 Sprint 5+    Period2-07~Period2-13；Period2-14 二期越权全量；Period2-15 前端零口径
 ```
@@ -190,3 +191,5 @@ Sprint 5+    Period2-07~Period2-13；Period2-14 二期越权全量；Period2-15 
 | 2026-10-21 | G2/G3/G4 已完成并集成验证（verify-p1 15/15；真实 HTTP G2 7/7、G3/G4 16/16） |
 | 2026-10-21 | G5 seed/demo + G1 清库基线完成（3 用户/238 流水/2 批次，tag `period1-baseline`） |
 | 2026-10-21 | G6（SDK/端点/越权门禁）+ G7（platform RLS/review 门禁）完成；verify-p1 18/18；G1~G7 全部关闭 |
+| 2026-10-22 | **Period2-01 完成**：`core/fifo`（稳定序/分批减仓/股息除息日归属/送转/配股/超卖 data_error/open 回合/桥接恒等式）+ 独立 oracle + 28 边界对拍 + hypothesis 属性测试；core 覆盖率 100%（161 passed）。 |
+| 2026-10-22 | **Period2-02 完成**：`review.round/round_fill/round_build_state`（迁移 0003 + RLS 3/3）、`rebuild_rounds` job（full/period 脏窗口 + 400 天安全回看 + 自动入队）、API-016/022~025/027~031、规则 CRUD、桥接恒等式；后端全量 590 passed，契约快照/SDK 同步。证据：[实施日志](Period2-01-02-Implementation-Log.md)。 |

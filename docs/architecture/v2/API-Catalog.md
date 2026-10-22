@@ -219,16 +219,71 @@
 - 验收断言：① fx_base → status=="ok"、break_count==0、filled_count==0；② fx_broken 首次 → status=="degraded"（不再 blocked）、break_count==1、filled_count==1、breaks[0].filled==true 且 breaks[0].filled_trade_id 非空、line_no 与 fixture 一致、|diff|≤0.01；③ 同一请求再次调用 → break_count==0、filled_count==0、status=="degraded"（区间内存在 missing 行），补差行仍只有 1 条；④ GET /trades?side=missing → 可查到该补差行（source=="system"、summary=="对账自动补差"、batch_id==null）；⑤ 缺资金余额列 → status=="degraded"、break_count==0（降级而非错误体）。
 #### API-027 GET /reconciliation/bridge
 - 用途：桥接恒等式（期初 + 现金流 + 损益 = 期末）；FR-R2；认证：read；同步。
-- 请求：query `period`(必填) / `as_of`(可选业务日)。
-- 响应 200：`period` / `balanced`(bool) / `identity{initial_cash,cashflows,realized_pnl,dividends,fees,ending_value,residual}` / `tolerance:"0.01"` / `status` / `data_as_of` / `inputs_hash`。
-- 错误码：INVALID_PERIOD(422)、VALIDATION_ERROR(422)。
-- 验收断言：① balanced==true；② |identity.residual|≤0.01；③ 断链 fixture → balanced==false 且 residual≠0；④ 相同输入重复调用 balanced/residual 完全相同（inputs_hash 相等）。
+- 请求：query `period`(必填) / `as_of`(可选业务日，只用该业务日及以前的数据)。
+- 响应 200：`period` / `balanced`(bool) / `identity{initial_cash,initial_open_cost,cashflows,realized_pnl,dividends,interest,fees,other,open_cost,ending_value,residual}` / `tolerance:"0.01"` / `status(ok|degraded|blocked)` / `data_as_of` / `inputs_hash`。
+- 恒等式（Period2-02 实现口径，金额均为定点字符串；`realized_pnl` 为**不含股息**的交易损益，股息单列，避免二次计入）：
+  ```
+  residual = initial_cash + initial_open_cost + cashflows + realized_pnl
+             + dividends + interest - fees + other - ending_value
+  ending_value = 期末现金 + open_cost（期末未平仓成本；P2-03 换为市值后同一恒等式仍成立）
+  ```
+  `cashflows` 为净外部资金流（银证转账等 transfer 净额）；`fees` 为未分摊费用（fee 类行，正=费用）；`other` 为无法归类的现金流（打新/补差/未知），非零时 `status=degraded` 并自然体现在 `residual`。期初/期末现金取账单 `cash_balance` 锚点，锚点缺失时按现金流推导并降级；完全无 `cash_balance` 时 `status=blocked`。
+- 错误码：INVALID_PERIOD(422)、VALIDATION_ERROR(422)、ADMIN_CANNOT_READ_TRADES(403)。
+- 验收断言：① balanced==true；② |identity.residual|≤0.01；③ 断链 fixture（cash_balance 不连续）→ balanced==false 且 residual≠0；④ 相同输入重复调用 balanced/residual/inputs_hash 完全相同。
 #### API-028 POST /jobs/rebuild-rounds
 - 用途：异步重建回合/净值/派生指标；FR-R2；认证：write；幂等：必需；异步。
 - 请求：body `scope`(full|period,默认 full) / `period`(scope=period 必填) / `reason`(可选)；头 `Idempotency-Key`。
-- 响应 202：`job_id` / `type:"rebuild_rounds"` / `status:"pending"` / `links{self,events}`；`Location: /api/v1/jobs/{job_id}`。
-- 错误码：IDEMPOTENCY_KEY_REUSED(422)、JOB_ALREADY_RUNNING(409)、QUOTA_EXCEEDED(429)、VALIDATION_ERROR(422)。
-- 验收断言：① 202 + Location；② 同参数并发 3 次 → 同一 job_id（第 2/3 次 `X-Job-Reused: true`）；③ 不同参数并发第 2 个 → 429 QUOTA_EXCEEDED 且有 Retry-After；④ 终态 succeeded 后 GET /rounds 立即可见新结果；⑤ 运行中 POST /jobs/{id}/cancel → 终态 cancelled。
+- 响应 202：`job_id` / `type:"rebuild_rounds"` / `status:"pending"` / `links{self,events}`；`Location: /api/v1/jobs/{job_id}`；同参复用（G2 语义）时 `X-Job-Reused: true`。
+- 错误码：IDEMPOTENCY_KEY_REUSED(422)、JOB_ALREADY_RUNNING(409)、QUOTA_EXCEEDED(429)、VALIDATION_ERROR(422)、INVALID_PERIOD(422)。
+- 验收断言：① 202 + Location；② 同参数并发 3 次 → 同一 job_id（第 2/3 次 `X-Job-Reused: true`）；③ 单飞范围内**异参**并发第 2 个 → 409 `JOB_ALREADY_RUNNING`（G2 收口：静默复用会跑错参数）；并发任务数超用户配额 → 429 QUOTA_EXCEEDED + Retry-After；④ 终态 succeeded 后 GET /rounds 立即可见新结果；⑤ 运行中 POST /jobs/{id}/cancel → 终态 cancelled。
+#### API-016 POST /imports/{batch_id}/reclassify
+- 用途：用户新增/修改摘要规则后，对指定批次重跑分类（未知摘要重新命中、隔离区条目减少）；FR-L5；认证：write；幂等：必需；异步。
+- 请求：path `batch_id`；body `{}` 或 `{reason?}`；头 `Idempotency-Key`（缺失 → 422 VALIDATION_ERROR）。
+- 响应 202：`job_id` / `type:"reclassify"` / `status:"pending"` / `batch_id` / `links{self,events}`；`Location: /api/v1/jobs/{job_id}`。
+- 错误码：NOT_FOUND(404)、IMPORT_ALREADY_REVOKED(409)、VALIDATION_ERROR(422)、JOB_ALREADY_RUNNING(409)、QUOTA_EXCEEDED(429)。
+- 验收断言：① 202 且 job.type=="reclassify"；② 新增用户规则命中后重跑 → 隔离区未解决条目减少且 trade.category/summary_code 更新；③ 跨用户 batch_id → 404 且不产生 job；④ 已撤销批次 → 409 IMPORT_ALREADY_REVOKED。
+#### API-022 GET /summary-rules
+- 用途：摘要分类规则列表（系统默认 + 本人规则）；FR-L5；认证：read；同步。
+- 请求：query 无（可选 `include_system=true`，默认 true）。
+- 响应 200：`items[]{rule_id,code,name,category,side,match_type,pattern,priority,enabled,is_system,version,created_at}` / `total`；系统规则 `user_id IS NULL` 对所有人生效。
+- 错误码：VALIDATION_ERROR(422)。
+- 验收断言：① 200 且系统默认规则覆盖 buy/sell/dividend/transfer/fee/interest/rights/new_stock 等类别；② 同用户 `code` 唯一（系统规则 code 也唯一）；③ 跨用户列表仅含系统规则 + 自己的规则（0 条他人规则）。
+#### API-023 POST /summary-rules
+- 用途：新建用户摘要规则；FR-L5；认证：write；幂等：支持；同步。
+- 请求：body `name/category/side/match_type/pattern/priority/enabled`；`code` 由服务端生成（`usr_`+8hex，≤16）。
+- 响应 201：`SummaryRuleOut`；响应头 `ETag: W/"1"`。
+- 错误码：VALIDATION_ERROR(422)。
+- 验收断言：① 201 且 `is_system=false`、`version=1`；② 下一次分类/API-016 重跑即生效；③ 非法 category/side/match_type/regex → 422。
+#### API-024 PATCH /summary-rules/{rule_id}
+- 用途：修改本人规则；FR-L5；认证：write；幂等：支持；同步。
+- 请求：path `rule_id`；头 `If-Match` 必填（`"<version>"`）；body 可改 `name/category/side/match_type/pattern/priority/enabled`（`code`/`is_system` 不可改）。
+- 响应 200：`SummaryRuleOut`（version+1）+ 新 `ETag`。
+- 错误码：NOT_FOUND(404)、VERSION_CONFLICT(409)、VALIDATION_ERROR(422)。
+- 验收断言：① version 递增 1；② 旧 If-Match → 409 VERSION_CONFLICT；③ 系统规则/他人规则 → 404（不可改）；④ `code` 字段被改 → 422。
+#### API-025 DELETE /summary-rules/{rule_id}
+- 用途：删除本人规则（删除后系统默认规则自然回退）；FR-L5；认证：write；幂等：幂等；同步。
+- 请求：path `rule_id`；无 body。
+- 响应 204；重复删除 → 204。
+- 错误码：NOT_FOUND(404)、VALIDATION_ERROR(422)。
+- 验收断言：① 204；② 删除后该摘要回到系统规则命中/隔离行为；③ 系统规则/他人规则 → 404。
+#### API-029 GET /rounds
+- 用途：回合列表（FIFO 配对结果，按平仓日倒序）；FR-R1/R2；认证：read；同步；游标分页。
+- 请求：query `security_code?` / `status?(open|closed|data_error)` / `from?`/`to?`（按 close_date 半开）/ `limit`(1~200,默认 50) / `cursor?`。
+- 响应 200：`items[]Round{round_id,security_code,security_name,status,open_date,close_date,quantity,cost,proceeds,dividend,pnl,return_rate,holding_days,open_trade_id,close_trade_id,data_error,oversell_quantity,fills_count,rebuilt_at}` / `next_cursor` / `has_more`。
+- 错误码：INVALID_CURSOR(400)、INVALID_SORT_FIELD(400)、VALIDATION_ERROR(422)、ADMIN_CANNOT_READ_TRADES(403)。
+- 验收断言：① 200；rebuild job succeeded 后立即可见；② 跨用户 0 条；③ `pnl` 与 golden 差 ≤0.01；④ 游标翻页无重无漏；非法游标 400 INVALID_CURSOR。
+#### API-030 GET /rounds/{round_id}
+- 用途：回合详情；FR-R2/D1；认证：read；同步。
+- 请求：path `round_id`。
+- 响应 200：`Round`（同上，含 `fills_count`）；可选 `fills[]`（`include_fills=true` 时内联）。
+- 错误码：NOT_FOUND(404)、VALIDATION_ERROR(422)、ADMIN_CANNOT_READ_TRADES(403)。
+- 验收断言：① 200 且 pnl/return_rate/holding_days 与列表一致；② 跨用户/不存在 → 404 且 body 不含他人 `security_code/pnl`；③ admin → 403 ADMIN_CANNOT_READ_TRADES。
+#### API-031 GET /rounds/{round_id}/fills
+- 用途：FIFO 配对明细（可追溯到买卖流水）；FR-R2；认证：read；同步。
+- 请求：path `round_id`。
+- 响应 200：`items[]{fill_id,sequence,buy_trade_id,sell_trade_id,quantity,buy_cost,sell_proceeds,dividend,pnl,open_date,close_date,holding_days}` / `total`。
+- 错误码：NOT_FOUND(404)、VALIDATION_ERROR(422)、ADMIN_CANNOT_READ_TRADES(403)。
+- 验收断言：① `buy_trade_id/sell_trade_id` 集合与 golden/FIFO 期望 100% 一致；② `Σfills.pnl == round.pnl`、`Σfills.quantity == round.quantity`；③ 跨用户 → 404。
 #### API-032 GET /nav
 - 用途：单位净值序列 + TWR/MWR 与基准指标；FR-R3；认证：read；同步。
 - 请求：query `from`/`to`(必填,半开) / `benchmark`(默认 hs300_tr) / `granularity`(daily|weekly)。
@@ -464,22 +519,22 @@ data: {"job_id":"job_01J9Z6","status":"succeeded","result_ref":"/api/v1/reports/
 | API-013 | imports_batch_detail | 200 counts.inserted==412、file_sha256 匹配；断链导入 filled_count==len(fills)≥1、fills 含 amount/date/line_no，撤销后归零 | fx_base/fx_broken | P0 |
 | API-014 | imports_quarantine_rows | 行号精确、raw 原样；跨用户 404 | fx_quarantine | P0 |
 | API-015 | imports_revoke_restore_count | 200 后 trades 行数回退（含 side=missing 补差一并软删）；再撤销 409 | fx_base/fx_broken | P0 |
-| API-016 | imports_reclassify | 202；新规则后隔离区条目减少 | fx_quarantine | P1 |
+| API-016 | imports_reclassify | 202；新规则后隔离区条目减少；跨用户 batch 404 | fx_quarantine | P1 |
 | API-017 | trades_cursor_sort_fields | 游标无重无漏；非法 sort 400；fields 裁剪；304 | fx_round30 | P0 |
 | API-018 | trades_patch_version | version+1；旧 version 409；跨用户 404 | fx_base | P0 |
 | API-019 | trades_soft_delete | 204；默认不可见；include_deleted=true 可见 | fx_base | P1 |
 | API-020 | trades_restore_recompute | 200；恢复后指标与原值 diff=0 | fx_round30 | P1 |
 | API-021 | trades_history | 200 含 ≥2 条版本记录 | fx_base | P1 |
-| API-022 | summary_rules_default | 200 含 5 类默认规则且 code 唯一 | fx_base | P0 |
+| API-022 | summary_rules_default | 200 含 5 类默认规则且 code 唯一；仅系统+本人规则 | fx_base | P0 |
 | API-023 | summary_rules_create | 201；下一次分类生效 | fx_quarantine | P0 |
-| API-024 | summary_rules_update_conflict | 200；旧 If-Match→409 | fx_base | P0 |
-| API-025 | summary_rules_delete | 204；回退内置规则 | fx_base | P1 |
+| API-024 | summary_rules_update_conflict | 200；旧 If-Match→409；系统规则 404 | fx_base | P0 |
+| API-025 | summary_rules_delete | 204；回退内置规则；系统规则 404 | fx_base | P1 |
 | API-026 | reconciliation_ok_and_broken | ok 时 break_count=filled_count=0；断链 fixture 首次 filled_count=1、breaks[0].filled=true/filled_trade_id 非空、status=degraded；再次调用 break_count=0 且仍 degraded；/trades?side=missing 可见补差行（source=system） | fx_broken | P0 |
-| API-027 | bridge_identity_balance | balanced=true、abs(residual)≤0.01、重复调用残差相同 | fx_round30 | P0 |
-| API-028 | rebuild_rounds_single_flight | 202；同参并发同一 job_id；不同参 429；/rounds 可见 | fx_round30 | P0 |
-| API-029 | rounds_list_visible_after_job | 200；job 成功后立即可见；跨用户 0 条 | fx_round30 | P0 |
-| API-030 | rounds_detail_pnl | 200 pnl 与 golden 差≤0.01 | fx_round30 | P0 |
-| API-031 | rounds_fills_fifo | FIFO buy/sell 配对集合 100% 一致 | fx_round30 | P0 |
+| API-027 | bridge_identity_balance | balanced=true、abs(residual)≤0.01、重复调用 residual/inputs_hash 相同；断链 fixture balanced=false | fx_round30 | P0 |
+| API-028 | rebuild_rounds_single_flight | 202+Location；同参并发同一 job_id（X-Job-Reused）；异参 409 JOB_ALREADY_RUNNING；/rounds 可见 | fx_round30 | P0 |
+| API-029 | rounds_list_visible_after_job | 200；job 成功后立即可见；跨用户 0 条；游标无重无漏 | fx_round30 | P0 |
+| API-030 | rounds_detail_pnl | 200 pnl 与 golden 差≤0.01；跨用户 404 | fx_round30 | P0 |
+| API-031 | rounds_fills_fifo | FIFO buy/sell 配对集合 100% 一致；Σfills.pnl==round.pnl | fx_round30 | P0 |
 | API-032 | nav_series_oracle | points 升序；日收益 vs oracle≤1bp；blocked 无资产值 | fx_blocked | P0 |
 | API-033 | metrics_batch_contract | n==12、sample_status=ok、value 小数、版本匹配 | fx_round30 | P0 |
 | API-034 | metrics_explain_trace | 无裸术语；status!=ok 时 conclusion=null+what_to_do | fx_n5 | P0 |

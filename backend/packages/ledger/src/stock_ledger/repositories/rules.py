@@ -63,6 +63,12 @@ _BASE_SYSTEM_RULES: tuple[tuple[str, str, str, str, str, str, int], ...] = (
     ("sys_new_stock", "新股→新股", "new_stock", "both", "contains", "新股", 14),
     ("sys_interest", "利息归本→利息", "interest", "both", "contains", "利息", 50),
     ("sys_rights", "配股→配股", "rights", "both", "contains", "配股", 60),
+    # 送股/转增/送转：送转行「数量>0 且发生金额=0」，落 category=other，review 侧
+    # 据此映射成 core FIFO 的 BONUS 事件（不新增枚举值，沿用已有 other 分类）。
+    # 优先级 45：低于配股(60)高于通用「费」(90)，且不会抢走「转托管」(30)/「银行转存」(30)。
+    ("sys_bonus_stock", "送股→公司行为", "other", "both", "contains", "送股", 45),
+    ("sys_bonus_cap", "转增→公司行为", "other", "both", "contains", "转增", 45),
+    ("sys_bonus_split", "送转→公司行为", "other", "both", "contains", "送转", 45),
     ("sys_fee", "费用→手续费", "fee", "both", "contains", "费", 90),
 )
 
@@ -116,6 +122,25 @@ class SummaryRuleRepository:
             select(SummaryRule)
             .where(
                 SummaryRule.enabled.is_(True),
+                (SummaryRule.user_id == user_id) | (SummaryRule.user_id.is_(None)),
+            )
+            .order_by(
+                SummaryRule.priority.asc(),
+                SummaryRule.is_system.asc(),
+                SummaryRule.id.asc(),
+            )
+        )
+        return list(await self._session.scalars(stmt))
+
+    async def list_for_user(self, user_id: uuid.UUID) -> list[SummaryRule]:
+        """API-022 列表用：系统规则 + 本人规则（**含 disabled**，供规则管理界面回显）。
+
+        与 `list_enabled` 的区别：这里不筛 `enabled`，否则用户停用的规则会在
+        CRUD 列表里"消失"，无法再启用。排序口径与 `list_enabled` 一致。
+        """
+        stmt = (
+            select(SummaryRule)
+            .where(
                 (SummaryRule.user_id == user_id) | (SummaryRule.user_id.is_(None)),
             )
             .order_by(

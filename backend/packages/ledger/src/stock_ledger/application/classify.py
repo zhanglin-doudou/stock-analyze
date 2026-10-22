@@ -90,15 +90,24 @@ def suggest_rule(rules: list[SummaryRule], summary: str | None, side: str) -> st
 async def reclassify_user(
     queue: JobQueue, session: AsyncSession, job: dict[str, Any], clock: Clock
 ) -> dict[str, Any]:
-    """全量复算某用户的业务分类；未命中送隔离区。"""
+    """复算某用户的业务分类；未命中送隔离区。
+
+    `job.params.batch_id` 存在时只复算该导入批次的明细（API-016 按批次重跑分类），
+    否则全量复算（增量规则生效后的兜底路径）。
+    """
     user_id = uuid.UUID(str(job["user_id"]))
     job_id = str(job["id"])
+    params = job.get("params") or {}
+    batch_id = params.get("batch_id")
     rules_repo = SummaryRuleRepository(session)
     trade_repo = TradeRepository(session)
     quarantine_repo = QuarantineRepository(session)
 
     rules = await load_rules(session, user_id)
     trades = await trade_repo.list_all(user_id)
+    if batch_id is not None:
+        # 只动目标批次，避免一次规则调整把历史其它批次的行一起重写。
+        trades = [trade for trade in trades if trade.batch_id == batch_id]
     existing_quarantine = await quarantine_repo.page(user_id, resolved=False, limit=200)
     already_flagged = {
         str(row.raw.get("trade_id")) for row in existing_quarantine if row.raw.get("trade_id")

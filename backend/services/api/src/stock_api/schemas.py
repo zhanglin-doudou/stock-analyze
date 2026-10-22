@@ -416,6 +416,115 @@ class ReconciliationOut(BaseModel):
     generated_at: datetime
 
 
+# ── 规则写请求 / 回合 / 桥接（API-016、022~025、027~031）──────
+class SummaryRuleCreateIn(SummaryRuleIn):
+    """API-023：`code` 由服务端生成（`usr_`+8hex），客户端不可指定。"""
+
+
+class SummaryRulePatchIn(StrictModel):
+    """API-024：部分更新；未提供字段不动（PATCH 语义）。"""
+
+    name: str | None = Field(default=None, min_length=1, max_length=64)
+    category: str | None = Field(default=None, min_length=1, max_length=24)
+    side: Literal["buy", "sell", "both"] | None = None
+    match_type: Literal["exact", "prefix", "contains", "regex"] | None = None
+    pattern: str | None = Field(default=None, min_length=1, max_length=128)
+    priority: int | None = Field(default=None, ge=0, le=1000)
+    enabled: bool | None = None
+
+
+class ReclassifyIn(StrictModel):
+    """API-016：body 可空 `{}`；reason 仅用于审计备注。"""
+
+    reason: str | None = Field(default=None, max_length=200)
+
+
+class RebuildRoundsIn(StrictModel):
+    """API-028：重建范围（full 全量 / period 脏窗口）。"""
+
+    scope: Literal["full", "period"] = "full"
+    period: str | None = None
+    reason: str | None = Field(default=None, max_length=200)
+
+
+class RoundOut(BaseModel):
+    """API-029/030：回合（金额/数量/比率全部定点字符串）。"""
+
+    round_id: str
+    security_code: str
+    security_name: str
+    status: Literal["open", "closed", "data_error"]
+    open_date: date
+    close_date: date | None = None
+    quantity: str
+    cost: str
+    proceeds: str
+    dividend: str
+    pnl: str
+    return_rate: str
+    holding_days: int
+    open_trade_id: str
+    close_trade_id: str | None = None
+    data_error: bool
+    oversell_quantity: str
+    fills_count: int
+    rebuilt_at: datetime
+
+
+class RoundPage(BaseModel):
+    items: list[RoundOut]
+    next_cursor: str | None = None
+    has_more: bool = False
+
+
+class RoundFillOut(BaseModel):
+    """API-031：FIFO 配对明细（一回合内 sequence 从 1 开始）。"""
+
+    fill_id: int
+    sequence: int
+    buy_trade_id: str
+    sell_trade_id: str
+    quantity: str
+    buy_cost: str
+    sell_proceeds: str
+    dividend: str
+    pnl: str
+    open_date: date
+    close_date: date
+    holding_days: int
+
+
+class RoundFillPage(BaseModel):
+    items: list[RoundFillOut]
+    total: int
+
+
+class BridgeIdentityOut(BaseModel):
+    """API-027：桥接恒等式各项（金额定点字符串，2 位小数）。"""
+
+    initial_cash: str
+    initial_open_cost: str
+    cashflows: str
+    realized_pnl: str
+    dividends: str
+    interest: str
+    fees: str
+    other: str
+    open_cost: str
+    ending_value: str
+    residual: str
+
+
+class ReconciliationBridgeOut(BaseModel):
+    period: str
+    balanced: bool
+    identity: BridgeIdentityOut
+    tolerance: str
+    status: str
+    data_as_of: datetime
+    inputs_hash: str
+
+
 # ── 运维（API-071~076）──────────────────────────────────────
 class HealthOut(BaseModel):
     status: Literal["ok"] = "ok"
