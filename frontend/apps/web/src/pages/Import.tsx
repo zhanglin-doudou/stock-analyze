@@ -187,7 +187,14 @@ export function Import() {
                 <Link className="btn btn-ghost" to="/trades">
                   去交易流水核对
                 </Link>
+                <Link className="btn btn-ghost" to="/rounds">
+                  查看回合
+                </Link>
               </div>
+              <p className="muted">
+                回合已由后台自动按 FIFO 建立（一次卖出及其消耗的买入批次）；生成可能需要几秒，
+                可在「回合」页查询与下钻配对明细。
+              </p>
               {revokeNotice ? <p className="notice">{revokeNotice}</p> : null}
             </div>
           ) : null}

@@ -130,4 +130,118 @@ describe("createClient", () => {
     expect(isApiProblemError(err)).toBe(true);
     expect((err as ApiProblemError).code).toBe("NETWORK_ERROR");
   });
+
+  it("回合列表/明细/配对明细走 /rounds 契约端点并原样透传过滤条件", async () => {
+    const paths: string[] = [];
+    const fetchImpl = vi.fn(async (input: RequestInfo | URL): Promise<Response> => {
+      const url = String(input);
+      paths.push(url);
+      if (url.includes("/fills")) {
+        return jsonResponse(200, { items: [], total: 0 });
+      }
+      if (url.match(/\/rounds\/[^?]+/)) {
+        return jsonResponse(200, {
+          round_id: "rnd_1",
+          security_code: "600519",
+          security_name: "贵州茅台",
+          status: "closed",
+          open_date: "2026-06-02",
+          close_date: "2026-06-20",
+          quantity: "150.0000",
+          cost: "1600.00",
+          proceeds: "2250.00",
+          dividend: "0.00",
+          pnl: "650.00",
+          return_rate: "0.40625000",
+          holding_days: 14,
+          open_trade_id: "trd_buy_1",
+          close_trade_id: "trd_sell_1",
+          data_error: false,
+          oversell_quantity: "0.0000",
+          fills_count: 2,
+          rebuilt_at: "2026-06-20T08:00:00Z",
+        });
+      }
+      return jsonResponse(200, { items: [], next_cursor: null, has_more: false });
+    });
+
+    const client = createClient({
+      baseUrl: "/api/v1",
+      getToken: () => ({ access: "token", refresh: null }),
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+
+    const page = await client.rounds.list({
+      limit: 50,
+      security_code: "600519",
+      status: "closed",
+      from: "2026-06-01",
+      to: "2026-06-30",
+    });
+    expect(page.items).toEqual([]);
+    const listUrl = paths[0];
+    expect(listUrl).toContain("/api/v1/rounds?");
+    expect(listUrl).toContain("security_code=600519");
+    expect(listUrl).toContain("status=closed");
+    expect(listUrl).toContain("from=2026-06-01");
+    expect(listUrl).toContain("to=2026-06-30");
+    expect(listUrl).toContain("limit=50");
+
+    const detail = await client.rounds.get("rnd_1");
+    expect(detail.round_id).toBe("rnd_1");
+    expect(detail.pnl).toBe("650.00");
+
+    const fills = await client.rounds.fills("rnd_1");
+    expect(fills.items).toEqual([]);
+    expect(paths[2]).toContain("/api/v1/rounds/rnd_1/fills");
+  });
+
+  it("手动重建回合 POST /jobs/rebuild-rounds 携带 Idempotency-Key 与 body", async () => {
+    const fetchImpl = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit): Promise<Response> =>
+        jsonResponse(202, {
+          job_id: "job_rebuild",
+          type: "rebuild_rounds",
+          status: "pending",
+          links: {
+            self: "/api/v1/jobs/job_rebuild",
+            events: "/api/v1/jobs/job_rebuild/events",
+          },
+        }),
+    );
+    const client = createClient({
+      baseUrl: "/api/v1",
+      getToken: () => ({ access: "token", refresh: null }),
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+
+    const accepted = await client.rounds.rebuild({ scope: "full" }, "idem-1");
+    expect(accepted.job_id).toBe("job_rebuild");
+
+    const [url, init] = fetchImpl.mock.calls[0];
+    expect(String(url)).toBe("/api/v1/jobs/rebuild-rounds");
+    expect(init?.method).toBe("POST");
+    const headers = init?.headers as Headers;
+    expect(headers.get("Idempotency-Key")).toBe("idem-1");
+    expect(JSON.parse(String(init?.body))).toEqual({ scope: "full" });
+  });
+
+  it("任务列表 jobs.list 支持 status/limit 过滤（回合页判断重建是否仍在跑）", async () => {
+    const fetchImpl = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit): Promise<Response> =>
+        jsonResponse(200, { items: [], next_cursor: null }),
+    );
+    const client = createClient({
+      baseUrl: "/api/v1",
+      getToken: () => ({ access: "token", refresh: null }),
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+
+    const page = await client.jobs.list({ status: "pending,running", limit: 20 });
+    expect(page.items).toEqual([]);
+    const url = String(fetchImpl.mock.calls[0][0]);
+    expect(url).toContain("/api/v1/jobs?");
+    expect(url).toContain("status=pending%2Crunning");
+    expect(url).toContain("limit=20");
+  });
 });

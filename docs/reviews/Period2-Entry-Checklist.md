@@ -193,3 +193,4 @@ Sprint 5+    Period2-07~Period2-13；Period2-14 二期越权全量；Period2-15 
 | 2026-10-21 | G6（SDK/端点/越权门禁）+ G7（platform RLS/review 门禁）完成；verify-p1 18/18；G1~G7 全部关闭 |
 | 2026-10-22 | **Period2-01 完成**：`core/fifo`（稳定序/分批减仓/股息除息日归属/送转/配股/超卖 data_error/open 回合/桥接恒等式）+ 独立 oracle + 28 边界对拍 + hypothesis 属性测试；core 覆盖率 100%（161 passed）。 |
 | 2026-10-22 | **Period2-02 完成**：`review.round/round_fill/round_build_state`（迁移 0003 + RLS 3/3）、`rebuild_rounds` job（full/period 脏窗口 + 400 天安全回看 + 自动入队）、API-016/022~025/027~031、规则 CRUD、桥接恒等式；后端全量 590 passed，契约快照/SDK 同步。证据：[实施日志](Period2-01-02-Implementation-Log.md)。 |
+| 2026-10-22 | **增量（Period2-02 产品化）**：导入提交/分类/撤销成功后自动建立 FIFO 回合；Web 新增「回合」列表（筛选/分页/重建）与回合详情（FIFO 配对明细）；`seed-demo` 直接建回合；后端全量 591 passed、前端 31 passed。证据：[实施日志 §8](Period2-01-02-Implementation-Log.md)。 |

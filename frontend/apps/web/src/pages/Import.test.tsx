@@ -123,6 +123,9 @@ describe("Import 导入页结果区", () => {
     const link = screen.getByRole("link", { name: "查看批次" });
     expect(link.getAttribute("href")).toBe("/imports?batch=bat_1");
     expect(screen.getByRole("button", { name: "撤销本次导入" })).toBeTruthy();
+    // Period2-02：导入成功后后台自动建回合，结果区给出回合查询入口。
+    expect(screen.getByRole("link", { name: "查看回合" }).getAttribute("href")).toBe("/rounds");
+    expect(screen.getByText(/回合已由后台自动按 FIFO 建立/)).toBeTruthy();
   });
 
   it("账单存在缺失时展示系统补差清单（side=missing 提示）", async () => {

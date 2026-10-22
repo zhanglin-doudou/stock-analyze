@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from stock_contracts.clock import FrozenClock
-from stock_contracts.enums import Role
+from stock_contracts.enums import ImportBatchStatus, Role
 from stock_contracts.errors import CATALOG
 from stock_ledger.application.imports import commit_batch
 from stock_ledger.application.preview import create_preview, default_object_store
@@ -531,6 +531,7 @@ def _seed_plan() -> list[str]:
         "2. 账号 A a@demo.example.com（user）：导入一份正常账单",
         "3. 账号 B b@demo.example.com（user）：导入一份正常账单",
         "4. 账号 admin@demo.example.com（admin）：仅建账号，无业务数据",
+        "5. 按 FIFO 建立回合（review.round / round_fill，幂等重建）",
         f"统一口令：{DEFAULT_PASSWORD}（三个账号共用）",
     ]
 
@@ -585,6 +586,19 @@ async def _import_bill(
         emit(f"  提交结果：{json.dumps(result, ensure_ascii=False, default=str)}")
 
         emit("  分类：已在 commit 阶段按规则写入（未命中摘要进隔离区）")
+
+        # 导入成功即建立回合（CLI 直接调用 commit_batch，不经过 worker 的自动入队，
+        # 因此这里显式跑一次全量重建；与 worker 路径同样幂等）。
+        if result.get("status") == ImportBatchStatus.SUCCEEDED.value:
+            from stock_review.application.rebuild import rebuild_rounds_for_user
+
+            rebuilt = await rebuild_rounds_for_user(
+                session, user_id=user_id, clock=clock, scope="full"
+            )
+            emit(
+                f"  回合：{rebuilt.rounds_closed} 个已平仓 / {rebuilt.rounds_open} 个持仓中 / "
+                f"{rebuilt.fills} 笔 FIFO 配对"
+            )
 
 
 async def _seed(db: Database, clock: FrozenClock, market_bill: bool) -> int:
@@ -705,12 +719,17 @@ def demo_steps(base: str, bill: Path) -> list[tuple[str, str, str]]:
             "200 + items 含金额（定点字符串）/ 分类 / 批次",
         ),
         (
-            "8) SSE 观察事件流",
+            "8) 查询回合（导入后自动建立）",
+            f"curl -s '{base}{API_PREFIX}/rounds?limit=5' -H \"Authorization: Bearer $TOKEN\"",
+            "200 + items 含 pnl / return_rate / holding_days；FIFO 配对见 /rounds/{id}/fills",
+        ),
+        (
+            "9) SSE 观察事件流",
             f'curl -N {base}{API_PREFIX}/jobs/<job_id>/events -H "Authorization: Bearer $TOKEN"',
             "事件流：queued → progress → succeeded（Last-Event-ID 可续传）",
         ),
         (
-            "9) 越权核对",
+            "10) 越权核对",
             "用 b@demo.example.com 令牌 GET /trades（应只见自己的数据）；用 admin@demo.example.com 令牌 GET /trades",
             "B 看不到 A（隔离）；admin 读业务明细被拒",
         ),
@@ -816,8 +835,28 @@ def _run_demo(base: str, bill: Path) -> int:
     emit(f"  [7] trades → {status} items={count}")
     if status != 200 or count == 0:
         return fail(f"导入后流水为空（{status}）：{json.dumps(body, ensure_ascii=False)[:200]}")
+    # 回合由 import_commit 成功后自动入队的 rebuild_rounds 任务建立，故轮询一次任务终态。
+    status, jobs = _http_json(
+        "GET", f"{base}{API_PREFIX}/jobs?status=pending,running&limit=50", token=token
+    )
+    active = list(jobs.get("items", [])) if isinstance(jobs, dict) else []
+    deadline = time.time() + 30
+    while active and time.time() < deadline:
+        time.sleep(0.5)
+        status, jobs = _http_json(
+            "GET", f"{base}{API_PREFIX}/jobs?status=pending,running&limit=50", token=token
+        )
+        active = list(jobs.get("items", [])) if isinstance(jobs, dict) else []
+    status, body = _http_json("GET", f"{base}{API_PREFIX}/rounds?limit=5", token=token)
+    rounds = body.get("items", []) if isinstance(body, dict) else []
+    emit(f"  [8] rounds → {status} items={len(rounds)}")
+    if status != 200 or not rounds:
+        return fail(
+            f"导入后未生成回合（{status}）：请确认 worker 正在运行（make worker）；"
+            f"{json.dumps(body, ensure_ascii=False)[:200]}"
+        )
     emit(
-        f"  [8] SSE：curl -N {base}{API_PREFIX}/jobs/{job_id}/events "
+        f"  [9] SSE：curl -N {base}{API_PREFIX}/jobs/{job_id}/events "
         f'-H "Authorization: Bearer $TOKEN"（用 -N 观察事件流）'
     )
     emit("✅ demo-p1 执行完毕")

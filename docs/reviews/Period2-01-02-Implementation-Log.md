@@ -180,3 +180,55 @@ STOCK_DB_NAME=stock_analyze_p2lead .venv/bin/python scripts/ci/gate_rls_coverage
 # 5) 契约 SDK（改端点后）
 .venv/bin/python -m stock_api.cli api-snapshot && .venv/bin/python -m stock_api.cli sdk
 ```
+
+---
+
+## 8. 增量：导入即建回合 + Web 回合查询（2026-10-22）
+
+在 Period2-01/02 基础上的产品化补齐：**导入账单时自动建立回合，Web 端可查询回合与 FIFO 配对明细**。
+
+### 8.1 后端
+
+- 导入链路（`import_commit` / `reclassify` / `import_revoke`）成功后由 worker 自动入队
+  `rebuild_rounds`（`scope=full`，单飞 key `f"{user_id}:full"`），回合在导入任务之后不久即可查询；
+  入队失败只记日志，不影响主任务成功。
+- CLI `seed-tenants` / `seed-demo` 直接调用 `commit_batch`（不经过 worker 入队），
+  已补显式全量重建，演示数据生成后 `review.round` 即可用（`make seed-demo` 实测 48 个持仓中回合）。
+- 新增端到端验收 `backend/tests/api/test_api_011_rounds_autobuild.py`：
+  preview → commit → worker 依次执行导入与自动重建 → `GET /rounds` 返回 closed+open 回合，
+  pnl/成本/FIFO fills 与手算一致，跨账号 0 条。
+- `demo-p1` 脚本增加「查询回合」步骤与实跑校验（worker 未运行时明确提示）。
+
+### 8.2 前端（Web）
+
+| 文件 | 内容 |
+|---|---|
+| `frontend/packages/api-client/src/contract.ts` | 新增 `Round` / `RoundPage` / `RoundFill` / `RoundFillPage` / `RebuildRoundsBody` / `JobList` 类型别名 + 编译期字段断言（契约删字段 → tsc 失败） |
+| `frontend/packages/api-client/src/http.ts` | 新增 `api.rounds.list/get/fills/rebuild`、`api.jobs.list`（全部走契约端点，零手写 DTO） |
+| `frontend/apps/web/src/pages/Rounds.tsx` | 回合列表：证券代码/状态/日期筛选、游标分页、状态徽标、盈亏着色（仅符号展示）、空态引导、「重建回合」异步任务 + 进度轮询、进入页面自动接管正在运行的自动重建 |
+| `frontend/apps/web/src/pages/RoundDetail.tsx` | 回合详情：回合口径（成本/卖出/股息/盈亏/收益率/持有交易日）+ FIFO 配对明细表 + 超卖/持仓中提示 |
+| `frontend/apps/web/src/router.tsx` | 新增 `/rounds`、`/rounds/:roundId` 路由与导航「回合」 |
+| `frontend/apps/web/src/pages/Import.tsx` | 导入成功结果区新增「查看回合」入口与自动建回合提示 |
+| `frontend/apps/web/src/styles.css` | 回合状态徽标 / 盈亏着色 / 筛选表单样式 |
+
+**零口径**：页面只展示后端返回的定点字符串，不做 `Number()/parseFloat` 等数值计算；
+收益率以「小数」原样展示，不做前端百分比换算。
+
+### 8.3 验证
+
+```bash
+# 后端：导入→自动建回合端到端 + 全量
+STOCK_DB_NAME=stock_analyze_p2lead .venv/bin/python -m pytest backend/tests/api/test_api_011_rounds_autobuild.py -q
+STOCK_DB_NAME=stock_analyze_p2lead .venv/bin/python -m pytest -q
+
+# 前端：类型/单测/构建
+pnpm -C frontend -r typecheck
+pnpm -C frontend -r test      # web 17 + api-client 14
+pnpm -C frontend -r build
+
+# 演示数据（新库）：导入后 review.round 立即有数据
+STOCK_DB_NAME=stock_analyze_p2demo .venv/bin/python -m stock_api.cli seed-demo
+```
+
+结果：后端全量 **591 passed**（新增 1 条「导入自动建回合」端到端用例），
+前端 **31 passed**（web 17 + api-client 14），tsc/build 绿；静态门禁（ruff/mypy/import-linter）全绿。

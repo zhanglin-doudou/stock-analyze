@@ -91,6 +91,14 @@ export type JobAcceptedOut = ApiSchemas["JobAcceptedOut"];
 export type JobLinks = ApiSchemas["JobLinks"];
 export type JobPage = ApiSchemas["JobPage"];
 
+// Period2-02：FIFO 回合（API-028~031）
+export type RoundOut = ApiSchemas["RoundOut"];
+export type RoundPageDocument = ApiSchemas["RoundPage"];
+export type RoundFillOut = ApiSchemas["RoundFillOut"];
+export type RoundFillPageDocument = ApiSchemas["RoundFillPage"];
+export type RebuildRoundsIn = ApiSchemas["RebuildRoundsIn"];
+export type RebuildRoundsBody = RebuildRoundsIn;
+
 export type HealthOut = ApiSchemas["HealthOut"];
 export type ReadyOut = ApiSchemas["ReadyOut"];
 export type VersionOut = ApiSchemas["VersionOut"];
@@ -165,6 +173,15 @@ export type Job = JobOut;
 export type JobAccepted = JobAcceptedOut;
 export type JobStatus = Job["status"];
 export type JobType = Job["type"];
+/** API-061 任务列表（`JobPage`）。 */
+export type JobList = JobPage;
+
+/** Period2-02：回合（一次卖出 + 其消耗的买入 lot 配对）与 FIFO 明细。 */
+export type Round = RoundOut;
+export type RoundStatus = Round["status"];
+export type RoundPage = RoundPageDocument;
+export type RoundFill = RoundFillOut;
+export type RoundFillPage = RoundFillPageDocument;
 
 // ── 编译期断言：后端契约变化必须在这里/typecheck 里炸出来 ─────────────────
 
@@ -205,6 +222,50 @@ export type AssertProblemFields = Assert<
 >;
 export type AssertQuarantineFields = Assert<FieldsPresent<QuarantineItem, "line_no" | "raw" | "reason_code" | "resolved">>;
 export type AssertRevokeFields = Assert<FieldsPresent<RevokeResult, "batch_id" | "status" | "reverted" | "revoked_at">>;
+/** 回合页/详情页读取的字段必须仍存在于契约（后端改名 → tsc 立即失败）。 */
+export type AssertRoundFields = Assert<
+  FieldsPresent<
+    Round,
+    | "round_id"
+    | "security_code"
+    | "security_name"
+    | "status"
+    | "open_date"
+    | "close_date"
+    | "quantity"
+    | "cost"
+    | "proceeds"
+    | "dividend"
+    | "pnl"
+    | "return_rate"
+    | "holding_days"
+    | "open_trade_id"
+    | "close_trade_id"
+    | "data_error"
+    | "oversell_quantity"
+    | "fills_count"
+    | "rebuilt_at"
+  >
+>;
+export type AssertRoundFillFields = Assert<
+  FieldsPresent<
+    RoundFill,
+    | "fill_id"
+    | "sequence"
+    | "buy_trade_id"
+    | "sell_trade_id"
+    | "quantity"
+    | "buy_cost"
+    | "sell_proceeds"
+    | "dividend"
+    | "pnl"
+    | "open_date"
+    | "close_date"
+    | "holding_days"
+  >
+>;
+export type AssertRoundPageFields = Assert<FieldsPresent<RoundPage, "items" | "next_cursor" | "has_more">>;
+
 
 /** 客户端增强类型必须仍然覆盖契约响应（契约删字段 → 这里报错）。 */
 export type AssertTradePageBase = Assert<IsSubset<TradePageDocument, Pick<TradePage, keyof TradePageDocument>>>;

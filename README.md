@@ -190,6 +190,7 @@ pnpm -r test                 # vitest
 ```
 
 - API client 分两层：`packages/api-client/src/http.ts`（手写传输层：Bearer 注入、RFC 7807 解析、401 刷新重放）+ `src/api/generated/schema.d.ts`（由契约生成，勿手改）。改接口后先 `make api-snapshot && make sdk`。
+- 页面：登录/注册、交易流水、**回合（列表 + FIFO 配对详情）**、导入 / 导入记录、设置。导入账单成功后 worker 会自动建立 FIFO 回合；回合页可查询/筛选/重建并下钻配对明细。
 
 ### 数据库调试
 
