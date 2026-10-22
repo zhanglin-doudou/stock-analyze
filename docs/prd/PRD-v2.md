@@ -1,6 +1,8 @@
 # 个人交易复盘平台 · 产品需求文档（PRD）
 
 > 版本：**v2.0** ｜ 日期：2026-10-19 ｜ 上一版：[PRD-v1.md](PRD-v1.md)（v1.1）
+> 补丁：**v2.1**（2026-10-21）｜ 不新增 FR/NFR 编号，只收紧 FR-L3 的导入隔离口径、补齐 FR-L6 的断链自愈语义（见 §0.6）。
+> 补丁：**v2.2**（2026-10-21）｜ 导入 commit 收尾自动跑一次对账并把系统补差归属批次，撤销导入级联删除补差（见 §0.7）。
 > 本次修订依据：① 系统第一版即考虑**多用户 + 云主机部署**，首批用户为**有经验的程序员投资者**；② 技术形态偏好 **PostgreSQL、前后端分离（React 前端 / Python 后端）、重后轻前、优先 API 可验收**；③ 源代码采用 **Monorepo**。
 
 ---
@@ -54,6 +56,26 @@
 | v1.0 | 2026-10-18 | 初稿（单机、无界面、API 化） |
 | v1.1 | 2026-10-19 | 依据双视角评审修订 13 项 blocker + 9 项缺失需求 |
 | v2.0 | 2026-10-19 | 形态修订：多用户 + 云主机 + PG + 前后端分离 + API 优先验收 + Monorepo |
+| v2.1 | 2026-10-21 | 行为补丁：导入全零金额行隔离（`INVALID_AMOUNT`）+ 对账断链自动补差（`side=missing`/`source=system`），见 §0.6 |
+| v2.2 | 2026-10-21 | 行为补丁：导入即对账并列出系统补差（`filled_count`/`fills` + `RECONCILIATION_AUTOFILLED` 警告）；撤销批次级联删除补差，见 §0.7 |
+
+### 0.6 v2.1 补丁说明（2026-10-21）
+
+由两条真实账单问题驱动，**不新增 FR/NFR 编号**，只收紧 FR-L3 / FR-L6 的验收口径：
+
+| 补丁 | 规则 | 目的 | 验收 |
+|---|---|---|---|
+| **P1 导入噪音行隔离** | 一行账单的「佣金、印花税、其他费、发生金额、资金余额」五个金额字段**全为 0**（资金余额列缺失/为空**不算 0**）→ 不写 `trade`，落隔离区 `reason_code=INVALID_AMOUNT`；该判定**先于**重复行判定 | 货基份额再投、转托管确认等零资金流噪音行没有交易语义；写入会污染回合/费用口径，还会被误判成重复行 | preview `estimated.quarantined` 与 commit `counts.quarantined` 同口径计入；同内容的重复全零行仍记 `INVALID_AMOUNT`（不是 `DUPLICATE_IN_FILE`）；`GET /trades` 查不到该行 |
+| **P2 对账断链自愈** | `GET /api/v1/reconciliation` 检出断链时自动插入 `side=missing`、`source=system` 的补差流水，落库一次链即闭合；响应新增 `filled_count` 与 `breaks[].filled/filled_trade_id` | 单笔漏记（如漏记转账）不应让资产类指标永久阻断；把缺口显式补成可审计的一行，比让用户手工对数更可复现 | 首次调用 `filled_count=1`、`status=degraded`（不再 `blocked`）；再次调用幂等、`break_count=0` 且补差行仍只有 1 条；`GET /trades?side=missing` 可见补差行 |
+
+> 两处补丁的共同取舍：**宁可显式兜底并留下可审计记录，也不静默吞行或长期阻断。** 补差流水与导入行同表，但以 `source=system` / `side=missing` 与真实成交严格区分；导入收尾对账写入的补差归属该批次（`batch_id=导入批次`），由对账 GET 触发的补差 `batch_id=null`。下游可按这些字段过滤。
+
+### 0.7 v2.2 补丁说明（2026-10-21）
+
+| 补丁 | 规则 | 目的 | 验收 |
+|---|---|---|---|
+| **P3 导入即对账** | `commit` 写完全部明细后，对本次导入区间跑一次余额链对账；检出断链→自动写 `side=missing`/`source=system` 补差行（归属本批次），批次 `warnings` 追加 `RECONCILIATION_AUTOFILLED`，批次详情返回 `filled_count` 与 `fills[]`（日期/金额/余额/行号/摘要） | 导入是用户唯一关心的时点：与其等用户手动打开对账页才发现“账不平”，不如导入完成立即告知“账单存在缺失”，并把缺口显式补成可审计流水 | 断链账单 commit 后：批次 `filled_count≥1`、`warnings` 含 `RECONCILIATION_AUTOFILLED`、`fills[]` 行号/金额精确；`GET /trades?side=missing&batch_id=…` 可查；正常账单 `filled_count=0` 且无该警告 |
+| **P4 撤销级联补差** | 撤销导入时，除本批次明细外，一并软删归属该批次的系统补差行；撤销后 `filled_count=0`、`fills=[]`，`GET /trades?side=missing&batch_id=…` 为空（`include_deleted=true` 可见已删补差） | 补差是导入的衍生产物；“撤销导入”必须回到导入前状态，不能留下凭空多出的资金流 | `POST /imports/{batch_id}/revoke → 200`；`reverted.inserted` 包含补差行；撤销后批次状态 `revoked`、补差不可见、原始行数与导入前一致 |
 
 ---
 
@@ -292,18 +314,22 @@ Internet ──TLS──▶   │  nginx  :443  ──静态资源──▶ Reac
 #### FR-L3 账单导入（两阶段 + 批次 + 可撤销）—— P0
 
 - **两阶段导入**：
-  - `preview`：解析文件、返回**列映射建议 + 日期格式识别 + 数据质量预检**（缺资金余额列、首行非买入、未知摘要、重复行数），**不落业务数据**。
+  - `preview`：解析文件、返回**列映射建议 + 日期格式识别 + 数据质量预检**（缺资金余额列、首行非买入、未知摘要、重复行数、全零金额行），**不落业务数据**。
   - `commit`：按确认后的映射与模式落库；返回 `202 + job_id`。
 - 字段与格式：13 个固定字段，列名接受常见别名；日期接受 `20230103` / `2023-01-03` / `2023/1/3` / Excel 序列号。
+- 噪音行隔离（v2.1）：一行账单的「佣金、印花税、其他费、发生金额、资金余额」五个金额字段**全为 0** → 不写 `trade`，落隔离区 `reason_code=INVALID_AMOUNT`；该判定**先于**重复行判定（同内容的重复全零行统一记 `INVALID_AMOUNT`，不记 `DUPLICATE_IN_FILE`）。「资金余额」列缺失/为空**不算 0**，仍走缺列降级口径。
 - 两种更新模式：**全量导入**（行级幂等、bag 去重）、**区间替换**（修复模式，旧数据软删）。
-- 批次与撤销：`import_batch` 记录文件名哈希、行数、新增/跳过/隔离数；支持**撤销本次导入**。
+- 导入即对账（v2.2）：`commit` 收尾对已入库明细跑一次余额链核对；检出断链自动写 `side=missing` 补差流水（`source=system`，`batch_id`=本批次），批次 `warnings` 追加 `RECONCILIATION_AUTOFILLED`，`GET /api/v1/imports/{batch_id}` 返回 `filled_count` 与 `fills[]{trade_id,trade_date,line_no,amount,cash_balance,summary}`，供结果页提示“账单存在缺失”。
+- 批次与撤销：`import_batch` 记录文件名哈希、行数、新增/跳过/隔离数；**撤销本次导入会连带软删本批次的系统补差行**，使数据回到导入前。
 - 原始文件归档（保留 N 天，可配置），用于重放与排障。
 - **API 验收**：
   - `POST /api/v1/imports/preview` → 200，含 `columns[]`（含 `suggested_field`）、`date_format`、`warnings[]`、`estimated{inserted,skipped,quarantined}`；**预览后 `GET /api/v1/trades` 总数不变**。
   - `POST /api/v1/imports` → 202 + `job_id`；`GET /api/v1/jobs/{id}` 至 `succeeded`；`GET /api/v1/imports/{batch_id}` 的 `inserted` 与预估一致（或差异有 `reason`）。
   - 重复上传同一文件 → 第二次 `inserted = 0`；同日同价同量多笔 → 按出现次数去重，不吞并。
-  - `POST /api/v1/imports/{batch_id}/revoke` → 200；撤销后 `GET /api/v1/trades` 行数与导入前一致。
+  - `POST /api/v1/imports/{batch_id}/revoke` → 200；撤销后 `GET /api/v1/trades` 行数与导入前一致，本批次 `side=missing` 补差同时软删（`GET /trades?side=missing&batch_id=…` 为空）。
+  - 导入收尾对账：断链账单 commit 后批次 `filled_count≥1`、`warnings` 含 `RECONCILIATION_AUTOFILLED`、`fills[]` 含日期/金额；正常账单 `filled_count=0` 且无该警告。
   - 缺资金余额列 → preview 返回 `warnings` 含 `MISSING_CASH_BALANCE`，commit 仍成功但对账标记不可用。
+  - 全零金额行 → preview `estimated.quarantined` 与 commit 批次 `counts.quarantined` 同口径计入；`GET /api/v1/imports/{batch_id}/quarantine?reason_code=INVALID_AMOUNT` 返回该行（`line_no` 精确、`raw` 原样），且该行不出现在 `GET /api/v1/trades`。
   - 首行非买入 → commit 成功且返回 `assumption=back_solved` 或 `NAV_UNRELIABLE` 说明。
   - 并发两次 commit 同一 `Idempotency-Key` → 同 `job_id`，数据只落一次。
 - **UI 验收**：必须（上传 + 预览确认 + 结果页 + 撤销）。
@@ -323,8 +349,12 @@ Internet ──TLS──▶   │  nginx  :443  ──静态资源──▶ Reac
 
 #### FR-L6 对账自证（分级阻断）—— P0
 
-- 余额链校验；断链精确定位。分级：资产类指标硬阻断（`blocked`），回合级仍输出并标"含 N 笔可疑"。
-- **API 验收**：`GET /api/v1/reconciliation?period=...` → 200，含 `status`、`break_count`、`breaks[]{trade_id, expected, actual, diff}`；断链样例 fixture 下 `breaks` 精确到行、`diff` 与期望一致（≤0.01 元）；此时 `GET /api/v1/metrics?ids=nav_return` → `status=blocked` 且**无 `value` 字段**。
+- 余额链校验；断链精确定位。分级：资产类指标硬阻断（`blocked`），回合级仍输出并标"含 N 笔可疑"。（v2.1 起断链优先自动补差，补差成功的区间降级为 `degraded`，见下）
+- **断链自愈（v2.1）**：`GET /api/v1/reconciliation` 检出断链时，对**带账单行号的导入行**自动写入一条补差流水——`side=missing`、`source=system`、`security_code=CASH`、`security_name=对账补差`、`summary=对账自动补差`、`category=other`（导入收尾对账写入的补差 `batch_id`=该导入批次，撤销时随之删除；对账 GET 触发的补差 `batch_id=null`）；`trade_date`=断链行日期、`amount`=实际余额−(上一行余额+本行发生金额)、`cash_balance`=本行余额−本行发生金额、`line_no`=断链行行号（排序保证补差行排在断链行之前）。落库一次后余额链即闭合，重复调用不再补差（幂等）。手工录入行（`line_no` 为空）无法稳定插到两行之间，其断链不自动补差、保持 `blocked` 交人工修复。
+- **导入即对账（v2.2）**：每次 `commit` 收尾都在本批次区间跑一次上述核对，补差写入后归属该批次；批次详情列出 `fills[]` 并给 `RECONCILIATION_AUTOFILLED` 警告，撤销批次级联软删补差。对账 GET 仍保留同样的自愈能力（幂等，不重复补差）。
+- **状态语义（v2.1）**：本次补差成功或区间内存在 `side=missing` 行 → `status=degraded`（不再 `blocked`）；无断链且无补差行 → `ok`；无资金余额列 → `degraded`（200 降级语义，对应 `IMPORT_MISSING_CASH_BALANCE`）。
+- **副作用声明**：该 GET 是自愈写端点——首次调用会写入补差流水，调用方/网关不得假设它只读或缓存其响应；补差流水可经 `GET /api/v1/trades?side=missing` 查询与审计（`source=system`；导入触发的带 `batch_id`，GET 触发的为 null）。
+- **API 验收**：`GET /api/v1/reconciliation?period=...` → 200，含 `status`、`break_count`、`filled_count`、`breaks[]{trade_id,line_no,trade_date,expected,actual,diff,filled,filled_trade_id}`；断链样例 fixture 首次调用：`break_count=1`、`filled_count=1`、`breaks[0].filled=true`、`breaks[0].filled_trade_id` 非空，`status=degraded`，且该 `filled_trade_id` 可在 `GET /api/v1/trades` 查到（`side=missing`、`source=system`、`summary=对账自动补差`）；再次调用：`break_count=0`、`filled_count=0`、`status=degraded`（区间内存在 `side=missing` 行），且补差行仍只有 1 条；无断链且无补差行 → `status=ok`；缺资金余额列 → `status=degraded`、`break_count=0`（200 降级语义，对应 `IMPORT_MISSING_CASH_BALANCE`）。
 - **UI 验收**：必须（红字 + 断点定位）。
 
 #### FR-L7 数据主权：导出、备份与删除 —— P0

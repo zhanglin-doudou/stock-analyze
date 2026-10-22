@@ -1,0 +1,30 @@
+# python
+__pycache__/
+*.py[cod]
+.venv/
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+dist/
+build/
+
+# node
+node_modules/
+frontend/**/dist/
+frontend/**/.vite/
+*.tsbuildinfo
+
+# env & local runtime
+.env
+.env.local
+infra/.env
+var/
+logs/
+*.log
+.DS_Store
+
+# fixtures with real data
+fixtures/real/

@@ -1,0 +1,126 @@
+[project]
+name = "stock-analyze-workspace"
+version = "0.1.0"
+description = "个人交易复盘平台（backend uv workspace root）"
+requires-python = ">=3.12"
+# 工作区聚合：根项目依赖全部成员，`uv sync` 即安装整套后端
+dependencies = [
+    "stock-contracts",
+    "stock-core",
+    "stock-platform",
+    "stock-ledger",
+    "stock-review",
+    "stock-delivery",
+    "stock-api",
+    "stock-worker",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = ["backend/packages/*", "backend/services/*"]
+
+[tool.uv.sources]
+stock-contracts = { workspace = true }
+stock-core = { workspace = true }
+stock-platform = { workspace = true }
+stock-ledger = { workspace = true }
+stock-review = { workspace = true }
+stock-delivery = { workspace = true }
+stock-api = { workspace = true }
+stock-worker = { workspace = true }
+
+[dependency-groups]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "pytest-cov>=6.0",
+    "httpx>=0.27",
+    "hypothesis>=6.112",
+    "asgi-lifespan>=2.1",
+    "ruff>=0.7",
+    "mypy>=1.13",
+    "import-linter>=2.1",
+    "types-pyyaml",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["backend/tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+markers = [
+    "api: API 验收用例（携带 API-NNN 标识）",
+    "integration: 需要真实 PostgreSQL",
+    "isolation: 多租户越权用例",
+]
+filterwarnings = ["error::DeprecationWarning:stock_api.*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["backend/packages", "backend/services", "backend/tests"]
+exclude = ["AGENTS.md", "docs/**"]
+
+[tool.ruff.lint]
+select = [
+    "E", "F", "W", "I", "N", "UP", "B", "A", "C4", "DTZ", "T20", "SIM", "PTH", "RUF",
+]
+ignore = [
+    # 中文文档注释中的全角标点是有意为之
+    "RUF001", "RUF002", "RUF003",
+    # pydantic Field(...) 作为默认值是框架惯用法
+    "B008",
+    "E501",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"backend/tests/**" = ["S101", "T20"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_unreachable = true
+plugins = ["pydantic.mypy"]
+exclude = ["^frontend/"]
+
+[[tool.mypy.overrides]]
+module = ["stock_ledger.infrastructure.parsers.*"]
+disallow_untyped_calls = false
+
+[tool.importlinter]
+root_packages = ["stock_contracts", "stock_core", "stock_platform", "stock_ledger", "stock_review", "stock_delivery", "stock_api", "stock_worker"]
+include_external_packages = true
+
+# ── 分层依赖铁律 L1~L5（Architecture §2.3）────────────────────
+# 下层绝不可依赖上层；stock_api / stock_worker 为顶层，可依赖全部。
+
+[[tool.importlinter.contracts]]
+name = "L1 stock_contracts 不依赖任何其它包"
+type = "forbidden"
+source_modules = ["stock_contracts"]
+forbidden_modules = ["stock_core", "stock_platform", "stock_ledger", "stock_review", "stock_delivery", "stock_api", "stock_worker"]
+
+[[tool.importlinter.contracts]]
+name = "L2 stock_core 只依赖 stock_contracts"
+type = "forbidden"
+source_modules = ["stock_core"]
+forbidden_modules = ["stock_platform", "stock_ledger", "stock_review", "stock_delivery", "stock_api", "stock_worker"]
+
+[[tool.importlinter.contracts]]
+name = "L3 stock_platform 只依赖 stock_contracts / stock_core"
+type = "forbidden"
+source_modules = ["stock_platform"]
+forbidden_modules = ["stock_ledger", "stock_review", "stock_delivery", "stock_api", "stock_worker"]
+
+[[tool.importlinter.contracts]]
+name = "L4 stock_ledger 只依赖 stock_contracts / stock_core / stock_platform"
+type = "forbidden"
+source_modules = ["stock_ledger"]
+forbidden_modules = ["stock_review", "stock_delivery", "stock_api", "stock_worker"]
+
+[[tool.importlinter.contracts]]
+name = "L5 api/worker 为顶层：任何下层不得依赖它们"
+type = "forbidden"
+source_modules = ["stock_contracts", "stock_core", "stock_platform", "stock_ledger", "stock_review", "stock_delivery"]
+forbidden_modules = ["stock_api", "stock_worker"]

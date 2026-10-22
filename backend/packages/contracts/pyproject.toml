@@ -1,0 +1,13 @@
+[project]
+name = "stock-contracts"
+version = "0.1.0"
+description = "跨上下文契约：DTO、枚举、错误码、常量"
+requires-python = ">=3.12"
+dependencies = ["pydantic>=2.9", "email-validator>=2.2"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/stock_contracts"]
