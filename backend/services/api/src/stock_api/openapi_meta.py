@@ -459,6 +459,21 @@ OPERATION_META: dict[str, dict[str, Any]] = {
             "ADMIN_CANNOT_READ_TRADES",
         ],
     },
+    "getNav": {
+        "api_id": "API-032",
+        "scope": "read",
+        "idempotent": False,
+        "async": False,
+        "error_codes": [
+            "INVALID_PERIOD",
+            "UNKNOWN_BENCHMARK",
+            "VALIDATION_ERROR",
+            "TOKEN_EXPIRED",
+            "TOKEN_REVOKED",
+            "MULTIPLE_CREDENTIALS",
+            "ADMIN_CANNOT_READ_TRADES",
+        ],
+    },
     "getRound": {
         "api_id": "API-030",
         "scope": "read",

@@ -99,6 +99,11 @@ export type RoundFillPageDocument = ApiSchemas["RoundFillPage"];
 export type RebuildRoundsIn = ApiSchemas["RebuildRoundsIn"];
 export type RebuildRoundsBody = RebuildRoundsIn;
 
+// Period2-03：净值与收益（API-032）
+export type NavOut = ApiSchemas["NavOut"];
+export type NavPointOut = ApiSchemas["NavPointOut"];
+export type NavSummaryOut = ApiSchemas["NavSummaryOut"];
+
 export type HealthOut = ApiSchemas["HealthOut"];
 export type ReadyOut = ApiSchemas["ReadyOut"];
 export type VersionOut = ApiSchemas["VersionOut"];
@@ -183,6 +188,12 @@ export type RoundPage = RoundPageDocument;
 export type RoundFill = RoundFillOut;
 export type RoundFillPage = RoundFillPageDocument;
 
+/** Period2-03：净值与收益（份额法 TWR + XIRR/MWR）。 */
+export type Nav = NavOut;
+export type NavStatus = Nav["status"];
+export type NavPoint = NavPointOut;
+export type NavSummary = NavSummaryOut;
+
 // ── 编译期断言：后端契约变化必须在这里/typecheck 里炸出来 ─────────────────
 
 /** http.ts / UI 读取的核心字段必须仍存在于 generated schema。 */
@@ -261,6 +272,17 @@ export type AssertRoundFillFields = Assert<
   >
 >;
 export type AssertRoundPageFields = Assert<FieldsPresent<RoundPage, "items" | "next_cursor" | "has_more">>;
+/** 净值页读取的字段必须仍存在于契约（后端改名 → tsc 立即失败）。 */
+export type AssertNavFields = Assert<
+  FieldsPresent<
+    Nav,
+    "period" | "points" | "summary" | "status" | "blocked_ranges" | "benchmark_id" | "data_as_of" | "definition_version"
+  >
+>;
+export type AssertNavPointFields = Assert<FieldsPresent<NavPoint, "date" | "unit_nav" | "twr_daily" | "cashflow" | "blocked">>;
+export type AssertNavSummaryFields = Assert<
+  FieldsPresent<NavSummary, "mwr" | "twr" | "annualized_twr" | "mwr_minus_twr" | "n_days">
+>;
 
 
 /** 客户端增强类型必须仍然覆盖契约响应（契约删字段 → 这里报错）。 */

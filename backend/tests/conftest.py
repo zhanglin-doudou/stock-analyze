@@ -52,11 +52,12 @@ _LEDGER_TABLES = (
     "summary_rule",
     "reconciliation",
 )
-# review 表由迁移 0003 建立（Period2-02）；三表都带 RLS，按 user 级联清理。
+# review 表由迁移 0003/0004 建立（Period2-02/03）；都带 RLS，按 user 级联清理。
 _REVIEW_TABLES = (
     "round",
     "round_fill",
     "round_build_state",
+    "nav_daily",
 )
 
 _TRUNCATE_SQL = (

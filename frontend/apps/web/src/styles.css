@@ -320,6 +320,19 @@ input[type="checkbox"] {
   background: #fde8e8;
   color: var(--danger);
 }
+/* nav（Period2-03：净值与收益状态） */
+.badge-ok {
+  background: #e6f4ea;
+  color: #0a7d32;
+}
+.badge-blocked {
+  background: #fde8e8;
+  color: var(--danger);
+}
+.badge-degraded {
+  background: #fff4e5;
+  color: #8a5300;
+}
 .money-pos {
   color: #0a7d32;
 }

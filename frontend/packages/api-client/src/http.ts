@@ -18,6 +18,7 @@ import type {
   LoginIn,
   LoginResponse,
   MeOut,
+  Nav,
   PatCreateResponse,
   Preview,
   PreviewOptions,
@@ -144,6 +145,15 @@ export interface ListJobsQuery {
   status?: string;
   limit?: number;
   cursor?: string;
+}
+
+/** API-032 净值查询（period=YYYY-MM 或 from/to 二选一；本期 granularity 仅 daily）。 */
+export interface GetNavQuery {
+  period?: string;
+  from?: string;
+  to?: string;
+  benchmark?: string;
+  granularity?: "daily";
 }
 
 export interface CursorQuery {
@@ -545,6 +555,22 @@ export function createClient(options: ClientOptions) {
     },
   };
 
+  const nav = {
+    /** API-032：构建/读取区间净值与收益（后端计算并 UPSERT `review.nav_daily`）。 */
+    get(query: GetNavQuery = {}) {
+      return send<Nav>({
+        path: "/nav",
+        query: {
+          period: query.period,
+          from: query.from,
+          to: query.to,
+          benchmark: query.benchmark,
+          granularity: query.granularity,
+        },
+      }).then((r) => r.data);
+    },
+  };
+
   const ops = {
     healthz() {
       return send<HealthOut>({ path: "/healthz", root: true, omitAuth: true }).then((r) => r.data);
@@ -566,7 +592,7 @@ export function createClient(options: ClientOptions) {
     },
   };
 
-  return { auth, tokens, imports, jobs, trades, rounds, ops, request: send };
+  return { auth, tokens, imports, jobs, trades, rounds, nav, ops, request: send };
 }
 
 export type ApiClient = ReturnType<typeof createClient>;

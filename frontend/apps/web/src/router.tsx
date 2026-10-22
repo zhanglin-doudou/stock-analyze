@@ -4,6 +4,7 @@ import { clearSession, useIsAuthenticated } from "./store/session";
 import { Import } from "./pages/Import";
 import { Imports } from "./pages/Imports";
 import { Login } from "./pages/Login";
+import { Nav } from "./pages/Nav";
 import { Register } from "./pages/Register";
 import { RoundDetail } from "./pages/RoundDetail";
 import { Rounds } from "./pages/Rounds";
@@ -25,6 +26,7 @@ function Layout(): ReactElement {
         <nav className="app-nav">
           <Link to="/trades">交易流水</Link>
           <Link to="/rounds">回合</Link>
+          <Link to="/nav">净值</Link>
           <Link to="/import">导入</Link>
           <Link to="/imports">导入记录</Link>
           <Link to="/settings">设置</Link>
@@ -62,6 +64,7 @@ export const router = createBrowserRouter([
       { path: "trades", element: <Trades /> },
       { path: "rounds", element: <Rounds /> },
       { path: "rounds/:roundId", element: <RoundDetail /> },
+      { path: "nav", element: <Nav /> },
       { path: "import", element: <Import /> },
       { path: "imports", element: <Imports /> },
       { path: "settings", element: <Settings /> },

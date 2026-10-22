@@ -525,6 +525,43 @@ class ReconciliationBridgeOut(BaseModel):
     inputs_hash: str
 
 
+# ── 净值与收益（API-032）──────────────────────────────────
+class NavPointOut(BaseModel):
+    """单日净值点（金额/净值/收益率均为定点字符串）。"""
+
+    date: date
+    unit_nav: str  # 单位净值（scale=6 → 6 位小数）
+    twr_daily: str  # 当日收益率（scale=8 → 8 位小数）
+    cashflow: str  # 当日外部现金流（scale=2 → 2 位小数）
+    blocked: bool = False
+
+
+class NavSummaryOut(BaseModel):
+    """区间汇总指标（本期不含基准对比，beta/alpha/ir 等为 null）。"""
+
+    mwr: str  # 资金加权收益率（XIRR，scale=8）
+    twr: str  # 时间加权收益率（累计，scale=8）
+    annualized_twr: str  # 年化 TWR（scale=8）
+    mwr_minus_twr: str  # MWR − TWR（scale=8）
+    beta: str | None = None
+    alpha_annual: str | None = None
+    t_value: str | None = None
+    tracking_error: str | None = None
+    ir: str | None = None
+    n_days: int
+
+
+class NavOut(BaseModel):
+    period: str
+    points: list[NavPointOut]
+    summary: NavSummaryOut
+    status: Literal["ok", "blocked", "degraded"]
+    blocked_ranges: list[dict[str, str]] = []
+    benchmark_id: str = "hs300_tr"
+    data_as_of: datetime
+    definition_version: str = "1.0"
+
+
 # ── 运维（API-071~076）──────────────────────────────────────
 class HealthOut(BaseModel):
     status: Literal["ok"] = "ok"

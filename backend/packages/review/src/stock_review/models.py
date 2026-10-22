@@ -41,6 +41,9 @@ USER_FK = "platform.user.id"
 # 回合状态：closed（已平仓） / open（期末仍持有） / data_error（超卖等数据错误，按 closed 落库）
 ROUND_STATUSES: tuple[str, ...] = ("closed", "open", "data_error")
 
+# 净值状态：ok（正常） / blocked（阻断，无资产值） / degraded（降级，有数据但不可靠）
+NAV_STATUSES: tuple[str, ...] = ("ok", "blocked", "degraded")
+
 
 class Round(Base):
     """FIFO 回合（一次卖出与被其消耗的买入 lot 的配对结果）。
@@ -151,16 +154,56 @@ class RoundBuildState(Base):
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
 
 
+class NavDaily(Base):
+    """每日单位净值（Period2-03）：份额法 TWR 的落库结果。
+
+    存在的原因：NAV 序列需要分页查询、口径留痕、与回合/指标联动；每次 GET /nav
+    实时全量计算在大账单上不可接受。rebuild-rounds 时一并写入，stale 时重算。
+
+    主键确定性：`nav_` + sha256(user_id|trade_date)[:32]，重复 rebuild 幂等。
+    `blocked` 行的 nav/return/total_value 字段为 0（不输出资产值，API 层过滤）。
+    """
+
+    __tablename__ = "nav_daily"
+    __table_args__ = (
+        Index("ix_nav_daily_user_date", "user_id", "trade_date", unique=True),
+        {"schema": SCHEMA},
+    )
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey(USER_FK, ondelete="CASCADE"), nullable=False
+    )
+    trade_date: Mapped[date] = mapped_column(Date, nullable=False)
+    nav_units: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    return_units: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    total_value_units: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    cashflow_units: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    shares_units: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="ok")
+    blocked_reason: Mapped[str | None] = mapped_column(String(256))
+    rebuilt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
 # 供迁移/RLS 门禁/测试 TRUNCATE 引用的表名清单（避免手写遗漏）
 REVIEW_TABLES: tuple[str, ...] = (
     Round.__tablename__,
     RoundFill.__tablename__,
     RoundBuildState.__tablename__,
+    NavDaily.__tablename__,
 )
 
 __all__ = [
+    "NAV_STATUSES",
     "REVIEW_TABLES",
     "ROUND_STATUSES",
+    "NavDaily",
     "Round",
     "RoundBuildState",
     "RoundFill",

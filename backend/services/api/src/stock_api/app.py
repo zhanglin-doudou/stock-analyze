@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from stock_contracts.clock import Clock, SystemClock
 from stock_contracts.errors import ApiError
+from stock_ledger.market import ReplayMarketDataSource
 from stock_platform.config import Settings, get_settings
 from stock_platform.db import Database
 from stock_platform.idempotency import IdempotencyStore
@@ -33,6 +34,7 @@ from stock_api.routers import (
     auth,
     imports,
     jobs,
+    nav,
     ops,
     reconciliation,
     rounds,
@@ -78,6 +80,7 @@ def build_state(settings: Settings, clock: Clock | None = None) -> AppState:
         tokens=TokenService(
             settings.jwt_secret, settings.jwt_algorithm, settings.access_ttl_seconds
         ),
+        market_data=ReplayMarketDataSource(settings.fixtures_dir / "market" / "quotes.json"),
         object_store=LocalObjectStore(settings.data_dir / "objects"),
     )
 
@@ -111,7 +114,7 @@ def create_app(settings: Settings | None = None, *, clock: Clock | None = None) 
     app.add_exception_handler(StarletteHTTPException, http_exception_handler)
     app.add_exception_handler(Exception, unhandled_error_handler)
 
-    for module in (ops, auth, tokens, jobs, trades, reconciliation, imports, rules, rounds):
+    for module in (ops, auth, tokens, jobs, trades, reconciliation, imports, rules, rounds, nav):
         app.include_router(module.router, prefix=API_PREFIX)
     # 探针/根路由按容器惯例不带前缀（/healthz、/readyz、/version、/metrics、/）
     app.include_router(ops.root_router)

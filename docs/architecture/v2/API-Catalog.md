@@ -286,7 +286,8 @@
 - 验收断言：① `buy_trade_id/sell_trade_id` 集合与 golden/FIFO 期望 100% 一致；② 跨用户 → 404。
 #### API-032 GET /nav
 - 用途：单位净值序列 + TWR/MWR 与基准指标；FR-R3；认证：read；同步。
-- 请求：query `from`/`to`(必填,半开) / `benchmark`(默认 hs300_tr) / `granularity`(daily|weekly)。
+- 请求：query `from`/`to`(与 `period`=YYYY-MM 二选一) / `benchmark`(默认 hs300_tr) / `granularity`(本期仅 daily)。
+- 口径（Period2-03 实现）：`twr` 为区间累计份额法 TWR（小数），`annualized_twr` 按自然日年化；`mwr` 为 XIRR（ACT/365，CF 含期初投入负/期末市值正）；`mwr_minus_twr = mwr − annualized_twr`（两端均年化，方能对齐比较，PRD 附录 A6）。期初基准点落在区间首日；非交易日按「当日或之前最近收盘价」估值；持仓标的缺行情 → 该日 `blocked` 且不输出资产值（不整段报错）。本期不含基准对比，`beta/alpha_annual/t_value/tracking_error/ir` 返回 null。
 - 响应 200：`points[]{date,unit_nav,twr_daily,cashflow,blocked}` / `summary{mwr,twr,annualized_twr,mwr_minus_twr,beta,alpha_annual,t_value,tracking_error,ir,n_days}` / `status(ok|blocked|degraded)` / `blocked_ranges[]{from,to,reason}` / `benchmark_id` / `data_as_of` / `definition_version`。
 - 错误码：INVALID_PERIOD(422)、UNKNOWN_BENCHMARK(422)、VALIDATION_ERROR(422)。
 - 验收断言：① points 按 date 严格升序、twr_daily 为十进制小数；② 与独立 oracle 逐日收益差 ≤1bp；③ 被阻断区间 status=="blocked" 且 summary 中资产类字段缺省；④ 未传 benchmark 时 benchmark_id=="hs300_tr" 并出现在 assumptions。

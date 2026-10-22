@@ -364,6 +364,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/nav": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Nav
+         * @description API-032：区间单位净值序列 + TWR/MWR 汇总。
+         *
+         *     计算并落库 `review.nav_daily`，blocked 日不返回资产值（unit_nav/twr_daily 为 "0"）。
+         */
+        get: operations["getNav"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/reconciliation": {
         parameters: {
             query?: never;
@@ -1125,6 +1147,89 @@ export interface components {
                 [key: string]: unknown;
             };
             user: components["schemas"]["UserBrief"];
+        };
+        /** NavOut */
+        NavOut: {
+            /**
+             * Benchmark Id
+             * @default hs300_tr
+             */
+            benchmark_id: string;
+            /**
+             * Blocked Ranges
+             * @default []
+             */
+            blocked_ranges: {
+                [key: string]: string;
+            }[];
+            /**
+             * Data As Of
+             * Format: date-time
+             */
+            data_as_of: string;
+            /**
+             * Definition Version
+             * @default 1.0
+             */
+            definition_version: string;
+            /** Period */
+            period: string;
+            /** Points */
+            points: components["schemas"]["NavPointOut"][];
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "blocked" | "degraded";
+            summary: components["schemas"]["NavSummaryOut"];
+        };
+        /**
+         * NavPointOut
+         * @description 单日净值点（金额/净值/收益率均为定点字符串）。
+         */
+        NavPointOut: {
+            /**
+             * Blocked
+             * @default false
+             */
+            blocked: boolean;
+            /** Cashflow */
+            cashflow: string;
+            /**
+             * Date
+             * Format: date
+             */
+            date: string;
+            /** Twr Daily */
+            twr_daily: string;
+            /** Unit Nav */
+            unit_nav: string;
+        };
+        /**
+         * NavSummaryOut
+         * @description 区间汇总指标（本期不含基准对比，beta/alpha/ir 等为 null）。
+         */
+        NavSummaryOut: {
+            /** Alpha Annual */
+            alpha_annual?: string | null;
+            /** Annualized Twr */
+            annualized_twr: string;
+            /** Beta */
+            beta?: string | null;
+            /** Ir */
+            ir?: string | null;
+            /** Mwr */
+            mwr: string;
+            /** Mwr Minus Twr */
+            mwr_minus_twr: string;
+            /** N Days */
+            n_days: number;
+            /** T Value */
+            t_value?: string | null;
+            /** Tracking Error */
+            tracking_error?: string | null;
+            /** Twr */
+            twr: string;
         };
         /**
          * PatCreateResponse
@@ -3061,6 +3166,66 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getNav: {
+        parameters: {
+            query?: {
+                /** @description YYYY-MM */
+                period?: string | null;
+                from?: string | null;
+                to?: string | null;
+                /** @description 基准代码（本期暂不计算对比） */
+                benchmark?: string;
+                /** @description daily|weekly（本期仅 daily） */
+                granularity?: string;
+            };
+            header?: {
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NavOut"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                     "application/problem+json": components["schemas"]["Error"];
                 };
             };

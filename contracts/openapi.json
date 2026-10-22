@@ -1003,6 +1003,192 @@
         "title": "MeOut",
         "type": "object"
       },
+      "NavOut": {
+        "properties": {
+          "benchmark_id": {
+            "default": "hs300_tr",
+            "title": "Benchmark Id",
+            "type": "string"
+          },
+          "blocked_ranges": {
+            "default": [],
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "title": "Blocked Ranges",
+            "type": "array"
+          },
+          "data_as_of": {
+            "format": "date-time",
+            "title": "Data As Of",
+            "type": "string"
+          },
+          "definition_version": {
+            "default": "1.0",
+            "title": "Definition Version",
+            "type": "string"
+          },
+          "period": {
+            "title": "Period",
+            "type": "string"
+          },
+          "points": {
+            "items": {
+              "$ref": "#/components/schemas/NavPointOut"
+            },
+            "title": "Points",
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "blocked",
+              "degraded"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "summary": {
+            "$ref": "#/components/schemas/NavSummaryOut"
+          }
+        },
+        "required": [
+          "period",
+          "points",
+          "summary",
+          "status",
+          "data_as_of"
+        ],
+        "title": "NavOut",
+        "type": "object"
+      },
+      "NavPointOut": {
+        "description": "单日净值点（金额/净值/收益率均为定点字符串）。",
+        "properties": {
+          "blocked": {
+            "default": false,
+            "title": "Blocked",
+            "type": "boolean"
+          },
+          "cashflow": {
+            "title": "Cashflow",
+            "type": "string"
+          },
+          "date": {
+            "format": "date",
+            "title": "Date",
+            "type": "string"
+          },
+          "twr_daily": {
+            "title": "Twr Daily",
+            "type": "string"
+          },
+          "unit_nav": {
+            "title": "Unit Nav",
+            "type": "string"
+          }
+        },
+        "required": [
+          "date",
+          "unit_nav",
+          "twr_daily",
+          "cashflow"
+        ],
+        "title": "NavPointOut",
+        "type": "object"
+      },
+      "NavSummaryOut": {
+        "description": "区间汇总指标（本期不含基准对比，beta/alpha/ir 等为 null）。",
+        "properties": {
+          "alpha_annual": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Alpha Annual"
+          },
+          "annualized_twr": {
+            "title": "Annualized Twr",
+            "type": "string"
+          },
+          "beta": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Beta"
+          },
+          "ir": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ir"
+          },
+          "mwr": {
+            "title": "Mwr",
+            "type": "string"
+          },
+          "mwr_minus_twr": {
+            "title": "Mwr Minus Twr",
+            "type": "string"
+          },
+          "n_days": {
+            "title": "N Days",
+            "type": "integer"
+          },
+          "t_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "T Value"
+          },
+          "tracking_error": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tracking Error"
+          },
+          "twr": {
+            "title": "Twr",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mwr",
+          "twr",
+          "annualized_twr",
+          "mwr_minus_twr",
+          "n_days"
+        ],
+        "title": "NavSummaryOut",
+        "type": "object"
+      },
       "PatCreateResponse": {
         "description": "明文 `token` 仅在此响应中出现一次（API-007 断言①）。",
         "properties": {
@@ -6630,6 +6816,247 @@
           "TOKEN_EXPIRED",
           "MULTIPLE_CREDENTIALS",
           "VALIDATION_ERROR"
+        ],
+        "x-idempotent": false,
+        "x-required-scope": "read"
+      }
+    },
+    "/api/v1/nav": {
+      "get": {
+        "description": "API-032：区间单位净值序列 + TWR/MWR 汇总。\n\n计算并落库 `review.nav_daily`，blocked 日不返回资产值（unit_nav/twr_daily 为 \"0\"）。",
+        "operationId": "getNav",
+        "parameters": [
+          {
+            "description": "YYYY-MM",
+            "in": "query",
+            "name": "period",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "YYYY-MM",
+              "title": "Period"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "To"
+            }
+          },
+          {
+            "description": "基准代码（本期暂不计算对比）",
+            "in": "query",
+            "name": "benchmark",
+            "required": false,
+            "schema": {
+              "default": "hs300_tr",
+              "description": "基准代码（本期暂不计算对比）",
+              "title": "Benchmark",
+              "type": "string"
+            }
+          },
+          {
+            "description": "daily|weekly（本期仅 daily）",
+            "in": "query",
+            "name": "granularity",
+            "required": false,
+            "schema": {
+              "default": "daily",
+              "description": "daily|weekly（本期仅 daily）",
+              "title": "Granularity",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-api-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "benchmark_id": "hs300_tr",
+                  "blocked_ranges": [],
+                  "data_as_of": "2026-09-30T09:30:00Z",
+                  "definition_version": "1.0",
+                  "period": "2026-09",
+                  "points": [
+                    {
+                      "blocked": false,
+                      "cashflow": "1234.56",
+                      "date": "2026-09-30",
+                      "twr_daily": "0.1234",
+                      "unit_nav": "12.340000"
+                    }
+                  ],
+                  "status": "ok",
+                  "summary": {
+                    "alpha_annual": "0.1234",
+                    "annualized_twr": "0.1234",
+                    "beta": "0.1234",
+                    "ir": "0.1234",
+                    "mwr": "0.1234",
+                    "mwr_minus_twr": "0.1234",
+                    "n_days": 1,
+                    "t_value": "0.1234",
+                    "tracking_error": "0.1234",
+                    "twr": "0.1234"
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/NavOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "TOKEN_EXPIRED",
+                  "detail": "访问凭证已过期。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 401,
+                  "title": "TOKEN_EXPIRED",
+                  "type": "https://stock-analyze.local/errors/TOKEN_EXPIRED",
+                  "user_message": "访问凭证已过期。",
+                  "what_to_do": "用 refresh_token 换新 access，或重建 PAT。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "未认证或凭证无效"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "ADMIN_CANNOT_READ_TRADES",
+                  "detail": "管理员账号不能查看交易明细。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 403,
+                  "title": "ADMIN_CANNOT_READ_TRADES",
+                  "type": "https://stock-analyze.local/errors/ADMIN_CANNOT_READ_TRADES",
+                  "user_message": "管理员账号不能查看交易明细。",
+                  "what_to_do": "用数据所有者账号访问。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "权限不足"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "example": {
+                  "code": "INVALID_PERIOD",
+                  "detail": "时间区间不合法。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 422,
+                  "title": "INVALID_PERIOD",
+                  "type": "https://stock-analyze.local/errors/INVALID_PERIOD",
+                  "user_message": "时间区间不合法。",
+                  "what_to_do": "用 YYYY-MM 或 from/to（半开区间）。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Nav",
+        "tags": [
+          "nav"
+        ],
+        "x-async": false,
+        "x-error-codes": [
+          "INVALID_PERIOD",
+          "UNKNOWN_BENCHMARK",
+          "VALIDATION_ERROR",
+          "TOKEN_EXPIRED",
+          "TOKEN_REVOKED",
+          "MULTIPLE_CREDENTIALS",
+          "ADMIN_CANNOT_READ_TRADES"
         ],
         "x-idempotent": false,
         "x-required-scope": "read"
