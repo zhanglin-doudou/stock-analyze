@@ -183,18 +183,25 @@ def assert_oracle_agrees(events: list[FifoEvent]) -> None:
     result = build_rounds(events)
     expected = oracle_build_rounds([to_oracle(event) for event in events])
 
-    produced = [round_ for round_ in result.rounds if round_.status != "open"]
-    assert len(produced) == len(expected.rounds), "回合数量与 oracle 不一致"
-    for round_, oracle_round in zip(produced, expected.rounds, strict=True):
-        assert round_.key == oracle_round.key
+    # 生产引擎 rounds = closed + data_error + open；oracle rounds = closed + open
+    assert len(result.rounds) == len(expected.rounds), (
+        f"回合数量与 oracle 不一致：生产 {len(result.rounds)} vs oracle {len(expected.rounds)}"
+    )
+    for round_, oracle_round in zip(result.rounds, expected.rounds, strict=True):
+        assert round_.key == oracle_round.key, f"key 不一致：{round_.key} vs {oracle_round.key}"
+        is_open = round_.status == "open"
+        assert is_open == oracle_round.is_open, (
+            f"open 状态不一致：{round_.key} 生产 open={is_open} oracle={oracle_round.is_open}"
+        )
         assert Decimal(round_.quantity_units) / Decimal(QTY_PER_SHARE) == oracle_round.quantity
         assert abs(Decimal(round_.cost_units) - oracle_round.cost * 100) <= ONE_CENT
         assert abs(Decimal(round_.proceeds_units) - oracle_round.proceeds * 100) <= ONE_CENT
         assert abs(Decimal(round_.dividend_units) - oracle_round.dividend * 100) <= ONE_CENT
         # 核心验收：pnl 差 ≤ 1 分
         assert abs(Decimal(round_.pnl_units) - oracle_round.pnl * 100) <= ONE_CENT
-        # 回合内不变量
-        assert sum(fill.quantity_units for fill in round_.fills) == round_.quantity_units
+        # 回合内不变量（open 回合可能 fills 为空）
+        if round_.fills:
+            assert sum(fill.quantity_units for fill in round_.fills) == round_.quantity_units
         assert round_.pnl_units == (
             round_.proceeds_units - round_.cost_units + round_.dividend_units
         )
@@ -210,7 +217,6 @@ def assert_oracle_agrees(events: list[FifoEvent]) -> None:
         )
         assert abs(Decimal(lot.cost_units) - oracle_lot.cost * 100) <= ONE_CENT
         assert abs(Decimal(lot.dividend_units) - oracle_lot.dividend * 100) <= ONE_CENT
-    assert len(result.open_rounds) == len(result.open_lots)
 
 
 # ── 28 条边界场景（Testing §9.2 交易结构矩阵）───────────
@@ -585,10 +591,10 @@ def test_golden_5_two_rounds_plus_open_lot() -> None:
     """买 100 @10.00（01-02）；卖 100 @12.00（01-10）；买 100 @9.00（01-12）；
     卖 50 @13.00（01-15）。
 
-    手算：
-    - 回合1：cost=1000.00、proceeds=1200.00、pnl=200.00、return=0.2；
-    - 回合2：50 股，cost=450.00、proceeds=650.00、pnl=200.00、return=200/450=0.44444444…；
-    - 期末 open：50 股，cost=450.00、pnl=0。
+    新语义（open round.cost = 已消耗 lot cost）手算：
+    - 周期1 b1:s1（closed）：100 股清仓，cost=1000.00、proceeds=1200.00、pnl=200.00、return=0.2；
+    - 周期2 b2:open（open）：已配对 50 股（做T卖出）、剩余 50 股在 open_lots；
+      round.cost=450.00（已消耗 50 股 @9.00）、proceeds=650.00、pnl=200.00、return=200/450≈0.4444。
     """
     result = build_rounds(
         [
@@ -598,23 +604,25 @@ def test_golden_5_two_rounds_plus_open_lot() -> None:
             sell("s2", D(2024, 1, 15), 50, "13.00", line_no=4),
         ]
     )
-    assert [round_.key for round_ in result.rounds] == ["b1:s1", "b2:s2", "b2:open"]
-    first, second, open_round = result.rounds
+    assert [round_.key for round_ in result.rounds] == ["b1:s1", "b2:open"]
+    first, open_round = result.rounds
     assert (first.cost_units, first.proceeds_units, first.pnl_units) == (100_000, 120_000, 20_000)
     assert first.return_rate_units == 20_000_000
-    assert (second.cost_units, second.proceeds_units, second.pnl_units) == (
-        45_000,
-        65_000,
-        20_000,
-    )
-    # 200/450 = 0.4444444444… → Ratio HALF_UP → 44_444_444
-    assert second.return_rate_units == 44_444_444
+    assert first.status == "closed"
     assert open_round.status == "open"
-    assert open_round.quantity_units == 500_000
-    assert open_round.cost_units == 45_000
-    assert open_round.pnl_units == 0
-    assert result.realized_pnl_units == 40_000
+    assert open_round.quantity_units == 500_000  # 已 FIFO 配对的 50 股
+    assert open_round.cost_units == 45_000  # 已消耗 50 股 @9.00 = 450 元
+    assert open_round.proceeds_units == 65_000  # 做T卖出 50 × 13.00
+    assert open_round.pnl_units == 20_000  # 65000 - 45000
+    # 20000/45000 = 0.44444444… → Ratio HALF_UP
+    assert open_round.return_rate_units == 44_444_444
+    # 剩余 lot 还在 open_lots 里（不重复计入 round quantity）
     assert len(result.open_lots) == 1
+    assert result.open_lots[0].buy_trade_id == "b2"
+    assert result.open_lots[0].quantity_units == 500_000
+    assert result.open_lots[0].cost_units == 45_000
+    # 已实现 pnl 仅含 closed round（open 周期的 pnl 含未实现部分，不计 realized）
+    assert result.realized_pnl_units == 20_000
 
 
 def test_golden_6_weighted_holding_days() -> None:

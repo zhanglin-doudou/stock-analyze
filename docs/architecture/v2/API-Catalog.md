@@ -281,9 +281,9 @@
 #### API-031 GET /rounds/{round_id}/fills
 - 用途：FIFO 配对明细（可追溯到买卖流水）；FR-R2；认证：read；同步。
 - 请求：path `round_id`。
-- 响应 200：`items[]{fill_id,sequence,buy_trade_id,sell_trade_id,quantity,buy_cost,sell_proceeds,dividend,pnl,open_date,close_date,holding_days}` / `total`。
+- 响应 200：`items[]{fill_id,sequence,buy_trade_id,sell_trade_id,quantity,open_date,close_date,holding_days}` / `total`。
 - 错误码：NOT_FOUND(404)、VALIDATION_ERROR(422)、ADMIN_CANNOT_READ_TRADES(403)。
-- 验收断言：① `buy_trade_id/sell_trade_id` 集合与 golden/FIFO 期望 100% 一致；② `Σfills.pnl == round.pnl`、`Σfills.quantity == round.quantity`；③ 跨用户 → 404。
+- 验收断言：① `buy_trade_id/sell_trade_id` 集合与 golden/FIFO 期望 100% 一致；② 跨用户 → 404。
 #### API-032 GET /nav
 - 用途：单位净值序列 + TWR/MWR 与基准指标；FR-R3；认证：read；同步。
 - 请求：query `from`/`to`(必填,半开) / `benchmark`(默认 hs300_tr) / `granularity`(daily|weekly)。
@@ -534,7 +534,7 @@ data: {"job_id":"job_01J9Z6","status":"succeeded","result_ref":"/api/v1/reports/
 | API-028 | rebuild_rounds_single_flight | 202+Location；同参并发同一 job_id（X-Job-Reused）；异参 409 JOB_ALREADY_RUNNING；/rounds 可见 | fx_round30 | P0 |
 | API-029 | rounds_list_visible_after_job | 200；job 成功后立即可见；跨用户 0 条；游标无重无漏 | fx_round30 | P0 |
 | API-030 | rounds_detail_pnl | 200 pnl 与 golden 差≤0.01；跨用户 404 | fx_round30 | P0 |
-| API-031 | rounds_fills_fifo | FIFO buy/sell 配对集合 100% 一致；Σfills.pnl==round.pnl | fx_round30 | P0 |
+| API-031 | rounds_fills_fifo | FIFO buy/sell 配对集合 100% 一致 | fx_round30 | P0 |
 | API-032 | nav_series_oracle | points 升序；日收益 vs oracle≤1bp；blocked 无资产值 | fx_blocked | P0 |
 | API-033 | metrics_batch_contract | n==12、sample_status=ok、value 小数、版本匹配 | fx_round30 | P0 |
 | API-034 | metrics_explain_trace | 无裸术语；status!=ok 时 conclusion=null+what_to_do | fx_n5 | P0 |

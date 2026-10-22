@@ -360,24 +360,24 @@ async def test_api_029_rounds_visible_after_rebuild(
 
     body = await _rounds(client, api_prefix, user.headers)
     items = body["items"]
-    assert len(items) == 4, items  # 1 closed + 3 open（各剩余 lot 一个 open 回合）
+    # 新引擎语义：buy100@100, buy50@90, sell60@120, buy40@110 → 未清仓 → 1 个 open round
+    # （不是 1 closed + 3 open，3 个剩余 lot 由 open_lots 独立展示）
+    assert len(items) == 1, items
     assert body["has_more"] is False
-    closed = [item for item in items if item["status"] == "closed"]
-    assert len(closed) == 1
-    round_ = closed[0]
+    round_ = items[0]
+    assert round_["status"] == "open"
     assert round_["security_code"] == "600519"
+    # open round 聚合已消耗 lot 部分：sell 60 股 FIFO 消耗 buy1 的前 60 股
     assert abs(Decimal(round_["pnl"]) - Decimal("1200.00")) <= Decimal("0.01")
-    assert round_["cost"] == "6000.00"
+    assert round_["cost"] == "6000.00"  # buy1 前 60 股成本
     assert round_["proceeds"] == "7200.00"
-    assert round_["quantity"] == "60.0000"
+    assert round_["quantity"] == "60.0000"  # 已 FIFO 配对的股数
     assert round_["return_rate"] == "0.20000000"
     assert _MONEY_RE.match(round_["pnl"])
     assert _MONEY_RE.match(round_["cost"])
     assert _QTY_RE.match(round_["quantity"])
     assert _RATIO_RE.match(round_["return_rate"])
     assert round_["fills_count"] == 1
-    open_rounds = [item for item in items if item["status"] == "open"]
-    assert sum(Decimal(item["cost"]) for item in open_rounds) == Decimal("12900.00")
 
     intruder = await account_factory()
     isolated = await _rounds(client, api_prefix, intruder.headers)
@@ -405,10 +405,10 @@ async def test_api_029_cursor_paging_no_dup_no_missing(
             break
         cursor = page["next_cursor"]
         assert cursor
-    assert len(seen) == len(set(seen)) == 4
+    assert len(seen) == len(set(seen)) == 1  # 新引擎：只有 1 个 open round
 
     closed_only = await _rounds(client, api_prefix, user.headers, "?limit=200&status=closed")
-    assert [item["status"] for item in closed_only["items"]] == ["closed"]
+    assert closed_only["items"] == []  # 新引擎：未清仓，没有 closed round
 
     other_security = await _rounds(
         client, api_prefix, user.headers, "?limit=200&security_code=000001"
@@ -421,24 +421,28 @@ async def test_api_030_round_detail_pnl_and_isolation(
 ) -> None:
     await _seed_round_scenario(owner_engine, user_id=user.user_id)
     await _rebuild_and_drain(client, api_prefix, user, settings)
-    closed = await _closed_round(client, api_prefix, user.headers)
+    # 新引擎：未清仓 → 只有 open round
+    body = await _rounds(client, api_prefix, user.headers)
+    assert len(body["items"]) == 1
+    round_ = body["items"][0]
 
-    resp = await client.get(f"{api_prefix}/rounds/{closed['round_id']}", headers=user.headers)
+    resp = await client.get(f"{api_prefix}/rounds/{round_['round_id']}", headers=user.headers)
     assert resp.status_code == 200, resp.text
     detail = resp.json()
-    assert detail["round_id"] == closed["round_id"]
+    assert detail["round_id"] == round_["round_id"]
     assert abs(Decimal(detail["pnl"]) - Decimal("1200.00")) <= Decimal("0.01")
-    assert detail["open_trade_id"] != detail["close_trade_id"]
+    assert detail["open_trade_id"]
+    assert detail["close_trade_id"] is None  # open round 无 close_trade_id
 
     intruder = await account_factory()
-    cross = await client.get(f"{api_prefix}/rounds/{closed['round_id']}", headers=intruder.headers)
+    cross = await client.get(f"{api_prefix}/rounds/{round_['round_id']}", headers=intruder.headers)
     assert cross.status_code == 404
     assert cross.json()["code"] == ErrorCode.NOT_FOUND.value
 
     missing = await client.get(f"{api_prefix}/rounds/rnd_does_not_exist", headers=user.headers)
     assert missing.status_code == 404
 
-    forbidden = await client.get(f"{api_prefix}/rounds/{closed['round_id']}", headers=admin.headers)
+    forbidden = await client.get(f"{api_prefix}/rounds/{round_['round_id']}", headers=admin.headers)
     assert forbidden.status_code == 403
 
 
@@ -447,48 +451,40 @@ async def test_api_031_fills_fifo_pairing(
 ) -> None:
     ids = await _seed_round_scenario(owner_engine, user_id=user.user_id)
     await _rebuild_and_drain(client, api_prefix, user, settings)
-    closed = await _closed_round(client, api_prefix, user.headers)
+    # 新引擎：未清仓 → 只有 1 个 open round（含 1 条 FIFO fill）
+    body = await _rounds(client, api_prefix, user.headers)
+    assert len(body["items"]) == 1
+    round_ = body["items"][0]
 
-    resp = await client.get(f"{api_prefix}/rounds/{closed['round_id']}/fills", headers=user.headers)
+    resp = await client.get(f"{api_prefix}/rounds/{round_['round_id']}/fills", headers=user.headers)
     assert resp.status_code == 200, resp.text
-    body = resp.json()
-    assert body["total"] == len(body["items"]) == 1
-    fill = body["items"][0]
+    fills_body = resp.json()
+    assert fills_body["total"] == len(fills_body["items"]) == 1
+    fill = fills_body["items"][0]
     assert fill["sequence"] == 1
     assert fill["buy_trade_id"] == ids["buy1"], "FIFO 应消耗最早买入的 lot"
     assert fill["sell_trade_id"] == ids["sell"]
     assert fill["quantity"] == "60.0000"
-    assert fill["buy_cost"] == "6000.00"
-    assert fill["sell_proceeds"] == "7200.00"
-    assert fill["pnl"] == "1200.00"
-    assert _MONEY_RE.match(fill["pnl"])
+    # 分摊成本/收益/pnl 不再在 fills 明细中返回（回合级 Round 字段保留）
+    assert "buy_cost" not in fill
+    assert "sell_proceeds" not in fill
+    assert "dividend" not in fill
+    assert "pnl" not in fill
 
-    # FIFO trade_id 集合与手算一致（buy1 被消耗 60 股；buy2/buy3 仍在 open 回合）
+    # FIFO trade_id 集合与手算一致（buy1 被消耗 60 股；buy2/buy3 作为剩余 lot 保留）
     buy_ids = {fill["buy_trade_id"]}
     sell_ids = {fill["sell_trade_id"]}
     assert buy_ids == {ids["buy1"]}
     assert sell_ids == {ids["sell"]}
 
-    open_rounds = [
-        item
-        for item in (await _rounds(client, api_prefix, user.headers))["items"]
-        if item["status"] == "open"
-    ]
-    for item in open_rounds:
-        empty = await client.get(
-            f"{api_prefix}/rounds/{item['round_id']}/fills", headers=user.headers
-        )
-        assert empty.status_code == 200
-        assert empty.json()["total"] == 0
-
     intruder = await account_factory()
     cross = await client.get(
-        f"{api_prefix}/rounds/{closed['round_id']}/fills", headers=intruder.headers
+        f"{api_prefix}/rounds/{round_['round_id']}/fills", headers=intruder.headers
     )
     assert cross.status_code == 404
     assert cross.json()["code"] == ErrorCode.NOT_FOUND.value
 
     forbidden = await client.get(
-        f"{api_prefix}/rounds/{closed['round_id']}/fills", headers=admin.headers
+        f"{api_prefix}/rounds/{round_['round_id']}/fills", headers=admin.headers
     )
     assert forbidden.status_code == 403

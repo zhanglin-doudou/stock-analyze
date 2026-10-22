@@ -173,10 +173,13 @@ async def bridge_for_period(
     result_end = build_rounds(trades_to_events(trades))
     initial_open_cost = sum(lot.cost_units for lot in result_start.open_lots)
     open_cost = sum(lot.cost_units for lot in result_end.open_lots)
+    # 新引擎：round = 0→非0→0 仓位周期；open round 内含部分卖出的 fills（做T）。
+    # realized_pnl 取所有 round（open+closed）中 close_date 在区间内的 fill 的交易损益。
     realized_pnl = sum(
-        item.pnl_units - item.dividend_units
-        for item in result_end.closed_rounds
-        if item.close_date is not None and period_start <= item.close_date <= period_end
+        fill.pnl_units - fill.dividend_units
+        for round_ in result_end.rounds
+        for fill in round_.fills
+        if period_start <= fill.close_date <= period_end
     )
 
     ending_cash, cash_source = _ending_cash(

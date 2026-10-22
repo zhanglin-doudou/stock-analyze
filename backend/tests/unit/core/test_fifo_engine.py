@@ -216,33 +216,33 @@ def test_add_position_two_lots_fifo_pairing() -> None:
             sell("s1", date(2024, 1, 10), 150, "12.00", line_no=3),
         ]
     )
-    assert len(result.closed_rounds) == 1
-    round_ = result.closed_rounds[0]
-    assert round_.key == "b1:s1"
+    # 卖 150 没卖光 200 股 → 还是 open round
+    assert len(result.closed_rounds) == 0
+    assert len(result.rounds) == 1
+    round_ = result.rounds[0]
+    assert round_.key == "b1:open"
+    assert round_.status == "open"
     assert round_.open_trade_id == "b1"
+    assert round_.quantity_units == shares(150)
+    assert round_.cost_units == cents("1550.00")  # 已消耗 1000+550，剩余 550 在 open_lots
+    assert round_.proceeds_units == cents("1800.00")
+    assert round_.dividend_units == 0
+    assert round_.pnl_units == cents("250.00")
+    # FIFO 配对填充
     assert [fill.buy_trade_id for fill in round_.fills] == ["b1", "b2"]
     assert [fill.sequence for fill in round_.fills] == [1, 2]
     assert [fill.quantity_units for fill in round_.fills] == [shares(100), shares(50)]
-    # b1 全额 1000.00；b2 按 50/100 分摊 550.00
     assert [fill.buy_cost_units for fill in round_.fills] == [cents("1000.00"), cents("550.00")]
-    # 卖出现金 1800.00 按 100:50 分摊 → 1200.00 / 600.00
     assert [fill.sell_proceeds_units for fill in round_.fills] == [
         cents("1200.00"),
         cents("600.00"),
     ]
-    assert round_.quantity_units == shares(150)
-    assert round_.cost_units == cents("1550.00")
-    assert round_.proceeds_units == cents("1800.00")
-    assert round_.pnl_units == cents("250.00")
-    assert round_.return_rate_units == 16_129_032  # 250/1550 = 0.16129032...
-    # b2 剩余 50 股 → open 回合
+    # b2 剩余 50 股 → open_lots
     assert len(result.open_lots) == 1
     lot = result.open_lots[0]
     assert lot.buy_trade_id == "b2"
     assert lot.quantity_units == shares(50)
     assert lot.cost_units == cents("550.00")
-    assert result.rounds[-1].key == "b2:open"
-    assert result.rounds[-1].status == "open"
 
 
 def test_partial_reduce_three_sells_creates_three_rounds() -> None:
@@ -253,20 +253,24 @@ def test_partial_reduce_three_sells_creates_three_rounds() -> None:
         sell("s3", date(2024, 1, 10), 100, "13.00", line_no=4),
     ]
     result = build_rounds(events)
-    assert len(result.rounds) == 3
-    assert [round_.key for round_ in result.rounds] == ["b1:s1", "b1:s2", "b1:s3"]
-    assert [round_.close_date for round_ in result.rounds] == [
-        date(2024, 1, 5),
-        date(2024, 1, 8),
-        date(2024, 1, 10),
-    ]
-    assert [round_.pnl_units for round_ in result.rounds] == [
+    # 三次卖出后清仓 → 1 个 closed round
+    assert len(result.rounds) == 1
+    assert result.rounds[0].key == "b1:s3"
+    assert result.rounds[0].status == "closed"
+    assert result.rounds[0].quantity_units == shares(300)
+    assert result.rounds[0].cost_units == cents("3000.00")
+    assert result.rounds[0].proceeds_units == cents("3600.00")
+    assert result.rounds[0].pnl_units == cents("600.00")
+    assert result.rounds[0].close_date == date(2024, 1, 10)
+    # 每次卖出都追加 fill
+    assert [fill.sequence for fill in result.rounds[0].fills] == [1, 2, 3]
+    assert [fill.sell_trade_id for fill in result.rounds[0].fills] == ["s1", "s2", "s3"]
+    assert [fill.quantity_units for fill in result.rounds[0].fills] == [shares(100)] * 3
+    assert [fill.pnl_units for fill in result.rounds[0].fills] == [
         cents("100.00"),
         cents("200.00"),
         cents("300.00"),
     ]
-    assert [round_.quantity_units for round_ in result.rounds] == [shares(100)] * 3
-    assert [round_.cost_units for round_ in result.rounds] == [cents("1000.00")] * 3
     assert result.open_lots == ()
     assert result.realized_pnl_units == cents("600.00")
 
@@ -476,16 +480,38 @@ def test_dividend_allocated_by_holding_at_ex_date_and_carried_into_round() -> No
         sell("s2", date(2024, 1, 11), 200, "12.00", line_no=4),
     ]
     result = build_rounds(events)
-    assert [round_.key for round_ in result.rounds] == ["b1:s1", "b2:s2"]
-    # 400 分按 100:300 分给两个 lot（b1=100、b2=300）；
-    # s1 卖 200 股 = b1 全部（带股息 100）+ b2 的 100/300（带股息 100）
-    assert result.rounds[0].dividend_units == 200
-    assert result.rounds[1].dividend_units == 200
-    assert result.rounds[0].pnl_units == cents("400.00") + 200
-    assert result.rounds[1].pnl_units == cents("400.00") + 200
+    # 两次卖出后清仓 → 1 个 closed round
+    assert len(result.rounds) == 1
+    round_ = result.rounds[0]
+    assert round_.key == "b1:s2"
+    assert round_.status == "closed"
+    assert round_.quantity_units == shares(400)
+    assert round_.cost_units == cents("4000.00")
+    assert round_.proceeds_units == cents("4800.00")
+    assert round_.dividend_units == 400
+    assert round_.pnl_units == 80_400  # 80000 + 400
+
+    # 3 个 fills：b1 全吃掉(100)+b2 的 100 → s1；b2 剩余 200 → s2
+    assert [fill.sequence for fill in round_.fills] == [1, 2, 3]
+    assert [fill.buy_trade_id for fill in round_.fills] == ["b1", "b2", "b2"]
+    assert [fill.sell_trade_id for fill in round_.fills] == ["s1", "s1", "s2"]
+    assert [fill.quantity_units for fill in round_.fills] == [
+        shares(100),
+        shares(100),
+        shares(200),
+    ]
+    assert [fill.buy_cost_units for fill in round_.fills] == [
+        cents("1000.00"),
+        cents("1000.00"),
+        cents("2000.00"),
+    ]
+    assert [fill.dividend_units for fill in round_.fills] == [100, 100, 200]
+    assert [fill.pnl_units for fill in round_.fills] == [20_100, 20_100, 40_200]
+
+    assert result.open_lots == ()
     assert result.dividend_units == 400
-    assert result.trading_pnl_units == cents("800.00")
-    assert result.realized_pnl_units == cents("800.00") + 400
+    assert result.trading_pnl_units == cents("800.00")  # 不含股息
+    assert result.realized_pnl_units == 80_400  # closed round 的 pnl
 
 
 def test_dividend_net_is_amount_minus_tax() -> None:
@@ -507,14 +533,37 @@ def test_dividend_does_not_change_cost_and_open_lot_keeps_undistributed_share() 
         sell("s1", date(2024, 1, 10), 100, "10.00", line_no=4),
     ]
     result = build_rounds(events)
-    # 101 分按 100:200 分给 b1/b2 → b1=33（floor）、b2=68（尾差）
-    assert result.rounds[0].dividend_units == 33
-    assert result.rounds[0].cost_units == cents("1000.00")
-    open_round = result.rounds[-1]
-    assert open_round.status == "open"
-    assert open_round.dividend_units == 68
-    assert open_round.pnl_units == 68
-    assert open_round.cost_units == cents("2000.00")
+    # 卖 100 没清仓（剩 200）→ open round
+    assert len(result.rounds) == 1
+    round_ = result.rounds[0]
+    assert round_.key == "b1:open"
+    assert round_.status == "open"
+    assert round_.quantity_units == shares(100)  # 已匹配
+    assert round_.cost_units == cents("1000.00")  # 已消耗 b1 的 1000 元，剩余 2000 在 open_lots
+    assert round_.proceeds_units == cents("1000.00")
+    assert round_.dividend_units == 33  # 已消耗 lot 分到的股息（尾差 68 在 open_lots）
+    assert round_.pnl_units == 33  # 100000 - 100000 + 33
+
+    assert len(round_.fills) == 1
+    fill = round_.fills[0]
+    assert fill.sequence == 1
+    assert fill.buy_trade_id == "b1"
+    assert fill.sell_trade_id == "s1"
+    assert fill.quantity_units == shares(100)
+    assert fill.buy_cost_units == cents("1000.00")
+    assert fill.sell_proceeds_units == cents("1000.00")
+    assert fill.dividend_units == 33  # 101 × 100/300 = 33
+    assert fill.pnl_units == 33
+
+    # b2 剩余 200 股带未分配股息 68
+    assert len(result.open_lots) == 1
+    lot = result.open_lots[0]
+    assert lot.buy_trade_id == "b2"
+    assert lot.quantity_units == shares(200)
+    assert lot.cost_units == cents("2000.00")
+    assert lot.dividend_units == 68  # 尾差 101 - 33 = 68
+    # result.dividend_units 聚合口 = Σ round.dividend（已消耗），不含 open_lots
+    assert result.dividend_units == 33  # 只有 b1 被 SELL 消耗，b2 的 68 还在 open_lots
 
 
 def test_dividend_without_holding_is_silently_ignored() -> None:
@@ -710,15 +759,30 @@ def test_open_rounds_per_lot_sorted_by_open_date_then_key() -> None:
         buy("b0", date(2024, 1, 2), 100, "9.00", line_no=3),
     ]
     result = build_rounds(events)
-    assert [round_.key for round_ in result.rounds] == ["b0:open", "b1:open", "b2:open"]
-    assert all(round_.status == "open" for round_ in result.rounds)
-    assert all(round_.close_trade_id is None for round_ in result.rounds)
-    assert all(round_.close_date is None for round_ in result.rounds)
-    assert all(round_.fills == () for round_ in result.rounds)
-    assert all(round_.holding_days == 0 for round_ in result.rounds)
-    assert all(round_.proceeds_units == 0 for round_ in result.rounds)
-    assert [lot.buy_trade_id for lot in result.open_lots] == ["b0", "b1", "b2"]
-    assert result.rounds[0].return_rate_units == 0  # 无已分配股息 → pnl=0
+    # 新语义：一个证券一个周期 → 只有 1 个 open round
+    assert len(result.rounds) == 1
+    round_ = result.rounds[0]
+    assert round_.key == "b0:open"
+    assert round_.status == "open"
+    assert round_.close_trade_id is None
+    assert round_.close_date is None
+    assert round_.fills == ()
+    assert round_.holding_days == 0
+    assert round_.proceeds_units == 0
+    assert round_.quantity_units == 0  # 还没卖过
+    assert round_.cost_units == 0  # 没有 SELL，已消耗 cost = 0
+    assert round_.dividend_units == 0
+    assert round_.pnl_units == 0
+    assert round_.return_rate_units == 0
+
+    # open_lots 按 open_date 排序，同日期按 line_no
+    assert [lot.buy_trade_id for lot in result.open_lots] == ["b0", "b2", "b1"]
+    assert [lot.quantity_units for lot in result.open_lots] == [shares(100)] * 3
+    assert [lot.cost_units for lot in result.open_lots] == [
+        cents("900.00"),
+        cents("1100.00"),
+        cents("1000.00"),
+    ]
 
 
 def test_closed_rounds_sort_before_open_rounds() -> None:
@@ -749,8 +813,9 @@ def test_security_name_prefers_sell_then_buy() -> None:
         sell("s1", date(2024, 1, 5), 50, "11.00", name="", line_no=2),
     ]
     result = build_rounds(events)
-    assert result.rounds[0].security_name == "旧名"  # 卖出侧为空 → 回落买入侧
-    assert result.rounds[1].security_name == "旧名"  # open 回合用买入侧名称
+    # 卖 50 没清仓 → 只有 1 个 open round
+    assert len(result.rounds) == 1
+    assert result.rounds[0].security_name == "旧名"  # SELL 名为空 → 回落第一个 BUY 名
 
     result = build_rounds(
         [
@@ -758,7 +823,8 @@ def test_security_name_prefers_sell_then_buy() -> None:
             sell("s1", date(2024, 1, 5), 50, "11.00", name="新名", line_no=2),
         ]
     )
-    assert result.rounds[0].security_name == "新名"
+    assert len(result.rounds) == 1
+    assert result.rounds[0].security_name == "新名"  # SELL 名非空优先
 
 
 # ── 持仓天数与收益率 ────────────────────────────────────
@@ -795,8 +861,16 @@ def test_open_round_return_rate_uses_dividend_over_cost() -> None:
     result = build_rounds(events)
     open_round = result.rounds[0]
     assert open_round.status == "open"
-    assert open_round.pnl_units == 500
-    assert open_round.return_rate_units == 500_000  # 500/100000 = 0.005
+    assert open_round.quantity_units == 0  # 还没卖过
+    assert open_round.fills == ()
+    assert open_round.proceeds_units == 0
+    # 没有 SELL → 已消耗 cost=0，股息还在 open_lots 里（未消耗）
+    assert open_round.cost_units == 0
+    assert open_round.dividend_units == 0
+    # pnl = proceeds - cost + dividend = 0 - 0 + 0
+    assert open_round.pnl_units == 0
+    # return_rate = pnl / cost，但 cost=0 时为 0（约定）
+    assert open_round.return_rate_units == 0
 
 
 def test_zero_cost_round_has_zero_return_rate() -> None:
@@ -832,34 +906,51 @@ def test_conservation_invariants_for_mixed_events() -> None:
     ]
     result = build_rounds(events)
 
-    closed = result.closed_rounds
-    buy_cost = cents("1000.00") + cents("2200.00")
-    rights_payment = cents("300.00")
-    # 成本守恒：Σ买入成本 + Σ配股缴款 = Σ closed.cost + Σ open.cost
-    assert buy_cost + rights_payment == sum(r.cost_units for r in closed) + sum(
-        lot.cost_units for lot in result.open_lots
+    # 卖 250+100=350，送转 300×0.3=90，配股 30 → 总 420 → 剩余 70 → open round
+    assert len(result.rounds) == 1
+    round_ = result.rounds[0]
+    assert round_.key == "b1:open"
+    assert round_.status == "open"
+    assert round_.quantity_units == shares(350)
+    assert round_.cost_units == 289_999  # 已消耗 lot cost（不是全周期 350000）
+    assert round_.proceeds_units == cents("4200.00")  # 350×12
+    assert round_.dividend_units == 416  # 已消耗 lot 分到的股息
+    assert round_.pnl_units == 130_417  # 420000 - 289999 + 416
+
+    # 3 fills 合计 350 股
+    assert len(round_.fills) == 3
+    assert sum(fill.quantity_units for fill in round_.fills) == round_.quantity_units
+    # fills 的 pnl 合计
+    assert sum(fill.pnl_units for fill in round_.fills) == 58_166 + 37_846 + 34_405  # 130417
+
+    # open_lots: b2 剩余 70 股
+    assert len(result.open_lots) == 1
+    lot = result.open_lots[0]
+    assert lot.buy_trade_id == "b2"
+    assert lot.quantity_units == shares(70)
+    assert lot.cost_units == 60_001
+    assert lot.dividend_units == 84
+
+    # === 守恒不变量 ===
+
+    # pnl 恒等式：pnl = proceeds - cost + dividend（open / closed 都适用）
+    for r in result.rounds:
+        assert r.pnl_units == r.proceeds_units - r.cost_units + r.dividend_units
+
+    # cost 守恒：已消耗 cost + 剩余 lot cost = 总投入
+    assert round_.cost_units + sum(lot.cost_units for lot in result.open_lots) == cents(
+        "1000.00"
+    ) + cents("2200.00") + cents("300.00")  # 350000 分
+
+    # 股息守恒：已消耗 dividend + 剩余 lot dividend = 净股息总额
+    assert (
+        round_.dividend_units + sum(lot.dividend_units for lot in result.open_lots) == 500
+    )  # 600-100 tax
+
+    # 数量守恒：matched + open = 总 420 股
+    assert round_.quantity_units + sum(lot.quantity_units for lot in result.open_lots) == shares(
+        420
     )
-    # 股息守恒：分配总额 = 净股息
-    assert sum(r.dividend_units for r in result.rounds) == 500
-    # 每回合 pnl 恒等式（closed；open 回合 pnl 仅含已分配股息）与 fills 数量守恒
-    for round_ in result.closed_rounds:
-        assert round_.pnl_units == (
-            round_.proceeds_units - round_.cost_units + round_.dividend_units
-        )
-        assert sum(fill.quantity_units for fill in round_.fills) == round_.quantity_units
-        assert sum(fill.pnl_units for fill in round_.fills) == round_.pnl_units
-    for round_ in result.open_rounds:
-        assert round_.pnl_units == round_.dividend_units
-        assert round_.proceeds_units == 0
-        assert round_.fills == ()
-    # 数量守恒：Σ买入 + Σ送转新增 + Σ配股新增 = Σ matched + Σ open + Σ oversell
-    # 送转新增 = 300 股 × 0.3 = 90 股
-    matched = sum(r.quantity_units for r in result.rounds if r.status != "open")
-    open_qty = sum(lot.quantity_units for lot in result.open_lots)
-    oversell = sum(error.quantity_units for error in result.data_errors if error.kind == "oversell")
-    assert shares(300) + shares(90) + shares(30) == matched + open_qty + oversell
-    assert open_qty == shares(70)
-    assert oversell == 0
 
 
 def test_build_rounds_is_deterministic() -> None:

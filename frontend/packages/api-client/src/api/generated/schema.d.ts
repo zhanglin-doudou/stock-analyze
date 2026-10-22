@@ -1498,10 +1498,11 @@ export interface components {
         /**
          * RoundFillOut
          * @description API-031：FIFO 配对明细（一回合内 sequence 从 1 开始）。
+         *
+         *     仅展示流水配对本身（买卖流水 ID、数量、日期），
+         *     分摊收益/成本/股息/pnl 请在回合级（Round）查看。
          */
         RoundFillOut: {
-            /** Buy Cost */
-            buy_cost: string;
             /** Buy Trade Id */
             buy_trade_id: string;
             /**
@@ -1509,8 +1510,6 @@ export interface components {
              * Format: date
              */
             close_date: string;
-            /** Dividend */
-            dividend: string;
             /** Fill Id */
             fill_id: number;
             /** Holding Days */
@@ -1520,12 +1519,8 @@ export interface components {
              * Format: date
              */
             open_date: string;
-            /** Pnl */
-            pnl: string;
             /** Quantity */
             quantity: string;
-            /** Sell Proceeds */
-            sell_proceeds: string;
             /** Sell Trade Id */
             sell_trade_id: string;
             /** Sequence */

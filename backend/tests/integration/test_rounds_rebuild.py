@@ -256,8 +256,9 @@ async def test_full_rebuild_matches_hand_computed_round(
     )
 
     result = await _rebuild(app_db, user_id)
-    assert result.rounds_total == 2
-    assert result.rounds_closed == 1
+    # 新引擎语义：buy 1000 sell 400 未清仓 → 只有 1 个 open round（含部分卖出的 fill）
+    assert result.rounds_total == 1
+    assert result.rounds_closed == 0
     assert result.rounds_open == 1
     assert result.fills == 1
     assert result.data_errors == 0
@@ -266,36 +267,29 @@ async def test_full_rebuild_matches_hand_computed_round(
     assert result.window_from is None
 
     async with app_db.tenant_tx(user_id) as session:
-        closed = await session.get(Round, build_round_id(user_id, "600519", f"{buy_id}:{sell_id}"))
         open_round = await session.get(Round, build_round_id(user_id, "600519", f"{buy_id}:open"))
-    assert closed is not None and open_round is not None
-    # 手算：卖出 400 股分摊成本 4000.00，现金 4800.00 → pnl 800.00；收益率 20%。
-    assert closed.status == "closed"
-    assert closed.quantity_units == 4_000_000
-    assert closed.cost_units == 400_000
-    assert closed.proceeds_units == 480_000
-    assert closed.dividend_units == 0
-    assert closed.pnl_units == 80_000
-    assert closed.return_rate_units == 20_000_000
-    assert closed.fills_count == 1
-    assert closed.data_error is False
-    # 期末未平仓：剩余 600 股、成本 6000.00。
+    assert open_round is not None
+    # open round 聚合已消耗 lot 部分：sell 400 股分摊成本 4000.00，现金 4800.00 → pnl 800.00。
     assert open_round.status == "open"
     assert open_round.close_trade_id is None
-    assert open_round.quantity_units == 6_000_000
-    assert open_round.cost_units == 600_000
-    assert open_round.pnl_units == 0
-    assert open_round.fills_count == 0
+    assert open_round.quantity_units == 4_000_000  # 已 FIFO 配对的股数
+    assert open_round.cost_units == 400_000  # 已消耗 lot 成本
+    assert open_round.proceeds_units == 480_000
+    assert open_round.dividend_units == 0
+    assert open_round.pnl_units == 80_000  # proceeds - cost
+    assert open_round.return_rate_units == 20_000_000
+    assert open_round.fills_count == 1
+    assert open_round.data_error is False
 
     state = await _load_build_state(app_db, user_id)
     assert state is not None
     assert state.last_scope == "full"
-    assert state.rounds_count == 2
+    assert state.rounds_count == 1
     assert state.last_trade_updated_at is not None
 
-    # 明细行与回合拆分一致
+    # 明细行在 open round 里
     async with app_db.tenant_tx(user_id) as session:
-        fills = await list_round_fills(session, user_id, closed.id)
+        fills = await list_round_fills(session, user_id, open_round.id)
     assert len(fills) == 1
     assert fills[0].buy_trade_id == buy_id
     assert fills[0].sell_trade_id == sell_id
@@ -322,7 +316,8 @@ async def test_repeated_full_rebuild_is_idempotent(
     second_snapshot = {
         row.id: (row.status, row.quantity_units, row.cost_units, row.pnl_units) for row in second
     }
-    assert result.rounds_total == 3  # A closed + A open + B closed
+    # 新引擎：A buy1000 sell400 未清仓 → 1 个 open；B buy1000 sell1000 全清 → 1 个 closed
+    assert result.rounds_total == 2  # B closed + A open
     assert first_snapshot == second_snapshot
 
 
@@ -361,7 +356,8 @@ async def test_empty_data_clears_rounds_and_records_state(
         line_no=2,
     )
     await _rebuild(app_db, user_id)
-    assert len(await _load_rounds(app_db, user_id)) == 2
+    # 新引擎：buy1000 sell400 未清仓 → 1 个 open round
+    assert len(await _load_rounds(app_db, user_id)) == 1
 
     # 撤销：软删全部流水 → full rebuild 清空回合（回合表不能残留“幽灵持仓”）。
     async with owner_engine.begin() as conn:
@@ -419,7 +415,8 @@ async def test_period_rebuild_only_touches_affected_securities(
     }
     for round_id in b_round_ids:
         assert after[round_id] == before[round_id]
-    assert len(after) == len(before) + 1
+    # 新引擎：加 buy 500 只是往 A 的 open round 追加 lot，不会开启新周期 → round 数不变
+    assert len(after) == len(before)
     assert ids["a_sell"]
 
     # 同参数重跑：ID 与值不变（确定性 + 幂等）。
@@ -460,7 +457,8 @@ async def test_period_rebuild_recomputes_soft_deleted_trade(
     user_id = await _insert_user(owner_engine)
     ids = await _seed_two_securities(owner_engine, user_id)
     await _rebuild(app_db, user_id)
-    assert len(await _load_rounds(app_db, user_id)) == 3
+    # 新引擎：A open + B closed → 2 rounds
+    assert len(await _load_rounds(app_db, user_id)) == 2
 
     # 撤销区间内的卖出 → A 的 closed 回合必须消失（软删流水所在的证券要脏）。
     await _soft_delete_trade(owner_engine, ids["a_sell"])
@@ -487,7 +485,8 @@ async def test_list_get_and_fills_rounds(owner_engine: AsyncEngine, app_db: Data
         assert cursor is not None
         second_page, next_cursor = await list_rounds(session, user_id, limit=1, cursor=cursor)
         assert len(second_page) == 1
-        assert next_cursor is not None
+        # 新引擎：只有 2 个 round（B closed + A open），第二页就是最后一页
+        assert next_cursor is None
         # closed 回合（有 close_date）排在 open 前面。
         assert first_page[0].close_date is not None
 
@@ -775,9 +774,9 @@ async def test_rebuild_rounds_job_runs_through_worker(
     assert job.status == "succeeded"
     assert job.result is not None
     assert job.result["scope"] == "full"
-    assert job.result["rounds_total"] == 3
+    assert job.result["rounds_total"] == 2  # B closed + A open
     # worker 结果里的日期是 JSON 友好的 isoformat 字符串（不能是 date 对象）。
     assert isinstance(job.result["rebuilt_at"], str)
 
     rows = await _load_rounds(app_db, user_id)
-    assert len(rows) == 3
+    assert len(rows) == 2  # B closed + A open

@@ -478,17 +478,17 @@ class RoundPage(BaseModel):
 
 
 class RoundFillOut(BaseModel):
-    """API-031：FIFO 配对明细（一回合内 sequence 从 1 开始）。"""
+    """API-031：FIFO 配对明细（一回合内 sequence 从 1 开始）。
+
+    仅展示流水配对本身（买卖流水 ID、数量、日期），
+    分摊收益/成本/股息/pnl 请在回合级（Round）查看。
+    """
 
     fill_id: int
     sequence: int
     buy_trade_id: str
     sell_trade_id: str
     quantity: str
-    buy_cost: str
-    sell_proceeds: str
-    dividend: str
-    pnl: str
     open_date: date
     close_date: date
     holding_days: int

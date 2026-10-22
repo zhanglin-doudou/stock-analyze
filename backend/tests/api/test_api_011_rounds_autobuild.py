@@ -75,24 +75,21 @@ async def test_import_auto_builds_rounds_and_web_can_query(
     assert rebuild_jobs, f"导入后应自动入队 rebuild_rounds，实际任务：{[i['type'] for i in items]}"
     assert all(item["status"] == "succeeded" for item in rebuild_jobs)
 
-    # GET /rounds 立即可查：1 个 closed（卖出 150 股）+ 1 个 open（剩余 50 股）。
+    # GET /rounds 立即可查：新引擎语义 buy100+buy100+sell150 未清仓 → 1 个 open round（含 2 条 fill）。
     rounds = await client.get(f"{api_prefix}/rounds?limit=50", headers=user.headers)
     assert rounds.status_code == 200, rounds.text
     body = rounds.json()
-    assert len(body["items"]) == 2, body
-    closed = [item for item in body["items"] if item["status"] == "closed"]
-    opened = [item for item in body["items"] if item["status"] == "open"]
-    assert len(closed) == 1 and len(opened) == 1, body
-    round_ = closed[0]
+    assert len(body["items"]) == 1, body  # 只有 open round
+    opened = body["items"]
+    assert opened[0]["status"] == "open"
+    round_ = opened[0]
     assert round_["security_code"] == "600519"
-    assert round_["quantity"] == "150.0000"
-    assert round_["cost"] == "1600.00"
+    # open round 聚合已消耗 lot 部分：sell 150 股 FIFO 消耗 buy1 全量 + buy2 50 股
+    assert round_["quantity"] == "150.0000"  # 已 FIFO 配对的股数
+    assert round_["cost"] == "1600.00"  # 已消耗 lot 成本（1000 + 600）
     assert round_["proceeds"] == "2250.00"
     assert round_["pnl"] == "650.00"
     assert round_["fills_count"] == 2
-    # 期末剩余 50 股（买入成本 600.00）以 open 回合保留，供净值/全样本胜率使用。
-    assert opened[0]["quantity"] == "50.0000"
-    assert opened[0]["cost"] == "600.00"
 
     fills = await client.get(
         f"{api_prefix}/rounds/{round_['round_id']}/fills", headers=user.headers

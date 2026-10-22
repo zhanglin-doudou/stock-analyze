@@ -158,16 +158,20 @@ def _assert_no_negative_positions(events: list[FifoEvent]) -> None:
         assert round_.cost_units >= 0
         assert round_.dividend_units >= 0
         assert round_.oversell_units >= 0
-        if round_.status == "open":
-            assert round_.proceeds_units == 0
-            assert round_.pnl_units == round_.dividend_units
-            assert round_.fills == ()
-        else:
+        # 周期语义不变量（open / closed 通用）：
+        # - pnl 恒等式：pnl = proceeds - cost + dividend
+        # - 有 fills 时 Σ fill.quantity == round.quantity_units（matched）
+        assert round_.pnl_units == (
+            round_.proceeds_units - round_.cost_units + round_.dividend_units
+        )
+        if round_.fills:
             assert sum(fill.quantity_units for fill in round_.fills) == round_.quantity_units
             assert sum(fill.pnl_units for fill in round_.fills) == round_.pnl_units
-            assert round_.pnl_units == (
-                round_.proceeds_units - round_.cost_units + round_.dividend_units
-            )
+        # data_error 状态与 oversell_units 对齐
+        if round_.status == "data_error":
+            assert round_.data_error is True
+        else:
+            assert round_.data_error is False
     for lot in result.open_lots:
         assert lot.quantity_units > 0
         assert lot.cost_units >= 0
@@ -188,7 +192,8 @@ def test_buy_sell_quantity_and_cost_conservation(events: list[FifoEvent]) -> Non
     )
 
     matched_quantity = sum(
-        round_.quantity_units for round_ in result.rounds if round_.status != "open"
+        round_.quantity_units
+        for round_ in result.rounds  # 含 open / closed，都是已 FIFO 配对量
     )
     open_quantity = sum(lot.quantity_units for lot in result.open_lots)
     oversell_quantity = sum(
@@ -198,10 +203,11 @@ def test_buy_sell_quantity_and_cost_conservation(events: list[FifoEvent]) -> Non
     assert open_quantity == aggregates["open_quantity"]
     assert oversell_quantity == aggregates["oversell_quantity"]
 
-    # 成本守恒：Σ买入成本 + Σ配股缴款 = Σ已平仓成本 + Σ期末未平仓成本
-    closed_cost = sum(round_.cost_units for round_ in result.rounds if round_.status != "open")
-    open_cost = sum(lot.cost_units for lot in result.open_lots)
-    assert aggregates["buy_cost"] + aggregates["rights_payment"] == closed_cost + open_cost
+    # 成本守恒：Σ买入成本 + Σ配股缴款 = Σ closed round.cost（已消耗）+ Σ open_lot.cost（剩余）
+    # （open round.cost 也是已消耗，已在 closed 里）
+    closed_cost = sum(round_.cost_units for round_ in result.rounds)
+    open_lot_cost = sum(lot.cost_units for lot in result.open_lots)
+    assert aggregates["buy_cost"] + aggregates["rights_payment"] == closed_cost + open_lot_cost
 
 
 @SETTINGS
@@ -209,10 +215,13 @@ def test_buy_sell_quantity_and_cost_conservation(events: list[FifoEvent]) -> Non
 def test_dividend_conservation(events: list[FifoEvent]) -> None:
     result = build_rounds(events)
     aggregates = _replay_aggregates(events)
-    allocated = sum(round_.dividend_units for round_ in result.rounds)
-    assert allocated == aggregates["dividend_net"]
+    # 新语义：round.dividend 仅含已消耗 lot 的股息，open_lots 含未消耗 lot 的股息
+    # 两者之和 = 累计净股息
+    consumed_dividend = sum(round_.dividend_units for round_ in result.rounds)
+    open_lot_dividend = sum(lot.dividend_units for lot in result.open_lots)
+    assert consumed_dividend + open_lot_dividend == aggregates["dividend_net"]
     # 股息聚合口 = closed + open（含 data_error 的已分配股息时单列）
-    assert result.dividend_units <= allocated
+    assert result.dividend_units <= consumed_dividend
 
 
 @SETTINGS
@@ -243,7 +252,8 @@ def test_invariants_buy_sell_only(events: list[FifoEvent]) -> None:
         aggregates["buy_quantity"] == aggregates["matched_quantity"] + aggregates["open_quantity"]
     )
     assert aggregates["buy_cost"] == sum(
-        round_.cost_units for round_ in result.rounds if round_.status != "open"
+        round_.cost_units
+        for round_ in result.rounds  # 含 open / closed，都是已消耗 cost
     ) + sum(lot.cost_units for lot in result.open_lots)
 
 

@@ -6,8 +6,11 @@
   生产实现用标度整数 + 尾差分摊；差异天然暴露「同错同消」的风险。
 * 期望值只由本实现产生，测试用它和 `stock_core.fifo.build_rounds` 对拍。
 
-本模块只覆盖 FIFO 回合（pnl / 数量 / 成本 / 现金 / 股息）与期末未平仓 lot，
+本模块覆盖 FIFO 回合（pnl / 数量 / 成本 / 现金 / 股息）与期末未平仓 lot，
 不覆盖持有天数、data_error 的字段细节（那是被测代码的展示口径）。
+
+回合定义（仓位周期）：从 0 股首次买入开始，历经分批买入、做T式部分卖出……
+直到持仓回到 0 股才关闭；中途 SELL 只追加 Fill 不关闭。
 """
 
 from __future__ import annotations
@@ -62,19 +65,23 @@ class OracleLot:
 
 @dataclass(frozen=True)
 class OracleRound:
-    """一个回合的期望值（自然单位）。"""
+    """一个回合的期望值（自然单位）。
+
+    回合 = 0→非0→0 的仓位周期；中途做T的 SELL 也配对进同一回合。
+    """
 
     key: str
-    buy_trade_id: str
-    sell_trade_id: str
+    buy_trade_id: str  # 周期开启时第一笔 BUY
+    sell_trade_id: str | None  # 最后一次 SELL；open 周期为 None
     open_date: date
-    close_date: date
-    quantity: Decimal
+    close_date: date | None
+    quantity: Decimal  # 整个周期已 FIFO 配对的股数之和
     cost: Decimal
     proceeds: Decimal
     dividend: Decimal
     pnl: Decimal
     oversell: Decimal = Decimal(0)
+    is_open: bool = False
 
 
 @dataclass(frozen=True)
@@ -84,13 +91,29 @@ class OracleResult:
 
 
 @dataclass
+class _RoundState:
+    """引擎内部周期聚合。"""
+
+    buy_trade_id: str
+    open_date: date
+    last_sell_trade_id: str | None = None
+    last_sell_date: date | None = None
+    matched: Decimal = Decimal(0)
+    cost: Decimal = Decimal(0)
+    proceeds: Decimal = Decimal(0)
+    dividend: Decimal = Decimal(0)
+    oversell: Decimal = Decimal(0)
+
+
+@dataclass
 class _State:
     lots: list[OracleLot] = field(default_factory=list)
     rounds: list[OracleRound] = field(default_factory=list)
+    current: _RoundState | None = None
 
 
 def build_rounds(events: Iterable[OracleEvent]) -> OracleResult:
-    """朴素 FIFO 配对：逐证券、按稳定序、持有 lot 列表。"""
+    """朴素 FIFO 配对：逐证券、按稳定序、仓位周期语义。"""
     ordered = sorted(events, key=lambda event: event.sort_key)
     by_security: dict[str, list[OracleEvent]] = {}
     for event in ordered:
@@ -112,10 +135,30 @@ def build_rounds(events: Iterable[OracleEvent]) -> OracleResult:
             elif event.kind == "rights":
                 _rights(event, state)
             # 其它事件不参与回合配对
+        # 期末仍有 lot → open round
+        if state.current is not None and state.lots:
+            cur = state.current
+            pnl = cur.proceeds - cur.cost + cur.dividend
+            key = f"{cur.buy_trade_id}:open"
+            round_ = OracleRound(
+                key=key,
+                buy_trade_id=cur.buy_trade_id,
+                sell_trade_id=None,
+                open_date=cur.open_date,
+                close_date=None,
+                quantity=cur.matched,
+                cost=cur.cost,  # 已消耗 lot 成本，剩余 lot 在 open_lots 独立展示
+                proceeds=cur.proceeds,
+                dividend=cur.dividend,  # 已消耗 lot 股息，剩余 lot 在 open_lots
+                pnl=pnl,
+                oversell=cur.oversell,
+                is_open=True,
+            )
+            rounds.append(round_)
         rounds.extend(state.rounds)
         open_lots.extend(state.lots)
 
-    rounds.sort(key=lambda round_: (round_.close_date, round_.key))
+    rounds.sort(key=lambda r: (r.close_date or date.max if not r.is_open else date.max, r.key))
     open_lots.sort(key=lambda lot: lot.open_date)
     return OracleResult(rounds=tuple(rounds), open_lots=tuple(open_lots))
 
@@ -123,6 +166,8 @@ def build_rounds(events: Iterable[OracleEvent]) -> OracleResult:
 def _buy(event: OracleEvent, state: _State) -> None:
     if event.quantity <= 0:
         return
+    if state.current is None:
+        state.current = _RoundState(buy_trade_id=event.trade_id, open_date=event.trade_date)
     state.lots.append(
         OracleLot(
             buy_trade_id=event.trade_id,
@@ -145,6 +190,7 @@ def _sell(event: OracleEvent, state: _State) -> None:
         chunks.append((lot, take))
         remaining -= take
     if not chunks:
+        # 全超卖 → 无可用 lot，不开启周期
         return
     matched = sum((take for _, take in chunks), Decimal(0))
     oversell = remaining
@@ -163,23 +209,46 @@ def _sell(event: OracleEvent, state: _State) -> None:
         cost_total += cost
         dividend_total += dividend
         proceeds_total += proceeds
-    first_lot = chunks[0][0]
-    state.rounds.append(
-        OracleRound(
-            key=f"{first_lot.buy_trade_id}:{event.trade_id}",
-            buy_trade_id=first_lot.buy_trade_id,
-            sell_trade_id=event.trade_id,
-            open_date=first_lot.open_date,
-            close_date=event.trade_date,
-            quantity=matched,
-            cost=cost_total,
-            proceeds=proceeds_total,
-            dividend=dividend_total,
-            pnl=proceeds_total - cost_total + dividend_total,
-            oversell=oversell,
+    if oversell > 0 and event.quantity > 0:
+        # 部分超卖时，把未配对部分的 proceeds 从 proceeds_total 里去掉（生产也这么做）
+        proceeds_total = event.amount * matched / event.quantity
+
+    # 维护周期
+    if state.current is None:
+        first_lot = chunks[0][0]
+        state.current = _RoundState(
+            buy_trade_id=first_lot.buy_trade_id, open_date=first_lot.open_date
         )
-    )
+    cur = state.current
+    cur.last_sell_trade_id = event.trade_id
+    cur.last_sell_date = event.trade_date
+    cur.matched += matched
+    cur.cost += cost_total
+    cur.proceeds += proceeds_total
+    cur.dividend += dividend_total
+    cur.oversell += oversell
+
     state.lots = [lot for lot in state.lots if lot.quantity > 0]
+    # 持仓归零 → 关闭周期
+    if not state.lots:
+        pnl = cur.proceeds - cur.cost + cur.dividend
+        key = f"{cur.buy_trade_id}:{cur.last_sell_trade_id or 'close'}"
+        round_ = OracleRound(
+            key=key,
+            buy_trade_id=cur.buy_trade_id,
+            sell_trade_id=cur.last_sell_trade_id,
+            open_date=cur.open_date,
+            close_date=cur.last_sell_date,
+            quantity=cur.matched,
+            cost=cur.cost,
+            proceeds=cur.proceeds,
+            dividend=cur.dividend,
+            pnl=pnl,
+            oversell=cur.oversell,
+            is_open=False,
+        )
+        state.rounds.append(round_)
+        state.current = None
 
 
 def _dividend(event: OracleEvent, state: _State) -> None:
