@@ -27,22 +27,35 @@ _DEFINITION_VERSION = "1.0"
 
 # cost (scale=2) / qty (scale=4) → price (scale=6): cost * 1e8 / qty
 _COST_QTY_TO_PRICE_SCALE = 10**8
+# 比率标度（scale=8）：金额比值 → 收益率标度整数
+_RATIO_SCALE = 10**8
 
 
 def _to_3dp(units: int, scale: int) -> str:
     """标度整数 → 三位小数字符串（截断而非四舍五入，保持零口径可预测）。"""
+    sign = "-" if units < 0 else ""
+    magnitude = abs(units)
     if scale == 0:
-        return f"{units}.000"
-    total_digits = scale + 3
-    s = f"{units:0{total_digits}d}"
-    if len(s) <= scale:
-        s = "0" + "." + "0" * (3 + scale)
-        return s[: s.index(".") + 4]  # "0.000"
-    int_part = s[:-scale]
-    frac_part = s[-scale:]
+        return f"{sign}{magnitude}.000"
+    int_part, frac_units = divmod(magnitude, 10**scale)
+    frac = f"{frac_units:0{scale}d}"
     # 截断到三位：如果 scale > 3，取前 3 位；如果 scale < 3，补 0
-    frac = frac_part[:3] if scale >= 3 else frac_part + "0" * (3 - scale)
-    return f"{int_part}.{frac}"
+    frac = frac[:3] if scale >= 3 else frac + "0" * (3 - scale)
+    return f"{sign}{int_part}.{frac}"
+
+
+def _to_3dp_trim(units: int, scale: int) -> str:
+    """三位小数后去掉尾零（`9.100` → `9.1`），用于持仓明细展示。"""
+    text = _to_3dp(units, scale)
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    return "0" if text == "-0" else text
+
+
+def _pct_2dp(ratio_units: int) -> str:
+    """比率标度整数 → 两位小数百分比字符串（避免出现 "-0.00%"）。"""
+    text = Ratio(ratio_units).as_pct(2)
+    return "0.00%" if text == "-0.00%" else text
 
 
 def _nav_holding_out(
@@ -56,10 +69,10 @@ def _nav_holding_out(
     return NavHoldingOut(
         security_code=code,
         security_name=name,
-        quantity=_to_3dp(qty_units, Qty.scale),
-        avg_cost=_to_3dp(avg_cost_units, Price.scale),
-        close_price=_to_3dp(close_units, Price.scale),
-        market_value=_to_3dp(market_value_units, Money.scale),
+        quantity=_to_3dp_trim(qty_units, Qty.scale),
+        avg_cost=_to_3dp_trim(avg_cost_units, Price.scale),
+        close_price=_to_3dp_trim(close_units, Price.scale),
+        market_value=_to_3dp_trim(market_value_units, Money.scale),
     )
 
 
@@ -135,8 +148,9 @@ async def get_nav(
     blocked_start: date | None = None
 
     holdings_map = result.holdings_by_date
+    prev_total_units: int | None = None
 
-    for row in rows:
+    for index, row in enumerate(rows):
         is_blocked = row.status == "blocked"
         if is_blocked:
             overall_status = "blocked"
@@ -153,8 +167,24 @@ async def get_nav(
 
         holdings_list: list[NavHoldingOut] = []
         total_assets_3dp = _to_3dp(0, Money.scale)
+        prev_total_assets: str | None = None
+        daily_pnl: str | None = None
+        pct = _pct_2dp(row.return_units)
         if not is_blocked:
             total_assets_3dp = _to_3dp(row.total_value_units, Money.scale)
+            # 首日没有上月点：用「上一交易日收盘资产」补昨日资产
+            prev_units = prev_total_units
+            if prev_units is None and index == 0:
+                prev_units = result.prev_day_value_units
+            if prev_units is not None:
+                prev_total_assets = _to_3dp(prev_units, Money.scale)
+                pnl_units = row.total_value_units - row.cashflow_units - prev_units
+                # 日收益额 = 当日总资产 − 当日外部现金流 − 昨日资产
+                daily_pnl = _to_3dp(pnl_units, Money.scale)
+                if index == 0 and prev_units > 0:
+                    # TWR 首点为基准（return 恒为 0），展示口径按当日盈亏/昨日资产计算
+                    pct = _pct_2dp(pnl_units * _RATIO_SCALE // prev_units)
+            prev_total_units = row.total_value_units
             for snap in holdings_map.get(row.trade_date, []):
                 holdings_list.append(
                     _nav_holding_out(
@@ -166,16 +196,22 @@ async def get_nav(
                         snap.market_value_units,
                     )
                 )
+        else:
+            # 阻断日切断「昨日资产」链条：下一可输出日的昨日资产不可得。
+            prev_total_units = None
 
         points.append(
             NavPointOut(
                 date=row.trade_date,
                 unit_nav=str(Price(row.nav_units)),
                 twr_daily=str(Ratio(row.return_units)),
+                twr_daily_pct=pct,
                 cashflow=str(Money(row.cashflow_units)),
                 blocked=is_blocked,
                 blocked_reason=row.blocked_reason if is_blocked else None,
                 total_assets=total_assets_3dp,
+                prev_total_assets=prev_total_assets,
+                daily_pnl=daily_pnl,
                 holdings=holdings_list,
             )
         )

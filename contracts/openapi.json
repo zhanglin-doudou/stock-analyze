@@ -1004,7 +1004,7 @@
         "type": "object"
       },
       "NavHoldingOut": {
-        "description": "单只标的在某日的持仓快照（金额/价格/数量均三位小数字符串）。",
+        "description": "单只标的在某日的持仓快照（数量/价格/金额为最多三位小数字符串，去掉尾零）。",
         "properties": {
           "avg_cost": {
             "title": "Avg Cost",
@@ -1127,6 +1127,17 @@
             "title": "Cashflow",
             "type": "string"
           },
+          "daily_pnl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Daily Pnl"
+          },
           "date": {
             "format": "date",
             "title": "Date",
@@ -1140,6 +1151,17 @@
             "title": "Holdings",
             "type": "array"
           },
+          "prev_total_assets": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prev Total Assets"
+          },
           "total_assets": {
             "default": "0.000",
             "title": "Total Assets",
@@ -1147,6 +1169,11 @@
           },
           "twr_daily": {
             "title": "Twr Daily",
+            "type": "string"
+          },
+          "twr_daily_pct": {
+            "default": "0.00%",
+            "title": "Twr Daily Pct",
             "type": "string"
           },
           "unit_nav": {
@@ -7028,10 +7055,13 @@
                       "blocked": false,
                       "blocked_reason": "示例",
                       "cashflow": "1234.56",
+                      "daily_pnl": "示例",
                       "date": "2026-09-30",
                       "holdings": [],
+                      "prev_total_assets": "示例",
                       "total_assets": "0.000",
                       "twr_daily": "0.1234",
+                      "twr_daily_pct": "0.00%",
                       "unit_nav": "12.340000"
                     }
                   ],

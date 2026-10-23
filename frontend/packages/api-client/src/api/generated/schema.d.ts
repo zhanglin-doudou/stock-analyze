@@ -1150,7 +1150,7 @@ export interface components {
         };
         /**
          * NavHoldingOut
-         * @description 单只标的在某日的持仓快照（金额/价格/数量均三位小数字符串）。
+         * @description 单只标的在某日的持仓快照（数量/价格/金额为最多三位小数字符串，去掉尾零）。
          */
         NavHoldingOut: {
             /** Avg Cost */
@@ -1215,6 +1215,8 @@ export interface components {
             blocked_reason?: string | null;
             /** Cashflow */
             cashflow: string;
+            /** Daily Pnl */
+            daily_pnl?: string | null;
             /**
              * Date
              * Format: date
@@ -1225,6 +1227,8 @@ export interface components {
              * @default []
              */
             holdings: components["schemas"]["NavHoldingOut"][];
+            /** Prev Total Assets */
+            prev_total_assets?: string | null;
             /**
              * Total Assets
              * @default 0.000
@@ -1232,6 +1236,11 @@ export interface components {
             total_assets: string;
             /** Twr Daily */
             twr_daily: string;
+            /**
+             * Twr Daily Pct
+             * @default 0.00%
+             */
+            twr_daily_pct: string;
             /** Unit Nav */
             unit_nav: string;
         };

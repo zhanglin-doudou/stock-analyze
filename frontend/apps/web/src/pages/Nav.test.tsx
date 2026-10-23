@@ -24,8 +24,30 @@ function makeNav(overrides: Partial<NavResult> = {}): NavResult {
     status: "ok",
     blocked_ranges: [],
     points: [
-      { date: "2026-06-02", unit_nav: "10000.000000", twr_daily: "0.00000000", cashflow: "0.00", blocked: false, total_assets: "50000.000", holdings: [] },
-      { date: "2026-06-20", unit_nav: "11000.000000", twr_daily: "0.10000000", cashflow: "0.00", blocked: false, total_assets: "55000.000", holdings: [] },
+      {
+        date: "2026-06-02",
+        unit_nav: "10000.000000",
+        twr_daily: "0.00000000",
+        twr_daily_pct: "0.00%",
+        cashflow: "0.00",
+        blocked: false,
+        total_assets: "50000.000",
+        prev_total_assets: null,
+        daily_pnl: null,
+        holdings: [],
+      },
+      {
+        date: "2026-06-20",
+        unit_nav: "11000.000000",
+        twr_daily: "0.10000000",
+        twr_daily_pct: "10.00%",
+        cashflow: "0.00",
+        blocked: false,
+        total_assets: "55000.000",
+        prev_total_assets: "50000.000",
+        daily_pnl: "5000.000",
+        holdings: [],
+      },
     ],
     summary: {
       mwr: "0.10000000",
@@ -86,6 +108,45 @@ describe("Nav 净值与收益页", () => {
     expect(screen.getByText("2026-06-02")).toBeTruthy();
     expect(screen.getByText("10000.000000")).toBeTruthy();
     expect(screen.getByText("11000.000000")).toBeTruthy();
+    // 昨日资产 / 日收益额 / 日收益百分比
+    expect(screen.getByText("昨日资产")).toBeTruthy();
+    expect(screen.getAllByText("50000.000").length).toBeGreaterThanOrEqual(2); // 06-02 总资产 + 06-20 昨日资产
+    expect(screen.getByText("日收益额")).toBeTruthy();
+    expect(screen.getAllByText("55000.000").length).toBeGreaterThanOrEqual(2); // 表格 + 持仓区总资产
+    expect(screen.getByText("5000.000")).toBeTruthy();
+    expect(screen.getByText("0.00%")).toBeTruthy();
+    expect(screen.getByText("10.00%")).toBeTruthy();
+    // 整月无阻断点 → 不展示阻断列
+    expect(screen.queryByText("阻断")).toBeNull();
+  });
+
+  it("存在阻断点时才展示阻断列", async () => {
+    getNav.mockResolvedValue(
+      makeNav({
+        status: "blocked",
+        blocked_ranges: [{ from: "2026-06-10", to: "2026-06-12" }],
+        points: [
+          {
+            date: "2026-06-10",
+            unit_nav: "0.000000",
+            twr_daily: "0.00000000",
+            twr_daily_pct: "0.00%",
+            cashflow: "0.00",
+            blocked: true,
+            total_assets: "0.000",
+            prev_total_assets: null,
+            daily_pnl: null,
+            holdings: [],
+          },
+        ],
+      }),
+    );
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "构建净值与收益" }));
+
+    expect(await screen.findByTestId("nav-result")).toBeTruthy();
+    expect(screen.getAllByText("阻断").length).toBeGreaterThanOrEqual(2);
   });
 
   it("阻断状态展示阻断区间且阻断日不显示资产值", async () => {
@@ -94,7 +155,18 @@ describe("Nav 净值与收益页", () => {
         status: "blocked",
         blocked_ranges: [{ from: "2026-06-10", to: "2026-06-12" }],
         points: [
-          { date: "2026-06-10", unit_nav: "0.000000", twr_daily: "0.00000000", cashflow: "0.00", blocked: true, total_assets: "0.000", holdings: [] },
+          {
+            date: "2026-06-10",
+            unit_nav: "0.000000",
+            twr_daily: "0.00000000",
+            twr_daily_pct: "0.00%",
+            cashflow: "0.00",
+            blocked: true,
+            total_assets: "0.000",
+            prev_total_assets: null,
+            daily_pnl: null,
+            holdings: [],
+          },
         ],
       }),
     );

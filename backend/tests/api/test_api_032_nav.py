@@ -26,6 +26,8 @@ pytestmark = pytest.mark.api
 _MONEY_RE = re.compile(r"^-?\d+\.\d{2}$")
 _NAV_RE = re.compile(r"^-?\d+\.\d{6}$")
 _RATIO_RE = re.compile(r"^-?\d+\.\d{8}$")
+_PCT_RE = re.compile(r"^-?\d+\.\d{2}%$")
+_3DP_RE = re.compile(r"^-?\d+\.\d{3}$")
 
 
 async def _seed_trade(
@@ -40,6 +42,9 @@ async def _seed_trade(
     cash_balance_units: int | None,
     category: str,
     security_code: str = "600519",
+    commission_units: int = 0,
+    stamp_tax_units: int = 0,
+    other_fee_units: int = 0,
 ) -> str:
     trade_id = f"trd_{uuid.uuid4().hex[:12]}"
     async with AsyncSession(engine) as session:
@@ -55,9 +60,9 @@ async def _seed_trade(
                 quantity_units=quantity_units,
                 price_units=price_units,
                 amount_units=amount_units,
-                commission_units=0,
-                stamp_tax_units=0,
-                other_fee_units=0,
+                commission_units=commission_units,
+                stamp_tax_units=stamp_tax_units,
+                other_fee_units=other_fee_units,
                 cash_balance_units=cash_balance_units,
                 cash_balance_available=cash_balance_units is not None,
                 category=category,
@@ -128,8 +133,16 @@ async def test_api_032_happy_path(client, account_factory, owner_engine):
     for p in points:
         assert _NAV_RE.match(p["unit_nav"]), p
         assert _RATIO_RE.match(p["twr_daily"]), p
+        assert _PCT_RE.match(p["twr_daily_pct"]), p
         assert _MONEY_RE.match(p["cashflow"]), p
+        assert _3DP_RE.match(p["total_assets"]), p
+        assert p["prev_total_assets"] is None or _3DP_RE.match(p["prev_total_assets"]), p
+        assert p["daily_pnl"] is None or _3DP_RE.match(p["daily_pnl"]), p
         assert isinstance(p["blocked"], bool)
+    # 月度首日：昨日资产取上一交易日收盘估值（现金账户无持仓 → 等于期初现金）
+    assert points[0]["prev_total_assets"] == "100000.000"
+    assert points[0]["daily_pnl"] == "0.000"
+    assert points[0]["twr_daily_pct"] == "0.00%"
 
     # summary 格式
     s = body["summary"]
@@ -161,6 +174,10 @@ async def test_api_032_twr_matches_oracle(client, account_factory, owner_engine)
     # 期初基准点（区间首日）+ 期末点；oracle：期初 100000 现金，期末 100620 = -70000 + 100×1706.20
     assert points["2026-06-01"]["unit_nav"] == "100000.000000"
     assert points["2026-06-30"]["unit_nav"] == "100620.000000"
+    # 昨日资产 / 日收益额 / 日收益百分比
+    assert points["2026-06-30"]["prev_total_assets"] == "100000.000"
+    assert points["2026-06-30"]["daily_pnl"] == "620.000"
+    assert points["2026-06-30"]["twr_daily_pct"] == "0.62%"
     twr = Decimal(body["summary"]["twr"])
     assert abs(twr - Decimal("0.0062")) <= Decimal("0.0001")  # ≤1bp
     # MWR 为 XIRR（ACT/365 年化）：无外部现金流时 MWR 应与年化 TWR 一致
@@ -168,6 +185,111 @@ async def test_api_032_twr_matches_oracle(client, account_factory, owner_engine)
     annualized_twr = Decimal(body["summary"]["annualized_twr"])
     assert abs(mwr - annualized_twr) <= Decimal("0.0001")
     assert abs(Decimal(body["summary"]["mwr_minus_twr"])) <= Decimal("0.0001")
+
+
+@pytest.mark.asyncio
+async def test_api_032_first_point_prev_assets_from_holdings(client, account_factory, owner_engine):
+    """月度首日补齐昨日资产：期初持仓按上一交易日（05-29）收盘价估值。"""
+    acc = await account_factory()
+    await _seed_trade(
+        owner_engine,
+        user_id=acc.user_id,
+        trade_date=date(2026, 5, 20),
+        side="buy",
+        quantity_units=100_0000,  # 100 股
+        price_units=1700_930000,  # 1700.93（05-29 收盘）
+        amount_units=-170_093_00,
+        cash_balance_units=0,
+        category="buy",
+    )
+
+    r = await client.get("/api/v1/nav", params={"period": "2026-06"}, headers=acc.headers)
+    assert r.status_code == 200, r.text
+    first = r.json()["points"][0]
+    assert first["date"] == "2026-06-01"
+    # 06-01 当日也按 05-29 收盘估值（夹具无 06-01 bar）→ 昨日资产 = 当日资产
+    assert first["total_assets"] == "170093.000"
+    assert first["prev_total_assets"] == "170093.000"
+    assert first["daily_pnl"] == "0.000"
+    assert first["twr_daily_pct"] == "0.00%"
+
+
+@pytest.mark.asyncio
+async def test_api_032_holding_values_trimmed(client, account_factory, owner_engine):
+    """持仓明细最多三位小数且去掉尾零：9.1 股不得渲染成 "009.100"。"""
+    acc = await account_factory()
+    await _seed_trade(
+        owner_engine,
+        user_id=acc.user_id,
+        trade_date=date(2026, 5, 29),
+        side="buy",
+        quantity_units=0,
+        price_units=0,
+        amount_units=0,
+        cash_balance_units=100_000_00,
+        category="other",
+    )
+    await _seed_trade(
+        owner_engine,
+        user_id=acc.user_id,
+        trade_date=date(2026, 6, 30),
+        side="buy",
+        quantity_units=9_1000,  # 9.1 股（scale=4）
+        price_units=1700_000000,
+        amount_units=-154_70_00,  # -15470.00
+        cash_balance_units=84_530_00,
+        category="buy",
+    )
+
+    r = await client.get("/api/v1/nav", params={"period": "2026-06"}, headers=acc.headers)
+    assert r.status_code == 200, r.text
+    point = next(p for p in r.json()["points"] if p["date"] == "2026-06-30")
+    holding = point["holdings"][0]
+    assert holding["quantity"] == "9.1"
+    assert holding["avg_cost"] == "1700"
+    assert holding["close_price"] == "1706.2"
+    assert holding["market_value"] == "15526.42"
+    assert point["total_assets"] == "100056.420"
+    assert point["daily_pnl"] == "56.420"
+
+
+@pytest.mark.asyncio
+async def test_api_032_avg_cost_includes_fees(client, account_factory, owner_engine):
+    """买入均价为含费口径：avg_cost = (成交额 + 佣金 + 印花税 + 其他费) ÷ 数量。"""
+    acc = await account_factory()
+    await _seed_trade(
+        owner_engine,
+        user_id=acc.user_id,
+        trade_date=date(2026, 5, 29),
+        side="buy",
+        quantity_units=0,
+        price_units=0,
+        amount_units=0,
+        cash_balance_units=200_000_00,
+        category="other",
+    )
+    # 100 股 @1700，佣金 42.50 + 其他费 2.50 → 净现金流 -(170000+45.00) = -170045.00
+    await _seed_trade(
+        owner_engine,
+        user_id=acc.user_id,
+        trade_date=date(2026, 6, 30),
+        side="buy",
+        quantity_units=100_0000,
+        price_units=1700_000000,
+        amount_units=-170_045_00,
+        cash_balance_units=29_955_00,
+        category="buy",
+        commission_units=42_50,
+        other_fee_units=2_50,
+    )
+
+    r = await client.get("/api/v1/nav", params={"period": "2026-06"}, headers=acc.headers)
+    assert r.status_code == 200, r.text
+    point = next(p for p in r.json()["points"] if p["date"] == "2026-06-30")
+    holding = point["holdings"][0]
+    assert holding["quantity"] == "100"
+    # 买入均价 = 170045 / 100 = 1700.45（高于成交价 1700，差额即费用）
+    assert holding["avg_cost"] == "1700.45"
 
 
 @pytest.mark.asyncio
@@ -285,6 +407,9 @@ async def test_api_032_back_solved_anchor(client, account_factory, owner_engine)
     assert body["summary"]["assumption"] == "back_solved"
     points = {p["date"]: p for p in body["points"]}
     assert points["2026-06-01"]["unit_nav"] == "0.000000"
+    # 期初现金反推为 0 → 首日昨日资产/收益额均为 0（非 null）
+    assert points["2026-06-01"]["prev_total_assets"] == "0.000"
+    assert points["2026-06-01"]["daily_pnl"] == "0.000"
     assert points["2026-06-30"]["total_assets"] == "100620.000"
 
 

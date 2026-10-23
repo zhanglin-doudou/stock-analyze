@@ -46,6 +46,9 @@ def _trade(
     price_units: int = 0,
     cash_balance_units: int | None = None,
     side: str = "buy",
+    commission_units: int = 0,
+    stamp_tax_units: int = 0,
+    other_fee_units: int = 0,
 ) -> Trade:
     return Trade(
         id=f"trd_{uuid.uuid4().hex[:12]}",
@@ -58,9 +61,9 @@ def _trade(
         quantity_units=quantity_units,
         price_units=price_units,
         amount_units=amount_units,
-        commission_units=0,
-        stamp_tax_units=0,
-        other_fee_units=0,
+        commission_units=commission_units,
+        stamp_tax_units=stamp_tax_units,
+        other_fee_units=other_fee_units,
         cash_balance_units=cash_balance_units,
         cash_balance_available=cash_balance_units is not None,
         category=category,
@@ -102,7 +105,7 @@ def _bar(symbol: str, trade_date: date, close: str) -> Bar:
 
 
 async def _run(trades: list[Trade], start: date, end: date, market) -> tuple:
-    points, blocked, reasons, degraded, _, _assumption = await compute_nav_points(
+    points, blocked, reasons, degraded, _, _assumption, _prev_day = await compute_nav_points(
         trades, start, end, market
     )
     series = build_nav_series(points) if points else None
@@ -234,12 +237,87 @@ async def test_missing_market_data_blocks_day_not_raise() -> None:
 async def test_baseline_point_on_period_start() -> None:
     """首个点必须是区间首日基准，否则整段 TWR 漏掉首日前的持仓涨跌。"""
     trades = _base_trades()
-    points, _, _, _, _, _ = await compute_nav_points(
+    points, _, _, _, _, _, _ = await compute_nav_points(
         trades, PERIOD_START, PERIOD_END, _rising_market("1500.00")
     )
     assert points[0][0] == PERIOD_START
     assert points[0][1] == cents("100000.00")
     assert points[0][2] == 0
+
+
+@pytest.mark.asyncio
+async def test_first_day_prev_assets_uses_previous_trading_close() -> None:
+    """月度首日「昨日资产」= 期初现金 + 期初持仓 × 上一交易日收盘价。"""
+    trades = [
+        _trade(
+            trade_date=date(2025, 12, 20),
+            category="transfer",
+            amount_units=cents("100000.00"),
+            cash_balance_units=cents("100000.00"),
+            security_code="CASH",
+        ),
+        _trade(
+            trade_date=date(2025, 12, 20),
+            category="buy",
+            amount_units=-cents("100000.00"),
+            cash_balance_units=0,
+            quantity_units=shares("100"),
+            price_units=price("1000.00"),
+        ),
+    ]
+    market = StubMarket(
+        [
+            _bar("600519", date(2025, 12, 31), "1000.00"),
+            _bar("600519", date(2026, 1, 5), "1100.00"),
+            _bar("600519", date(2026, 1, 31), "1100.00"),
+        ]
+    )
+    points, _, _, _, _, _, prev_day = await compute_nav_points(
+        trades, date(2026, 1, 5), date(2026, 1, 31), market
+    )
+
+    # 首日基准 = 100 股 × 01-05 收盘 1100 = 110000；昨日资产 = 100 × 12-31 收盘 1000
+    assert points[0] == (date(2026, 1, 5), cents("110000.00"), 0)
+    assert prev_day == cents("100000.00")
+
+
+@pytest.mark.asyncio
+async def test_avg_cost_includes_all_fees() -> None:
+    """买入均价必须含全部费用：成本 = 净现金流出 = 成交额 + 佣金 + 印花税 + 其他费。"""
+    trades = [
+        _trade(
+            trade_date=date(2025, 12, 31),
+            category="transfer",
+            amount_units=cents("200000.00"),
+            cash_balance_units=cents("200000.00"),
+            security_code="CASH",
+        ),
+        # 100 股 @1700，佣金 42.50 + 其他费 2.50 → 净现金流 -(170000+45.00)
+        _trade(
+            trade_date=date(2026, 1, 5),
+            category="buy",
+            amount_units=-cents("170045.00"),
+            cash_balance_units=cents("29955.00"),
+            quantity_units=shares("100"),
+            price_units=price("1700.00"),
+            commission_units=cents("42.50"),
+            other_fee_units=cents("2.50"),
+        ),
+    ]
+    market = StubMarket(
+        [
+            _bar("600519", date(2026, 1, 5), "1700.00"),
+            _bar("600519", date(2026, 1, 31), "1700.00"),
+        ]
+    )
+    _, _, _, _, holdings_by_date, _, _ = await compute_nav_points(
+        trades, date(2026, 1, 1), date(2026, 1, 31), market
+    )
+
+    snap = holdings_by_date[date(2026, 1, 5)][0]
+    assert snap.cost_units == cents("170045.00")  # 含佣金 42.50 + 其他费 2.50
+    # 买入均价 = 170045 / 100 = 1700.45（> 成交价 1700，差额即费用）
+    assert snap.cost_units * 10**8 // snap.quantity_units == price("1700.45")
 
 
 @pytest.mark.asyncio
@@ -254,7 +332,7 @@ async def test_no_cash_anchor_is_global_block() -> None:
             price_units=price("1000.00"),
         )
     ]
-    points, blocked, reasons, _, _, _ = await compute_nav_points(
+    points, blocked, reasons, _, _, _, _ = await compute_nav_points(
         trades, PERIOD_START, PERIOD_END, _rising_market("1500.00")
     )
     assert points == [] and blocked == []
@@ -266,7 +344,7 @@ async def test_no_cash_anchor_is_global_block() -> None:
 async def test_anchor_statement_when_balance_before_period() -> None:
     """区间前有余额行 → statement 直取（主路径，行为不变）。"""
     trades = _base_trades()
-    _, _, reasons, _, _, assumption = await compute_nav_points(
+    _, _, reasons, _, _, assumption, _ = await compute_nav_points(
         trades, PERIOD_START, PERIOD_END, _rising_market("1500.00")
     )
     assert reasons == []
@@ -301,7 +379,7 @@ async def test_anchor_back_solved_from_first_balance_inside_period() -> None:
     """首行非余额行、区间内首条余额行 → back_solved 反推期初现金（验收⑤）。"""
     period_start, period_end = date(2026, 1, 1), date(2026, 1, 31)
     market = StubMarket([_bar("600519", date(2026, 1, 10), "1000.00")])
-    points, blocked, reasons, _, _, assumption = await compute_nav_points(
+    points, blocked, reasons, _, _, assumption, _ = await compute_nav_points(
         _back_solved_trades(), period_start, period_end, market
     )
 
@@ -319,7 +397,7 @@ async def test_anchor_back_solved_from_first_balance_inside_period() -> None:
 async def test_anchor_next_month_falls_back_to_statement() -> None:
     """按月构建：首月 back_solved 锚定后，次月经区间前余额行 statement 直取（验收⑤场景）。"""
     market = StubMarket([_bar("600519", date(2026, 1, 10), "1000.00")])
-    points, _, reasons, _, _, assumption = await compute_nav_points(
+    points, _, reasons, _, _, assumption, _ = await compute_nav_points(
         _back_solved_trades(), date(2026, 2, 1), date(2026, 2, 28), market
     )
     assert reasons == []
@@ -357,7 +435,7 @@ class _EmptyMarket:
 async def test_blocked_reason_annotates_market_failure(cause: str, label: str) -> None:
     """逐日阻断仍返回 200 blocked，但原因带可操作类别（契约不变）。"""
     trades = _base_trades()
-    _, blocked, reasons, _, _, _ = await compute_nav_points(
+    _, blocked, reasons, _, _, _, _ = await compute_nav_points(
         trades, PERIOD_START, PERIOD_END, _FailureMarket(cause)
     )
     assert reasons == []
@@ -371,7 +449,7 @@ async def test_blocked_reason_annotates_market_failure(cause: str, label: str) -
 async def test_blocked_reason_marks_requested_but_empty_as_no_data() -> None:
     """请求了标的但区间内无 bar（适配器返回空序列）→ 标记 no_data。"""
     trades = _base_trades()
-    _, blocked, reasons, _, _, _ = await compute_nav_points(
+    _, blocked, reasons, _, _, _, _ = await compute_nav_points(
         trades, PERIOD_START, PERIOD_END, _EmptyMarket()
     )
     assert reasons == []

@@ -527,14 +527,15 @@ class ReconciliationBridgeOut(BaseModel):
 
 # ── 净值与收益（API-032）──────────────────────────────────
 class NavHoldingOut(BaseModel):
-    """单只标的在某日的持仓快照（金额/价格/数量均三位小数字符串）。"""
+    """单只标的在某日的持仓快照（数量/价格/金额为最多三位小数字符串，去掉尾零）。"""
 
     security_code: str
     security_name: str
-    quantity: str  # 持有份额（三位小数）
-    avg_cost: str  # 加权平均成本价（三位小数）
-    close_price: str  # 当日或之前最近收盘价（三位小数）
-    market_value: str  # 持仓市值（三位小数）
+    quantity: str  # 持有份额（最多三位小数，如 "9.1"）
+    # 含费买入均价 = 累计成本 ÷ 持仓数量；成本为净现金流出，已含佣金/印花税/其他费。
+    avg_cost: str  # 含费买入均价（最多三位小数，去尾零）
+    close_price: str  # 当日或之前最近收盘价（最多三位小数）
+    market_value: str  # 持仓市值（最多三位小数）
 
 
 class NavPointOut(BaseModel):
@@ -543,12 +544,19 @@ class NavPointOut(BaseModel):
     date: date
     unit_nav: str  # 单位净值（scale=6 → 后端返回完整精度）
     twr_daily: str  # 当日收益率（scale=8 → 后端返回完整精度）
+    twr_daily_pct: str = "0.00%"  # 当日收益率百分比（两位小数，如 "0.62%"）
     cashflow: str  # 当日外部现金流（scale=2 → 后端返回完整精度）
     blocked: bool = False
     # blocked 日的可读原因（含失败类别）；非 blocked 日为 null。
     blocked_reason: str | None = None
     # 当日总资产（现金 + 持仓市值），三位小数字符串；blocked 日为 "0.000"。
     total_assets: str = "0.000"
+    # 上一净值点的总资产（三位小数）；首个点取上一交易日收盘估值，
+    # 缺行情或前一点 blocked 时为 null。
+    prev_total_assets: str | None = None
+    # 当日收益额 = 当日总资产 − 当日外部现金流 − 上一净值点总资产（三位小数）；
+    # 无上一净值点时为 null。
+    daily_pnl: str | None = None
     # 当日持仓明细（非 blocked 日填充，blocked 日为空列表）。
     holdings: list[NavHoldingOut] = []
 

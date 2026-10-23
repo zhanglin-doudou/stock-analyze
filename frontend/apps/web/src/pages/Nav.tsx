@@ -97,27 +97,55 @@ export function Nav() {
         row.blocked ? <span className="muted">—</span> : <strong>{row.total_assets}</strong>,
     },
     {
+      key: "prev_total_assets",
+      header: "昨日资产",
+      render: (row) =>
+        row.blocked || row.prev_total_assets == null ? (
+          <span className="muted">—</span>
+        ) : (
+          row.prev_total_assets
+        ),
+    },
+    {
       key: "nav",
       header: "单位净值",
       render: (row) => (row.blocked ? <span className="muted">—</span> : row.unit_nav),
     },
     {
       key: "twr",
-      header: "日收益（小数）",
+      header: "日收益（%）",
       render: (row) =>
-        row.blocked ? <span className="muted">—</span> : <span className={signedClass(row.twr_daily)}>{row.twr_daily}</span>,
+        row.blocked ? (
+          <span className="muted">—</span>
+        ) : (
+          <span className={signedClass(row.twr_daily_pct)}>{row.twr_daily_pct}</span>
+        ),
+    },
+    {
+      key: "daily_pnl",
+      header: "日收益额",
+      render: (row) =>
+        row.blocked || row.daily_pnl == null ? (
+          <span className="muted">—</span>
+        ) : (
+          <span className={signedClass(row.daily_pnl)}>{row.daily_pnl}</span>
+        ),
     },
     {
       key: "cashflow",
       header: "外部现金流",
       render: (row) => <span className={signedClass(row.cashflow)}>{row.cashflow}</span>,
     },
-    {
+  ];
+
+  // 整月没有任何阻断点时不展示阻断列（避免正常月份出现一列全空）。
+  if (result?.points.some((point) => point.blocked)) {
+    columns.push({
       key: "blocked",
       header: "阻断",
       render: (row) => (row.blocked ? <span className="badge badge-data_error">阻断</span> : null),
-    },
-  ];
+    });
+  }
 
   const summary = result?.summary;
   const blockedRanges = result?.blocked_ranges ?? [];
@@ -131,7 +159,7 @@ export function Nav() {
     { key: "security_code", header: "代码", render: (row) => row.security_code },
     { key: "security_name", header: "名称", render: (row) => row.security_name },
     { key: "quantity", header: "持有份额", render: (row) => row.quantity },
-    { key: "avg_cost", header: "买入价", render: (row) => row.avg_cost },
+    { key: "avg_cost", header: "买入均价", render: (row) => row.avg_cost },
     { key: "close_price", header: "现价", render: (row) => row.close_price },
     {
       key: "market_value",

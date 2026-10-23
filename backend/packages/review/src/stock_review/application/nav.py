@@ -60,6 +60,9 @@ class NavComputeResult:
     degraded: bool
     holdings_by_date: dict[date, list[_HoldingSnapshot]]
     assumption: str | None  # 期初现金锚点来源：statement | back_solved；blocked 时 None
+    # 月度首日的「昨日资产」= 期初现金 + 期初持仓按上一交易日收盘价估值（scale=2）；
+    # 仅用于 API 展示首日昨日资产/日收益额，不进入 TWR 序列；行情不足时为 None。
+    prev_day_value_units: int | None = None
 
 
 @dataclass(slots=True)
@@ -241,7 +244,9 @@ def investor_cashflows(series: NavSeries) -> list[CashflowPoint]:
 
 
 # 这些 category 的 trade 会增加 cost_basis（花钱买入更多持仓）。
-# amount_units 对 buy/rights/new_stock 为负（现金流出），取负即得成本增量。
+# amount_units 是带符号净现金流：buy/rights/new_stock 为负，且解析器已把
+# 佣金/印花税/其他费折算进净额（买入 = -(成交额 + 全部费用)），取负即得**含费成本**，
+# 不得再叠加 commission/stamp_tax/other_fee 字段（会重复计）。
 _COST_ADD_CATEGORIES: frozenset[str] = frozenset({"buy", "rights", "new_stock"})
 
 
@@ -257,17 +262,19 @@ async def compute_nav_points(
     bool,  # degraded
     dict[date, list[_HoldingSnapshot]],  # holdings_by_date (非 blocked 日)
     str | None,  # assumption：期初现金锚点来源（statement | back_solved）
+    int | None,  # prev_day_value_units：上一交易日收盘资产（首日「昨日资产」）
 ]:
     """计算区间内每日 NAV 输入 + 持仓快照。
 
-    返回 (points, blocked_points, blocked_reasons, degraded, holdings_by_date, assumption)。
-    新增的 holdings_by_date 为 API 响应组装所需，不落库；assumption 仅响应透出。
+    返回 (points, blocked_points, blocked_reasons, degraded, holdings_by_date, assumption,
+    prev_day_value_units)。holdings_by_date 为 API 响应组装所需，不落库；
+    assumption / prev_day_value_units 仅响应透出，不进入 TWR 序列或落库字段。
     """
     # 1. 期初现金锚点：区间前余额行直取（statement）或区间首条余额行反推（back_solved）；
     #    全历史无余额行 → 全局阻断。
     initial = _initial_cash(trades, period_start)
     if initial is None:
-        return [], [], ["无现金余额锚点（无 cash_balance 行）"], False, {}, None
+        return [], [], ["无现金余额锚点（无 cash_balance 行）"], False, {}, None, None
     initial_cash, assumption = initial
 
     # 2. FIFO 结果用于检测 data_error（降级）
@@ -309,6 +316,14 @@ async def compute_nav_points(
     ladder, market_causes = await _load_prices(
         market_data, all_symbols, period_start - _PRICE_LOOKBACK, trade_dates[-1]
     )
+
+    # 6a. 月度首日「昨日资产」：期初现金 + 期初持仓按上一交易日收盘价估值。
+    #     仅用于展示首日的昨日资产/日收益额（不进入 TWR 序列）。
+    prev_day_value, prev_day_missing = _total_market_value(
+        dict(initial_holdings), ladder, period_start - timedelta(days=1)
+    )
+    prev_day_value_units: int | None = None if prev_day_missing else initial_cash + prev_day_value
+
     points: list[tuple[date, int, int]] = []
     holdings_by_date: dict[date, list[_HoldingSnapshot]] = {}
 
@@ -332,6 +347,7 @@ async def compute_nav_points(
                 degraded,
                 {},
                 assumption,
+                prev_day_value_units,
             )
         points.append((baseline_date, initial_cash + baseline_value, 0))
         holdings_by_date[baseline_date] = _build_holding_snapshots(
@@ -402,7 +418,7 @@ async def compute_nav_points(
             dict(state.holdings), dict(state.cost_basis), ladder, d, code_names
         )
 
-    return points, blocked_points, [], degraded, holdings_by_date, assumption
+    return points, blocked_points, [], degraded, holdings_by_date, assumption, prev_day_value_units
 
 
 def _build_holding_snapshots(
@@ -462,6 +478,7 @@ async def compute_and_store_nav(
         degraded,
         holdings_by_date,
         assumption,
+        prev_day_value_units,
     ) = await compute_nav_points(trades, period_start, period_end, market_data)
 
     rebuilt_at = clock.now()
@@ -550,6 +567,7 @@ async def compute_and_store_nav(
             degraded=False,
             holdings_by_date={},
             assumption=None,
+            prev_day_value_units=None,
         )
     return NavComputeResult(
         series=series,
@@ -558,6 +576,7 @@ async def compute_and_store_nav(
         degraded=degraded,
         holdings_by_date=holdings_by_date,
         assumption=assumption,
+        prev_day_value_units=prev_day_value_units,
     )
 
 

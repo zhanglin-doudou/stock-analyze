@@ -288,7 +288,7 @@
 - 用途：单位净值序列 + TWR/MWR 与基准指标；FR-R3；认证：read；同步。
 - 请求：query `from`/`to`(与 `period`=YYYY-MM 二选一) / `benchmark`(默认 hs300_tr) / `granularity`(本期仅 daily)。
 - 口径（Period2-03 实现）：`twr` 为区间累计份额法 TWR（小数），`annualized_twr` 按自然日年化；`mwr` 为 XIRR（ACT/365，CF 含期初投入负/期末市值正）；`mwr_minus_twr = mwr − annualized_twr`（两端均年化，方能对齐比较，PRD 附录 A6）。期初基准点落在区间首日；非交易日按「当日或之前最近收盘价」估值；持仓标的缺行情 → 该日 `blocked` 且不输出资产值（不整段报错）。期初现金锚点：`period_start` 前最后一条余额行直取（`assumption="statement"`）；否则取 `period_start` 当日或之后第一条余额行反推（`assumption="back_solved"`，PRD 附录 A1）；全历史无余额行 → 整段 `blocked`。本期不含基准对比，`beta/alpha_annual/t_value/tracking_error/ir` 返回 null。
-- 响应 200：`points[]{date,unit_nav,twr_daily,cashflow,blocked}` / `summary{mwr,twr,annualized_twr,mwr_minus_twr,beta,alpha_annual,t_value,tracking_error,ir,n_days,assumption}` / `status(ok|blocked|degraded)` / `blocked_ranges[]{from,to,reason}` / `benchmark_id` / `data_as_of` / `definition_version`。`summary.assumption ∈ statement|back_solved`，blocked 时为 null。
+- 响应 200：`points[]{date,unit_nav,twr_daily,twr_daily_pct,cashflow,blocked,blocked_reason,total_assets,prev_total_assets,daily_pnl,holdings[]}` / `summary{mwr,twr,annualized_twr,mwr_minus_twr,beta,alpha_annual,t_value,tracking_error,ir,n_days,assumption}` / `status(ok|blocked|degraded)` / `blocked_ranges[]{from,to,reason}` / `benchmark_id` / `data_as_of` / `definition_version`。`summary.assumption ∈ statement|back_solved`，blocked 时为 null。`twr_daily_pct` 为两位小数的百分比字符串（如 `"0.62%"`）；`total_assets/prev_total_assets/daily_pnl` 为三位小数定点字符串，`daily_pnl = total_assets − cashflow − prev_total_assets`，首个净值点的 `prev_total_assets` 取「期初现金 + 期初持仓按上一交易日收盘价」估值（缺行情或前一点 blocked 时为 null，首点 `twr_daily_pct` 按该日盈亏/昨日资产计算）；`holdings[]` 的 `quantity/avg_cost/close_price/market_value` 为最多三位小数、去掉尾零的字符串（如 `"9.1"`）；`avg_cost` 为**含费买入均价**（累计成本 ÷ 持仓数量，成本取净现金流出，已含佣金/印花税/其他费）。
 - 错误码：INVALID_PERIOD(422)、UNKNOWN_BENCHMARK(422)、VALIDATION_ERROR(422)。
 - 验收断言：① points 按 date 严格升序、twr_daily 为十进制小数；② 与独立 oracle 逐日收益差 ≤1bp；③ 被阻断区间 status=="blocked" 且 summary 中资产类字段缺省；④ 未传 benchmark 时 benchmark_id=="hs300_tr" 并出现在 assumptions；⑤ 首行非余额行、区间内含余额行的月份 → 构建成功且 `summary.assumption=="back_solved"`，期初现金 = 余额行余额 − 该行发生额 − 区间内该行之前流水发生额之和。
 ### 2.3 度量、诊断与报告
@@ -536,7 +536,7 @@ data: {"job_id":"job_01J9Z6","status":"succeeded","result_ref":"/api/v1/reports/
 | API-029 | rounds_list_visible_after_job | 200；job 成功后立即可见；跨用户 0 条；游标无重无漏 | fx_round30 | P0 |
 | API-030 | rounds_detail_pnl | 200 pnl 与 golden 差≤0.01；跨用户 404 | fx_round30 | P0 |
 | API-031 | rounds_fills_fifo | FIFO buy/sell 配对集合 100% 一致 | fx_round30 | P0 |
-| API-032 | nav_series_oracle | points 升序；日收益 vs oracle≤1bp；blocked 无资产值 | fx_blocked | P0 |
+| API-032 | nav_series_oracle | points 升序；日收益 vs oracle≤1bp；日收益百分比两位小数；首日补齐昨日资产/日收益额（后续点与上一日自洽）；持仓数值最多三位小数且去尾零；blocked 无资产值 | fx_blocked | P0 |
 | API-033 | metrics_batch_contract | n==12、sample_status=ok、value 小数、版本匹配 | fx_round30 | P0 |
 | API-034 | metrics_explain_trace | 无裸术语；status!=ok 时 conclusion=null+what_to_do | fx_n5 | P0 |
 | API-035 | metrics_drilldown_money | items 非空且金额定点；source_endpoints 可调 | fx_round30 | P0 |
