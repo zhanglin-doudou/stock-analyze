@@ -1181,6 +1181,21 @@
             "title": "Annualized Twr",
             "type": "string"
           },
+          "assumption": {
+            "anyOf": [
+              {
+                "enum": [
+                  "statement",
+                  "back_solved"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assumption"
+          },
           "beta": {
             "anyOf": [
               {
@@ -7024,6 +7039,7 @@
                   "summary": {
                     "alpha_annual": "0.1234",
                     "annualized_twr": "0.1234",
+                    "assumption": "statement",
                     "beta": "0.1234",
                     "ir": "0.1234",
                     "mwr": "0.1234",

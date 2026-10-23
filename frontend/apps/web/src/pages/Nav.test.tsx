@@ -38,6 +38,7 @@ function makeNav(overrides: Partial<NavResult> = {}): NavResult {
       tracking_error: null,
       ir: null,
       n_days: 30,
+      assumption: "statement",
     },
     ...overrides,
   };
@@ -116,6 +117,17 @@ describe("Nav 净值与收益页", () => {
     fireEvent.click(screen.getByRole("button", { name: "构建净值与收益" }));
 
     expect(await screen.findByText(/净值为降级结果/)).toBeTruthy();
+  });
+
+  it("期初资产为反推值时给出口径提示", async () => {
+    getNav.mockResolvedValue(
+      makeNav({ summary: { ...makeNav().summary, assumption: "back_solved" } }),
+    );
+    renderPage();
+
+    fireEvent.click(screen.getByRole("button", { name: "构建净值与收益" }));
+
+    expect(await screen.findByText(/期初资产为反推值/)).toBeTruthy();
   });
 
   it("后端 422（月份非法）走 RFC 7807 错误渲染", async () => {

@@ -27,6 +27,10 @@ from stock_platform.security import hasher_for
 
 DEFAULT_PASSWORD = "Str0ng-Passw0rd!"
 
+# 开发账号：每个用例清空后默认插入，避免每次测试都要手工造账号。
+DEV_EMAIL = "1234@dev.com"
+DEV_PASSWORD = "1234"
+
 # 需要清空的业务表（不含 platform.schema_version，避免破坏“启动即校验”）。
 _PLATFORM_TABLES = (
     "user",
@@ -59,12 +63,8 @@ _REVIEW_TABLES = (
     "round_build_state",
     "nav_daily",
 )
-# 公共行情缓存（迁移 0005，market schema，无 RLS/无 user_id）：不随 CASCADE 清理，
-# 必须显式 TRUNCATE，否则 pull_range 会跨用例污染「未覆盖→拉取」路径。
-_MARKET_TABLES = (
-    "daily_bar",
-    "pull_range",
-)
+# market schema（迁移 0005）是公共行情缓存：跨用例共享、跨全量测试保留，
+# 避免重复拉取。测试缓存本身的用例（unit/platform/test_market_cache.py）自清理。
 
 _TRUNCATE_SQL = (
     "TRUNCATE TABLE "
@@ -73,8 +73,6 @@ _TRUNCATE_SQL = (
     + ", ".join(f'ledger."{name}"' for name in _LEDGER_TABLES)
     + ", "
     + ", ".join(f'review."{name}"' for name in _REVIEW_TABLES)
-    + ", "
-    + ", ".join(f"market.{name}" for name in _MARKET_TABLES)
     + " RESTART IDENTITY CASCADE"
 )
 
@@ -117,9 +115,13 @@ async def app_engine(settings: Settings) -> AsyncIterator[AsyncEngine]:
 
 @pytest_asyncio.fixture(autouse=True)
 async def _clean_db(owner_engine: AsyncEngine) -> AsyncIterator[None]:
-    """每个用例前清空业务表并重置自增；不重跑迁移。"""
+    """每个用例前清空业务表并重置自增；插入开发账号 DEV_EMAIL/DEV_PASSWORD。
+
+    market schema 不在清空范围（公共行情缓存，跨用例共享）。
+    """
     async with owner_engine.begin() as conn:
         await conn.execute(text(_TRUNCATE_SQL))
+    await _insert_user(owner_engine, email=DEV_EMAIL, password=DEV_PASSWORD)
     yield
 
 

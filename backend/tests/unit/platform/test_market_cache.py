@@ -19,7 +19,8 @@ from typing import Any
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import select
+from sqlalchemy import select, text
+from sqlalchemy.ext.asyncio import AsyncEngine
 from stock_contracts.clock import FrozenClock
 from stock_contracts.errors import ApiError, ErrorCode
 from stock_platform.config import Settings
@@ -29,6 +30,14 @@ from stock_platform.market_models import DailyBar, PullRange
 from stock_platform.ports import Bar, MarketCapabilities, MarketDataSource, Quote
 
 TODAY = date(2026, 10, 23)
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _clean_market(owner_engine: AsyncEngine) -> AsyncIterator[None]:
+    """market schema 已不在全局清表范围；本文件专测缓存语义，需起始空表。"""
+    async with owner_engine.begin() as conn:
+        await conn.execute(text("TRUNCATE market.daily_bar, market.pull_range RESTART IDENTITY"))
+    yield
 
 
 class StubMarketDataSource:

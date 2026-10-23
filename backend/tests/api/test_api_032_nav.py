@@ -138,6 +138,8 @@ async def test_api_032_happy_path(client, account_factory, owner_engine):
     assert _RATIO_RE.match(s["annualized_twr"]), s
     assert _RATIO_RE.match(s["mwr_minus_twr"]), s
     assert isinstance(s["n_days"], int)
+    # 期初锚点：05-29 余额行在区间前 → statement 直取
+    assert s["assumption"] == "statement"
     # 本期不含基准对比
     assert s["beta"] is None
     assert s["alpha_annual"] is None
@@ -242,6 +244,48 @@ async def test_api_032_no_cash_balance_blocked(client, account_factory, owner_en
     assert body["status"] == "blocked"
     # blocked 区间
     assert len(body["blocked_ranges"]) >= 1
+
+
+@pytest.mark.asyncio
+async def test_api_032_back_solved_anchor(client, account_factory, owner_engine):
+    """首行非余额行、区间内首条余额行 → 构建成功且 assumption=="back_solved"（验收⑤）。
+
+    06-05 入金 +100000（无余额列）；06-30 买 100 股 @1700（余额 -70000）。
+    期初反推 = -70000 − (−170000) − 100000 = 0；期末总资产 = -70000 + 100×1706.20 = 100620。
+    """
+    acc = await account_factory()
+    await _seed_trade(
+        owner_engine,
+        user_id=acc.user_id,
+        trade_date=date(2026, 6, 5),
+        side="buy",
+        quantity_units=0,
+        price_units=0,
+        amount_units=100_000_00,  # +100000.00
+        cash_balance_units=None,
+        category="transfer",
+        security_code="CASH",
+    )
+    await _seed_trade(
+        owner_engine,
+        user_id=acc.user_id,
+        trade_date=date(2026, 6, 30),
+        side="buy",
+        quantity_units=100_0000,
+        price_units=1700_000000,
+        amount_units=-170_000_00,
+        cash_balance_units=-70_000_00,  # 区间内首条余额行
+        category="buy",
+    )
+
+    r = await client.get("/api/v1/nav", params={"period": "2026-06"}, headers=acc.headers)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["status"] == "ok"
+    assert body["summary"]["assumption"] == "back_solved"
+    points = {p["date"]: p for p in body["points"]}
+    assert points["2026-06-01"]["unit_nav"] == "0.000000"
+    assert points["2026-06-30"]["total_assets"] == "100620.000"
 
 
 @pytest.mark.asyncio

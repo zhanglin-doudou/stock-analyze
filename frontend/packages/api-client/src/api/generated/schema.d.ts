@@ -1244,6 +1244,8 @@ export interface components {
             alpha_annual?: string | null;
             /** Annualized Twr */
             annualized_twr: string;
+            /** Assumption */
+            assumption?: ("statement" | "back_solved") | null;
             /** Beta */
             beta?: string | null;
             /** Ir */

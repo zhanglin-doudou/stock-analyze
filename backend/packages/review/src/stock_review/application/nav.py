@@ -4,7 +4,7 @@
 - 每日总资产 = 现金余额 + Σ(持仓数量 × 当日收盘价)；
 - 外部现金流 = `category=transfer` 的 amount 之和（入金正、出金负）；
 - 份额法 TWR：shares_0=1，NAV_t = (V_t - CF_t) / shares_{t-1}，Δshares = CF_t / NAV_t；
-- 期初资产用 bridge 的 `_initial_cash`（区间前最后余额 / 首行反推）+ 期初持仓市值；
+- 期初资产用 bridge 的 `_initial_cash`（区间前最后余额 statement / 区间首条余额行反推 back_solved）+ 期初持仓市值；
 - 阻断条件（任一即当日 `blocked`）：对账断链、缺行情数据、无期初资产锚点；
 - FIFO `data_error` 降级为 `degraded`（仍输出资产值，但 status 降级）。
 
@@ -59,6 +59,7 @@ class NavComputeResult:
     blocked_reasons: list[str]
     degraded: bool
     holdings_by_date: dict[date, list[_HoldingSnapshot]]
+    assumption: str | None  # 期初现金锚点来源：statement | back_solved；blocked 时 None
 
 
 @dataclass(slots=True)
@@ -255,18 +256,19 @@ async def compute_nav_points(
     list[str],  # blocked_reasons (global)
     bool,  # degraded
     dict[date, list[_HoldingSnapshot]],  # holdings_by_date (非 blocked 日)
+    str | None,  # assumption：期初现金锚点来源（statement | back_solved）
 ]:
     """计算区间内每日 NAV 输入 + 持仓快照。
 
-    返回 (points, blocked_points, blocked_reasons, degraded, holdings_by_date)。
-    新增的 holdings_by_date 为 API 响应组装所需，不落库。
+    返回 (points, blocked_points, blocked_reasons, degraded, holdings_by_date, assumption)。
+    新增的 holdings_by_date 为 API 响应组装所需，不落库；assumption 仅响应透出。
     """
-    # 1. 期初现金锚点
-    if not any(_is_cash_balance(t) for t in trades):
-        return [], [], ["无现金余额锚点（无 cash_balance 行）"], False, {}
-    initial_cash = _initial_cash(trades, period_start)
-    if initial_cash is None:
-        return [], [], ["无法确定期初现金（无区间前余额且首行非余额行）"], False, {}
+    # 1. 期初现金锚点：区间前余额行直取（statement）或区间首条余额行反推（back_solved）；
+    #    全历史无余额行 → 全局阻断。
+    initial = _initial_cash(trades, period_start)
+    if initial is None:
+        return [], [], ["无现金余额锚点（无 cash_balance 行）"], False, {}, None
+    initial_cash, assumption = initial
 
     # 2. FIFO 结果用于检测 data_error（降级）
     fifo_all = build_rounds(trades_to_events(trades))
@@ -329,6 +331,7 @@ async def compute_nav_points(
                 [],
                 degraded,
                 {},
+                assumption,
             )
         points.append((baseline_date, initial_cash + baseline_value, 0))
         holdings_by_date[baseline_date] = _build_holding_snapshots(
@@ -399,7 +402,7 @@ async def compute_nav_points(
             dict(state.holdings), dict(state.cost_basis), ladder, d, code_names
         )
 
-    return points, blocked_points, [], degraded, holdings_by_date
+    return points, blocked_points, [], degraded, holdings_by_date, assumption
 
 
 def _build_holding_snapshots(
@@ -452,9 +455,14 @@ async def compute_and_store_nav(
     """
     trades = await TradeRepository(session).balances_ordered(user_id, period_end=period_end)
 
-    points, blocked_points, blocked_reasons, degraded, holdings_by_date = await compute_nav_points(
-        trades, period_start, period_end, market_data
-    )
+    (
+        points,
+        blocked_points,
+        blocked_reasons,
+        degraded,
+        holdings_by_date,
+        assumption,
+    ) = await compute_nav_points(trades, period_start, period_end, market_data)
 
     rebuilt_at = clock.now()
     rows: list[dict[str, object]] = []
@@ -541,6 +549,7 @@ async def compute_and_store_nav(
             blocked_reasons=blocked_reasons,
             degraded=False,
             holdings_by_date={},
+            assumption=None,
         )
     return NavComputeResult(
         series=series,
@@ -548,6 +557,7 @@ async def compute_and_store_nav(
         blocked_reasons=[],
         degraded=degraded,
         holdings_by_date=holdings_by_date,
+        assumption=assumption,
     )
 
 

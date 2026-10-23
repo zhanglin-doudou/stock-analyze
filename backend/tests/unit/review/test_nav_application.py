@@ -102,7 +102,9 @@ def _bar(symbol: str, trade_date: date, close: str) -> Bar:
 
 
 async def _run(trades: list[Trade], start: date, end: date, market) -> tuple:
-    points, blocked, reasons, degraded, _ = await compute_nav_points(trades, start, end, market)
+    points, blocked, reasons, degraded, _, _assumption = await compute_nav_points(
+        trades, start, end, market
+    )
     series = build_nav_series(points) if points else None
     mwr = 0
     if series is not None:
@@ -232,7 +234,7 @@ async def test_missing_market_data_blocks_day_not_raise() -> None:
 async def test_baseline_point_on_period_start() -> None:
     """首个点必须是区间首日基准，否则整段 TWR 漏掉首日前的持仓涨跌。"""
     trades = _base_trades()
-    points, _, _, _, _ = await compute_nav_points(
+    points, _, _, _, _, _ = await compute_nav_points(
         trades, PERIOD_START, PERIOD_END, _rising_market("1500.00")
     )
     assert points[0][0] == PERIOD_START
@@ -252,11 +254,78 @@ async def test_no_cash_anchor_is_global_block() -> None:
             price_units=price("1000.00"),
         )
     ]
-    points, blocked, reasons, _, _ = await compute_nav_points(
+    points, blocked, reasons, _, _, _ = await compute_nav_points(
         trades, PERIOD_START, PERIOD_END, _rising_market("1500.00")
     )
     assert points == [] and blocked == []
     assert reasons and "现金" in reasons[0]
+
+
+# ── 期初现金锚点来源（statement / back_solved，API-Catalog API-032 验收⑤）─────
+@pytest.mark.asyncio
+async def test_anchor_statement_when_balance_before_period() -> None:
+    """区间前有余额行 → statement 直取（主路径，行为不变）。"""
+    trades = _base_trades()
+    _, _, reasons, _, _, assumption = await compute_nav_points(
+        trades, PERIOD_START, PERIOD_END, _rising_market("1500.00")
+    )
+    assert reasons == []
+    assert assumption == "statement"
+
+
+def _back_solved_trades() -> list[Trade]:
+    """首行非余额行：01-05 入金 100000（无余额列）；01-10 买 30 股 @1000（余额 70000）。
+
+    期初反推 = 70000 − (−30000) − 100000 = 0；逐日前推后 01-10 现金恰为 70000（链自洽）。
+    """
+    return [
+        _trade(
+            trade_date=date(2026, 1, 5),
+            category="transfer",
+            amount_units=cents("100000.00"),
+            security_code="CASH",
+        ),
+        _trade(
+            trade_date=date(2026, 1, 10),
+            category="buy",
+            amount_units=-cents("30000.00"),
+            cash_balance_units=cents("70000.00"),
+            quantity_units=shares("30"),
+            price_units=price("1000.00"),
+        ),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_anchor_back_solved_from_first_balance_inside_period() -> None:
+    """首行非余额行、区间内首条余额行 → back_solved 反推期初现金（验收⑤）。"""
+    period_start, period_end = date(2026, 1, 1), date(2026, 1, 31)
+    market = StubMarket([_bar("600519", date(2026, 1, 10), "1000.00")])
+    points, blocked, reasons, _, _, assumption = await compute_nav_points(
+        _back_solved_trades(), period_start, period_end, market
+    )
+
+    assert reasons == [] and blocked == []
+    assert assumption == "back_solved"
+    # 期初基准点：反推现金 0、无持仓 → 总资产 0
+    assert points[0] == (period_start, 0, 0)
+    # 01-05 入金到账：现金 100000、无持仓
+    assert (date(2026, 1, 5), cents("100000.00"), cents("100000.00")) in points
+    # 01-10：现金 70000 + 市值 30×1000 = 100000（buy 非外部现金流）
+    assert (date(2026, 1, 10), cents("100000.00"), 0) in points
+
+
+@pytest.mark.asyncio
+async def test_anchor_next_month_falls_back_to_statement() -> None:
+    """按月构建：首月 back_solved 锚定后，次月经区间前余额行 statement 直取（验收⑤场景）。"""
+    market = StubMarket([_bar("600519", date(2026, 1, 10), "1000.00")])
+    points, _, reasons, _, _, assumption = await compute_nav_points(
+        _back_solved_trades(), date(2026, 2, 1), date(2026, 2, 28), market
+    )
+    assert reasons == []
+    assert assumption == "statement"
+    # 期初现金 70000（01-10 余额行）+ 持仓 30 股 × 01-10 收盘 1000 = 100000
+    assert points[0] == (date(2026, 2, 1), cents("100000.00"), 0)
 
 
 # ── 行情失败类别 → blocked_reason（D2=A：不新增错误码，只细化自由文本）─────
@@ -288,7 +357,7 @@ class _EmptyMarket:
 async def test_blocked_reason_annotates_market_failure(cause: str, label: str) -> None:
     """逐日阻断仍返回 200 blocked，但原因带可操作类别（契约不变）。"""
     trades = _base_trades()
-    _, blocked, reasons, _, _ = await compute_nav_points(
+    _, blocked, reasons, _, _, _ = await compute_nav_points(
         trades, PERIOD_START, PERIOD_END, _FailureMarket(cause)
     )
     assert reasons == []
@@ -302,7 +371,7 @@ async def test_blocked_reason_annotates_market_failure(cause: str, label: str) -
 async def test_blocked_reason_marks_requested_but_empty_as_no_data() -> None:
     """请求了标的但区间内无 bar（适配器返回空序列）→ 标记 no_data。"""
     trades = _base_trades()
-    _, blocked, reasons, _, _ = await compute_nav_points(
+    _, blocked, reasons, _, _, _ = await compute_nav_points(
         trades, PERIOD_START, PERIOD_END, _EmptyMarket()
     )
     assert reasons == []

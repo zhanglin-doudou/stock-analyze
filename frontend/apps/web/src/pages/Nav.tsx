@@ -65,14 +65,20 @@ export function Nav() {
       setResult(data);
       const defaultPoint = lastUnblocked(data.points);
       if (defaultPoint) setSelectedDate(defaultPoint.date);
+      // 期初现金为区间首条余额行反推时给出口径提示（API-032 assumption）。
+      const assumptionHint =
+        data.summary.assumption === "back_solved"
+          ? " 期初资产为反推值（assumption=back_solved）。"
+          : "";
       if (data.status === "blocked") {
         setNotice(
-          "本期净值存在阻断区间（缺期初资产锚点、缺行情或对账断链），阻断日不输出资产值。",
+          "本期净值存在阻断区间（缺期初资产锚点、缺行情或对账断链），阻断日不输出资产值。" +
+            assumptionHint,
         );
       } else if (data.status === "degraded") {
-        setNotice("本期部分日期存在 FIFO 数据异常，净值为降级结果，仅供排查参考。");
+        setNotice("本期部分日期存在 FIFO 数据异常，净值为降级结果，仅供排查参考。" + assumptionHint);
       } else {
-        setNotice(`已构建 ${data.period} 的净值与收益。`);
+        setNotice(`已构建 ${data.period} 的净值与收益。` + assumptionHint);
       }
     } catch (err) {
       setResult(null);

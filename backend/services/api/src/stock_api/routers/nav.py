@@ -196,6 +196,9 @@ async def get_nav(
         annualized_twr=str(Ratio(annualized_twr_units)),
         mwr_minus_twr=str(Ratio(mwr_minus_twr)),
         n_days=result.series.natural_days if result.series else 0,
+        assumption=cast(Literal["statement", "back_solved"], result.assumption)
+        if result.assumption
+        else None,
     )
 
     return NavOut(

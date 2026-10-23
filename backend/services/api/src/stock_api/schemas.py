@@ -566,6 +566,9 @@ class NavSummaryOut(BaseModel):
     tracking_error: str | None = None
     ir: str | None = None
     n_days: int
+    # 期初现金锚点来源：statement（区间前余额行直取）| back_solved（区间首条余额行反推）；
+    # blocked 时为 null。
+    assumption: Literal["statement", "back_solved"] | None = None
 
 
 class NavOut(BaseModel):

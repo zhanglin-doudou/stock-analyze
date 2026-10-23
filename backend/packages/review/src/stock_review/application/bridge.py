@@ -18,8 +18,9 @@
 - `bonus`（送转）零金额、不产生现金流，同样不参与分类。
 
 现金锚点：
-- 期初 = `period_start` 之前最后一条 `cash_balance`；缺失时用首行反推
-  `cash_balance - amount`（PRD FR-R2.1 的 `back_solved` 口径）；
+- 期初 = `period_start` 之前最后一条 `cash_balance`（`statement`）；缺失时用
+  `period_start` 当日或之后第一条余额行反推（PRD FR-R2.1 / 附录 A1 的 `back_solved` 口径，
+  见 `_initial_cash`）；
 - 期末 = 区间内最后一条 `cash_balance`；区间内没有余额行时按
   `期初 + Σ区间现金流` 推导并降级；
 - 完全没有 cash_balance（无任何锚点）→ `status="blocked"`，`balanced=False`，`residual=0`。
@@ -114,17 +115,39 @@ def _to_result(
     )
 
 
-def _initial_cash(trades: list[Trade], period_start: date) -> int | None:
-    """期初现金：区间前最后一条余额；缺失则首行反推；都不可得 → None（blocked）。"""
-    balances_before = [
-        trade for trade in trades if trade.trade_date < period_start and _is_cash_balance(trade)
-    ]
-    if balances_before:
-        return int(balances_before[-1].cash_balance_units or 0)
-    if trades and _is_cash_balance(trades[0]):
-        # back_solved：首行余额 - 首行发生金额 = 该行之前的现金。
-        return int((trades[0].cash_balance_units or 0) - trades[0].amount_units)
-    return None
+def _initial_cash(trades: list[Trade], period_start: date) -> tuple[int, str] | None:
+    """期初现金锚点：返回 (期初现金, 来源)；全历史无余额行 → None（blocked）。
+
+    来源口径（PRD 附录 A1 / API-Catalog API-032）：
+    - `statement`：`period_start` 之前最后一条余额行，直接取余额；
+    - `back_solved`：区间前无余额行时，取 `period_start` 当日或之后**第一条**余额行 B 反推
+      （离锚点最近、推导链最短）：
+
+        期初 = B.balance − B.amount − Σ{t.amount : period_start ≤ t.date 且 t 稳定序在 B 之前}
+
+      B=全历史首行时 Σ 为空，退化为原「首行反推」口径。
+    """
+    anchor_before: Trade | None = None
+    anchor_after: Trade | None = None
+    for trade in trades:
+        if not _is_cash_balance(trade):
+            continue
+        if trade.trade_date < period_start:
+            anchor_before = trade  # trades 按稳定序升序，最后命中即区间前最近一条
+        elif anchor_after is None:
+            anchor_after = trade  # 区间当日或之后第一条
+    if anchor_before is not None:
+        return int(anchor_before.cash_balance_units or 0), "statement"
+    if anchor_after is None:
+        return None
+    # 反推：B 行之前的现金（B.balance − B.amount）减去 [period_start, B) 内流水发生额。
+    cash = int(anchor_after.cash_balance_units or 0) - anchor_after.amount_units
+    for trade in trades:
+        if trade is anchor_after:
+            break
+        if trade.trade_date >= period_start:
+            cash -= trade.amount_units
+    return cash, "back_solved"
 
 
 def _ending_cash(
@@ -162,9 +185,10 @@ async def bridge_for_period(
     if not any(_is_cash_balance(trade) for trade in trades):
         return _blocked(period, clock)
 
-    initial_cash = _initial_cash(trades, period_start)
-    if initial_cash is None:
+    initial = _initial_cash(trades, period_start)
+    if initial is None:
         return _blocked(period, clock)
+    initial_cash, _anchor_source = initial
 
     # 区间前持仓成本（FIFO open lots）与区间内平仓损益、期末未平仓成本。
     result_start = build_rounds(
