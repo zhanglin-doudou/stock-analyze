@@ -165,8 +165,11 @@ class NavDaily(Base):
     """
 
     __tablename__ = "nav_daily"
+    # 与迁移 0004 完全一致：唯一性由 UniqueConstraint 保证，另有一条普通索引
+    # （此前模型写成 unique Index 导致 `alembic check` 报漂移，属历史债）。
     __table_args__ = (
-        Index("ix_nav_daily_user_date", "user_id", "trade_date", unique=True),
+        UniqueConstraint("user_id", "trade_date", name="uq_nav_daily_user_date"),
+        Index("ix_nav_daily_user_date", "user_id", "trade_date"),
         {"schema": SCHEMA},
     )
 

@@ -11,7 +11,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from stock_contracts.clock import Clock, SystemClock
 from stock_contracts.errors import ApiError
-from stock_ledger.market import ReplayMarketDataSource
+from stock_ledger.market import create_market_source
 from stock_platform.config import Settings, get_settings
 from stock_platform.db import Database
 from stock_platform.idempotency import IdempotencyStore
@@ -70,6 +70,8 @@ async def _check_schema_version(state: AppState) -> None:
 def build_state(settings: Settings, clock: Clock | None = None) -> AppState:
     db = Database(settings, role="app")
     resolved_clock = clock or SystemClock()
+    # 行情源统一走工厂：live 分支需要无租户 session_factory（公共行情缓存）。
+    market_data = create_market_source(settings, session_factory=db.session, clock=resolved_clock)
     return AppState(
         settings=settings,
         db=db,
@@ -80,7 +82,7 @@ def build_state(settings: Settings, clock: Clock | None = None) -> AppState:
         tokens=TokenService(
             settings.jwt_secret, settings.jwt_algorithm, settings.access_ttl_seconds
         ),
-        market_data=ReplayMarketDataSource(settings.fixtures_dir / "market" / "quotes.json"),
+        market_data=market_data,
         object_store=LocalObjectStore(settings.data_dir / "objects"),
     )
 

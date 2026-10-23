@@ -1193,6 +1193,8 @@ export interface components {
              * @default false
              */
             blocked: boolean;
+            /** Blocked Reason */
+            blocked_reason?: string | null;
             /** Cashflow */
             cashflow: string;
             /**

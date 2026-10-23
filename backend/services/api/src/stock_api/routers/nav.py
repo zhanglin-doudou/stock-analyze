@@ -119,6 +119,7 @@ async def get_nav(
                 twr_daily=str(Ratio(row.return_units)),
                 cashflow=str(Money(row.cashflow_units)),
                 blocked=is_blocked,
+                blocked_reason=row.blocked_reason if is_blocked else None,
             )
         )
     if blocked_start is not None and rows:

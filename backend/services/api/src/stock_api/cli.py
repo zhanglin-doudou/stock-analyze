@@ -445,8 +445,8 @@ VERIFY_STEPS: tuple[tuple[str, list[str]], ...] = (
     ("mypy (strict)", ["uv", "run", "mypy", "backend/packages", "backend/services"]),
     ("import-linter (L1~L5)", ["uv", "run", "lint-imports"]),
     (
-        "pytest 单测（不含 api/integration）",
-        ["uv", "run", "pytest", "-m", "not integration and not api", "-q"],
+        "pytest 单测（不含 api/integration/live）",
+        ["uv", "run", "pytest", "-m", "not integration and not api and not live", "-q"],
     ),
     (
         "core 覆盖率 100%",
@@ -460,11 +460,22 @@ VERIFY_STEPS: tuple[tuple[str, list[str]], ...] = (
             "-q",
         ],
     ),
-    ("pytest 一期 API 验收", ["uv", "run", "pytest", "backend/tests/api", "-q"]),
+    (
+        "pytest 一期 API 验收",
+        ["uv", "run", "pytest", "backend/tests/api", "-m", "not live", "-q"],
+    ),
     ("pytest 越权矩阵", ["uv", "run", "pytest", "-m", "isolation", "-q"]),
     (
         "pytest RLS 直连",
-        ["uv", "run", "pytest", "backend/tests/integration/test_rls_isolation.py", "-q"],
+        [
+            "uv",
+            "run",
+            "pytest",
+            "backend/tests/integration/test_rls_isolation.py",
+            "-m",
+            "not live",
+            "-q",
+        ],
     ),
     ("pytest 架构约束", ["uv", "run", "pytest", "backend/tests/architecture", "-q"]),
     (

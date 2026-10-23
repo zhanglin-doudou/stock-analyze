@@ -15,6 +15,7 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
+from stock_contracts.errors import ApiError, ErrorCode
 from stock_core.nav import build_nav_series
 from stock_ledger.models import Trade
 from stock_platform.ports import Bar
@@ -79,9 +80,7 @@ class StubMarket:
 
     async def get_daily_bars(self, symbols, start, end):
         return [
-            bar
-            for bar in self._bars
-            if bar.symbol in symbols and start <= bar.trade_date <= end
+            bar for bar in self._bars if bar.symbol in symbols and start <= bar.trade_date <= end
         ]
 
 
@@ -103,9 +102,7 @@ def _bar(symbol: str, trade_date: date, close: str) -> Bar:
 
 
 async def _run(trades: list[Trade], start: date, end: date, market) -> tuple:
-    points, blocked, reasons, degraded = await compute_nav_points(
-        trades, start, end, market
-    )
+    points, blocked, reasons, degraded = await compute_nav_points(trades, start, end, market)
     series = build_nav_series(points) if points else None
     mwr = 0
     if series is not None:
@@ -199,9 +196,7 @@ async def test_deposit_before_fall_mwr_below_twr() -> None:
     trades = _base_trades() + _deposit_then_buy(
         date(2026, 9, 15), deposit="100000.00", qty="100", price_value="1000.00"
     )
-    series, mwr, _, _, _ = await _run(
-        trades, PERIOD_START, PERIOD_END, _rising_market("750.00")
-    )
+    series, mwr, _, _, _ = await _run(trades, PERIOD_START, PERIOD_END, _rising_market("750.00"))
 
     assert series is not None
     assert Decimal(series.twr_units) < 0
@@ -212,9 +207,7 @@ async def test_deposit_before_fall_mwr_below_twr() -> None:
 async def test_no_external_cashflow_mwr_equals_annualized_twr() -> None:
     """无区间内外部现金流：MWR 与年化 TWR 应一致（差异 <1bp）。"""
     trades = _base_trades()
-    series, mwr, _, _, _ = await _run(
-        trades, PERIOD_START, PERIOD_END, _rising_market("1500.00")
-    )
+    series, mwr, _, _, _ = await _run(trades, PERIOD_START, PERIOD_END, _rising_market("1500.00"))
 
     assert series is not None
     assert abs(mwr - series.annualized_twr_units) <= 10**8 // 10000
@@ -264,3 +257,54 @@ async def test_no_cash_anchor_is_global_block() -> None:
     )
     assert points == [] and blocked == []
     assert reasons and "现金" in reasons[0]
+
+
+# ── 行情失败类别 → blocked_reason（D2=A：不新增错误码，只细化自由文本）─────
+class _FailureMarket:
+    def __init__(self, cause: str) -> None:
+        self._cause = cause
+
+    async def get_daily_bars(self, symbols, start, end):
+        raise ApiError(
+            ErrorCode.INTERNAL_ERROR,
+            detail="upstream down",
+            metadata={"market_failure": self._cause},
+        )
+
+
+class _EmptyMarket:
+    async def get_daily_bars(self, symbols, start, end):
+        return ()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("cause", "label"),
+    [
+        ("unavailable", "行情源暂时不可用"),
+        ("not_supported", "标的不在支持范围"),
+    ],
+)
+async def test_blocked_reason_annotates_market_failure(cause: str, label: str) -> None:
+    """逐日阻断仍返回 200 blocked，但原因带可操作类别（契约不变）。"""
+    trades = _base_trades()
+    _, blocked, reasons, _ = await compute_nav_points(
+        trades, PERIOD_START, PERIOD_END, _FailureMarket(cause)
+    )
+    assert reasons == []
+    assert blocked
+    reason = blocked[0][1]
+    assert reason.startswith("缺行情数据：")
+    assert label in reason
+
+
+@pytest.mark.asyncio
+async def test_blocked_reason_marks_requested_but_empty_as_no_data() -> None:
+    """请求了标的但区间内无 bar（适配器返回空序列）→ 标记 no_data。"""
+    trades = _base_trades()
+    _, blocked, reasons, _ = await compute_nav_points(
+        trades, PERIOD_START, PERIOD_END, _EmptyMarket()
+    )
+    assert reasons == []
+    assert blocked
+    assert "该区间无行情" in blocked[0][1]

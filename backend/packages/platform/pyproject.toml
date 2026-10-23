@@ -15,6 +15,13 @@ dependencies = [
     "pydantic-settings>=2.6",
 ]
 
+# ── 可选依赖：akshare 行情适配器（仅 MARKET_MODE=live 需要）────
+# 由 stock_platform.market_live 在子线程内 lazy import；未安装时 replay 模式不受影响。
+# 版本约束依据（2026-10）：PyPI 最早版本 1.16.72（`>=1.14` 不存在）；pandas 3.1.0 比
+# akshare 1.19.1 晚发布、兼容未验证，先给上限。
+[project.optional-dependencies]
+live = ["akshare>=1.16.72,<1.20", "pandas>=2.0,<3.1"]
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

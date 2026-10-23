@@ -1073,6 +1073,17 @@
             "title": "Blocked",
             "type": "boolean"
           },
+          "blocked_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blocked Reason"
+          },
           "cashflow": {
             "title": "Cashflow",
             "type": "string"
@@ -6948,6 +6959,7 @@
                   "points": [
                     {
                       "blocked": false,
+                      "blocked_reason": "示例",
                       "cashflow": "1234.56",
                       "date": "2026-09-30",
                       "twr_daily": "0.1234",

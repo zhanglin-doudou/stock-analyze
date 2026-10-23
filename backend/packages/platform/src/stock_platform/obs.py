@@ -33,6 +33,16 @@ JOBS_TOTAL = Counter("sa_jobs_total", "任务总数", ["kind", "status"])
 JOB_DURATION = Histogram("sa_job_duration_seconds", "任务耗时", ["kind"])
 SSE_CONNECTIONS = Gauge("sa_sse_connections", "SSE 连接数")
 RECONCILE_BREAKS = Counter("sa_reconciliation_breaks_total", "对账断链条数")
+# 行情源（MARKET_MODE=live）：Reliability FM-17 的 market_fetch_errors 指标。
+MARKET_FETCH_TOTAL = Counter("sa_market_fetch_total", "行情拉取次数", ["result"])
+MARKET_FETCH_SECONDS = Histogram(
+    "sa_market_fetch_seconds",
+    "行情拉取耗时",
+    ["result"],
+    buckets=(0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0),
+)
+MARKET_FETCH_ERRORS = Counter("sa_market_fetch_errors_total", "行情拉取失败原因", ["reason"])
+MARKET_CACHE_HITS = Counter("sa_market_cache_hits_total", "行情缓存命中情况", ["cache"])
 
 
 def new_request_id_ctx() -> str:

@@ -471,7 +471,7 @@ services/api ─▶ application ─▶ domain ◀── infrastructure
 | `RoundRepository` / `NavRepository` / `MetricRepository` / `AttributionRepository` | `review/domain/ports.py` | SQLAlchemy | 同上 |
 | `ReportRepository` / `JournalRepository` / `AlertRepository` | `delivery/domain/ports.py` | SQLAlchemy | 同上 |
 | `UserRepository` / `TokenRepository` / `AuditRepository` | `platform/domain/ports.py` | SQLAlchemy | 同上 |
-| `MarketDataSource` | `review/domain/ports.py` | akshare / AlphaFeed | 录制回放 |
+| `MarketDataSource` | `platform/ports.py` | akshare / AlphaFeed | 录制回放 |
 | `BillParser` | `ledger/domain/ports.py` | 华泰解析器（注册表） | FixtureParser |
 | `LlmProvider` / `ToolGateway` | `delivery/domain/ports.py` | GLM / 本地 | Echo / 录制 |
 | `JobQueue` | `platform/ports.py` | PG `SKIP LOCKED` | 同步执行器 |
@@ -495,8 +495,9 @@ services/api ─▶ application ─▶ domain ◀── infrastructure
 | RLS | 所有租户表 `ENABLE ROW LEVEL SECURITY`；策略 `USING (user_id = current_setting('app.user_id')::uuid)` | 即使仓储漏过滤也读不到他人数据 |
 | 会话变量 | 每请求事务内 `SET LOCAL app.user_id = :uid`，连接归还前重置 | 防连接池串号（关键安全点） |
 | 管理面 | `platform.user` 等系统表不进租户策略；admin 仅访问系统视图 | 满足"admin 不可读交易明细" |
+| 公共缓存 | `market` schema 两表（`daily_bar` / `pull_range`）无 `user_id`、**不启用 RLS**；行情为公开数据、可再生 | 所有租户共享；写路径仅内部装配（不开放 HTTP 端点） |
 
-### 9.2 schema 与表清单（v1 的 31 张 → v2 的 36 张）
+### 9.2 schema 与表清单（v1 的 31 张 → v2 的 38 张：36 张业务表 + 2 张公共行情缓存表）
 
 **`platform`（系统与多租户）**
 
@@ -520,6 +521,13 @@ services/api ─▶ application ─▶ domain ◀── infrastructure
 **`ledger`**：`trade`、`trade_history`、`import_batch`、`quarantine_row`、`summary_rule`（系统默认 + 用户覆盖）、`reconciliation`、`provenance`、`export_log`（均含 `user_id`）
 
 **`review`**：`round`、`round_fill`、`nav_daily`、`cashflow`、`metric_result`、`metric_dependency`、`attribution`、`report`、`journal_entry`、`behavior_rule`、`alert`（均含 `user_id`）
+
+**`market`（公共行情缓存，无 `user_id`、不启用 RLS，可再生）**
+
+| 表 | 关键列 | 说明 |
+|---|---|---|
+| `daily_bar` | symbol, adjust, trade_date, close_units, return_units, source, pulled_at | 不复权日线缓存（`adjust=''`；PK `(symbol, adjust, trade_date)`） |
+| `pull_range` | id, symbol, adjust, adjust_version, range_start, range_end, data_end, requested_end, complete, bar_count, checksum | 区间覆盖/TTL 判定（区间并集 + 尾部刷新 + 负缓存；`ON CONFLICT` 幂等） |
 
 ### 9.3 关键索引与分区
 

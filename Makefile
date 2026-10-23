@@ -128,7 +128,7 @@ typecheck:
 
 .PHONY: test
 test:
-	@$(UV) pytest -m "not integration and not api" -q
+	@$(UV) pytest -m "not integration and not api and not live" -q
 
 .PHONY: test-core
 test-core:
@@ -144,7 +144,7 @@ test-api:
 
 .PHONY: test-integration
 test-integration:
-	@$(UV) pytest -m "integration" -q
+	@$(UV) pytest -m "integration and not live" -q
 
 .PHONY: test-rls
 test-rls:
@@ -162,7 +162,7 @@ test-review:
 .PHONY: test-p2
 test-p2:
 	@$(UV) pytest backend/tests/unit/core --cov=stock_core --cov-fail-under=100 -q
-	@$(UV) pytest backend/tests/unit/review backend/tests/integration -q
+	@$(UV) pytest backend/tests/unit/review backend/tests/integration -m "not live" -q
 	@$(UV) pytest backend/tests/api -q
 	@$(UV) pytest -m "isolation" -q
 	@$(UV) pytest backend/tests/contract -q

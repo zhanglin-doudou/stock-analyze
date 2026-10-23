@@ -206,7 +206,14 @@ async def test_api_032_missing_market_data_blocks_not_404(client, account_factor
     for point in blocked:
         assert point["unit_nav"] == "0.000000"
         assert point["twr_daily"] == "0.00000000"
+        # 新增可选字段（非破坏）：blocked 日必须给出可读原因
+        assert point["blocked_reason"]
+        assert "缺行情数据" in point["blocked_reason"]
     assert body["blocked_ranges"]
+    # 非 blocked 日该字段为 null（显式序列化）
+    for point in body["points"]:
+        if not point["blocked"]:
+            assert point["blocked_reason"] is None
 
 
 @pytest.mark.asyncio

@@ -41,9 +41,7 @@ from stock_review.application.rebuild import trades_to_events
 from stock_review.models import NavDaily
 
 # 持仓影响类：这些 category 会改变持仓数量。
-_HOLDING_CATEGORIES: frozenset[str] = frozenset(
-    {"buy", "sell", "bonus", "rights", "new_stock"}
-)
+_HOLDING_CATEGORIES: frozenset[str] = frozenset({"buy", "sell", "bonus", "rights", "new_stock"})
 # 外部现金流：transfer（银证转账）。
 _CASHFLOW_CATEGORIES: frozenset[str] = frozenset({"transfer"})
 # 数量标度（scale=4）× 价格标度（scale=6）→ 金额标度（scale=2）需除 1e8。
@@ -94,9 +92,7 @@ def _group_trades_by_date(trades: list[Trade]) -> dict[date, list[Trade]]:
     return grouped
 
 
-def _closing_prices(
-    bars: Sequence[Bar], symbols: list[str]
-) -> dict[str, list[tuple[date, int]]]:
+def _closing_prices(bars: Sequence[Bar], symbols: list[str]) -> dict[str, list[tuple[date, int]]]:
     """Bar 序列 → {symbol: [(trade_date, close_units)] 升序}。
 
     用「价格阶梯」而非精确日期查表：非交易日（周末/节假日/月末口径）取**当日或之前
@@ -145,20 +141,47 @@ def _total_market_value(
     return total, missing
 
 
+# 行情失败类别（适配器写在 `ApiError.metadata["market_failure"]`；D2=A：不新增错误码）。
+_MARKET_FAILURE_KEY = "market_failure"
+_MARKET_FAILURE_LABELS: dict[str, str] = {
+    "unavailable": "（行情源暂时不可用，可重试）",
+    "not_supported": "（标的不在支持范围，仅支持 A 股主板/科创/创业）",
+    "no_data": "（该区间无行情，可能未上市/停牌）",
+}
+_MARKET_FAILURE_PRIORITY: tuple[str, ...] = ("unavailable", "not_supported", "no_data")
+
+
+def _market_failure_cause(exc: ApiError) -> str:
+    raw = exc.metadata.get(_MARKET_FAILURE_KEY)
+    return raw if isinstance(raw, str) and raw in _MARKET_FAILURE_LABELS else ""
+
+
+def _blocked_reason(prefix: str, symbols: list[str], causes: dict[str, str]) -> str:
+    """`缺行情数据：000651` + 三类可读后缀（不可用可重试 / 不在支持范围 / 无行情）。"""
+    base = f"{prefix}：{','.join(sorted(symbols))}"
+    present = {causes[symbol] for symbol in symbols if symbol in causes}
+    for cause in _MARKET_FAILURE_PRIORITY:
+        if cause in present:
+            return base + _MARKET_FAILURE_LABELS[cause]
+    return base
+
+
 async def _load_prices(
     market_data: MarketDataSource,
     symbols: list[str],
     start: date,
     end: date,
-) -> dict[str, list[tuple[date, int]]]:
-    """取收盘价阶梯；某个标的缺行情时**降级为当日阻断**，不让整段请求失败。
+) -> tuple[dict[str, list[tuple[date, int]]], dict[str, str]]:
+    """取收盘价阶梯 + 每标的失败类别；缺行情时**降级为当日阻断**，不让整段请求失败。
 
-    行情端口对未知标的会抛 `ApiError(NOT_FOUND)`（回放夹具没有该标的）。批量取数
-    失败后按标的逐个重试，取不到的标的直接跳过 —— 后续逐日推演会把持有该标的的
-    日期判为阻断（缺行情数据），而不是把整段 NAV 变成 404。
+    行情端口对未知标的会抛 `ApiError`（回放夹具没有该标的 / live 不在支持范围）。
+    批量取数失败后按标的逐个重试，取不到的标的跳过 —— 后续逐日推演会把持有该标的
+    的日期判为阻断（缺行情数据），而不是把整段 NAV 变成 404。返回的 `causes` 用于
+    把 `blocked_reason` 细化为三类（见 `docs/architecture/2026-10-22-live-market-data-source.md` §6）。
     """
     if not symbols:
-        return {}
+        return {}, {}
+    causes: dict[str, str] = {}
     try:
         bars: Sequence[Bar] = await market_data.get_daily_bars(symbols, start, end)
     except ApiError:
@@ -166,10 +189,19 @@ async def _load_prices(
         for symbol in symbols:
             try:
                 collected.extend(await market_data.get_daily_bars([symbol], start, end))
-            except ApiError:
+            except ApiError as exc:
+                cause = _market_failure_cause(exc)
+                if cause:
+                    causes[symbol] = cause
                 continue  # 该标的无行情 → 持有它的日期阻断
-        return _closing_prices(collected, symbols)
-    return _closing_prices(bars, symbols)
+        ladder = _closing_prices(collected, symbols)
+    else:
+        ladder = _closing_prices(bars, symbols)
+    # 请求了但区间内没有任何 bar：视为 no_data（适配器不必为此造 404）。
+    for symbol in symbols:
+        if not ladder.get(symbol):
+            causes.setdefault(symbol, "no_data")
+    return ladder, causes
 
 
 def investor_cashflows(series: NavSeries) -> list[CashflowPoint]:
@@ -189,9 +221,7 @@ def investor_cashflows(series: NavSeries) -> list[CashflowPoint]:
             amount -= point.total_value_units  # 期初投入（负）
         flows.append(CashflowPoint(point.trade_date, amount))
     last = points[-1]
-    flows[-1] = CashflowPoint(
-        last.trade_date, flows[-1].amount_units + last.total_value_units
-    )
+    flows[-1] = CashflowPoint(last.trade_date, flows[-1].amount_units + last.total_value_units)
     return flows
 
 
@@ -221,17 +251,13 @@ async def compute_nav_points(
     degraded = any(r.status == "data_error" for r in fifo_all.rounds)
 
     # 3. 期初持仓（区间前 open lots）
-    fifo_before = build_rounds(
-        trades_to_events([t for t in trades if t.trade_date < period_start])
-    )
+    fifo_before = build_rounds(trades_to_events([t for t in trades if t.trade_date < period_start]))
     initial_holdings: dict[str, int] = defaultdict(int)
     for lot in fifo_before.open_lots:
         initial_holdings[lot.security_code] += lot.quantity_units
 
     # 4. 按日分组 trades（只取区间内；区间前的持仓/现金已由 initial_holdings / initial_cash 承担）
-    all_trades_in_range = [
-        t for t in trades if period_start <= t.trade_date <= period_end
-    ]
+    all_trades_in_range = [t for t in trades if period_start <= t.trade_date <= period_end]
     by_date = _group_trades_by_date(all_trades_in_range)
 
     # 5. 交易日序列：区间内所有有 trade 的日期 + period_end
@@ -249,7 +275,7 @@ async def compute_nav_points(
     }
     all_symbols = sorted(holding_symbols | set(initial_holdings.keys()))
     # 回看窗口：期初基准需要「期初当日或之前」的收盘价，否则第一天就判缺行情。
-    ladder = await _load_prices(
+    ladder, market_causes = await _load_prices(
         market_data, all_symbols, period_start - _PRICE_LOOKBACK, trade_dates[-1]
     )
     points: list[tuple[date, int, int]] = []
@@ -264,7 +290,12 @@ async def compute_nav_points(
         if baseline_missing:
             return (
                 [],
-                [(baseline_date, f"缺期初行情数据：{','.join(sorted(baseline_missing))}")],
+                [
+                    (
+                        baseline_date,
+                        _blocked_reason("缺期初行情数据", baseline_missing, market_causes),
+                    )
+                ],
                 [],
                 degraded,
             )
@@ -311,9 +342,7 @@ async def compute_nav_points(
         market_value, missing = _total_market_value(state.holdings, ladder, d)
         if missing:
             # 缺行情 → 当日阻断（继续推演后续日，不中断整段）
-            blocked_points.append(
-                (d, f"缺行情数据：{','.join(sorted(missing))}")
-            )
+            blocked_points.append((d, _blocked_reason("缺行情数据", missing, market_causes)))
             continue
 
         total_value = state.cash_units + market_value
@@ -336,9 +365,7 @@ async def compute_and_store_nav(
     阻断时不落库资产值（total_value/nav/return 均为 0，status=blocked）。
     逐日阻断（缺行情）的日期不计入 TWR/XIRR，只落 0 值 blocked 行。
     """
-    trades = await TradeRepository(session).balances_ordered(
-        user_id, period_end=period_end
-    )
+    trades = await TradeRepository(session).balances_ordered(user_id, period_end=period_end)
 
     points, blocked_points, blocked_reasons, degraded = await compute_nav_points(
         trades, period_start, period_end, market_data
@@ -389,7 +416,7 @@ async def compute_and_store_nav(
                 }
             )
 
-        for p in (series.points if series else []):
+        for p in series.points if series else []:
             rows.append(
                 {
                     "id": _nav_id(user_id, p.trade_date),
@@ -419,9 +446,7 @@ async def compute_and_store_nav(
             "rebuilt_at": stmt.excluded.rebuilt_at,
             "updated_at": rebuilt_at,
         }
-        stmt = stmt.on_conflict_do_update(
-            index_elements=["id"], set_=update_cols
-        )
+        stmt = stmt.on_conflict_do_update(index_elements=["id"], set_=update_cols)
         await session.execute(stmt)
 
     if blocked_reasons:

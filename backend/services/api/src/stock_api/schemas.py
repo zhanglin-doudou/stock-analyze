@@ -534,6 +534,9 @@ class NavPointOut(BaseModel):
     twr_daily: str  # 当日收益率（scale=8 → 8 位小数）
     cashflow: str  # 当日外部现金流（scale=2 → 2 位小数）
     blocked: bool = False
+    # blocked 日的可读原因（含失败类别）；非 blocked 日为 null。
+    # 新增可选响应字段属非破坏变更（API-Catalog §7）。
+    blocked_reason: str | None = None
 
 
 class NavSummaryOut(BaseModel):

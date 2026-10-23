@@ -2,13 +2,14 @@
 
 本文是 [README](../README.md) 的数据库专项文档：本地 PostgreSQL 的两种安装方式、三角色模型、迁移执行、日常 SQL 操作与故障排查。
 
-一期 schema 布局（4 个业务 schema，由 Alembic 迁移 `0001_phase1` 创建；`0002_platform_tenant_rls` 补 platform 租户表 RLS；`0003_review_rounds` 建二期复盘表 round / round_fill / round_build_state 并同批启 RLS）：
+一期 schema 布局（3 个业务 schema + 1 个公共缓存 schema，由 Alembic 迁移 `0001_phase1` 创建；`0002_platform_tenant_rls` 补 platform 租户表 RLS；`0003_review_rounds` 建二期复盘表 round / round_fill / round_build_state 并同批启 RLS；`0005_market_cache` 建公共行情缓存 schema `market`）：
 
 | Schema | 内容 |
 |---|---|
 | `platform` | 用户 / 令牌 / 任务 / 幂等键 / 审计 / 配置等平台表；**租户表 job / idempotency_key / user_setting / outbox_event 启 RLS**，认证/系统表不启（见 §2.1） |
 | `ledger` | 流水 / 批次 / 预览 / 隔离区 / 摘要规则 / 对账（**全部启 RLS**） |
 | `review` | 复盘域（二期已启用）：FIFO 回合 `round`、配对明细 `round_fill`、增量重建水位 `round_build_state`（**全部启 RLS**） |
+| `market` | 公共行情缓存（live 模式）：日线 `daily_bar`、区间覆盖 `pull_range`；**公共数据、不启用 RLS**，可再生（丢了可重拉），不进备份/恢复的正确性断言 |
 | `delivery` | 交付域（三期启用） |
 
 ---
@@ -88,6 +89,8 @@ STOCK_DB_APP_DSN=postgresql+asyncpg://stock_app:stock_app_pw@127.0.0.1:5432/stoc
 | `platform.audit_log` | 含登录失败等 actor 未知事件；跨租户不可见由 API 层 actor 过滤保证 |
 | `platform.job_event` | 无 `user_id` 列（从属于 `job`，按 `job_id` 访问；写入发生在 job 的租户事务内） |
 
+> `market` schema 的 `daily_bar` / `pull_range` 是跨用户公共行情缓存（无 `user_id`），**按设计不启用 RLS**；`scripts/ci/gate_rls_coverage.py` 只扫 platform/ledger/review 的租户表，不会误报。写路径仅内部装配（不开放 HTTP 端点），`stock_app` 的 DML 由迁移 `0005_market_cache` 的 `GRANT` 授予。
+
 覆盖门禁（新增租户表未补 RLS 即 CI fail；P2-02 后 review 3 张表自动纳入）：
 
 ```bash
@@ -114,6 +117,7 @@ uv run alembic -c backend/alembic.ini heads
 - 新增迁移：`uv run alembic -c backend/alembic.ini revision --autogenerate -m "xxx"`，生成后**必须人工审阅**（RLS/授权语句不在 autogenerate 范围内）。
 - 迁移 `0002_platform_tenant_rls`：为 `platform.job / idempotency_key / user_setting / outbox_event` 补 `tenant_isolation` 策略（`ENABLE RLS` + `CREATE POLICY`，可重复执行）。新增**带 `user_id` 的业务表**必须同批补 RLS，并跑 `scripts/ci/gate_rls_coverage.py`。
 - 迁移 `0003_review_rounds`（Period2-02）：建 `review.round` / `review.round_fill` / `review.round_build_state` 三表 + `tenant_isolation` 策略 + `stock_app` DML 授权，并把 `platform.schema_version.version` 更新为 `0003_period2_review`（`stock_api/version.py::SCHEMA_VERSION` 同步）。
+- 迁移 `0005_market_cache`（live 行情）：建 `market` schema + `market.daily_bar` / `market.pull_range` 两表 + 索引 + `GRANT`（`stock_app` DML / `stock_backup` 只读）+ 把 `platform.schema_version.version` 更新为 `0005_market_cache`（`stock_api/version.py::SCHEMA_VERSION` 同步）；downgrade 回 `0004_period2_nav`。行情缓存属于**可再生公共数据**，不进备份/恢复演练的正确性断言。
 - 启动即校验：API 启动时会核对 `platform.schema_version` 与代码版本，不匹配直接拒绝启动——先跑迁移再起服务。
 
 ## 4. 连接与执行 SQL
@@ -226,7 +230,7 @@ make db-reset        # Docker：down -v 销毁卷 → 重新 up → 重跑迁移
 make migrate         # 仅补跑迁移
 ```
 
-只清业务数据、保留表结构（与测试 `conftest` 同思路）：
+只清业务与行情缓存数据、保留表结构（与测试 `conftest` 同思路；`market` 缓存清空后可重拉）：
 
 ```sql
 TRUNCATE TABLE platform."user", platform.refresh_token, platform.api_token,
@@ -238,6 +242,8 @@ TRUNCATE TABLE ledger.import_batch, ledger.import_preview, ledger.trade,
   ledger.trade_history, ledger.quarantine_row, ledger.summary_rule, ledger.reconciliation
 RESTART IDENTITY CASCADE;
 TRUNCATE TABLE review.round, review.round_fill, review.round_build_state
+RESTART IDENTITY CASCADE;
+TRUNCATE TABLE market.daily_bar, market.pull_range
 RESTART IDENTITY CASCADE;
 ```
 

@@ -53,6 +53,18 @@ class Settings(BaseSettings):
 
     # ── 外部依赖 ──────────────────────────────────────────
     market_mode: Literal["replay", "live"] = Field("replay", alias="MARKET_MODE")
+    # 行情 live 模式（设计见 docs/architecture/2026-10-22-live-market-data-source.md §7）
+    market_live_source: Literal["akshare"] = Field("akshare", alias="MARKET_LIVE_SOURCE")
+    # v1 只落不复权日线（真实市价）：估值口径需要真实成交价，qfq 时变且会重复计入分红。
+    market_live_adjust: Literal[""] = Field("", alias="MARKET_LIVE_ADJUST")
+    market_live_timeout_seconds: float = Field(10.0, alias="MARKET_LIVE_TIMEOUT_SECONDS")
+    market_live_cache_enabled: bool = Field(True, alias="MARKET_LIVE_CACHE_ENABLED")
+    market_live_cache_ttl_days: int = Field(30, alias="MARKET_LIVE_CACHE_TTL_DAYS")
+    market_live_negative_ttl_days: int = Field(1, alias="MARKET_LIVE_NEGATIVE_TTL_DAYS")
+    market_live_tail_refetch_days: int = Field(5, alias="MARKET_LIVE_TAIL_REFETCH_DAYS")
+    market_live_max_concurrency: int = Field(2, alias="MARKET_LIVE_MAX_CONCURRENCY")
+    market_live_retry_attempts: int = Field(2, alias="MARKET_LIVE_RETRY_ATTEMPTS")
+    market_live_retry_backoff_seconds: float = Field(1.5, alias="MARKET_LIVE_RETRY_BACKOFF_SECONDS")
     llm_provider: Literal["none", "glm", "local"] = Field("none", alias="LLM_PROVIDER")
 
     # ── 运维 ──────────────────────────────────────────────

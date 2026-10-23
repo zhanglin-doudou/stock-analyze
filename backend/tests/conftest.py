@@ -59,6 +59,12 @@ _REVIEW_TABLES = (
     "round_build_state",
     "nav_daily",
 )
+# 公共行情缓存（迁移 0005，market schema，无 RLS/无 user_id）：不随 CASCADE 清理，
+# 必须显式 TRUNCATE，否则 pull_range 会跨用例污染「未覆盖→拉取」路径。
+_MARKET_TABLES = (
+    "daily_bar",
+    "pull_range",
+)
 
 _TRUNCATE_SQL = (
     "TRUNCATE TABLE "
@@ -67,6 +73,8 @@ _TRUNCATE_SQL = (
     + ", ".join(f'ledger."{name}"' for name in _LEDGER_TABLES)
     + ", "
     + ", ".join(f'review."{name}"' for name in _REVIEW_TABLES)
+    + ", "
+    + ", ".join(f"market.{name}" for name in _MARKET_TABLES)
     + " RESTART IDENTITY CASCADE"
 )
 
@@ -76,8 +84,12 @@ _TRUNCATE_SQL = (
 
 @pytest.fixture(scope="session")
 def settings() -> Settings:
-    """读取根 .env 的真实配置（库名/角色/密码）。"""
-    return get_settings()
+    """读取根 .env 的真实配置（库名/角色/密码），并强制 `MARKET_MODE=replay`。
+
+    `.env` 被手工改成 live（端到端验证）时，测试套件必须仍然走确定性回放，否则
+    全量 API 测试会触发外网取数。联网用例（`@pytest.mark.live`）自己构造 live Settings。
+    """
+    return get_settings().model_copy(update={"market_mode": "replay"})
 
 
 @pytest_asyncio.fixture

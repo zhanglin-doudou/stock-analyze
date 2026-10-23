@@ -268,6 +268,32 @@ def test_factory_replay_is_lazy_until_first_use(tmp_path: Path) -> None:
     assert missing.value.code is ErrorCode.INTERNAL_ERROR
 
 
-def test_factory_live_mode_is_explicitly_not_implemented() -> None:
-    with pytest.raises(NotImplementedError):
+def test_factory_live_without_akshare_fails_fast(monkeypatch: pytest.MonkeyPatch) -> None:
+    """部署错误尽早暴露：MARKET_MODE=live 但未装 akshare → 启动期 RuntimeError。"""
+    from stock_platform import market_live
+
+    monkeypatch.setattr(market_live, "akshare_available", lambda: False)
+    with pytest.raises(RuntimeError, match="uv sync --extra live"):
         create_market_source(Settings(market_mode="live"))
+
+
+def test_factory_live_cache_requires_session_factory(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from stock_platform import market_live
+
+    monkeypatch.setattr(market_live, "akshare_available", lambda: True)
+    with pytest.raises(ValueError, match="session_factory"):
+        create_market_source(Settings(market_mode="live"))
+
+
+def test_factory_live_without_cache_is_pure_akshare(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from stock_platform import market_live
+    from stock_platform.ports import MarketDataSource
+
+    monkeypatch.setattr(market_live, "akshare_available", lambda: True)
+    source = create_market_source(Settings(market_mode="live", market_live_cache_enabled=False))
+    assert isinstance(source, market_live.AkshareMarketDataSource)
+    assert isinstance(source, MarketDataSource)

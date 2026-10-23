@@ -31,12 +31,16 @@ from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal, DecimalException
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
+from stock_contracts.clock import Clock, SystemClock
 from stock_contracts.constants import SCALE_PRICE, SCALE_RATIO
 from stock_contracts.errors import ApiError, ErrorCode
 from stock_platform.config import Settings
 from stock_platform.ports import Bar, MarketCapabilities, MarketDataSource, Quote
+
+if TYPE_CHECKING:  # 仅类型检查；避免 replay 模式加载 sqlalchemy 装配模块
+    from stock_platform.market_live import SessionFactory
 
 _ISO_DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 _FIXED_RE = re.compile(r"-?(?:0|[1-9]\d*)(?:\.\d+)?")
@@ -281,18 +285,50 @@ class ReplayMarketDataSource:
         return tuple(wanted)
 
 
-def create_market_source(settings: Settings) -> MarketDataSource:
+def create_market_source(
+    settings: Settings,
+    *,
+    session_factory: SessionFactory | None = None,
+    clock: Clock | None = None,
+) -> MarketDataSource:
     """按 `MARKET_MODE` 装配行情源。
 
-    - `replay`：读 `settings.fixtures_dir/market/quotes.json`（懒加载，fail-closed）；
-    - `live`：尚未实现，显式 `NotImplementedError`（P2-04 再落 akshare 适配器）。
+    - `replay`：读 `settings.fixtures_dir/market/quotes.json`（懒加载，fail-closed），
+      忽略 `session_factory`；
+    - `live` + `market_live_cache_enabled=True`：`CachedMarketDataSource` 包
+      `AkshareMarketDataSource`，**必须**提供无租户的 `session_factory`（公共行情缓存）；
+    - `live` + `market_live_cache_enabled=False`：纯 akshare 透传（调试用）；
+    - akshare 未安装且 `live`：启动期 `RuntimeError`（部署错误，尽早暴露）。
+
+    设计见 `docs/architecture/2026-10-22-live-market-data-source.md` §8。工厂留在
+    ledger 的原因：`ReplayMarketDataSource` 在本层，platform 不能反向依赖 ledger（L1-L5）。
     """
-    if settings.market_mode == "live":
-        raise NotImplementedError(
-            "MARKET_MODE=live 尚未实现：akshare 行情适配器在 P2-04 落地；"
-            "当前请使用 MARKET_MODE=replay"
+    if settings.market_mode == "replay":
+        return ReplayMarketDataSource(settings.fixtures_dir / "market" / "quotes.json")
+
+    from stock_platform.market_live import (
+        AkshareMarketDataSource,
+        CachedMarketDataSource,
+        akshare_available,
+    )
+
+    if not akshare_available():
+        raise RuntimeError("MARKET_MODE=live 需要 akshare：请执行 `uv sync --extra live` 后重启")
+    resolved_clock = clock or SystemClock()
+    inner = AkshareMarketDataSource(settings, resolved_clock)
+    if not settings.market_live_cache_enabled:
+        return inner
+    if session_factory is None:
+        raise ValueError(
+            "MARKET_MODE=live 且缓存开启（MARKET_LIVE_CACHE_ENABLED=true）时必须传入 "
+            "session_factory（无租户的 Database.session）"
         )
-    return ReplayMarketDataSource(settings.fixtures_dir / "market" / "quotes.json")
+    return CachedMarketDataSource(
+        inner,
+        settings=settings,
+        session_factory=session_factory,
+        clock=resolved_clock,
+    )
 
 
 __all__ = ["ReplayMarketDataSource", "create_market_source"]

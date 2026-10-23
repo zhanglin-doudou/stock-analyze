@@ -13,6 +13,7 @@ from logging.config import fileConfig
 from typing import Any
 
 import stock_ledger.models  # noqa: F401
+import stock_platform.market_models
 
 # 让 Base.metadata 收集到全部业务表；缺失的包（如 review 尚未落地）按需忽略。
 import stock_platform.models  # noqa: F401
@@ -31,7 +32,7 @@ if config.config_file_name is not None:
 
 target_metadata = Base.metadata
 
-OWNED_SCHEMAS = ("platform", "ledger", "review", "delivery")
+OWNED_SCHEMAS = ("platform", "ledger", "review", "delivery", "market")
 
 
 def _include_object(
