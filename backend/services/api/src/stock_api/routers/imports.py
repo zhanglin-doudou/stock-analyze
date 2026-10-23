@@ -33,6 +33,7 @@ from stock_ledger.repositories.imports import ImportBatchRepository, ImportPrevi
 from stock_ledger.repositories.quarantine import QuarantineRepository
 from stock_ledger.repositories.trades import TradeRepository
 from stock_platform.idempotency import IdempotencyStore
+from stock_platform.obs import get_logger
 from stock_platform.tenant import TenantContext
 
 from stock_api.deps import get_state, get_tenant
@@ -54,13 +55,17 @@ from stock_api.schemas import (
     QuarantineItem,
     QuarantinePage,
     QuarantineRaw,
+    ReclassifyIn,
     RevokeIn,
     RevokeOut,
 )
 
+log = get_logger("stock_api.imports")
+
 router = APIRouter(tags=["imports"], route_class=StrictQueryRoute)
 
 _ENDPOINT_COMMIT = "POST /imports"
+_ENDPOINT_RECLASSIFY = "POST /imports/{batch_id}/reclassify"
 _JOBS_PREFIX = "/api/v1/jobs"
 
 # 隔离区原始列（原始表头 → canonical 字段）到 `QuarantineRaw` 字段的映射
@@ -478,9 +483,128 @@ async def revoke_import(
             actor_id=user_id,
             request_id=request.headers.get("x-request-id"),
         )
+        # 撤销改变了资产（软删本批次明细）→ 同一事务内触发一次全量回合重建。
+        # 入队失败（并发上限/已有同类任务）不得影响撤销本身的 200：吞掉并留日志。
+        try:
+            await state.queue.enqueue(
+                session,
+                kind="rebuild_rounds",
+                user_id=user_id,
+                scope_key=f"{user_id}:full",
+                params={"scope": "full", "reason": "import_revoke"},
+            )
+        except ApiError as exc:
+            log.warning(
+                "import.revoke_rebuild_enqueue_skipped",
+                batch_id=batch_id,
+                code=exc.code.value,
+            )
     return RevokeOut(
         batch_id=outcome["batch_id"],
         status="revoked",
         reverted={"inserted": int(outcome["removed_trades"]), "updated": 0},
         revoked_at=outcome["revoked_at"],
     )
+
+
+@router.post(
+    "/imports/{batch_id}/reclassify",
+    status_code=202,
+    response_model=JobAcceptedOut,
+    operation_id="reclassifyImport",
+)
+async def reclassify_import(
+    batch_id: str,
+    request: Request,
+    response: Response,
+    ctx: Annotated[TenantContext, Depends(get_tenant)],
+    payload: Annotated[ReclassifyIn | None, Body()] = None,
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+) -> JobAcceptedOut | JSONResponse:
+    """API-016：按当前规则重跑该批次的分类（异步 202；跨账号批次 → 404）。"""
+    ctx.forbid_admin_trades()
+    user_id = ctx.require_write()
+    state = get_state(request)
+    reason = payload.reason if payload is not None else None
+
+    async with state.db.session(user_id=user_id, begin=True) as session:
+        # 归属校验先于幂等键校验：跨账号/不存在的批次一律 404（不泄露存在性）。
+        batch = await ImportBatchRepository(session).by_id(user_id, batch_id)
+        if batch is None:
+            raise NotFoundError(detail=f"导入批次 {batch_id} 不存在")
+
+        if not idempotency_key or not 16 <= len(idempotency_key) <= 128:
+            raise ApiError(
+                ErrorCode.VALIDATION_ERROR,
+                errors=[FieldError("Idempotency-Key", "required", "该操作必须携带幂等键(16~128)")],
+            )
+
+        body = {"batch_id": batch_id, "reason": reason}
+        body_json = json.dumps(body, sort_keys=True, separators=(",", ":"))
+        request_hash = hashlib.sha256(body_json.encode("utf-8")).hexdigest()
+        try:
+            record = await state.idempotency.begin(
+                session,
+                user_id=user_id,
+                endpoint=_ENDPOINT_RECLASSIFY,
+                key=idempotency_key,
+                request_hash=request_hash,
+            )
+        except ApiError as exc:
+            if exc.code is ErrorCode.IDEMPOTENCY_IN_PROGRESS:
+                job_ref = exc.metadata.get("job_id")
+                raise ApiError(
+                    ErrorCode.IDEMPOTENCY_IN_PROGRESS,
+                    detail="该幂等键正在处理中",
+                    headers={"X-Job-Id": str(job_ref)} if job_ref else {},
+                ) from exc
+            raise
+
+        if record is not None:
+            replayed = IdempotencyStore.payload_of(record)
+            if replayed is not None:
+                return JSONResponse(
+                    content=replayed,
+                    status_code=IdempotencyStore.status_of(record),
+                    headers={
+                        "Idempotency-Replayed": "true",
+                        "Location": f"{_JOBS_PREFIX}/{replayed.get('job_id')}",
+                        "Retry-After": "1",
+                    },
+                )
+
+        params: dict[str, Any] = {"batch_id": batch_id}
+        if reason is not None:
+            params["reason"] = reason
+        job_id, reused = await state.queue.enqueue(
+            session,
+            kind="reclassify",
+            user_id=user_id,
+            scope_key=f"{user_id}:reclassify:{batch_id}",
+            params=params,
+        )
+        accepted = JobAcceptedOut(
+            job_id=job_id,
+            type="reclassify",
+            batch_id=batch_id,
+            status="pending",
+            links=JobLinks(
+                self=f"{_JOBS_PREFIX}/{job_id}",
+                events=f"{_JOBS_PREFIX}/{job_id}/events",
+            ),
+        )
+        await state.idempotency.complete(
+            session,
+            user_id=user_id,
+            endpoint=_ENDPOINT_RECLASSIFY,
+            key=idempotency_key,
+            status_code=202,
+            body=accepted.model_dump(mode="json"),
+            job_id=job_id,
+        )
+
+    response.headers["Location"] = f"{_JOBS_PREFIX}/{job_id}"
+    response.headers["Retry-After"] = "1"
+    if reused:
+        response.headers["X-Job-Reused"] = "true"
+    return accepted

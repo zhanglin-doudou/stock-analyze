@@ -127,6 +127,8 @@ make typecheck       mypy + import-linter + tsc
 make test            快速单测（不含 api/integration）
 make test-core       core 单测 + 100% 覆盖门禁
 make test-api        API 验收套件（需 PostgreSQL）
+make test-review     Period2 review 域单测 + rebuild 集成测试
+make test-p2         Period2-01/02 全量断言（fifo/review/API/越权/契约）
 make test-rls        RLS 隔离集成测试
 make test-isolation  越权负向矩阵
 make verify-p1       一期质量门禁一条命令全绿
@@ -188,6 +190,7 @@ pnpm -r test                 # vitest
 ```
 
 - API client 分两层：`packages/api-client/src/http.ts`（手写传输层：Bearer 注入、RFC 7807 解析、401 刷新重放）+ `src/api/generated/schema.d.ts`（由契约生成，勿手改）。改接口后先 `make api-snapshot && make sdk`。
+- 页面：登录/注册、交易流水、**回合（列表 + FIFO 配对详情）**、导入 / 导入记录、设置。导入账单成功后 worker 会自动建立 FIFO 回合；回合页可查询/筛选/重建并下钻配对明细。
 
 ### 数据库调试
 
@@ -242,6 +245,8 @@ make lint         # ruff + eslint
 | 单测（core/contracts） | `make test` | 无 |
 | core 覆盖门禁 | `make test-core`（要求 100%） | 无 |
 | API 验收（真实 ASGI + 真库） | `make test-api` | PostgreSQL |
+| Period2 review 域（回合落库/rebuild） | `make test-review` | PostgreSQL |
+| Period2-01/02 套餐（fifo/review/API/越权/契约） | `make test-p2` | PostgreSQL |
 | RLS 双层隔离 | `make test-rls` | PostgreSQL |
 | 越权负向矩阵 | `make test-isolation` | PostgreSQL |
 | 架构（import-linter 元测试） | `make test-architecture` | 无 |
@@ -255,3 +260,4 @@ make lint         # ruff + eslint
 - [API-Catalog](docs/architecture/v2/API-Catalog.md) — 端点总表 / 错误码表 / 验收矩阵
 - [数据库安装与 SQL 指引](docs/DATABASE.md) — 本文档配套的数据库专项文档
 - [Testing](docs/architecture/v2/Testing.md) / [Reliability](docs/architecture/v2/Reliability.md) / [Extensibility](docs/architecture/v2/Extensibility.md) / [ADR](docs/architecture/v2/ADR.md)
+- [Period2-01/02 实施与验收日志](docs/reviews/Period2-01-02-Implementation-Log.md) — FIFO 引擎与回合落库的交付物/口径/证据

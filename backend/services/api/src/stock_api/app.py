@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from stock_contracts.clock import Clock, SystemClock
 from stock_contracts.errors import ApiError
+from stock_ledger.market import create_market_source
 from stock_platform.config import Settings, get_settings
 from stock_platform.db import Database
 from stock_platform.idempotency import IdempotencyStore
@@ -29,7 +30,18 @@ from stock_api.errors import (
 )
 from stock_api.middlewares import RequestContextMiddleware
 from stock_api.openapi_meta import apply_contract_metadata
-from stock_api.routers import auth, imports, jobs, ops, reconciliation, tokens, trades
+from stock_api.routers import (
+    auth,
+    imports,
+    jobs,
+    nav,
+    ops,
+    reconciliation,
+    rounds,
+    rules,
+    tokens,
+    trades,
+)
 from stock_api.version import API_PREFIX, APP_VERSION
 
 log = get_logger("stock_api")
@@ -58,6 +70,8 @@ async def _check_schema_version(state: AppState) -> None:
 def build_state(settings: Settings, clock: Clock | None = None) -> AppState:
     db = Database(settings, role="app")
     resolved_clock = clock or SystemClock()
+    # 行情源统一走工厂：live 分支需要无租户 session_factory（公共行情缓存）。
+    market_data = create_market_source(settings, session_factory=db.session, clock=resolved_clock)
     return AppState(
         settings=settings,
         db=db,
@@ -68,6 +82,7 @@ def build_state(settings: Settings, clock: Clock | None = None) -> AppState:
         tokens=TokenService(
             settings.jwt_secret, settings.jwt_algorithm, settings.access_ttl_seconds
         ),
+        market_data=market_data,
         object_store=LocalObjectStore(settings.data_dir / "objects"),
     )
 
@@ -101,7 +116,7 @@ def create_app(settings: Settings | None = None, *, clock: Clock | None = None) 
     app.add_exception_handler(StarletteHTTPException, http_exception_handler)
     app.add_exception_handler(Exception, unhandled_error_handler)
 
-    for module in (ops, auth, tokens, jobs, trades, reconciliation, imports):
+    for module in (ops, auth, tokens, jobs, trades, reconciliation, imports, rules, rounds, nav):
         app.include_router(module.router, prefix=API_PREFIX)
     # 探针/根路由按容器惯例不带前缀（/healthz、/readyz、/version、/metrics、/）
     app.include_router(ops.root_router)

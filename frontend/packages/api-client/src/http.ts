@@ -13,10 +13,12 @@ import type {
   ImportBatch,
   Job,
   JobAccepted,
+  JobList,
   JobStatus,
   LoginIn,
   LoginResponse,
   MeOut,
+  Nav,
   PatCreateResponse,
   Preview,
   PreviewOptions,
@@ -24,12 +26,16 @@ import type {
   ProblemFieldError,
   QuarantinePage,
   ReadyOut,
+  RebuildRoundsBody,
   RefreshIn,
   RefreshOut,
   RegisterIn,
   RegisterResponse,
   RestoreResult,
   RevokeResult,
+  Round,
+  RoundFillPage,
+  RoundPage,
   TokenList,
   TradeHistoryPage,
   TradeMutationOut,
@@ -122,6 +128,32 @@ export interface ListTradesQuery {
   include_deleted?: boolean;
   fields?: string;
   include_total?: boolean;
+}
+
+/** API-029 回合列表查询（区间作用于 `COALESCE(close_date, open_date)`，半开区间由调用方决定）。 */
+export interface ListRoundsQuery {
+  limit?: number;
+  cursor?: string;
+  security_code?: string;
+  status?: string;
+  from?: string;
+  to?: string;
+}
+
+/** API-061 任务列表查询（status 逗号分隔）。 */
+export interface ListJobsQuery {
+  status?: string;
+  limit?: number;
+  cursor?: string;
+}
+
+/** API-032 净值查询（period=YYYY-MM 或 from/to 二选一；本期 granularity 仅 daily）。 */
+export interface GetNavQuery {
+  period?: string;
+  from?: string;
+  to?: string;
+  benchmark?: string;
+  granularity?: "daily";
 }
 
 export interface CursorQuery {
@@ -366,6 +398,13 @@ export function createClient(options: ClientOptions) {
     get(jobId: string) {
       return send<Job>({ path: `/jobs/${jobId}` }).then((r) => r.data);
     },
+    /** API-061：本人任务列表（含积压）；回合页用它判断自动重建是否仍在跑。 */
+    list(query: ListJobsQuery = {}) {
+      return send<JobList>({
+        path: "/jobs",
+        query: { status: query.status, limit: query.limit, cursor: query.cursor },
+      }).then((r) => r.data);
+    },
     cancel(jobId: string) {
       return send<Job>({ path: `/jobs/${jobId}/cancel`, method: "POST" }).then((r) => r.data);
     },
@@ -482,6 +521,56 @@ export function createClient(options: ClientOptions) {
     },
   };
 
+  const rounds = {
+    /** API-029：回合列表（游标分页 / 代码 / 状态 / 日期过滤）。 */
+    list(query: ListRoundsQuery = {}) {
+      return send<RoundPage>({
+        path: "/rounds",
+        query: {
+          limit: query.limit,
+          cursor: query.cursor,
+          security_code: query.security_code,
+          status: query.status,
+          from: query.from,
+          to: query.to,
+        },
+      }).then((r) => r.data);
+    },
+    /** API-030：回合详情。 */
+    get(roundId: string) {
+      return send<Round>({ path: `/rounds/${roundId}` }).then((r) => r.data);
+    },
+    /** API-031：FIFO 配对明细。 */
+    fills(roundId: string) {
+      return send<RoundFillPage>({ path: `/rounds/${roundId}/fills` }).then((r) => r.data);
+    },
+    /** API-028：手动重建回合（异步 202；与导入后的自动重建同单飞 key，撞上则复用/409）。 */
+    rebuild(body: RebuildRoundsBody, idempotencyKey: string) {
+      return send<JobAccepted>({
+        path: "/jobs/rebuild-rounds",
+        method: "POST",
+        body,
+        idempotencyKey,
+      }).then((r) => r.data);
+    },
+  };
+
+  const nav = {
+    /** API-032：构建/读取区间净值与收益（后端计算并 UPSERT `review.nav_daily`）。 */
+    get(query: GetNavQuery = {}) {
+      return send<Nav>({
+        path: "/nav",
+        query: {
+          period: query.period,
+          from: query.from,
+          to: query.to,
+          benchmark: query.benchmark,
+          granularity: query.granularity,
+        },
+      }).then((r) => r.data);
+    },
+  };
+
   const ops = {
     healthz() {
       return send<HealthOut>({ path: "/healthz", root: true, omitAuth: true }).then((r) => r.data);
@@ -503,7 +592,7 @@ export function createClient(options: ClientOptions) {
     },
   };
 
-  return { auth, tokens, imports, jobs, trades, ops, request: send };
+  return { auth, tokens, imports, jobs, trades, rounds, nav, ops, request: send };
 }
 
 export type ApiClient = ReturnType<typeof createClient>;

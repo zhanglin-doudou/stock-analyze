@@ -28,3 +28,6 @@ logs/
 
 # fixtures with real data
 fixtures/real/
+
+# uv 本地缓存（沙箱内 uv run 用）
+.uvcache/

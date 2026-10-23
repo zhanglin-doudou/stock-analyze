@@ -32,7 +32,9 @@ help:
 	@echo "  make typecheck      mypy + tsc + import-linter"
 	@echo "  make test           快速单测（无外部依赖）"
 	@echo "  make test-core      core 内核单测 + 覆盖门禁"
-	@echo "  make test-api       API 验收套件（一期端点）"
+	@echo "  make test-review    Period2 review 域单测 + rebuild 集成测试"
+	@echo "  make test-p2        Period2-01/02 全量断言（fifo/review/API/越权/契约）"
+	@echo "  make test-api       API 验收套件（一期 + 二期已实现端点）"
 	@echo "  make test-rls       RLS 隔离集成测试"
 	@echo "  make test-isolation 越权负向矩阵"
 	@echo "  make api-check      契约完整性检查（示例/错误码/operationId）"
@@ -126,7 +128,7 @@ typecheck:
 
 .PHONY: test
 test:
-	@$(UV) pytest -m "not integration and not api" -q
+	@$(UV) pytest -m "not integration and not api and not live" -q
 
 .PHONY: test-core
 test-core:
@@ -142,7 +144,7 @@ test-api:
 
 .PHONY: test-integration
 test-integration:
-	@$(UV) pytest -m "integration" -q
+	@$(UV) pytest -m "integration and not live" -q
 
 .PHONY: test-rls
 test-rls:
@@ -151,6 +153,23 @@ test-rls:
 .PHONY: test-isolation
 test-isolation:
 	@$(UV) pytest -m "isolation" -q
+
+# ── Period2-01/02（FIFO 核心 + 回合落库/端点）────────────────
+.PHONY: test-review
+test-review:
+	@$(UV) pytest backend/tests/unit/review backend/tests/integration/test_rounds_rebuild.py -q
+
+.PHONY: test-p2
+test-p2:
+	@$(UV) pytest backend/tests/unit/core --cov=stock_core --cov-fail-under=100 -q
+	@$(UV) pytest backend/tests/unit/review backend/tests/integration -m "not live" -q
+	@$(UV) pytest backend/tests/api -q
+	@$(UV) pytest -m "isolation" -q
+	@$(UV) pytest backend/tests/contract -q
+	@$(PY) scripts/ci/gate_endpoint_coverage.py
+	@$(PY) scripts/ci/gate_tenant_coverage.py
+	@$(PY) -m stock_api.cli api-check
+	@$(PY) -m stock_api.cli api-snapshot --check
 
 .PHONY: test-architecture
 test-architecture:

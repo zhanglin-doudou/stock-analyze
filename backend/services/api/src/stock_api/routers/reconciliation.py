@@ -19,7 +19,12 @@ from stock_platform.tenant import TenantContext
 
 from stock_api.deps import get_state, get_tenant
 from stock_api.routing import StrictQueryRoute
-from stock_api.schemas import ReconciliationBreak, ReconciliationOut
+from stock_api.schemas import (
+    BridgeIdentityOut,
+    ReconciliationBreak,
+    ReconciliationBridgeOut,
+    ReconciliationOut,
+)
 
 router = APIRouter(tags=["reconciliation"], route_class=StrictQueryRoute)
 
@@ -98,4 +103,65 @@ async def get_reconciliation(
         epsilon=str(Money(dto.epsilon_units)),
         data_as_of=dto.data_as_of,
         generated_at=dto.generated_at,
+    )
+
+
+@router.get(
+    "/reconciliation/bridge",
+    response_model=ReconciliationBridgeOut,
+    operation_id="getReconciliationBridge",
+)
+async def get_reconciliation_bridge(
+    request: Request,
+    ctx: Annotated[TenantContext, Depends(get_tenant)],
+    period: Annotated[str, Query(description="YYYY-MM")],
+    as_of: Annotated[date | None, Query(description="可选业务截止日（须落在 period 内）")] = None,
+) -> ReconciliationBridgeOut:
+    """API-027：桥接恒等式（期初 + 现金流 + 损益 = 期末），FR-R2。
+
+    `identity` 各项均为 2 位小数定点字符串；`balanced` 由残差绝对值 ≤ tolerance 判定。
+    `as_of` 存在时把区间截止日收窄到该业务日；越界 → 422 INVALID_PERIOD。
+    """
+    user_id = ctx.require_user()
+    ctx.forbid_admin_trades()
+    state = get_state(request)
+    start, month_end = _parse_period(period)
+    period_end = month_end
+    if as_of is not None:
+        if not start <= as_of <= month_end:
+            raise ApiError(ErrorCode.INVALID_PERIOD, detail="as_of 必须落在 period 区间内")
+        period_end = as_of
+
+    from stock_review.application.bridge import bridge_for_period
+
+    async with state.db.session(user_id=user_id, begin=True) as session:
+        result = await bridge_for_period(
+            session,
+            user_id=user_id,
+            period_start=start,
+            period_end=period_end,
+            clock=state.clock,
+        )
+
+    identity = BridgeIdentityOut(
+        initial_cash=str(Money(result.initial_cash_units)),
+        initial_open_cost=str(Money(result.initial_open_cost_units)),
+        cashflows=str(Money(result.cashflows_units)),
+        realized_pnl=str(Money(result.realized_pnl_units)),
+        dividends=str(Money(result.dividends_units)),
+        interest=str(Money(result.interest_units)),
+        fees=str(Money(result.fees_units)),
+        other=str(Money(result.other_units)),
+        open_cost=str(Money(result.open_cost_units)),
+        ending_value=str(Money(result.ending_value_units)),
+        residual=str(Money(result.residual_units)),
+    )
+    return ReconciliationBridgeOut(
+        period=result.period,
+        balanced=result.balanced,
+        identity=identity,
+        tolerance=str(Money(result.tolerance_units)),
+        status=result.status,
+        data_as_of=result.data_as_of,
+        inputs_hash=result.inputs_hash,
     )

@@ -119,3 +119,123 @@ async def test_app_role_cannot_execute_ddl(app_engine: AsyncEngine) -> None:
     with pytest.raises(ProgrammingError):
         async with app_engine.begin() as conn:
             await conn.execute(text("create table ledger.ddl_probe (id int)"))
+
+
+# ── review 三表 RLS（Period2-02，迁移 0003；gate 要求 review 3/3）──────
+
+_REVIEW_TABLES = ("round", "round_fill", "round_build_state")
+
+_INSERT_ROUND_SQL = """
+insert into review.round (
+    id, user_id, security_code, security_name, status, open_trade_id, close_trade_id,
+    open_date, close_date, quantity_units, cost_units, proceeds_units, dividend_units,
+    pnl_units, return_rate_units, holding_days, data_error, oversell_units,
+    fills_count, rebuilt_at
+) values (
+    :id, :uid, '600519', '贵州茅台', 'closed', :open_trade_id, :close_trade_id,
+    :open_date, :close_date, 1000000, 1000000, 1200000, 0,
+    200000, 20000000, 5, false, 0,
+    1, now()
+)
+"""
+
+_INSERT_FILL_SQL = """
+insert into review.round_fill (
+    user_id, round_id, sequence, buy_trade_id, sell_trade_id,
+    quantity_units, buy_cost_units, sell_proceeds_units, dividend_units, pnl_units,
+    open_date, close_date, holding_days
+) values (
+    :uid, :round_id, 1, :buy_trade_id, :sell_trade_id,
+    1000000, 1000000, 1200000, 0, 200000,
+    :open_date, :close_date, 5
+)
+"""
+
+_INSERT_BUILD_STATE_SQL = """
+insert into review.round_build_state
+    (user_id, last_rebuilt_at, last_scope, rounds_count, version)
+values (:uid, now(), 'full', 1, 1)
+"""
+
+
+async def _seed_review_rows(engine: AsyncEngine, user_id: uuid.UUID) -> str:
+    """以 owner 直插 review 三表各一行（绕过 RLS，为两侧租户准备数据）。"""
+    round_id = f"rnd_{uuid.uuid4().hex[:32]}"
+    trade_ids = {
+        "id": round_id,
+        "uid": user_id,
+        "open_trade_id": f"trd_{uuid.uuid4().hex[:12]}",
+        "close_trade_id": f"trd_{uuid.uuid4().hex[:12]}",
+        "open_date": date(2026, 1, 5),
+        "close_date": date(2026, 1, 7),
+        "buy_trade_id": f"trd_{uuid.uuid4().hex[:12]}",
+        "sell_trade_id": f"trd_{uuid.uuid4().hex[:12]}",
+        "round_id": round_id,
+    }
+    async with engine.begin() as conn:
+        await conn.execute(text(_INSERT_ROUND_SQL), trade_ids)
+        await conn.execute(text(_INSERT_FILL_SQL), trade_ids)
+        await conn.execute(text(_INSERT_BUILD_STATE_SQL), {"uid": user_id})
+    return round_id
+
+
+async def _count_table_visible(engine: AsyncEngine, user_id: uuid.UUID | None, table: str) -> int:
+    """在租户会话内统计 review 表可见行数（table 来自测试常量，无注入面）。"""
+    assert table in _REVIEW_TABLES
+    async with engine.begin() as conn:
+        if user_id is not None:
+            await conn.execute(
+                text("select set_config('app.user_id', :uid, true)"), {"uid": str(user_id)}
+            )
+        return int(
+            await conn.scalar(text(f"select count(*) from review.{table}"))  # type: ignore[arg-type]
+        )
+
+
+@pytest.fixture
+async def review_seeded(
+    owner_engine: AsyncEngine, two_users: tuple[uuid.UUID, uuid.UUID]
+) -> tuple[uuid.UUID, uuid.UUID]:
+    user_a, user_b = two_users
+    await _seed_review_rows(owner_engine, user_a)
+    await _seed_review_rows(owner_engine, user_b)
+    return user_a, user_b
+
+
+async def test_review_tables_are_tenant_isolated(
+    app_engine: AsyncEngine, review_seeded: tuple[uuid.UUID, uuid.UUID]
+) -> None:
+    user_a, user_b = review_seeded
+    for table in _REVIEW_TABLES:
+        assert await _count_table_visible(app_engine, user_a, table) == 1, table
+        assert await _count_table_visible(app_engine, user_b, table) == 1, table
+
+
+async def test_unset_tenant_reads_zero_review_rows(
+    app_engine: AsyncEngine, review_seeded: tuple[uuid.UUID, uuid.UUID]
+) -> None:
+    for table in _REVIEW_TABLES:
+        assert await _count_table_visible(app_engine, None, table) == 0, table
+
+
+async def test_cross_tenant_review_write_rejected(
+    app_engine: AsyncEngine, review_seeded: tuple[uuid.UUID, uuid.UUID]
+) -> None:
+    """A 的租户会话不能写入 user_id=B 的回合（WITH CHECK 谓词拒绝）。"""
+    user_a, user_b = review_seeded
+    with pytest.raises(ProgrammingError, match="row-level security"):
+        async with app_engine.begin() as conn:
+            await conn.execute(
+                text("select set_config('app.user_id', :uid, true)"), {"uid": str(user_a)}
+            )
+            await conn.execute(
+                text(_INSERT_ROUND_SQL),
+                {
+                    "id": f"rnd_{uuid.uuid4().hex[:32]}",
+                    "uid": user_b,
+                    "open_trade_id": f"trd_{uuid.uuid4().hex[:12]}",
+                    "close_trade_id": f"trd_{uuid.uuid4().hex[:12]}",
+                    "open_date": date(2026, 1, 5),
+                    "close_date": date(2026, 1, 7),
+                },
+            )

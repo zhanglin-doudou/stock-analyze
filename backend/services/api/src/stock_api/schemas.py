@@ -416,6 +416,180 @@ class ReconciliationOut(BaseModel):
     generated_at: datetime
 
 
+# ── 规则写请求 / 回合 / 桥接（API-016、022~025、027~031）──────
+class SummaryRuleCreateIn(SummaryRuleIn):
+    """API-023：`code` 由服务端生成（`usr_`+8hex），客户端不可指定。"""
+
+
+class SummaryRulePatchIn(StrictModel):
+    """API-024：部分更新；未提供字段不动（PATCH 语义）。"""
+
+    name: str | None = Field(default=None, min_length=1, max_length=64)
+    category: str | None = Field(default=None, min_length=1, max_length=24)
+    side: Literal["buy", "sell", "both"] | None = None
+    match_type: Literal["exact", "prefix", "contains", "regex"] | None = None
+    pattern: str | None = Field(default=None, min_length=1, max_length=128)
+    priority: int | None = Field(default=None, ge=0, le=1000)
+    enabled: bool | None = None
+
+
+class ReclassifyIn(StrictModel):
+    """API-016：body 可空 `{}`；reason 仅用于审计备注。"""
+
+    reason: str | None = Field(default=None, max_length=200)
+
+
+class RebuildRoundsIn(StrictModel):
+    """API-028：重建范围（full 全量 / period 脏窗口）。"""
+
+    scope: Literal["full", "period"] = "full"
+    period: str | None = None
+    reason: str | None = Field(default=None, max_length=200)
+
+
+class RoundOut(BaseModel):
+    """API-029/030：回合（金额/数量/比率全部定点字符串）。"""
+
+    round_id: str
+    security_code: str
+    security_name: str
+    status: Literal["open", "closed", "data_error"]
+    open_date: date
+    close_date: date | None = None
+    quantity: str
+    cost: str
+    proceeds: str
+    dividend: str
+    pnl: str
+    return_rate: str
+    holding_days: int
+    open_trade_id: str
+    close_trade_id: str | None = None
+    data_error: bool
+    oversell_quantity: str
+    fills_count: int
+    rebuilt_at: datetime
+
+
+class RoundPage(BaseModel):
+    items: list[RoundOut]
+    next_cursor: str | None = None
+    has_more: bool = False
+
+
+class RoundFillOut(BaseModel):
+    """API-031：FIFO 配对明细（一回合内 sequence 从 1 开始）。
+
+    仅展示流水配对本身（买卖流水 ID、数量、日期），
+    分摊收益/成本/股息/pnl 请在回合级（Round）查看。
+    """
+
+    fill_id: int
+    sequence: int
+    buy_trade_id: str
+    sell_trade_id: str
+    quantity: str
+    open_date: date
+    close_date: date
+    holding_days: int
+
+
+class RoundFillPage(BaseModel):
+    items: list[RoundFillOut]
+    total: int
+
+
+class BridgeIdentityOut(BaseModel):
+    """API-027：桥接恒等式各项（金额定点字符串，2 位小数）。"""
+
+    initial_cash: str
+    initial_open_cost: str
+    cashflows: str
+    realized_pnl: str
+    dividends: str
+    interest: str
+    fees: str
+    other: str
+    open_cost: str
+    ending_value: str
+    residual: str
+
+
+class ReconciliationBridgeOut(BaseModel):
+    period: str
+    balanced: bool
+    identity: BridgeIdentityOut
+    tolerance: str
+    status: str
+    data_as_of: datetime
+    inputs_hash: str
+
+
+# ── 净值与收益（API-032）──────────────────────────────────
+class NavHoldingOut(BaseModel):
+    """单只标的在某日的持仓快照（数量/价格/金额为最多三位小数字符串，去掉尾零）。"""
+
+    security_code: str
+    security_name: str
+    quantity: str  # 持有份额（最多三位小数，如 "9.1"）
+    # 含费买入均价 = 累计成本 ÷ 持仓数量；成本为净现金流出，已含佣金/印花税/其他费。
+    avg_cost: str  # 含费买入均价（最多三位小数，去尾零）
+    close_price: str  # 当日或之前最近收盘价（最多三位小数）
+    market_value: str  # 持仓市值（最多三位小数）
+
+
+class NavPointOut(BaseModel):
+    """单日净值点（金额/净值/收益率均为定点字符串）。"""
+
+    date: date
+    unit_nav: str  # 单位净值（scale=6 → 后端返回完整精度）
+    twr_daily: str  # 当日收益率（scale=8 → 后端返回完整精度）
+    twr_daily_pct: str = "0.00%"  # 当日收益率百分比（两位小数，如 "0.62%"）
+    cashflow: str  # 当日外部现金流（scale=2 → 后端返回完整精度）
+    blocked: bool = False
+    # blocked 日的可读原因（含失败类别）；非 blocked 日为 null。
+    blocked_reason: str | None = None
+    # 当日总资产（现金 + 持仓市值），三位小数字符串；blocked 日为 "0.000"。
+    total_assets: str = "0.000"
+    # 上一净值点的总资产（三位小数）；首个点取上一交易日收盘估值，
+    # 缺行情或前一点 blocked 时为 null。
+    prev_total_assets: str | None = None
+    # 当日收益额 = 当日总资产 − 当日外部现金流 − 上一净值点总资产（三位小数）；
+    # 无上一净值点时为 null。
+    daily_pnl: str | None = None
+    # 当日持仓明细（非 blocked 日填充，blocked 日为空列表）。
+    holdings: list[NavHoldingOut] = []
+
+
+class NavSummaryOut(BaseModel):
+    """区间汇总指标（本期不含基准对比，beta/alpha/ir 等为 null）。"""
+
+    mwr: str  # 资金加权收益率（XIRR，scale=8）
+    twr: str  # 时间加权收益率（累计，scale=8）
+    annualized_twr: str  # 年化 TWR（scale=8）
+    mwr_minus_twr: str  # MWR − TWR（scale=8）
+    beta: str | None = None
+    alpha_annual: str | None = None
+    t_value: str | None = None
+    tracking_error: str | None = None
+    ir: str | None = None
+    n_days: int
+    # 期初现金锚点来源：statement（区间前余额行直取）| back_solved（区间首条余额行反推）；
+    # blocked 时为 null。
+    assumption: Literal["statement", "back_solved"] | None = None
+
+
+class NavOut(BaseModel):
+    period: str
+    points: list[NavPointOut]
+    summary: NavSummaryOut
+    status: Literal["ok", "blocked", "degraded"]
+    blocked_ranges: list[dict[str, str]] = []
+    benchmark_id: str = "hs300_tr"
+    data_as_of: datetime
+    definition_version: str = "1.0"
+
+
 # ── 运维（API-071~076）──────────────────────────────────────
 class HealthOut(BaseModel):
     status: Literal["ok"] = "ok"

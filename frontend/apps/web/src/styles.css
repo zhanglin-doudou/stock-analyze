@@ -71,6 +71,7 @@ h3 {
   cursor: not-allowed;
 }
 .btn-ghost {
+  white-space: nowrap;
   background: #fff;
   color: var(--accent);
 }
@@ -304,4 +305,65 @@ input[type="checkbox"] {
 }
 .revoke-batch {
   margin: 6px 0;
+}
+
+/* rounds（Period2-02：FIFO 回合查询） */
+.badge-closed {
+  background: #e6f4ea;
+  color: #0a7d32;
+}
+.badge-open {
+  background: #e8f0fe;
+  color: var(--accent);
+}
+.badge-data_error {
+  background: #fde8e8;
+  color: var(--danger);
+}
+/* nav（Period2-03：净值与收益状态） */
+.badge-ok {
+  background: #e6f4ea;
+  color: #0a7d32;
+}
+.badge-blocked {
+  background: #fde8e8;
+  color: var(--danger);
+}
+.badge-degraded {
+  background: #fff4e5;
+  color: #8a5300;
+}
+.money-pos {
+  color: #0a7d32;
+}
+.money-neg {
+  color: var(--danger);
+}
+.filters {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px 12px;
+}
+.filters label {
+  margin: 0;
+}
+.filters .row-actions {
+  grid-column: 1 / -1;
+}
+select {
+  display: block;
+  width: 100%;
+  padding: 6px 8px;
+  margin-top: 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+}
+input[type="date"] {
+  display: block;
+  width: 100%;
+  padding: 6px 8px;
+  margin-top: 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
 }

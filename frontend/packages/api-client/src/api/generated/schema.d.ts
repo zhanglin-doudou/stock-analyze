@@ -222,6 +222,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/imports/{batch_id}/reclassify": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reclassify Import
+         * @description API-016：按当前规则重跑该批次的分类（异步 202；跨账号批次 → 404）。
+         */
+        post: operations["reclassifyImport"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/imports/{batch_id}/revoke": {
         parameters: {
             query?: never;
@@ -256,6 +276,26 @@ export interface paths {
         get: operations["listJobs"];
         put?: never;
         post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/jobs/rebuild-rounds": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rebuild Rounds Endpoint
+         * @description API-028：入队重建回合（202）；同参复用同一 job，异参单飞 → 409。
+         */
+        post: operations["rebuildRounds"];
         delete?: never;
         options?: never;
         head?: never;
@@ -324,6 +364,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/nav": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Nav
+         * @description API-032：区间单位净值序列 + TWR/MWR 汇总。
+         *
+         *     计算并落库 `review.nav_daily`，blocked 日不返回资产值（unit_nav/twr_daily 为 "0"）。
+         */
+        get: operations["getNav"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/reconciliation": {
         parameters: {
             query?: never;
@@ -344,6 +406,137 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/api/v1/reconciliation/bridge": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Reconciliation Bridge
+         * @description API-027：桥接恒等式（期初 + 现金流 + 损益 = 期末），FR-R2。
+         *
+         *     `identity` 各项均为 2 位小数定点字符串；`balanced` 由残差绝对值 ≤ tolerance 判定。
+         *     `as_of` 存在时把区间截止日收窄到该业务日；越界 → 422 INVALID_PERIOD。
+         */
+        get: operations["getReconciliationBridge"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/rounds": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Rounds Endpoint
+         * @description API-029：回合列表（游标分页/过滤/本人隔离）。
+         */
+        get: operations["listRounds"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/rounds/{round_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Round Endpoint
+         * @description API-030：回合详情；跨账号/不存在 → 404，admin → 403。
+         */
+        get: operations["getRound"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/rounds/{round_id}/fills": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Round Fills Endpoint
+         * @description API-031：FIFO 配对明细（一回合内 sequence 从 1 开始）。
+         */
+        get: operations["listRoundFills"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/summary-rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Summary Rules
+         * @description API-022：规则列表（系统规则 + 本人规则，含 disabled），按优先级升序。
+         */
+        get: operations["listSummaryRules"];
+        put?: never;
+        /**
+         * Create Summary Rule
+         * @description API-023：新建用户规则（`code` 服务端生成；重复/非法 category → 422）。
+         */
+        post: operations["createSummaryRule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/summary-rules/{rule_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Summary Rule
+         * @description API-025：删除用户规则（204）；系统/他人规则 404（删除后自然回退系统规则）。
+         */
+        delete: operations["deleteSummaryRule"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Summary Rule
+         * @description API-024：修改用户规则（If-Match 乐观锁；旧版本 409；系统/他人规则 404）。
+         */
+        patch: operations["updateSummaryRule"];
         trace?: never;
     };
     "/api/v1/tokens": {
@@ -747,6 +940,34 @@ export interface components {
              */
             mapping?: string | null;
         };
+        /**
+         * BridgeIdentityOut
+         * @description API-027：桥接恒等式各项（金额定点字符串，2 位小数）。
+         */
+        BridgeIdentityOut: {
+            /** Cashflows */
+            cashflows: string;
+            /** Dividends */
+            dividends: string;
+            /** Ending Value */
+            ending_value: string;
+            /** Fees */
+            fees: string;
+            /** Initial Cash */
+            initial_cash: string;
+            /** Initial Open Cost */
+            initial_open_cost: string;
+            /** Interest */
+            interest: string;
+            /** Open Cost */
+            open_cost: string;
+            /** Other */
+            other: string;
+            /** Realized Pnl */
+            realized_pnl: string;
+            /** Residual */
+            residual: string;
+        };
         /** @description RFC 7807 问题详情 + 平台扩展字段（code/user_message/what_to_do/retryable/request_id/errors），对应 Content-Type: application/problem+json。 */
         Error: {
             code: string;
@@ -926,6 +1147,130 @@ export interface components {
                 [key: string]: unknown;
             };
             user: components["schemas"]["UserBrief"];
+        };
+        /**
+         * NavHoldingOut
+         * @description 单只标的在某日的持仓快照（数量/价格/金额为最多三位小数字符串，去掉尾零）。
+         */
+        NavHoldingOut: {
+            /** Avg Cost */
+            avg_cost: string;
+            /** Close Price */
+            close_price: string;
+            /** Market Value */
+            market_value: string;
+            /** Quantity */
+            quantity: string;
+            /** Security Code */
+            security_code: string;
+            /** Security Name */
+            security_name: string;
+        };
+        /** NavOut */
+        NavOut: {
+            /**
+             * Benchmark Id
+             * @default hs300_tr
+             */
+            benchmark_id: string;
+            /**
+             * Blocked Ranges
+             * @default []
+             */
+            blocked_ranges: {
+                [key: string]: string;
+            }[];
+            /**
+             * Data As Of
+             * Format: date-time
+             */
+            data_as_of: string;
+            /**
+             * Definition Version
+             * @default 1.0
+             */
+            definition_version: string;
+            /** Period */
+            period: string;
+            /** Points */
+            points: components["schemas"]["NavPointOut"][];
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "blocked" | "degraded";
+            summary: components["schemas"]["NavSummaryOut"];
+        };
+        /**
+         * NavPointOut
+         * @description 单日净值点（金额/净值/收益率均为定点字符串）。
+         */
+        NavPointOut: {
+            /**
+             * Blocked
+             * @default false
+             */
+            blocked: boolean;
+            /** Blocked Reason */
+            blocked_reason?: string | null;
+            /** Cashflow */
+            cashflow: string;
+            /** Daily Pnl */
+            daily_pnl?: string | null;
+            /**
+             * Date
+             * Format: date
+             */
+            date: string;
+            /**
+             * Holdings
+             * @default []
+             */
+            holdings: components["schemas"]["NavHoldingOut"][];
+            /** Prev Total Assets */
+            prev_total_assets?: string | null;
+            /**
+             * Total Assets
+             * @default 0.000
+             */
+            total_assets: string;
+            /** Twr Daily */
+            twr_daily: string;
+            /**
+             * Twr Daily Pct
+             * @default 0.00%
+             */
+            twr_daily_pct: string;
+            /** Unit Nav */
+            unit_nav: string;
+        };
+        /**
+         * NavSummaryOut
+         * @description 区间汇总指标（本期不含基准对比，beta/alpha/ir 等为 null）。
+         */
+        NavSummaryOut: {
+            /** Alpha Annual */
+            alpha_annual?: string | null;
+            /** Annualized Twr */
+            annualized_twr: string;
+            /** Assumption */
+            assumption?: ("statement" | "back_solved") | null;
+            /** Beta */
+            beta?: string | null;
+            /** Ir */
+            ir?: string | null;
+            /** Mwr */
+            mwr: string;
+            /** Mwr Minus Twr */
+            mwr_minus_twr: string;
+            /** N Days */
+            n_days: number;
+            /** T Value */
+            t_value?: string | null;
+            /** Tracking Error */
+            tracking_error?: string | null;
+            /** Twr */
+            twr: string;
         };
         /**
          * PatCreateResponse
@@ -1134,6 +1479,30 @@ export interface components {
              */
             status: "ready" | "not_ready";
         };
+        /**
+         * RebuildRoundsIn
+         * @description API-028：重建范围（full 全量 / period 脏窗口）。
+         */
+        RebuildRoundsIn: {
+            /** Period */
+            period?: string | null;
+            /** Reason */
+            reason?: string | null;
+            /**
+             * Scope
+             * @default full
+             * @enum {string}
+             */
+            scope: "full" | "period";
+        };
+        /**
+         * ReclassifyIn
+         * @description API-016：body 可空 `{}`；reason 仅用于审计备注。
+         */
+        ReclassifyIn: {
+            /** Reason */
+            reason?: string | null;
+        };
         /** ReconciliationBreak */
         ReconciliationBreak: {
             /** Actual */
@@ -1155,6 +1524,25 @@ export interface components {
             trade_date?: string | null;
             /** Trade Id */
             trade_id: string;
+        };
+        /** ReconciliationBridgeOut */
+        ReconciliationBridgeOut: {
+            /** Balanced */
+            balanced: boolean;
+            /**
+             * Data As Of
+             * Format: date-time
+             */
+            data_as_of: string;
+            identity: components["schemas"]["BridgeIdentityOut"];
+            /** Inputs Hash */
+            inputs_hash: string;
+            /** Period */
+            period: string;
+            /** Status */
+            status: string;
+            /** Tolerance */
+            tolerance: string;
         };
         /** ReconciliationOut */
         ReconciliationOut: {
@@ -1252,6 +1640,200 @@ export interface components {
              * @constant
              */
             status: "revoked";
+        };
+        /**
+         * RoundFillOut
+         * @description API-031：FIFO 配对明细（一回合内 sequence 从 1 开始）。
+         *
+         *     仅展示流水配对本身（买卖流水 ID、数量、日期），
+         *     分摊收益/成本/股息/pnl 请在回合级（Round）查看。
+         */
+        RoundFillOut: {
+            /** Buy Trade Id */
+            buy_trade_id: string;
+            /**
+             * Close Date
+             * Format: date
+             */
+            close_date: string;
+            /** Fill Id */
+            fill_id: number;
+            /** Holding Days */
+            holding_days: number;
+            /**
+             * Open Date
+             * Format: date
+             */
+            open_date: string;
+            /** Quantity */
+            quantity: string;
+            /** Sell Trade Id */
+            sell_trade_id: string;
+            /** Sequence */
+            sequence: number;
+        };
+        /** RoundFillPage */
+        RoundFillPage: {
+            /** Items */
+            items: components["schemas"]["RoundFillOut"][];
+            /** Total */
+            total: number;
+        };
+        /**
+         * RoundOut
+         * @description API-029/030：回合（金额/数量/比率全部定点字符串）。
+         */
+        RoundOut: {
+            /** Close Date */
+            close_date?: string | null;
+            /** Close Trade Id */
+            close_trade_id?: string | null;
+            /** Cost */
+            cost: string;
+            /** Data Error */
+            data_error: boolean;
+            /** Dividend */
+            dividend: string;
+            /** Fills Count */
+            fills_count: number;
+            /** Holding Days */
+            holding_days: number;
+            /**
+             * Open Date
+             * Format: date
+             */
+            open_date: string;
+            /** Open Trade Id */
+            open_trade_id: string;
+            /** Oversell Quantity */
+            oversell_quantity: string;
+            /** Pnl */
+            pnl: string;
+            /** Proceeds */
+            proceeds: string;
+            /** Quantity */
+            quantity: string;
+            /**
+             * Rebuilt At
+             * Format: date-time
+             */
+            rebuilt_at: string;
+            /** Return Rate */
+            return_rate: string;
+            /** Round Id */
+            round_id: string;
+            /** Security Code */
+            security_code: string;
+            /** Security Name */
+            security_name: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "open" | "closed" | "data_error";
+        };
+        /** RoundPage */
+        RoundPage: {
+            /**
+             * Has More
+             * @default false
+             */
+            has_more: boolean;
+            /** Items */
+            items: components["schemas"]["RoundOut"][];
+            /** Next Cursor */
+            next_cursor?: string | null;
+        };
+        /**
+         * SummaryRuleCreateIn
+         * @description API-023：`code` 由服务端生成（`usr_`+8hex），客户端不可指定。
+         */
+        SummaryRuleCreateIn: {
+            /** Category */
+            category: string;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /**
+             * Match Type
+             * @default exact
+             * @enum {string}
+             */
+            match_type: "exact" | "prefix" | "contains" | "regex";
+            /** Name */
+            name: string;
+            /** Pattern */
+            pattern: string;
+            /**
+             * Priority
+             * @default 100
+             */
+            priority: number;
+            /**
+             * Side
+             * @default both
+             * @enum {string}
+             */
+            side: "buy" | "sell" | "both";
+        };
+        /** SummaryRuleOut */
+        SummaryRuleOut: {
+            /** Category */
+            category: string;
+            /** Code */
+            code: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Enabled */
+            enabled: boolean;
+            /** Is System */
+            is_system: boolean;
+            /** Match Type */
+            match_type: string;
+            /** Name */
+            name: string;
+            /** Pattern */
+            pattern: string;
+            /** Priority */
+            priority: number;
+            /** Rule Id */
+            rule_id: string;
+            /** Side */
+            side: string;
+            /** Version */
+            version: number;
+        };
+        /** SummaryRulePage */
+        SummaryRulePage: {
+            /** Items */
+            items: components["schemas"]["SummaryRuleOut"][];
+            /** Total */
+            total: number;
+        };
+        /**
+         * SummaryRulePatchIn
+         * @description API-024：部分更新；未提供字段不动（PATCH 语义）。
+         */
+        SummaryRulePatchIn: {
+            /** Category */
+            category?: string | null;
+            /** Enabled */
+            enabled?: boolean | null;
+            /** Match Type */
+            match_type?: ("exact" | "prefix" | "contains" | "regex") | null;
+            /** Name */
+            name?: string | null;
+            /** Pattern */
+            pattern?: string | null;
+            /** Priority */
+            priority?: number | null;
+            /** Side */
+            side?: ("buy" | "sell" | "both") | null;
         };
         /** TradeHistoryItem */
         TradeHistoryItem: {
@@ -2152,6 +2734,91 @@ export interface operations {
             };
         };
     };
+    reclassifyImport: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path: {
+                batch_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["ReclassifyIn"] | null;
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobAcceptedOut"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 资源状态冲突 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 请求过于频繁 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     revokeImport: {
         parameters: {
             query?: never;
@@ -2278,6 +2945,80 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    rebuildRounds: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RebuildRoundsIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobAcceptedOut"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 资源状态冲突 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 请求过于频繁 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
                     "application/problem+json": components["schemas"]["Error"];
                 };
             };
@@ -2471,6 +3212,66 @@ export interface operations {
             };
         };
     };
+    getNav: {
+        parameters: {
+            query?: {
+                /** @description YYYY-MM */
+                period?: string | null;
+                from?: string | null;
+                to?: string | null;
+                /** @description 基准代码（本期暂不计算对比） */
+                benchmark?: string;
+                /** @description daily|weekly（本期仅 daily） */
+                granularity?: string;
+            };
+            header?: {
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["NavOut"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     getReconciliation: {
         parameters: {
             query?: {
@@ -2509,6 +3310,495 @@ export interface operations {
             };
             /** @description 权限不足 */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getReconciliationBridge: {
+        parameters: {
+            query: {
+                /** @description YYYY-MM */
+                period: string;
+                /** @description 可选业务截止日（须落在 period 内） */
+                as_of?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ReconciliationBridgeOut"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listRounds: {
+        parameters: {
+            query?: {
+                security_code?: string | null;
+                status?: string | null;
+                from?: string | null;
+                to?: string | null;
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoundPage"];
+                };
+            };
+            /** @description 请求参数错误 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getRound: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path: {
+                round_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoundOut"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listRoundFills: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path: {
+                round_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoundFillPage"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listSummaryRules: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SummaryRulePage"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    createSummaryRule: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SummaryRuleCreateIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SummaryRuleOut"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    deleteSummaryRule: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path: {
+                rule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    updateSummaryRule: {
+        parameters: {
+            query?: never;
+            header?: {
+                "If-Match"?: string | null;
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path: {
+                rule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SummaryRulePatchIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SummaryRuleOut"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 资源状态冲突 */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

@@ -15,6 +15,11 @@ dependencies = [
     "stock-worker",
 ]
 
+# ── 可选依赖：真实行情源（MARKET_MODE=live 才需要）────────────
+# 根为 workspace 聚合（package=false），转发到真正的实现包 stock-platform。
+[project.optional-dependencies]
+live = ["stock-platform[live]"]
+
 [tool.uv]
 package = false
 
@@ -53,6 +58,7 @@ markers = [
     "api: API 验收用例（携带 API-NNN 标识）",
     "integration: 需要真实 PostgreSQL",
     "isolation: 多租户越权用例",
+    "live: 需要网络与 akshare optional extra 的联网用例（默认门禁排除）",
 ]
 filterwarnings = ["error::DeprecationWarning:stock_api.*"]
 
@@ -87,6 +93,11 @@ exclude = ["^frontend/"]
 [[tool.mypy.overrides]]
 module = ["stock_ledger.infrastructure.parsers.*"]
 disallow_untyped_calls = false
+
+# akshare/pandas 未发布 py.typed：optional extra 未安装时也必须能通过 mypy strict。
+[[tool.mypy.overrides]]
+module = ["akshare", "akshare.*", "pandas", "pandas.*"]
+ignore_missing_imports = true
 
 [tool.importlinter]
 root_packages = ["stock_contracts", "stock_core", "stock_platform", "stock_ledger", "stock_review", "stock_delivery", "stock_api", "stock_worker"]

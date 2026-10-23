@@ -27,6 +27,10 @@ from stock_platform.security import hasher_for
 
 DEFAULT_PASSWORD = "Str0ng-Passw0rd!"
 
+# 开发账号：每个用例清空后默认插入，避免每次测试都要手工造账号。
+DEV_EMAIL = "1234@dev.com"
+DEV_PASSWORD = "1234"
+
 # 需要清空的业务表（不含 platform.schema_version，避免破坏“启动即校验”）。
 _PLATFORM_TABLES = (
     "user",
@@ -52,12 +56,23 @@ _LEDGER_TABLES = (
     "summary_rule",
     "reconciliation",
 )
+# review 表由迁移 0003/0004 建立（Period2-02/03）；都带 RLS，按 user 级联清理。
+_REVIEW_TABLES = (
+    "round",
+    "round_fill",
+    "round_build_state",
+    "nav_daily",
+)
+# market schema（迁移 0005）是公共行情缓存：跨用例共享、跨全量测试保留，
+# 避免重复拉取。测试缓存本身的用例（unit/platform/test_market_cache.py）自清理。
 
 _TRUNCATE_SQL = (
     "TRUNCATE TABLE "
     + ", ".join(f'platform."{name}"' for name in _PLATFORM_TABLES)
     + ", "
     + ", ".join(f'ledger."{name}"' for name in _LEDGER_TABLES)
+    + ", "
+    + ", ".join(f'review."{name}"' for name in _REVIEW_TABLES)
     + " RESTART IDENTITY CASCADE"
 )
 
@@ -67,8 +82,12 @@ _TRUNCATE_SQL = (
 
 @pytest.fixture(scope="session")
 def settings() -> Settings:
-    """读取根 .env 的真实配置（库名/角色/密码）。"""
-    return get_settings()
+    """读取根 .env 的真实配置（库名/角色/密码），并强制 `MARKET_MODE=replay`。
+
+    `.env` 被手工改成 live（端到端验证）时，测试套件必须仍然走确定性回放，否则
+    全量 API 测试会触发外网取数。联网用例（`@pytest.mark.live`）自己构造 live Settings。
+    """
+    return get_settings().model_copy(update={"market_mode": "replay"})
 
 
 @pytest_asyncio.fixture
@@ -96,9 +115,13 @@ async def app_engine(settings: Settings) -> AsyncIterator[AsyncEngine]:
 
 @pytest_asyncio.fixture(autouse=True)
 async def _clean_db(owner_engine: AsyncEngine) -> AsyncIterator[None]:
-    """每个用例前清空业务表并重置自增；不重跑迁移。"""
+    """每个用例前清空业务表并重置自增；插入开发账号 DEV_EMAIL/DEV_PASSWORD。
+
+    market schema 不在清空范围（公共行情缓存，跨用例共享）。
+    """
     async with owner_engine.begin() as conn:
         await conn.execute(text(_TRUNCATE_SQL))
+    await _insert_user(owner_engine, email=DEV_EMAIL, password=DEV_PASSWORD)
     yield
 
 

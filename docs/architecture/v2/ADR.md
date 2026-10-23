@@ -1,4 +1,4 @@
-# 架构决策记录 v2（ADR-0013 ~ ADR-0024）
+# 架构决策记录 v2（ADR-0013 ~ ADR-0025）
 
 > 项目：个人交易复盘平台 ｜ 需求基线：[PRD-v2.md](../../prd/PRD-v2.md)（v2.0）｜ 主文档：[Architecture-v2.md](../../Architecture-v2.md)
 > v1 决策见 [v1/ADR.md](../v1/ADR.md)（ADR-0001~0012）。本文件记载 **v2 对 v1 的取代与新增**。
@@ -18,6 +18,7 @@
 | [0022](#adr-0022-llm-旁路--金额后端填充--出站守卫) | LLM 旁路 + 金额后端填充 + 出站守卫 | 采纳（强化） | 0012 |
 | [0023](#adr-0023-软删用于业务追溯注销物理删除) | 软删用于业务追溯，注销物理删除 | 采纳 | — |
 | [0024](#adr-0024-分层差异化覆盖--契约与越权硬门禁) | 分层差异化覆盖 + 契约/越权硬门禁 | 采纳（延续） | 0010 的 v2 版本 |
+| [0025](#adr-0025-行情估值口径与缓存策略不复权--并集覆盖) | 行情估值口径与缓存策略（不复权 + 并集覆盖） | 采纳 | — |
 
 ---
 
@@ -198,6 +199,26 @@
 - 缓解：fast/full/nightly 分段；端点清单由契约自动生成，用例缺失即列在报告中。
 **被否方案**：全局 100% 覆盖（浪费且鼓励无意义断言）；只靠人工验收（不可持续）。
 **关联需求**：NFR-7、FR-A2、NFR-6。
+
+---
+
+## ADR-0025 行情估值口径与缓存策略（不复权 + 并集覆盖）
+
+**状态**：采纳 ｜ 2026-10-23 ｜ 依据：设计 [2026-10-22-live-market-data-source.md](../2026-10-22-live-market-data-source.md) v2 与评审裁定 D1–D4
+**背景**：真实账单（2021-10，000651/601688）请求 `GET /nav` 时因 replay 行情 fixture 覆盖不足被判 blocked，需要接入 akshare 真实行情。行情接入同时牵动三类决策：估值用哪种复权口径、缓存如何失效、外部依赖如何隔离；且与 PRD NFR-2（后复权 + as-of 因子快照 + 涨跌停/因子跳变校验）存在阶段性偏离，必须显式记录。
+**决策**：
+1. **估值口径：不复权（D1）**。v1 只落不复权日线（akshare `adjust=""`），`market.daily_bar.adjust` 恒为 `''`，`capabilities.supports_adjusted=False`；`MARKET_LIVE_ADJUST` 只接受 `""`，显式拒绝 `qfq/hfq` 误配。
+2. **缓存：区间并集 + 尾部刷新 + TTL（D3）**。新建 `market` schema 公共缓存两表（`daily_bar` / `pull_range`，无 RLS、可再生）。覆盖判定用 `pull_range` 区间并集：已结束区间以 `requested_end` 为覆盖上界（非交易日不重拉），含未来/当月区间只用 `data_end` 覆盖且尾部 `MARKET_LIVE_TAIL_REFETCH_DAYS`（默认 5 天）恒为缺口；正缓存 TTL 30 天、负缓存（区间无行情）短 TTL 1 天；`daily_bar` 按 `(symbol, adjust, trade_date)` 幂等 upsert，`pull_range` 按 `ON CONFLICT` 覆盖并落 `source/checksum/bar_count/pulled_at` 留痕（NFR-2 最小来源留痕）。
+3. **契约与依赖（D2）**：不新增错误码，保持 degraded `blocked` 200；失败类别经 `ApiError.metadata["market_failure"]` 传给 nav，`/nav` 仅新增可选响应字段 `blocked_reason`（非破坏）。akshare 走 optional extra `live`（`uv sync --extra live`），启动期 `find_spec` fail-fast；上游并发上限 2 + 有上限重试 + `to_thread` 隔离。
+4. **NFR-2 分阶段偏离**：hfq + 复权因子 + `factor_version` 失效 + as-of 因子快照 + 涨跌停/因子跳变校验留到后续期次；v1 不做上市日期校验（空结果统一 `no_data` + 负缓存短 TTL）。
+5. **实现位置偏离**：实现在 `stock_platform/market_live.py`（行情是跨用户公共基础设施，放 platform 语义最准），与 Extensibility EP-2 规划的 `review/infra/marketdata/` 不同；ledger 只保留装配工厂并透传 `session_factory`，不直接读写缓存表。
+**理由**：① NAV 公式 `现金 + Σ(数量 × 收盘价)` 需要**真实市价**；qfq 是相对最新价缩放的历史序列，会让总资产绝对值、MWR、多标的组合权重同时失真，且可能为负。② 账单中股息/红利已作为 `category=dividend` 现金流入账，qfq 又把分红折入价格，除权日会**重复计入**。③ akshare 官方确认 qfq 历史价格时变，与永久缓存不相容。④ 区间并集 + 尾部刷新 + TTL 同时满足「连续月份增量拉取」「当月不漏新交易日」「上游修正可自愈」，且无需引入增量列/分区或额外中间件。
+**后果**：
+- 正面：历史账单可出数（2021-10 的 000651/601688）；重复查询走缓存、连续月份只拉缺口；不复权口径与账单现金流自洽、可确定性复算；缓存可随时重建，不背备份责任。
+- 负面：与 PRD NFR-2 的「后复权/as-of 因子」要求暂时偏离；首次冷缓存打破 NFR-10 读 p95 ≤300ms；单源无灾备、无熔断；缓存表无 RLS（依赖「公共数据 + 不开放 HTTP 写路径」控制）。
+- 缓解：hfq/因子版本后续期次补齐；NAV 异步化把取数移出请求事务；补灾备源与统一出站治理；缓存命中优先 + 并发 2 + 重试克制；downgrade 直接 drop `market` schema。
+**被否方案**：qfq 前复权估值（时变 + 股息重复计入 + 可为负）；hfq 估值（v1 无因子快照，无法保证 PIT 正确性，留后续期次）；无 TTL 的永久缓存（上游修正与新股上市/停牌恢复无法自愈）；每次请求全量重拉（东财按并发封 IP，延迟不可接受）；新增 `MARKET_DATA_UNAVAILABLE` 错误码或 503（`/nav` 消费方吞 `ApiError`，503 是死码）；Redis/独立缓存服务（多一个有状态组件，与「不引入额外中间件」约束冲突）；行情放 `review` schema（跨用户公共数据不属于复盘租户域，且 RLS 语义不符）。
+**关联需求**：FR-R1、NFR-2、NFR-9、NFR-10；见 Reliability §7/§8 的降级矩阵与出站治理。
 
 ---
 
