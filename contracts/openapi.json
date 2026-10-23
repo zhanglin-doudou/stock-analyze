@@ -1003,6 +1003,45 @@
         "title": "MeOut",
         "type": "object"
       },
+      "NavHoldingOut": {
+        "description": "单只标的在某日的持仓快照（金额/价格/数量均三位小数字符串）。",
+        "properties": {
+          "avg_cost": {
+            "title": "Avg Cost",
+            "type": "string"
+          },
+          "close_price": {
+            "title": "Close Price",
+            "type": "string"
+          },
+          "market_value": {
+            "title": "Market Value",
+            "type": "string"
+          },
+          "quantity": {
+            "title": "Quantity",
+            "type": "string"
+          },
+          "security_code": {
+            "title": "Security Code",
+            "type": "string"
+          },
+          "security_name": {
+            "title": "Security Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "security_code",
+          "security_name",
+          "quantity",
+          "avg_cost",
+          "close_price",
+          "market_value"
+        ],
+        "title": "NavHoldingOut",
+        "type": "object"
+      },
       "NavOut": {
         "properties": {
           "benchmark_id": {
@@ -1091,6 +1130,19 @@
           "date": {
             "format": "date",
             "title": "Date",
+            "type": "string"
+          },
+          "holdings": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/NavHoldingOut"
+            },
+            "title": "Holdings",
+            "type": "array"
+          },
+          "total_assets": {
+            "default": "0.000",
+            "title": "Total Assets",
             "type": "string"
           },
           "twr_daily": {
@@ -6962,6 +7014,8 @@
                       "blocked_reason": "示例",
                       "cashflow": "1234.56",
                       "date": "2026-09-30",
+                      "holdings": [],
+                      "total_assets": "0.000",
                       "twr_daily": "0.1234",
                       "unit_nav": "12.340000"
                     }

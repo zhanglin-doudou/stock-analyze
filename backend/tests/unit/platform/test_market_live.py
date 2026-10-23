@@ -43,8 +43,25 @@ class _Frame:
 class _FakeAkshare:
     __version__ = "9.9.9"
 
-    def __init__(self, handler: Any) -> None:
+    def __init__(self, handler: Any, sina_handler: Any | None = None) -> None:
+        # stock_zh_a_hist（东财，中文列名）和 stock_zh_a_daily（新浪，英文列名）
+        # 是真实 akshare 里的两个独立接口，这里允许测试分别注入。
         self.stock_zh_a_hist = handler
+        self.stock_zh_a_daily = sina_handler if sina_handler is not None else handler
+
+
+def _sina_fallback_transient(**_kwargs: Any) -> _Frame:
+    """新浪在东财 TransientError 场景下也抛 TransientError，让外层 retry 接管。"""
+    raise Timeout("sina down")
+
+
+def _sina_success(*pairs: tuple[date, float]) -> Any:
+    """新浪正常返回时用英文列名（date/close），与 _records 的中文列名对齐。"""
+
+    def _handler(**_kwargs: Any) -> _Frame:
+        return _Frame([{"date": d, "close": c} for d, c in pairs])
+
+    return _handler
 
 
 def _settings(**overrides: Any) -> Settings:
@@ -61,8 +78,18 @@ def _clock() -> FrozenClock:
     return FrozenClock("2026-10-23T09:00:00+08:00")
 
 
-def _source(handler: Any, monkeypatch: pytest.MonkeyPatch, **overrides: Any) -> Any:
-    monkeypatch.setattr(market_live, "_import_akshare", lambda: _FakeAkshare(handler))
+def _source(
+    handler: Any,
+    monkeypatch: pytest.MonkeyPatch,
+    *,
+    sina_handler: Any | None = None,
+    **overrides: Any,
+) -> Any:
+    monkeypatch.setattr(
+        market_live,
+        "_import_akshare",
+        lambda: _FakeAkshare(handler, sina_handler=sina_handler),
+    )
     return market_live.AkshareMarketDataSource(_settings(**overrides), _clock())
 
 
@@ -182,7 +209,9 @@ async def test_transient_error_is_retried_then_succeeds(monkeypatch: pytest.Monk
             raise Timeout("connect timeout")
         return _Frame(_records((date(2021, 10, 28), 10.0)))
 
-    source = _source(handler, monkeypatch, market_live_retry_attempts=2)
+    source = _source(
+        handler, monkeypatch, market_live_retry_attempts=2, sina_handler=_sina_fallback_transient
+    )
     bars = await source.get_daily_bars(["600519"], date(2021, 10, 1), date(2021, 10, 31))
     assert len(bars) == 1
     assert calls == 2
@@ -198,7 +227,9 @@ async def test_transient_error_exhausted_maps_to_unavailable(
         calls += 1
         raise Timeout("down")
 
-    source = _source(handler, monkeypatch, market_live_retry_attempts=2)
+    source = _source(
+        handler, monkeypatch, market_live_retry_attempts=2, sina_handler=_sina_fallback_transient
+    )
     with pytest.raises(ApiError) as caught:
         await source.get_daily_bars(["600519"], date(2021, 10, 1), date(2021, 10, 31))
     assert caught.value.code is ErrorCode.INTERNAL_ERROR

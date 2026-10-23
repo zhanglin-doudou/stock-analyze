@@ -214,6 +214,8 @@ ADMIN_FORBIDDEN: list[tuple[str, str]] = [
     ("get", "/rounds/{round_id}"),
     ("get", "/rounds/{round_id}/fills"),
     ("get", "/reconciliation/bridge"),
+    # Period2-03：admin 不可读 NAV + 持仓
+    ("get", "/nav"),
 ]
 
 #: 列表型端点：A/B 各自造数据，B 的列表不得包含 A 的行（跨租户列表隔离）
@@ -266,6 +268,8 @@ UNAUTHENTICATED_MATRIX: list[tuple[str, str]] = [
     ("get", "/rounds"),
     ("get", "/rounds/{round_id}"),
     ("get", "/rounds/{round_id}/fills"),
+    # Period2-03（API-032 净值与收益 + 每日持仓）
+    ("get", "/nav"),
 ]
 
 #: 路径参数占位值（只用于越权/401 用例；资源不存在时恰好也走 404 分支）。
@@ -282,6 +286,8 @@ _PLACEHOLDERS = {
 _REQUIRED_QUERY: dict[str, str] = {
     "/reconciliation": "?period=2026-06",
     "/reconciliation/bridge": "?period=2026-06",
+    # Period2-03：/nav 需要 period 参数才能通过 StrictQueryRoute 校验（避免 400 而非 401）
+    "/nav": "?period=2026-06",
 }
 
 

@@ -102,7 +102,7 @@ def _bar(symbol: str, trade_date: date, close: str) -> Bar:
 
 
 async def _run(trades: list[Trade], start: date, end: date, market) -> tuple:
-    points, blocked, reasons, degraded = await compute_nav_points(trades, start, end, market)
+    points, blocked, reasons, degraded, _ = await compute_nav_points(trades, start, end, market)
     series = build_nav_series(points) if points else None
     mwr = 0
     if series is not None:
@@ -232,7 +232,7 @@ async def test_missing_market_data_blocks_day_not_raise() -> None:
 async def test_baseline_point_on_period_start() -> None:
     """首个点必须是区间首日基准，否则整段 TWR 漏掉首日前的持仓涨跌。"""
     trades = _base_trades()
-    points, _, _, _ = await compute_nav_points(
+    points, _, _, _, _ = await compute_nav_points(
         trades, PERIOD_START, PERIOD_END, _rising_market("1500.00")
     )
     assert points[0][0] == PERIOD_START
@@ -252,7 +252,7 @@ async def test_no_cash_anchor_is_global_block() -> None:
             price_units=price("1000.00"),
         )
     ]
-    points, blocked, reasons, _ = await compute_nav_points(
+    points, blocked, reasons, _, _ = await compute_nav_points(
         trades, PERIOD_START, PERIOD_END, _rising_market("1500.00")
     )
     assert points == [] and blocked == []
@@ -288,7 +288,7 @@ class _EmptyMarket:
 async def test_blocked_reason_annotates_market_failure(cause: str, label: str) -> None:
     """逐日阻断仍返回 200 blocked，但原因带可操作类别（契约不变）。"""
     trades = _base_trades()
-    _, blocked, reasons, _ = await compute_nav_points(
+    _, blocked, reasons, _, _ = await compute_nav_points(
         trades, PERIOD_START, PERIOD_END, _FailureMarket(cause)
     )
     assert reasons == []
@@ -302,7 +302,7 @@ async def test_blocked_reason_annotates_market_failure(cause: str, label: str) -
 async def test_blocked_reason_marks_requested_but_empty_as_no_data() -> None:
     """请求了标的但区间内无 bar（适配器返回空序列）→ 标记 no_data。"""
     trades = _base_trades()
-    _, blocked, reasons, _ = await compute_nav_points(
+    _, blocked, reasons, _, _ = await compute_nav_points(
         trades, PERIOD_START, PERIOD_END, _EmptyMarket()
     )
     assert reasons == []

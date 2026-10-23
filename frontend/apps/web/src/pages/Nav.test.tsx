@@ -24,8 +24,8 @@ function makeNav(overrides: Partial<NavResult> = {}): NavResult {
     status: "ok",
     blocked_ranges: [],
     points: [
-      { date: "2026-06-02", unit_nav: "10000.000000", twr_daily: "0.00000000", cashflow: "0.00", blocked: false },
-      { date: "2026-06-20", unit_nav: "11000.000000", twr_daily: "0.10000000", cashflow: "0.00", blocked: false },
+      { date: "2026-06-02", unit_nav: "10000.000000", twr_daily: "0.00000000", cashflow: "0.00", blocked: false, total_assets: "50000.000", holdings: [] },
+      { date: "2026-06-20", unit_nav: "11000.000000", twr_daily: "0.10000000", cashflow: "0.00", blocked: false, total_assets: "55000.000", holdings: [] },
     ],
     summary: {
       mwr: "0.10000000",
@@ -93,7 +93,7 @@ describe("Nav 净值与收益页", () => {
         status: "blocked",
         blocked_ranges: [{ from: "2026-06-10", to: "2026-06-12" }],
         points: [
-          { date: "2026-06-10", unit_nav: "0.000000", twr_daily: "0.00000000", cashflow: "0.00", blocked: true },
+          { date: "2026-06-10", unit_nav: "0.000000", twr_daily: "0.00000000", cashflow: "0.00", blocked: true, total_assets: "0.000", holdings: [] },
         ],
       }),
     );

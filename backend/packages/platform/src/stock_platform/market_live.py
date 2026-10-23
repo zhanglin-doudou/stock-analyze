@@ -193,20 +193,41 @@ def validate_symbols(symbols: Sequence[str]) -> tuple[str, ...]:
     return tuple(wanted)
 
 
+def _symbol_to_sina(symbol: str) -> str:
+    """601688 → sh601688（沪市 6 开头用 sh，其余深市用 sz）。"""
+    if symbol.startswith("6"):
+        return f"sh{symbol}"
+    return f"sz{symbol}"
+
+
 def _parse_rows(
     rows: Sequence[Mapping[str, Any]],
+    *,
+    source: str = "eastmoney",
 ) -> tuple[list[tuple[date, int, int]], date | None]:
-    """akshare 行字典 → `[(trade_date, close_units, return_units)]`。
+    """行情源行字典 → `[(trade_date, close_units, return_units)]`。
 
-    只依赖 `日期`/`收盘` 两列；NaN/None/负价/重复日期一律 fail-closed。
+    兼容两种列名：
+    - eastmoney：中文（日期 / 收盘）
+    - sina：英文（date / close）
+
+    只依赖日期/收盘价两列；NaN/None/负价/重复日期一律 fail-closed。
     `return_units` 由 close 序列派生（首根 0），与 `close_units` 严格自洽。
     """
+    if source == "sina":
+        date_key, close_key = "date", "close"
+    else:
+        date_key, close_key = "日期", "收盘"
     parsed: list[tuple[date, int]] = []
     for index, row in enumerate(rows):
-        trade_date = _row_date(row.get("日期"), where=f"row[{index}].日期")
-        close_units = _to_units(row.get("收盘"), scale=SCALE_PRICE, where=f"row[{index}].收盘")
+        trade_date = _row_date(row.get(date_key), where=f"{source} row[{index}].{date_key}")
+        close_units = _to_units(
+            row.get(close_key), scale=SCALE_PRICE, where=f"{source} row[{index}].{close_key}"
+        )
         if close_units <= 0:
-            raise _invalid_data(f"row[{index}].收盘: 收盘价必须为正，实际 {row.get('收盘')!r}")
+            raise _invalid_data(
+                f"{source} row[{index}].收盘: 收盘价必须为正，实际 {row.get(close_key)!r}"
+            )
         parsed.append((trade_date, close_units))
     if not parsed:
         return [], None
@@ -216,7 +237,7 @@ def _parse_rows(
     previous_date: date | None = None
     for trade_date, close_units in parsed:
         if previous_date is not None and trade_date <= previous_date:
-            raise _invalid_data(f"上游日期非严格递增：{trade_date} <= {previous_date}")
+            raise _invalid_data(f"{source} 上游日期非严格递增：{trade_date} <= {previous_date}")
         return_units = 0 if previous is None else _ratio_units(previous, close_units)
         bars.append((trade_date, close_units, return_units))
         previous, previous_date = close_units, trade_date
@@ -465,11 +486,31 @@ class AkshareMarketDataSource:
     def _fetch_units(
         self, symbol: str, start: date, end: date
     ) -> tuple[list[tuple[date, int, int]], date | None]:
-        """在线程内执行：lazy import akshare → 调用 → 行解析。"""
+        """在线程内执行：lazy import akshare → 调用 → 行解析。
+
+        多源 fallback：东财 → 新浪。东财在部分网络环境下会被 TLS 层直接 RST，
+        新浪（AkShare `stock_zh_a_daily`）列名不同（date/close vs 日期/收盘），
+        `_parse_rows(source=...)` 已兼容。
+        """
         try:
             module = _import_akshare()
         except RuntimeError as exc:  # 运行期兜底：启动期已用 find_spec 拦截
             raise _TransientMarketError(str(exc)) from exc
+        sources = [self._fetch_eastmoney, self._fetch_sina]
+        last_exc: Exception | None = None
+        for fetcher in sources:
+            try:
+                return fetcher(module, symbol, start, end)
+            except _TransientMarketError as exc:
+                # 只有网络/超时类瞬时故障才降级到下一个源；InvalidData 说明源返回了东西
+                # 但口径坏了，不应盲目降级到另一个口径不同的源（可能掩盖问题）。
+                last_exc = exc
+                continue
+        raise _TransientMarketError(f"所有行情源均不可用：{last_exc}") from last_exc
+
+    def _fetch_eastmoney(
+        self, module: Any, symbol: str, start: date, end: date
+    ) -> tuple[list[tuple[date, int, int]], date | None]:
         try:
             frame = module.stock_zh_a_hist(
                 symbol=symbol,
@@ -481,17 +522,44 @@ class AkshareMarketDataSource:
             )
         except Exception as exc:
             if _is_transient_failure(exc):
-                raise _TransientMarketError(f"{type(exc).__name__}: {exc}") from exc
-            raise _invalid_data(f"akshare 调用失败：{type(exc).__name__}: {exc}") from exc
+                raise _TransientMarketError(f"eastmoney {type(exc).__name__}: {exc}") from exc
+            raise _invalid_data(f"eastmoney 调用失败：{type(exc).__name__}: {exc}") from exc
         if frame is None:
             return [], None
         try:
             rows = frame.to_dict("records")
         except Exception as exc:
-            raise _invalid_data(f"akshare 返回结构非法：{type(exc).__name__}") from exc
+            raise _invalid_data(f"eastmoney 返回结构非法：{type(exc).__name__}") from exc
         if not rows:
             return [], None
-        return _parse_rows(rows)
+        return _parse_rows(rows, source="eastmoney")
+
+    def _fetch_sina(
+        self, module: Any, symbol: str, start: date, end: date
+    ) -> tuple[list[tuple[date, int, int]], date | None]:
+        sina_symbol = _symbol_to_sina(symbol)
+        try:
+            # adjust="" 不复权（与 eastmoney stock_zh_a_hist 默认口径一致）：
+            # 分红现金流已在账单侧单独进 NAV，不复权避免双计。
+            frame = module.stock_zh_a_daily(
+                symbol=sina_symbol,
+                start_date=start.strftime("%Y%m%d"),
+                end_date=end.strftime("%Y%m%d"),
+                adjust="",
+            )
+        except Exception as exc:
+            if _is_transient_failure(exc):
+                raise _TransientMarketError(f"sina {type(exc).__name__}: {exc}") from exc
+            raise _invalid_data(f"sina 调用失败：{type(exc).__name__}: {exc}") from exc
+        if frame is None:
+            return [], None
+        try:
+            rows = frame.to_dict("records")
+        except Exception as exc:
+            raise _invalid_data(f"sina 返回结构非法：{type(exc).__name__}") from exc
+        if not rows:
+            return [], None
+        return _parse_rows(rows, source="sina")
 
 
 # ── DB 缓存装饰器 ───────────────────────────────────────────

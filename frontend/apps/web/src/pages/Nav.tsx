@@ -1,4 +1,4 @@
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import type { Nav, NavPoint, NavStatus } from "@sa/api-client";
 import { api } from "../client";
@@ -32,7 +32,15 @@ function currentMonth(): string {
 
 const PERIOD_RE = /^\d{4}-\d{2}$/;
 
-/** 净值与收益（/nav）：按月构建份额法 TWR 与 XIRR/MWR 并展示每日净值。 */
+/** 找到最后一个非 blocked 的 NavPoint，作为持仓明细默认选中日。 */
+function lastUnblocked(points: NavPoint[]): NavPoint | undefined {
+  for (let i = points.length - 1; i >= 0; i--) {
+    if (!points[i].blocked) return points[i];
+  }
+  return undefined;
+}
+
+/** 净值与收益（/nav）：按月构建份额法 TWR 与 XIRR/MWR 并展示每日净值 + 持仓。 */
 export function Nav() {
   const [period, setPeriod] = useState(currentMonth);
   const [result, setResult] = useState<Nav | null>(null);
@@ -40,6 +48,7 @@ export function Nav() {
   const [error, setError] = useState<unknown>(null);
   const [formError, setFormError] = useState("");
   const [notice, setNotice] = useState("");
+  const [selectedDate, setSelectedDate] = useState<string>("");
 
   const build = useCallback(async () => {
     if (!PERIOD_RE.test(period)) {
@@ -50,9 +59,12 @@ export function Nav() {
     setError(null);
     setFormError("");
     setNotice("");
+    setSelectedDate("");
     try {
       const data = await api.nav.get({ period });
       setResult(data);
+      const defaultPoint = lastUnblocked(data.points);
+      if (defaultPoint) setSelectedDate(defaultPoint.date);
       if (data.status === "blocked") {
         setNotice(
           "本期净值存在阻断区间（缺期初资产锚点、缺行情或对账断链），阻断日不输出资产值。",
@@ -72,6 +84,12 @@ export function Nav() {
 
   const columns: Array<Column<NavPoint>> = [
     { key: "date", header: "日期", render: (row) => row.date },
+    {
+      key: "total_assets",
+      header: "总资产",
+      render: (row) =>
+        row.blocked ? <span className="muted">—</span> : <strong>{row.total_assets}</strong>,
+    },
     {
       key: "nav",
       header: "单位净值",
@@ -97,6 +115,26 @@ export function Nav() {
 
   const summary = result?.summary;
   const blockedRanges = result?.blocked_ranges ?? [];
+
+  const selectedPoint = useMemo(
+    () => result?.points.find((p) => p.date === selectedDate),
+    [result, selectedDate],
+  );
+
+  const holdingColumns: Array<Column<NonNullable<NavPoint["holdings"]>[number]>> = [
+    { key: "security_code", header: "代码", render: (row) => row.security_code },
+    { key: "security_name", header: "名称", render: (row) => row.security_name },
+    { key: "quantity", header: "持有份额", render: (row) => row.quantity },
+    { key: "avg_cost", header: "买入价", render: (row) => row.avg_cost },
+    { key: "close_price", header: "现价", render: (row) => row.close_price },
+    {
+      key: "market_value",
+      header: "市值",
+      render: (row) => (
+        <span className={signedClass(row.market_value)}>{row.market_value}</span>
+      ),
+    },
+  ];
 
   return (
     <div>
@@ -190,6 +228,50 @@ export function Nav() {
             emptyText="本期没有可输出的净值日点（可能缺少余额行或行情数据）。"
           />
           <p className="muted">数据截至：{result.data_as_of}</p>
+
+          {/* 每日持仓分析 */}
+          <hr style={{ margin: "24px 0", border: "none", borderTop: "1px solid var(--border)" }} />
+          <h2>每日持仓分析</h2>
+          {(() => {
+            const unblocked = result.points.filter((p) => !p.blocked);
+            if (unblocked.length === 0) {
+              return <p className="muted">本期所有日均被阻断，无可展示的持仓。</p>;
+            }
+            return (
+              <>
+                <label>
+                  <span className="muted">选择日期：</span>
+                  <select
+                    value={selectedDate}
+                    onChange={(e) => setSelectedDate(e.target.value)}
+                    aria-label="持仓日期"
+                    style={{ marginLeft: "8px" }}
+                  >
+                    {unblocked.map((p) => (
+                      <option key={p.date} value={p.date}>
+                        {p.date}　总资产 {p.total_assets}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                {selectedPoint ? (
+                  <div style={{ marginTop: "16px" }} data-testid="nav-holdings">
+                    <p>
+                      <strong>{selectedPoint.date}</strong>
+                      <span className="muted">　总资产：</span>
+                      <span className="money">{selectedPoint.total_assets}</span>
+                    </p>
+                    <Table
+                      columns={holdingColumns}
+                      rows={selectedPoint.holdings ?? []}
+                      rowKey={(row) => row.security_code}
+                      emptyText="该日无持仓（可能已全部清仓）。"
+                    />
+                  </div>
+                ) : null}
+              </>
+            );
+          })()}
         </div>
       ) : (
         <p className="muted">

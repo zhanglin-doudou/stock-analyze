@@ -1148,6 +1148,24 @@ export interface components {
             };
             user: components["schemas"]["UserBrief"];
         };
+        /**
+         * NavHoldingOut
+         * @description 单只标的在某日的持仓快照（金额/价格/数量均三位小数字符串）。
+         */
+        NavHoldingOut: {
+            /** Avg Cost */
+            avg_cost: string;
+            /** Close Price */
+            close_price: string;
+            /** Market Value */
+            market_value: string;
+            /** Quantity */
+            quantity: string;
+            /** Security Code */
+            security_code: string;
+            /** Security Name */
+            security_name: string;
+        };
         /** NavOut */
         NavOut: {
             /**
@@ -1202,6 +1220,16 @@ export interface components {
              * Format: date
              */
             date: string;
+            /**
+             * Holdings
+             * @default []
+             */
+            holdings: components["schemas"]["NavHoldingOut"][];
+            /**
+             * Total Assets
+             * @default 0.000
+             */
+            total_assets: string;
             /** Twr Daily */
             twr_daily: string;
             /** Unit Nav */

@@ -526,17 +526,31 @@ class ReconciliationBridgeOut(BaseModel):
 
 
 # ── 净值与收益（API-032）──────────────────────────────────
+class NavHoldingOut(BaseModel):
+    """单只标的在某日的持仓快照（金额/价格/数量均三位小数字符串）。"""
+
+    security_code: str
+    security_name: str
+    quantity: str  # 持有份额（三位小数）
+    avg_cost: str  # 加权平均成本价（三位小数）
+    close_price: str  # 当日或之前最近收盘价（三位小数）
+    market_value: str  # 持仓市值（三位小数）
+
+
 class NavPointOut(BaseModel):
     """单日净值点（金额/净值/收益率均为定点字符串）。"""
 
     date: date
-    unit_nav: str  # 单位净值（scale=6 → 6 位小数）
-    twr_daily: str  # 当日收益率（scale=8 → 8 位小数）
-    cashflow: str  # 当日外部现金流（scale=2 → 2 位小数）
+    unit_nav: str  # 单位净值（scale=6 → 后端返回完整精度）
+    twr_daily: str  # 当日收益率（scale=8 → 后端返回完整精度）
+    cashflow: str  # 当日外部现金流（scale=2 → 后端返回完整精度）
     blocked: bool = False
     # blocked 日的可读原因（含失败类别）；非 blocked 日为 null。
-    # 新增可选响应字段属非破坏变更（API-Catalog §7）。
     blocked_reason: str | None = None
+    # 当日总资产（现金 + 持仓市值），三位小数字符串；blocked 日为 "0.000"。
+    total_assets: str = "0.000"
+    # 当日持仓明细（非 blocked 日填充，blocked 日为空列表）。
+    holdings: list[NavHoldingOut] = []
 
 
 class NavSummaryOut(BaseModel):

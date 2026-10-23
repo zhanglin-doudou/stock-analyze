@@ -13,17 +13,54 @@ from typing import Annotated, Literal, cast
 
 from fastapi import APIRouter, Depends, Query, Request
 from stock_contracts.errors import ApiError, ErrorCode
-from stock_core.values import Money, Price, Ratio
+from stock_core.values import Money, Price, Qty, Ratio
 from stock_platform.tenant import TenantContext
 
 from stock_api.deps import get_market_data, get_state, get_tenant
 from stock_api.routing import StrictQueryRoute
-from stock_api.schemas import NavOut, NavPointOut, NavSummaryOut
+from stock_api.schemas import NavHoldingOut, NavOut, NavPointOut, NavSummaryOut
 
 router = APIRouter(tags=["nav"], route_class=StrictQueryRoute)
 
 _PERIOD_RE = re.compile(r"^(\d{4})-(\d{2})$")
 _DEFINITION_VERSION = "1.0"
+
+# cost (scale=2) / qty (scale=4) → price (scale=6): cost * 1e8 / qty
+_COST_QTY_TO_PRICE_SCALE = 10**8
+
+
+def _to_3dp(units: int, scale: int) -> str:
+    """标度整数 → 三位小数字符串（截断而非四舍五入，保持零口径可预测）。"""
+    if scale == 0:
+        return f"{units}.000"
+    total_digits = scale + 3
+    s = f"{units:0{total_digits}d}"
+    if len(s) <= scale:
+        s = "0" + "." + "0" * (3 + scale)
+        return s[: s.index(".") + 4]  # "0.000"
+    int_part = s[:-scale]
+    frac_part = s[-scale:]
+    # 截断到三位：如果 scale > 3，取前 3 位；如果 scale < 3，补 0
+    frac = frac_part[:3] if scale >= 3 else frac_part + "0" * (3 - scale)
+    return f"{int_part}.{frac}"
+
+
+def _nav_holding_out(
+    code: str, name: str, qty_units: int, cost_units: int, close_units: int, market_value_units: int
+) -> NavHoldingOut:
+    """持仓快照 → NavHoldingOut（三位小数字符串）。"""
+    if qty_units > 0 and cost_units > 0:
+        avg_cost_units = cost_units * _COST_QTY_TO_PRICE_SCALE // qty_units
+    else:
+        avg_cost_units = 0
+    return NavHoldingOut(
+        security_code=code,
+        security_name=name,
+        quantity=_to_3dp(qty_units, Qty.scale),
+        avg_cost=_to_3dp(avg_cost_units, Price.scale),
+        close_price=_to_3dp(close_units, Price.scale),
+        market_value=_to_3dp(market_value_units, Money.scale),
+    )
 
 
 def _parse_period(period: str) -> tuple[date, date]:
@@ -97,6 +134,8 @@ async def get_nav(
     overall_status: str = "ok"
     blocked_start: date | None = None
 
+    holdings_map = result.holdings_by_date
+
     for row in rows:
         is_blocked = row.status == "blocked"
         if is_blocked:
@@ -112,6 +151,22 @@ async def get_nav(
             if row.status == "degraded" and overall_status != "blocked":
                 overall_status = "degraded"
 
+        holdings_list: list[NavHoldingOut] = []
+        total_assets_3dp = _to_3dp(0, Money.scale)
+        if not is_blocked:
+            total_assets_3dp = _to_3dp(row.total_value_units, Money.scale)
+            for snap in holdings_map.get(row.trade_date, []):
+                holdings_list.append(
+                    _nav_holding_out(
+                        snap.security_code,
+                        snap.security_name,
+                        snap.quantity_units,
+                        snap.cost_units,
+                        snap.close_units,
+                        snap.market_value_units,
+                    )
+                )
+
         points.append(
             NavPointOut(
                 date=row.trade_date,
@@ -120,6 +175,8 @@ async def get_nav(
                 cashflow=str(Money(row.cashflow_units)),
                 blocked=is_blocked,
                 blocked_reason=row.blocked_reason if is_blocked else None,
+                total_assets=total_assets_3dp,
+                holdings=holdings_list,
             )
         )
     if blocked_start is not None and rows:

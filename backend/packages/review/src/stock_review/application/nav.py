@@ -58,6 +58,7 @@ class NavComputeResult:
     mwr_units: int
     blocked_reasons: list[str]
     degraded: bool
+    holdings_by_date: dict[date, list[_HoldingSnapshot]]
 
 
 @dataclass(slots=True)
@@ -66,7 +67,20 @@ class _DailyState:
 
     cash_units: int
     holdings: dict[str, int]  # security_code → quantity_units (scale=4)
+    cost_basis: dict[str, int]  # security_code → 累计成本 (scale=2)
     cashflow_units: int  # 当日外部现金流（scale=2）
+
+
+@dataclass(slots=True)
+class _HoldingSnapshot:
+    """单只标的在某日的持仓快照（供 API 响应组装，不落库）。"""
+
+    security_code: str
+    security_name: str
+    quantity_units: int  # scale=4
+    cost_units: int  # 累计成本 (scale=2)，=0 且 qty>0 表示纯送转
+    close_units: int  # 当日或之前最近收盘价 (scale=6)
+    market_value_units: int  # 市值 (scale=2)
 
 
 def _nav_id(user_id: uuid.UUID, trade_date: date) -> str:
@@ -225,36 +239,51 @@ def investor_cashflows(series: NavSeries) -> list[CashflowPoint]:
     return flows
 
 
+# 这些 category 的 trade 会增加 cost_basis（花钱买入更多持仓）。
+# amount_units 对 buy/rights/new_stock 为负（现金流出），取负即得成本增量。
+_COST_ADD_CATEGORIES: frozenset[str] = frozenset({"buy", "rights", "new_stock"})
+
+
 async def compute_nav_points(
     trades: list[Trade],
     period_start: date,
     period_end: date,
     market_data: MarketDataSource,
-) -> tuple[list[tuple[date, int, int]], list[tuple[date, str]], list[str], bool]:
-    """计算区间内每日 (date, total_value_units, cashflow_units) 序列。
+) -> tuple[
+    list[tuple[date, int, int]],  # (date, total_value_units, cashflow_units)
+    list[tuple[date, str]],  # blocked_points
+    list[str],  # blocked_reasons (global)
+    bool,  # degraded
+    dict[date, list[_HoldingSnapshot]],  # holdings_by_date (非 blocked 日)
+]:
+    """计算区间内每日 NAV 输入 + 持仓快照。
 
-    返回 (points, blocked_points, blocked_reasons, degraded)。
-    - points: 可计算日 (date, total_value_units, cashflow_units)，供 core.build_nav_series 消费；
-    - blocked_points: 逐日阻断 [(date, reason)]（如该日持仓缺行情）；不计入 TWR；
-    - blocked_reasons: 全局阻断原因（如无期初锚点）；非空时 points/blocked_points 为空；
-    - degraded: FIFO data_error 时为 True。
+    返回 (points, blocked_points, blocked_reasons, degraded, holdings_by_date)。
+    新增的 holdings_by_date 为 API 响应组装所需，不落库。
     """
     # 1. 期初现金锚点
     if not any(_is_cash_balance(t) for t in trades):
-        return [], [], ["无现金余额锚点（无 cash_balance 行）"], False
+        return [], [], ["无现金余额锚点（无 cash_balance 行）"], False, {}
     initial_cash = _initial_cash(trades, period_start)
     if initial_cash is None:
-        return [], [], ["无法确定期初现金（无区间前余额且首行非余额行）"], False
+        return [], [], ["无法确定期初现金（无区间前余额且首行非余额行）"], False, {}
 
     # 2. FIFO 结果用于检测 data_error（降级）
     fifo_all = build_rounds(trades_to_events(trades))
     degraded = any(r.status == "data_error" for r in fifo_all.rounds)
 
-    # 3. 期初持仓（区间前 open lots）
+    # 3. 期初持仓（区间前 open lots）+ 成本
     fifo_before = build_rounds(trades_to_events([t for t in trades if t.trade_date < period_start]))
     initial_holdings: dict[str, int] = defaultdict(int)
+    initial_cost: dict[str, int] = defaultdict(int)
+    code_names: dict[str, str] = {}
     for lot in fifo_before.open_lots:
         initial_holdings[lot.security_code] += lot.quantity_units
+        initial_cost[lot.security_code] += lot.cost_units
+    # 从所有 trades 构建 code → name 映射（覆盖期初持仓 + 区间内新买入）
+    for trade in trades:
+        if trade.security_code and trade.security_name:
+            code_names[trade.security_code] = trade.security_name
 
     # 4. 按日分组 trades（只取区间内；区间前的持仓/现金已由 initial_holdings / initial_cash 承担）
     all_trades_in_range = [t for t in trades if period_start <= t.trade_date <= period_end]
@@ -279,6 +308,7 @@ async def compute_nav_points(
         market_data, all_symbols, period_start - _PRICE_LOOKBACK, trade_dates[-1]
     )
     points: list[tuple[date, int, int]] = []
+    holdings_by_date: dict[date, list[_HoldingSnapshot]] = {}
 
     # 6b. 期初基准点：区间首日之前的总资产（现金 + 期初持仓按市价）。
     #     没有它，TWR 只能从首个交易日算起，整段收益会漏掉首日涨跌。
@@ -298,13 +328,18 @@ async def compute_nav_points(
                 ],
                 [],
                 degraded,
+                {},
             )
         points.append((baseline_date, initial_cash + baseline_value, 0))
+        holdings_by_date[baseline_date] = _build_holding_snapshots(
+            dict(initial_holdings), dict(initial_cost), ladder, baseline_date, code_names
+        )
 
     # 7. 逐日推演
     state = _DailyState(
         cash_units=initial_cash,
         holdings=dict(initial_holdings),
+        cost_basis=dict(initial_cost),
         cashflow_units=0,
     )
     blocked_points: list[tuple[date, str]] = []
@@ -317,12 +352,25 @@ async def compute_nav_points(
 
         for trade in day_trades:
             category = _category(trade)
-            # 持仓变化
-            delta = _holding_delta(category, trade.quantity_units)
-            if delta:
-                state.holdings[trade.security_code] = (
-                    state.holdings.get(trade.security_code, 0) + delta
-                )
+            code = trade.security_code
+            if code:
+                # 持仓数量变化
+                delta = _holding_delta(category, trade.quantity_units)
+                if delta:
+                    state.holdings[code] = state.holdings.get(code, 0) + delta
+                # 成本变化：buy/rights/new_stock 增加成本，sell 按比例结转
+                if category in _COST_ADD_CATEGORIES and trade.amount_units != 0:
+                    state.cost_basis[code] = state.cost_basis.get(code, 0) + (-trade.amount_units)
+                elif category == "sell":
+                    old_qty = state.holdings.get(code, 0) - _holding_delta(
+                        category, trade.quantity_units
+                    )
+                    if old_qty > 0 and delta < 0:
+                        old_cost = state.cost_basis.get(code, 0)
+                        state.cost_basis[code] = max(0, old_cost + (old_cost * delta) // old_qty)
+                # 更新 code→name
+                if trade.security_name:
+                    code_names[code] = trade.security_name
             # 现金变化（所有 trade 的 amount 都影响现金）
             day_cash_delta += trade.amount_units
             # 外部现金流
@@ -347,8 +395,45 @@ async def compute_nav_points(
 
         total_value = state.cash_units + market_value
         points.append((d, total_value, cashflow))
+        holdings_by_date[d] = _build_holding_snapshots(
+            dict(state.holdings), dict(state.cost_basis), ladder, d, code_names
+        )
 
-    return points, blocked_points, [], degraded
+    return points, blocked_points, [], degraded, holdings_by_date
+
+
+def _build_holding_snapshots(
+    holdings: dict[str, int],
+    cost_basis: dict[str, int],
+    ladder: dict[str, list[tuple[date, int]]],
+    trade_date: date,
+    code_names: dict[str, str],
+) -> list[_HoldingSnapshot]:
+    """根据某日推演结束后的 holdings/cost_basis + 价格阶梯，构建持仓快照列表。
+
+    过滤 qty=0 的标的；按 security_code 排序，保证确定性。
+    """
+    snapshots: list[_HoldingSnapshot] = []
+    for code in sorted(holdings):
+        qty = holdings[code]
+        if qty == 0:
+            continue
+        close = _close_on_or_before(ladder, code, trade_date)
+        if close is None:
+            continue  # 缺行情的日期会被判 blocked，这里只是兜底过滤
+        cost = cost_basis.get(code, 0)
+        market_value = qty * close // _QTY_PRICE_SCALE
+        snapshots.append(
+            _HoldingSnapshot(
+                security_code=code,
+                security_name=code_names.get(code, code),
+                quantity_units=qty,
+                cost_units=cost,
+                close_units=close,
+                market_value_units=market_value,
+            )
+        )
+    return snapshots
 
 
 async def compute_and_store_nav(
@@ -367,7 +452,7 @@ async def compute_and_store_nav(
     """
     trades = await TradeRepository(session).balances_ordered(user_id, period_end=period_end)
 
-    points, blocked_points, blocked_reasons, degraded = await compute_nav_points(
+    points, blocked_points, blocked_reasons, degraded, holdings_by_date = await compute_nav_points(
         trades, period_start, period_end, market_data
     )
 
@@ -451,13 +536,18 @@ async def compute_and_store_nav(
 
     if blocked_reasons:
         return NavComputeResult(
-            series=None, mwr_units=0, blocked_reasons=blocked_reasons, degraded=False
+            series=None,
+            mwr_units=0,
+            blocked_reasons=blocked_reasons,
+            degraded=False,
+            holdings_by_date={},
         )
     return NavComputeResult(
         series=series,
         mwr_units=mwr_units,
         blocked_reasons=[],
         degraded=degraded,
+        holdings_by_date=holdings_by_date,
     )
 
 
