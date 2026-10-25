@@ -32,7 +32,7 @@ help:
 	@echo "  make typecheck      mypy + tsc + import-linter"
 	@echo "  make test           快速单测（无外部依赖）"
 	@echo "  make test-core      core 内核单测 + 覆盖门禁"
-	@echo "  make test-review    Period2 review 域单测 + rebuild 集成测试"
+	@echo "  make test-review    Period2 review 域单测 + rebuild/资产表增量集成测试"
 	@echo "  make test-p2        Period2-01/02 全量断言（fifo/review/API/越权/契约）"
 	@echo "  make test-api       API 验收套件（一期 + 二期已实现端点）"
 	@echo "  make test-rls       RLS 隔离集成测试"
@@ -157,7 +157,7 @@ test-isolation:
 # ── Period2-01/02（FIFO 核心 + 回合落库/端点）────────────────
 .PHONY: test-review
 test-review:
-	@$(UV) pytest backend/tests/unit/review backend/tests/integration/test_rounds_rebuild.py -q
+	@$(UV) pytest backend/tests/unit/review backend/tests/integration/test_rounds_rebuild.py backend/tests/integration/test_assets_incremental.py -q
 
 .PHONY: test-p2
 test-p2:

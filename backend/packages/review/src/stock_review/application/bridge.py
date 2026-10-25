@@ -39,6 +39,8 @@ from stock_ledger.models import Trade
 from stock_ledger.repositories.trades import TradeRepository
 
 from stock_review.application.rebuild import trades_to_events
+from stock_review.application.valuation import category as _category
+from stock_review.application.valuation import is_cash_balance as _is_cash_balance
 
 # 桥接容差：1 分（标度整数最小单位的 1 倍；金额全部是分）。
 TOLERANCE_UNITS = 1
@@ -70,14 +72,6 @@ class BridgeResult:
     status: str
     data_as_of: datetime
     inputs_hash: str
-
-
-def _category(trade: Trade) -> str:
-    return (trade.category or "").strip().lower()
-
-
-def _is_cash_balance(trade: Trade) -> bool:
-    return trade.cash_balance_units is not None
 
 
 def _blocked(period: str, clock: Clock) -> BridgeResult:

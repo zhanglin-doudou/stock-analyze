@@ -87,7 +87,11 @@ async def test_heartbeat_keeps_long_handler_alive(
     job_id = await _enqueue(runner, user_id, kind="slow_test")
 
     async def slow_handler(
-        queue: JobQueue, session: Any, job: JobPayload, clock: Clock
+        queue: JobQueue,
+        session: Any,
+        job: JobPayload,
+        clock: Clock,
+        market_data: Any,
     ) -> dict[str, Any]:
         await asyncio.sleep(1.0)
         await queue.finish(session, job["id"], status=JobStatus.SUCCEEDED, result={"ok": True})
@@ -129,12 +133,20 @@ async def test_unknown_exception_marks_failed_and_loop_continues(
     ok_id = await _enqueue(runner, user_id, kind="ok")
 
     async def boom_handler(
-        queue: JobQueue, session: Any, job: JobPayload, clock: Clock
+        queue: JobQueue,
+        session: Any,
+        job: JobPayload,
+        clock: Clock,
+        market_data: Any,
     ) -> dict[str, Any]:
         raise RuntimeError("handler 内部炸了")
 
     async def ok_handler(
-        queue: JobQueue, session: Any, job: JobPayload, clock: Clock
+        queue: JobQueue,
+        session: Any,
+        job: JobPayload,
+        clock: Clock,
+        market_data: Any,
     ) -> dict[str, Any]:
         await queue.finish(session, job["id"], status=JobStatus.SUCCEEDED, result={"ok": True})
         return {"ok": True}
@@ -173,7 +185,11 @@ async def test_api_error_retries_via_fail_or_retry(
     job_id = await _enqueue(runner, user_id, kind="bad_api", max_attempts=3)
 
     async def bad_api_handler(
-        queue: JobQueue, session: Any, job: JobPayload, clock: Clock
+        queue: JobQueue,
+        session: Any,
+        job: JobPayload,
+        clock: Clock,
+        market_data: Any,
     ) -> dict[str, Any]:
         raise ApiError(ErrorCode.VALIDATION_ERROR, detail="参数不合法")
 
@@ -199,7 +215,11 @@ async def test_handler_crashing_after_finish_does_not_duplicate_finish(
     job_id = await _enqueue(runner, user_id, kind="boom_after_finish")
 
     async def boom_after_finish(
-        queue: JobQueue, session: Any, job: JobPayload, clock: Clock
+        queue: JobQueue,
+        session: Any,
+        job: JobPayload,
+        clock: Clock,
+        market_data: Any,
     ) -> dict[str, Any]:
         await queue.finish(session, job["id"], status=JobStatus.SUCCEEDED, result={"ok": True})
         raise RuntimeError("收口后炸")

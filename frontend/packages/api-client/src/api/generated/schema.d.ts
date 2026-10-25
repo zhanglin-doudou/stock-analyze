@@ -24,6 +24,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/assets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Assets Endpoint
+         * @description API-081：每日资产快照列表（日期倒序默认；闭区间过滤；游标分页）。
+         */
+        get: operations["listAssets"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/assets/build": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Build Assets Endpoint
+         * @description API-082：入队构建/增量更新资产表（202）；单飞复用 / 异参 409。
+         */
+        post: operations["buildAssets"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/login": {
         parameters: {
             query?: never;
@@ -772,6 +812,144 @@ export interface components {
              * @enum {string}
              */
             status: "stale" | "blocked" | "unreliable" | "ok";
+        };
+        /**
+         * AssetBuildAccepted
+         * @description API-082：202 专用响应（不复用 `JobAcceptedOut`，避免多出 `batch_id:null`）。
+         */
+        AssetBuildAccepted: {
+            /** Job Id */
+            job_id: string;
+            links: components["schemas"]["JobLinks"];
+            /**
+             * Status
+             * @default pending
+             * @constant
+             */
+            status: "pending";
+            /**
+             * Type
+             * @default build_assets
+             * @constant
+             */
+            type: "build_assets";
+        };
+        /**
+         * AssetBuildIn
+         * @description API-082：构建模式（`auto` 增量/自动判定全量；`full` 强制全量）。
+         */
+        AssetBuildIn: {
+            /**
+             * Mode
+             * @default auto
+             * @enum {string}
+             */
+            mode: "auto" | "full";
+        };
+        /**
+         * AssetBuildStateOut
+         * @description 资产表构建摘要（`GET /assets` 的 `build` 块）。
+         */
+        AssetBuildStateOut: {
+            /** Assumption */
+            assumption?: "back_solved" | null;
+            /** Definition Version */
+            definition_version: string;
+            /**
+             * Has New Market Data
+             * @default false
+             */
+            has_new_market_data: boolean;
+            /** Last Built At */
+            last_built_at?: string | null;
+            /** Last Built Through */
+            last_built_through?: string | null;
+            /** Last Mode */
+            last_mode?: ("full" | "incremental" | "noop") | null;
+            /** Last Rebuild From */
+            last_rebuild_from?: string | null;
+            /**
+             * Last Rows Written
+             * @default 0
+             */
+            last_rows_written: number;
+            /** Last Status */
+            last_status?: ("ok" | "degraded" | "blocked") | null;
+            /**
+             * Rows Count
+             * @default 0
+             */
+            rows_count: number;
+            /**
+             * State
+             * @enum {string}
+             */
+            state: "missing" | "current" | "stale" | "blocked";
+            /** Status Reason */
+            status_reason?: string | null;
+        };
+        /**
+         * AssetPageOut
+         * @description API-081：资产表分页（游标 + 构建摘要 + 口径血缘）。
+         */
+        AssetPageOut: {
+            build: components["schemas"]["AssetBuildStateOut"];
+            /** Data As Of */
+            data_as_of?: string | null;
+            /** Definition Version */
+            definition_version: string;
+            /**
+             * Has More
+             * @default false
+             */
+            has_more: boolean;
+            /** Items */
+            items: components["schemas"]["AssetPointOut"][];
+            /** Next Cursor */
+            next_cursor?: string | null;
+        };
+        /**
+         * AssetPointOut
+         * @description 每日资产快照行（金额 2 位定点字符串；blocked 行数值字段**显式 null**）。
+         */
+        AssetPointOut: {
+            /** Cash */
+            cash?: string | null;
+            /** Cashflow */
+            cashflow?: string | null;
+            /** Daily Pnl */
+            daily_pnl?: string | null;
+            /** Daily Return */
+            daily_return?: string | null;
+            /** Daily Return Pct */
+            daily_return_pct?: string | null;
+            /**
+             * Date
+             * Format: date
+             */
+            date: string;
+            /** Holding Cost */
+            holding_cost?: string | null;
+            /**
+             * Holding Count
+             * @default 0
+             */
+            holding_count: number;
+            /** Market Value */
+            market_value?: string | null;
+            /** Prev Total Assets */
+            prev_total_assets?: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "blocked" | "degraded";
+            /** Status Reason */
+            status_reason?: string | null;
+            /** Total Assets */
+            total_assets?: string | null;
+            /** Unrealized Pnl */
+            unrealized_pnl?: string | null;
         };
         /**
          * AuthOut
@@ -2101,6 +2279,149 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listAssets: {
+        parameters: {
+            query?: {
+                from?: string | null;
+                to?: string | null;
+                /** @description ok|blocked|degraded */
+                status?: string | null;
+                /** @description trade_date|-trade_date */
+                sort?: string;
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssetPageOut"];
+                };
+            };
+            /** @description 请求参数错误 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    buildAssets: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: {
+            content: {
+                "application/json": components["schemas"]["AssetBuildIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssetBuildAccepted"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 资源状态冲突 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 请求过于频繁 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
                     "application/problem+json": components["schemas"]["Error"];
                 };
             };

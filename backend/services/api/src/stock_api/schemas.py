@@ -590,6 +590,72 @@ class NavOut(BaseModel):
     definition_version: str = "1.0"
 
 
+# ── 资产表（API-081/082，Period2-16）─────────────────────────
+class AssetPointOut(StrictModel):
+    """每日资产快照行（金额 2 位定点字符串；blocked 行数值字段**显式 null**）。"""
+
+    date: date
+    # blocked 行以下金额/比率字段一律 null（不是 "0.00"、也不是省略键）。
+    cash: str | None = None
+    market_value: str | None = None
+    total_assets: str | None = None
+    holding_cost: str | None = None
+    unrealized_pnl: str | None = None
+    # blocked 行强制 0（硬阻断不输出持仓明细）。
+    holding_count: int = 0
+    cashflow: str | None = None
+    prev_total_assets: str | None = None
+    daily_pnl: str | None = None
+    daily_return: str | None = None
+    # 后端算好的两位百分比串（如 "0.62%"），前端零口径。
+    daily_return_pct: str | None = None
+    status: Literal["ok", "blocked", "degraded"]
+    status_reason: str | None = None
+
+
+class AssetBuildStateOut(StrictModel):
+    """资产表构建摘要（`GET /assets` 的 `build` 块）。"""
+
+    state: Literal["missing", "current", "stale", "blocked"]
+    last_status: Literal["ok", "degraded", "blocked"] | None = None
+    last_built_at: datetime | None = None
+    last_built_through: date | None = None
+    last_mode: Literal["full", "incremental", "noop"] | None = None
+    last_rebuild_from: date | None = None
+    last_rows_written: int = 0
+    rows_count: int = 0
+    assumption: Literal["back_solved"] | None = None
+    status_reason: str | None = None
+    has_new_market_data: bool = False
+    definition_version: str
+
+
+class AssetPageOut(StrictModel):
+    """API-081：资产表分页（游标 + 构建摘要 + 口径血缘）。"""
+
+    items: list[AssetPointOut]
+    next_cursor: str | None = None
+    has_more: bool = False
+    build: AssetBuildStateOut
+    definition_version: str
+    data_as_of: date | None = None
+
+
+class AssetBuildIn(StrictModel):
+    """API-082：构建模式（`auto` 增量/自动判定全量；`full` 强制全量）。"""
+
+    mode: Literal["auto", "full"] = "auto"
+
+
+class AssetBuildAccepted(StrictModel):
+    """API-082：202 专用响应（不复用 `JobAcceptedOut`，避免多出 `batch_id:null`）。"""
+
+    job_id: str
+    type: Literal["build_assets"] = "build_assets"
+    status: Literal["pending"] = "pending"
+    links: JobLinks
+
+
 # ── 运维（API-071~076）──────────────────────────────────────
 class HealthOut(BaseModel):
     status: Literal["ok"] = "ok"

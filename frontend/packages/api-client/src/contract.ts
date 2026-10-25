@@ -104,6 +104,13 @@ export type NavOut = ApiSchemas["NavOut"];
 export type NavPointOut = ApiSchemas["NavPointOut"];
 export type NavSummaryOut = ApiSchemas["NavSummaryOut"];
 
+// Period2-16：每日资产表（API-081/082）
+export type AssetPointOut = ApiSchemas["AssetPointOut"];
+export type AssetPageOut = ApiSchemas["AssetPageOut"];
+export type AssetBuildStateOut = ApiSchemas["AssetBuildStateOut"];
+export type AssetBuildIn = ApiSchemas["AssetBuildIn"];
+export type AssetBuildAccepted = ApiSchemas["AssetBuildAccepted"];
+
 export type HealthOut = ApiSchemas["HealthOut"];
 export type ReadyOut = ApiSchemas["ReadyOut"];
 export type VersionOut = ApiSchemas["VersionOut"];
@@ -194,6 +201,25 @@ export type NavStatus = Nav["status"];
 export type NavPoint = NavPointOut;
 export type NavSummary = NavSummaryOut;
 
+/** Period2-16：每日资产表（现金 + 持仓市值快照；API-081/082）。
+ * 金额/比率均为后端定点字符串，前端只展示、排序与着色，不做任何数值计算（零口径）。
+ */
+export type AssetPoint = AssetPointOut;
+/** 行级状态：`ok | blocked | degraded`。 */
+export type AssetRowStatus = AssetPoint["status"];
+/** 资产表分页响应（`items` + `build` 构建摘要）。 */
+export type AssetPage = AssetPageOut;
+/** 构建摘要块（`build`）：无 state 时 `last_*`/`assumption` 等全部为 null。 */
+export type AssetBuildState = AssetBuildStateOut;
+/** 构建状态机：`missing | current | stale | blocked`。 */
+export type AssetBuildStateName = AssetBuildState["state"];
+/** 最近一次构建模式：`full | incremental | noop`（未构建为 null）。 */
+export type AssetBuildMode = NonNullable<AssetBuildState["last_mode"]>;
+/** 最近一次构建结果：`ok | degraded | blocked`（未构建为 null）。 */
+export type AssetBuildLastStatus = NonNullable<AssetBuildState["last_status"]>;
+/** API-082 请求体：`{"mode": "auto" | "full"}`，默认 auto。 */
+export type AssetBuildBody = AssetBuildIn;
+
 // ── 编译期断言：后端契约变化必须在这里/typecheck 里炸出来 ─────────────────
 
 /** http.ts / UI 读取的核心字段必须仍存在于 generated schema。 */
@@ -283,6 +309,46 @@ export type AssertNavPointFields = Assert<FieldsPresent<NavPoint, "date" | "unit
 export type AssertNavSummaryFields = Assert<
   FieldsPresent<NavSummary, "mwr" | "twr" | "annualized_twr" | "mwr_minus_twr" | "n_days">
 >;
+/** 资产页读取的字段必须仍存在于契约（后端改名 → tsc 立即失败）。 */
+export type AssertAssetPointFields = Assert<
+  FieldsPresent<
+    AssetPoint,
+    | "date"
+    | "cash"
+    | "market_value"
+    | "total_assets"
+    | "holding_cost"
+    | "unrealized_pnl"
+    | "holding_count"
+    | "cashflow"
+    | "daily_pnl"
+    | "daily_return"
+    | "daily_return_pct"
+    | "status"
+    | "status_reason"
+  >
+>;
+export type AssertAssetPageFields = Assert<
+  FieldsPresent<AssetPage, "items" | "next_cursor" | "has_more" | "build" | "definition_version" | "data_as_of">
+>;
+export type AssertAssetBuildStateFields = Assert<
+  FieldsPresent<
+    AssetBuildState,
+    | "state"
+    | "last_status"
+    | "last_built_at"
+    | "last_built_through"
+    | "last_mode"
+    | "last_rebuild_from"
+    | "last_rows_written"
+    | "rows_count"
+    | "assumption"
+    | "status_reason"
+    | "has_new_market_data"
+    | "definition_version"
+  >
+>;
+export type AssertAssetBuildAcceptedFields = Assert<FieldsPresent<AssetBuildAccepted, "job_id" | "type" | "status" | "links">>;
 
 
 /** 客户端增强类型必须仍然覆盖契约响应（契约删字段 → 这里报错）。 */

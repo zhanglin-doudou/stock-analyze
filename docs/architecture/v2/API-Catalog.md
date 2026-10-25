@@ -48,7 +48,7 @@
 - ETag `W/"<version>"`（列表含查询指纹），写响应返新 ETag；`If-Match` 不匹配 → 409 `VERSION_CONFLICT`（遵循 PRD FR-L4，不采用 412）。
 - 格式：金额**定点字符串 2 位** `"1234.56"`；价格 6 位、数量 4 位；比率十进制小数；时间 ISO 8601 UTC；业务日 `YYYY-MM-DD`（Asia/Shanghai）；`blocked` 时 `value` **字段缺省**。软删默认过滤 `deleted_at NULL`，`include_deleted=true` 仅本人；注销物理级联删除，审计留事件元数据。
 
-## §1 端点总表（80 个；Path 省略公共前缀 `/api/v1`，标注「根」者不在前缀下）
+## §1 端点总表（82 个；Path 省略公共前缀 `/api/v1`，标注「根」者不在前缀下）
 | API-ID | Method | Path | 用途 | FR | 认证/scope | 幂等 | 同步/异步 | 优先级 | 主要成功码 |
 |---|---|---|---|---|---|---|---|---|---|
 | API-001 | POST | `/auth/register` | 注册账号 | L2 | 公开 | 支持 | 同步 | P0 | 201 |
@@ -131,9 +131,11 @@
 | API-078 | POST | `/chat/sessions/{session_id}/messages` | 提问（金额后端填充） | D7 | write | 支持 | 同步 | P1 | 200 |
 | API-079 | GET | `/metrics/{metric_id}` | 指标详情（单指标完整 MetricResult） | R5/R8/D1 | read | — | 同步 | P0 | 200 |
 | API-080 | GET | `/trades/{trade_id}` | 流水详情（含血缘与版本） | L4/L8/D1 | read | — | 同步 | P0 | 200 |
+| API-081 | GET | `/assets` | 每日资产快照列表（现金/持仓市值/成本/浮盈/日收益） | D1 | read | — | 同步 | P0 | 200 |
+| API-082 | POST | `/assets/build` | 构建/增量更新资产表 | D1 | write | 必需 | 异步 | P0 | 202 |
 
 ## §2 分域详细契约
-> 下列 30 个端点为**详细契约**；其余 50 个的请求/响应字段以 `openapi/openapi.json` 为准（§1 已登记、§6 已配验收用例）。断言均为可脚本执行：状态码 + 字段值 + 状态迁移 + 副作用。
+> 下列 32 个端点为**详细契约**；其余 50 个的请求/响应字段以 `openapi/openapi.json` 为准（§1 已登记、§6 已配验收用例）。断言均为可脚本执行：状态码 + 字段值 + 状态迁移 + 副作用。
 ### 2.1 认证、导入与流水
 #### API-001 POST /auth/register
 - 用途：注册账号；FR-L2；认证：公开；幂等：支持；同步。
@@ -291,6 +293,19 @@
 - 响应 200：`points[]{date,unit_nav,twr_daily,twr_daily_pct,cashflow,blocked,blocked_reason,total_assets,prev_total_assets,daily_pnl,holdings[]}` / `summary{mwr,twr,annualized_twr,mwr_minus_twr,beta,alpha_annual,t_value,tracking_error,ir,n_days,assumption}` / `status(ok|blocked|degraded)` / `blocked_ranges[]{from,to,reason}` / `benchmark_id` / `data_as_of` / `definition_version`。`summary.assumption ∈ statement|back_solved`，blocked 时为 null。`twr_daily_pct` 为两位小数的百分比字符串（如 `"0.62%"`）；`total_assets/prev_total_assets/daily_pnl` 为三位小数定点字符串，`daily_pnl = total_assets − cashflow − prev_total_assets`，首个净值点的 `prev_total_assets` 取「期初现金 + 期初持仓按上一交易日收盘价」估值（缺行情或前一点 blocked 时为 null，首点 `twr_daily_pct` 按该日盈亏/昨日资产计算）；`holdings[]` 的 `quantity/avg_cost/close_price/market_value` 为最多三位小数、去掉尾零的字符串（如 `"9.1"`）；`avg_cost` 为**含费买入均价**（累计成本 ÷ 持仓数量，成本取净现金流出，已含佣金/印花税/其他费）。
 - 错误码：INVALID_PERIOD(422)、UNKNOWN_BENCHMARK(422)、VALIDATION_ERROR(422)。
 - 验收断言：① points 按 date 严格升序、twr_daily 为十进制小数；② 与独立 oracle 逐日收益差 ≤1bp；③ 被阻断区间 status=="blocked" 且 summary 中资产类字段缺省；④ 未传 benchmark 时 benchmark_id=="hs300_tr" 并出现在 assumptions；⑤ 首行非余额行、区间内含余额行的月份 → 构建成功且 `summary.assumption=="back_solved"`，期初现金 = 余额行余额 − 该行发生额 − 区间内该行之前流水发生额之和。
+#### API-081 GET /assets
+- 用途：每日资产快照列表（“资产变化”展示 + 后续回撤族数据源）；FR-D1；认证：read；同步；游标分页。
+- 请求：query `limit`(1~200，默认 50) / `cursor` / `from`/`to`(业务日**闭区间** `[from,to]`) / `status`(∈`ok|blocked|degraded`) / `sort`(白名单 `trade_date`、`-trade_date`，默认 `-trade_date`)。
+- 响应 200：`items[]{date,cash,market_value,total_assets,holding_cost,unrealized_pnl,holding_count,cashflow,prev_total_assets,daily_pnl,daily_return,daily_return_pct,status,status_reason}` / `next_cursor` / `has_more` / `build{state,last_status,last_built_at,last_built_through,last_mode,last_rebuild_from,last_rows_written,rows_count,assumption,status_reason,has_new_market_data,definition_version}` / `definition_version` / `data_as_of`。金额为 2 位定点字符串；`daily_return` 为 8 位比率串、`daily_return_pct` 为两位百分比串（后端算，前端零口径）；**blocked 行数值字段一律显式 `null`**（非 `"0.00"`、非省略键）、`holding_count=0`、`status_reason` 非空。`build.state ∈ missing|current|stale|blocked`：无 state → `missing`（`rows_count=0`、`last_mode=null`）；全局无现金锚点 → `blocked`（`last_status="blocked"`、`last_built_through=null`、`status_reason` 非空）；指纹/行情 as_of/自然日前进 → `stale`。行只返回与 `state.definition_version` 同版本的口径（版本 bump 后不混排）。
+- 错误码：INVALID_CURSOR(400)、INVALID_SORT_FIELD(400)、UNKNOWN_QUERY_PARAM(400)、INVALID_PERIOD(422)、VALIDATION_ERROR(422)、ADMIN_CANNOT_READ_TRADES(403)。
+- 验收断言：① 200 且 `items` 按 date 倒序、06-30 行与手算 oracle 一致（`cash="-70000.00"`、`market_value="170620.00"`、`total_assets="100620.00"`、`daily_pnl="620.00"`、`daily_return="0.00620000"`、`daily_return_pct="0.62%"`）、`build.state=="current"`、`definition_version=="1.0"`；② 未构建 → `items==[]`、`build.state=="missing"`、owner 直查两表无新增行；③ 跨用户 0 条泄露、admin → 403 `ADMIN_CANNOT_READ_TRADES`、无 token → 401；④ blocked 行数值字段全 `null` 且 `status_reason` 非空；⑤ 游标翻全集无重无漏、篡改 cursor → 400 INVALID_CURSOR；⑥ `limit=1/200` 可用、`limit=0/201` → 422、`from>to` → 422 INVALID_PERIOD、`status=foo` → 422、`sort=foo` → 400、未知 query → 400；⑦ `from/to` 闭区间含端点、`status` 过滤与 `sort=trade_date` 升序（与默认倒序互逆）；⑧ 构建后插流水/推进行情/时钟跨日 → `build.state=="stale"`，重建后回到 `current`。
+#### API-082 POST /assets/build
+- 用途：构建/增量更新每日资产表（长任务）；FR-D1；认证：write；幂等：**必需**；异步。
+- 请求：头 `Idempotency-Key`(必填 16~128)；body 可选 `{mode:"auto"|"full"}`（默认 `auto`；`auto`=首次全量/后续按指纹与水位线增量）。`request_hash` 基于**解析默认值后**的规范 body（缺省 body 与 `{"mode":"auto"}` 视为同一请求）。
+- 响应 202：`job_id` / `type:"build_assets"` / `status:"pending"` / `links{self,events}`；`Location: /api/v1/jobs/{job_id}`、`Retry-After: 1`；同参复用 `X-Job-Reused: true`；幂等重放 `Idempotency-Replayed: true`（重放路径同样带 Location/Retry-After）。
+- Job：`kind=build_assets`、单飞 `scope_key={user_id}:assets`、`params={"mode":<解析默认值后的真实值>}`；handler 阶段 `recomputing → writing → finalizing`（progress 单调不减、粒度 ≥5）；结果写入 `platform.job.result`（键 `mode/rebuild_from/rows_written/rows_total/built_through/status/assumption/data_as_of`），**不扩 `GET /jobs` 响应**，对外摘要统一读 `GET /assets` 的 `build` 块。
+- 错误码：IDEMPOTENCY_KEY_REUSED(422)、IDEMPOTENCY_IN_PROGRESS(409)、JOB_ALREADY_RUNNING(409)、QUOTA_EXCEEDED(429)、VALIDATION_ERROR(422)、INSUFFICIENT_SCOPE(403)、ADMIN_CANNOT_READ_TRADES(403)。
+- 验收断言：① 202 + Location/Retry-After 且 `type=="build_assets"`；drain 后 `GET /assets` 行可见、`build.last_mode/last_rows_written/last_built_through` 齐全；② 同 key 同 body → 同一 `job_id` + `Idempotency-Replayed`，重复构建不产生重复行；缺省 body 与 `{"mode":"auto"}` 同 key 不 422；③ 不同 key 同参（首个待执行）→ 同一 `job_id` + `X-Job-Reused`；`auto` 运行中发 `full` → 409 `JOB_ALREADY_RUNNING`；④ read PAT → 403 `INSUFFICIENT_SCOPE`、admin → 403 `ADMIN_CANNOT_READ_TRADES`、无 token → 401、跨用户 job 不可见（404）；⑤ 缺 `Idempotency-Key`/`mode=bad` → 422 VALIDATION_ERROR、同 key 异体 → 422 IDEMPOTENCY_KEY_REUSED；⑥ 增量摘要：`build.last_mode=="incremental"`、`last_rows_written == end - last_rebuild_from + 1 < build.rows_count`，owner 直读 job.result 断言 `rows_written/rows_total`，结果与全量逐行相等；⑦ 无流水/无现金锚点 → 202→succeeded，`build.rows_count==0`，无锚点时 `build.last_status=="blocked"`；⑧ 进度事件 `stage ∈ {recomputing,writing,finalizing}` 且单调（平台 claim=parsing、finish=done 属既有行为）。
 ### 2.3 度量、诊断与报告
 #### API-033 GET /metrics
 - 用途：三域指标批量查询；FR-R5/R6/R8；认证：read；同步。
@@ -438,13 +453,13 @@
 | NAV_UNRELIABLE | 200 | 期初反推失败（降级码） | 这段时间的数据不敢给你算收益。 | 补全资金余额列或修正首行后重算。 | 是（修正后） |
 | IMPORT_MISSING_CASH_BALANCE | 200 | 缺资金余额列（警告码） | 账单缺少资金余额，暂时无法对账。 | 上传含资金余额列的账单。 | 是（补数据） |
 
-## §4 关键资源 Schema（12 个；完整字段见 OpenAPI `components.schemas`）
+## §4 关键资源 Schema（16 个；完整字段见 OpenAPI `components.schemas`）
 | DTO | 字段 | 类型 | 必填 | 说明 | 示例 |
 |---|---|---|---|---|---|
 | MetricResult | metric_id / definition_version | string | 是 | 稳定指标 ID / 口径版本 `^\d+\.\d+$` | `win_rate` / `2.1` |
 | MetricResult | value / n / sample_status / status | decimal-string / integer / enum | 否/是 | blocked 时 value 缺省；样本数；`ok/insufficient/pending_window/blocked`；`ok/stale/blocked/unreliable` | `0.4321` / `12` / `ok` / `ok` |
 | MetricResult | data_as_of / inputs_hash / computed_at | date / string / datetime | 是 | 血缘四件套 | `2026-10-01` / `sha256:9f…` / `2026-10-19T08:00:00Z` |
-| Job | job_id / type | string / enum | 是 | `import_commit/rebuild_rounds/diagnostics_selection/report_generate/export_create/backup/restore_drill/reclassify` | `job_01J9Z6` / `report_generate` |
+| Job | job_id / type | string / enum | 是 | `import_commit/rebuild_rounds/diagnostics_selection/report_generate/export_create/backup/restore_drill/reclassify/build_assets` | `job_01J9Z6` / `report_generate` |
 | Job | status / progress / stage | enum / integer / string | 是 | `pending/running/succeeded/failed/cancelled`；0–100 单调；阶段码 | `running` / `60` / `rendering` |
 | Job | result_ref / error | string\|null / Error\|null | 否 | 终态资源链接 / 失败原因（含 code/user_message/what_to_do） | `/api/v1/reports/rpt_…` |
 | ImportPreview | preview_id / file | string / object | 是 | 24h TTL；`name/sha256/bytes` | `prv_01J9Z6` |
@@ -467,6 +482,10 @@
 | Trade | dedupe_key / version / account_masked | string / integer / string | 是 | A27 去重键 / 乐观锁 / 股东账号 MD5 摘要（32 位 hex，空账号为 null） | `sha256:…` / `3` / `ab12…9f` |
 | ImportBatch | batch_id / status / mode / counts / filled_count / fills | string / enum / object / integer / object[] | 是 | 批次；`pending…revoked`；`full/replace_range`；`parsed/inserted/skipped/quarantined`；导入收尾对账补差数；补差明细 `{trade_id,trade_date,line_no,amount,cash_balance,summary}`（撤销后清零） | `imp_01J9Z6` / `succeeded` / `{"inserted":412}` / `1` / `[{"amount":"-3000.00"}]` |
 | PatToken | token_id / prefix / scopes / expires_at / last_used_at | string / enum[] / datetime | 是/否 | 元信息；prefix 前 8 位；`read/write`；最长 365d | `tok_01J9Z6` / `pat_7Fh2` / `["read"]` / `2027-01-17T00:00:00Z` |
+| AssetPoint | date / total_assets / status | date / decimal-string / enum | 是 | 每日资产快照行（金额 2 位定点串）；blocked 行数值显式 `null`、`holding_count=0` | `2026-06-30` / `"100620.00"` / `ok` |
+| AssetPoint | cash / market_value / holding_cost / unrealized_pnl / daily_pnl / daily_return | decimal-string\|null | 否 | 现金/持仓市值/含费成本/浮动盈亏/日盈亏/日收益率；blocked 行全为 `null` | `"-70000.00"` / `"0.00620000"` |
+| AssetBuildState | state / last_status / last_mode / rows_count | enum / integer | 是 | `missing/current/stale/blocked`；`ok/degraded/blocked`；`full/incremental/noop`；当前保留行数 | `current` / `ok` / `incremental` / `125` |
+| AssetPage | items[] / build / definition_version / data_as_of | object / string / date | 是 | 分页 + 构建摘要 + 口径血缘；`AssetBuildAccepted` 为 202 专用体 `{job_id,type:"build_assets",status:"pending",links{self,events}}` | `{"has_more":false}` / `"1.0"` |
 
 ## §5 异步任务与 SSE 契约
 ### 5.1 状态机（`platform.job`）
@@ -485,6 +504,7 @@ enqueue ─▶ pending ─claim(SKIP LOCKED)─▶ running ─成功─▶ succe
 | `import_commit` / `reclassify` | 是（检查点） | 写事务前取消无副作用；写事务内不可中断，完成后按幂等回滚批次 |
 | `rebuild_rounds` / `diagnostics_selection` | 是 | 计算阶段检查点取消；已提交派生数据保留并可重算 |
 | `report_generate` / `export_create` | 是 | 渲染/打包前检查点取消 |
+| `build_assets` | 是（写事务前检查点） | 派生重建；写事务前取消无副作用，写事务内不可中断（与 `rebuild_rounds` 一致） |
 | `backup` / `restore_drill` | 否（running 后） | 一致性快照，取消即损坏风险 |
 - `progress`：0–100 单调不减、粒度≥5；`stage ∈ queued/parsing/writing/recomputing/rendering/finalizing`；`message` 人话；`result_ref` 只在终态出现；`attempt/max_attempts/available_at/heartbeat_at` 用于排障。
 ### 5.3 SSE 事件与断线续传
@@ -585,6 +605,8 @@ data: {"job_id":"job_01J9Z6","status":"succeeded","result_ref":"/api/v1/reports/
 | API-078 | chat_answer_citations | 200 answer+citations；LLM 关闭仍答金额；出站无金额 | fx_llm_off | P1 |
 | API-079 | metrics_detail_single | 200 且 definition_version/inputs_hash/data_as_of 齐全；blocked 无 value | fx_round30 | P0 |
 | API-080 | trades_detail_owner | 200 且字段与列表一致；跨用户 404 | fx_base | P0 |
+| API-081 | assets_daily_series | 200 日期倒序且 06-30 行金额==oracle（含 daily_return_pct）；未构建 items=[]+build.state=missing；blocked 行数值全 null；from/to 闭区间/status/sort/limit 校验；跨用户 0 条、admin 403 | fx_round30 | P0 |
+| API-082 | assets_build_incremental | 202+Location/Retry-After 且 type=build_assets；同 key 重放同一 job_id+Idempotency-Replayed；同参 X-Job-Reused、异参 409；drain 后 build.last_mode=incremental 且 last_rows_written==窗口天数<rows_count；无锚点 build.last_status=blocked | fx_round30 | P0 |
 
 ### 6.1 端到端脚本（5 条，覆盖「注册登录 → PAT → preview → commit → 取指标 → 下载月报」）
 ```bash
@@ -628,7 +650,7 @@ grep -c '2026-09' report.html
 ## §7 契约治理
 1. **生成与快照**：FastAPI `app.openapi()` → `make openapi-export` 输出 `openapi/openapi.json`（`sort_keys=True`、UTF-8、无时间戳），PR 必须同 commit 更新快照；CI `make api-contract-check` 阻断漂移。
 2. **破坏性变更（必须升 `/api/v2`）**：删除/改名端点、path、`operationId`；新增必填参数或请求体字段；删除响应字段、可选改必填、类型/格式变更；删除枚举值；收紧认证/scope；成功状态码变更；分页/幂等语义变更。**非破坏**：新增可选参数/响应字段/端点/错误码、放宽校验、新增枚举值（客户端必须忽略未知）。
-3. **`operationId` 规范**：`<domain>_<action>[_object]` snake_case，domain 取 §1 域前缀（`auth/account/tokens/imports/trades/summary_rules/reconciliation/rounds/nav/metrics/attribution/trends/diagnostics/reports/shares/journal/alerts/notifications/settings/exports/jobs/audit/admin/ops/chat`），action ∈ `list/get/create/update/delete/restore/revoke/run/cancel/download/stream/ack`；例 `imports_create`、`metrics_get_batch`、`jobs_stream_events`。发布后入 `openapi/operationId.lock.json`，改名视为破坏性变更。
+3. **`operationId` 规范**：`<domain>_<action>[_object]` snake_case，domain 取 §1 域前缀（`auth/account/tokens/imports/trades/summary_rules/reconciliation/rounds/nav/assets/metrics/attribution/trends/diagnostics/reports/shares/journal/alerts/notifications/settings/exports/jobs/audit/admin/ops/chat`；**注**：本仓既有实现的实际 operationId 为 camelCase，如 `listAssets`/`buildAssets`，以 §1/OpenAPI 为准），action ∈ `list/get/create/update/delete/restore/revoke/run/cancel/download/stream/ack`；例 `imports_create`、`metrics_get_batch`、`jobs_stream_events`。发布后入 `openapi/operationId.lock.json`，改名视为破坏性变更。
 4. **示例与错误码强制**：每 operation ≥1 个 2xx 示例（金额定点字符串、比率小数）、每个可返回错误在 `responses` 给 `application/problem+json` 示例、`x-error-codes` 列全 §3 code、`x-required-scope`、`x-idempotent`、`x-async`；缺任一项 CI 失败。
 5. **契约测试与 SDK**：Schemathesis 对 staging（空库 + fixture）跑 `--checks all`；越权/幂等/游标负向用例由 API 验收套件覆盖；前端 SDK 由 `openapi-typescript` + `orval` 生成（TanStack Query hooks），`pnpm gen:sdk`，生成物 diff 非空即失败；**禁止手写请求类型**。
 6. **版本兼容**：`/api/v1` 至少服务一个大版本；弃用端点响应头 `Deprecation` + `Sunset`，提前 ≥90 天在 CHANGELOG 与 `/version` 标注；expand-contract 迁移保证滚动升级期间新旧副本并存。

@@ -121,9 +121,16 @@ async def test_app_role_cannot_execute_ddl(app_engine: AsyncEngine) -> None:
             await conn.execute(text("create table ledger.ddl_probe (id int)"))
 
 
-# ── review 三表 RLS（Period2-02，迁移 0003；gate 要求 review 3/3）──────
+# ── review 六表 RLS（Period2-02/03/16，迁移 0003/0004/0006；gate 要求 review 6/6）──
 
-_REVIEW_TABLES = ("round", "round_fill", "round_build_state")
+_REVIEW_TABLES = (
+    "round",
+    "round_fill",
+    "round_build_state",
+    "nav_daily",
+    "asset_daily",
+    "asset_build_state",
+)
 
 _INSERT_ROUND_SQL = """
 insert into review.round (
@@ -157,9 +164,47 @@ insert into review.round_build_state
 values (:uid, now(), 'full', 1, 1)
 """
 
+_INSERT_NAV_DAILY_SQL = """
+insert into review.nav_daily (
+    id, user_id, trade_date, nav_units, return_units, total_value_units,
+    cashflow_units, shares_units, status, blocked_reason, rebuilt_at
+) values (
+    :nav_id, :uid, :open_date, 1000000, 0, 1000000,
+    0, 100000000, 'ok', null, now()
+)
+"""
+
+_INSERT_ASSET_DAILY_SQL = """
+insert into review.asset_daily (
+    id, user_id, trade_date, cash_units, market_value_units, total_assets_units,
+    holding_cost_units, unrealized_pnl_units, holding_count, cashflow_units,
+    prev_total_assets_units, daily_pnl_units, daily_return_units, status,
+    status_reason, definition_version, rebuilt_at
+) values (
+    :asset_id, :uid, :open_date, 1000000, 0, 1000000,
+    0, 0, 0, 0,
+    1000000, 0, 0, 'ok',
+    null, '1.0', now()
+)
+"""
+
+_INSERT_ASSET_BUILD_STATE_SQL = """
+insert into review.asset_build_state (
+    user_id, start_date, last_built_through, last_built_at, last_trade_updated_at,
+    last_trade_count, last_trade_version_sum, data_as_of, assumption, last_status,
+    last_fifo_error, status_reason, last_mode, last_rebuild_from, last_rows_written,
+    definition_version, rows_count, version
+) values (
+    :uid, :open_date, :open_date, now(), now(),
+    1, 1, :open_date, 'back_solved', 'ok',
+    false, null, 'full', :open_date, 1,
+    '1.0', 1, 1
+)
+"""
+
 
 async def _seed_review_rows(engine: AsyncEngine, user_id: uuid.UUID) -> str:
-    """以 owner 直插 review 三表各一行（绕过 RLS，为两侧租户准备数据）。"""
+    """以 owner 直插 review 六表各一行（绕过 RLS，为两侧租户准备数据）。"""
     round_id = f"rnd_{uuid.uuid4().hex[:32]}"
     trade_ids = {
         "id": round_id,
@@ -176,6 +221,15 @@ async def _seed_review_rows(engine: AsyncEngine, user_id: uuid.UUID) -> str:
         await conn.execute(text(_INSERT_ROUND_SQL), trade_ids)
         await conn.execute(text(_INSERT_FILL_SQL), trade_ids)
         await conn.execute(text(_INSERT_BUILD_STATE_SQL), {"uid": user_id})
+        await conn.execute(
+            text(_INSERT_NAV_DAILY_SQL),
+            {"nav_id": f"nav_{uuid.uuid4().hex[:32]}", "uid": user_id, **trade_ids},
+        )
+        await conn.execute(
+            text(_INSERT_ASSET_DAILY_SQL),
+            {"asset_id": f"ast_{uuid.uuid4().hex[:32]}", "uid": user_id, **trade_ids},
+        )
+        await conn.execute(text(_INSERT_ASSET_BUILD_STATE_SQL), {"uid": user_id, **trade_ids})
     return round_id
 
 

@@ -12,7 +12,7 @@
 |---|---|
 | 知道**要做什么**（需求） | [prd/PRD-v2.md](prd/PRD-v2.md) |
 | 知道**怎么建**（架构） | [Architecture-v2.md](Architecture-v2.md) |
-| **验收**某个功能（"完成"的判据） | [architecture/v2/API-Catalog.md](architecture/v2/API-Catalog.md) — 80 个端点 + 验收矩阵 |
+| **验收**某个功能（"完成"的判据） | [architecture/v2/API-Catalog.md](architecture/v2/API-Catalog.md) — 82 个端点 + 验收矩阵 |
 | 知道**测试怎么做**、覆盖率门禁 | [architecture/v2/Testing.md](architecture/v2/Testing.md) |
 | 知道**怎么上线/兜底/恢复** | [architecture/v2/Reliability.md](architecture/v2/Reliability.md) |
 | 知道**加功能要改哪里** | [architecture/v2/Extensibility.md](architecture/v2/Extensibility.md) |
@@ -32,14 +32,14 @@ docs/
 │   └── PRD-v2.md                   # 需求基线 v2.0（28 FR + 15 NFR，每条带 API 验收）
 └── architecture/v2/
     ├── README.md                   # v2 文档包索引（单一事实源表、关键数字、阅读路径）
-    ├── API-Catalog.md              # ★ 80 端点 / 47 错误码 / 验收矩阵 80/80
+    ├── API-Catalog.md              # ★ 82 端点 / 47 错误码 / 验收矩阵 82/82
     ├── Reliability.md             # 8 条 SLO、20 行 FMEA、降级矩阵、PITR、SOP
     ├── Testing.md                 # 覆盖率门禁、越权矩阵、契约三件套、前端零口径
     ├── Extensibility.md           # 12 扩展点、租户演进、API 兼容治理、反扩展
     └── ADR.md                     # ADR-0013~0024（取代链）
 ```
 
-**关键数字**：80 端点 ｜ 28/28 FR + 15/15 NFR 覆盖 ｜ 36 张表 ｜ 12 扩展点 ｜ 可用性 ≥99.9% ｜ RPO ≤5min / RTO ≤30min ｜ core 覆盖 100/100。
+**关键数字**：82 端点 ｜ 28/28 FR + 15/15 NFR 覆盖 ｜ 36 张表 ｜ 12 扩展点 ｜ 可用性 ≥99.9% ｜ RPO ≤5min / RTO ≤30min ｜ core 覆盖 100/100。
 
 **一期验收（2026-10-20）**：[reviews/Period1-CodeReview-and-Acceptance.md](reviews/Period1-CodeReview-and-Acceptance.md) — 代码审查 + 一期验收报告，结论：**不通过**（5 项 P0 / 17 项 P1 待修，含真账单对账假断链、`replace_range` 数据丢失、admin PAT 越权、撤销入口缺失、verify-p1 空心）。
 > **修复进展（2026-10-21）**：5 项 P0 已全部修复并复验 — [P0-2/P0-3](reviews/Period1-Fix-Log-P0-2-P0-3.md)（数据丢失 / admin PAT）、[P0-1/P0-4/P0-5](reviews/Period1-Fix-Log-P0-1-P0-4-P0-5.md)（真实账对账 / 撤销 UI / 门禁与契约）；`make verify-p1` 15/15 全绿。剩余 P1/P2 见审查报告。

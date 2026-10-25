@@ -25,7 +25,7 @@
 | 文档 | 行数 | 职责 | 最先读哪节 |
 |---|---|---|---|
 | [../Architecture-v2.md](../../Architecture-v2.md) | 951 | **主文档**：驱动力、**可验收 API 清单（先行）**、服务级质量属性、C4、Monorepo 双栈、PG 多租户、队列、指标引擎、前端架构、安全、部署迁移、28+15 追溯矩阵 | §0.2、§2、§19 |
-| [API-Catalog.md](API-Catalog.md) | 600 | **可验收 API 目录**：总则、80 个端点总表、30 个详细契约、47 个错误码、12 个 Schema、异步/SSE、验收矩阵 80/80、契约治理、FR→API 追溯 28/28 | §1、§6、§8 |
+| [API-Catalog.md](API-Catalog.md) | 600 | **可验收 API 目录**：总则、82 个端点总表、32 个详细契约、47 个错误码、16 个 Schema、异步/SSE、验收矩阵 82/82、契约治理、FR→API 追溯 28/28 | §1、§6、§8 |
 | [Reliability.md](Reliability.md) | 506 | 服务级高可用：8 条 SLO 与错误预算、故障域与 15 个单点、优雅停机与滚动发布、expand-contract、PG/PITR、队列可靠性、20 行 FMEA、8×10 降级矩阵、容量、告警、SOP-1~10、12 项演练 | §1、§3、§7 |
 | [Testing.md](Testing.md) | 548 | 测试与门禁：两类新增高危缺陷、分层覆盖率（含端点/越权硬门禁）、12 类套件、**20 行越权矩阵 + RLS 直连 8 项**、API 验收套件、契约三件套、前端测试与零口径断言、确定性、CI 四段、性能 | §2、§4、§5 |
 | [Extensibility.md](Extensibility.md) | 506 | 可扩展性：X-1~X-8 判据、EP-1~EP-12、指标注册表 v2、**租户演进路径**、**API 兼容治理**、前端扩展、版本化矩阵、9 项反扩展、四个作业单 | §2、§4、§5 |
@@ -61,7 +61,7 @@
 | 后端分层 | `services/api → application → domain ← infrastructure`（core 纯计算） |
 | 数据 | PG 三业务 schema：`ledger` / `review` / `platform` + 1 个公共缓存 schema `market`；38 张表（36 张业务表：ledger 8 / review 11 / platform 17 + 2 张公共缓存表 `market.daily_bar` / `market.pull_range`）；RLS 双层隔离 |
 | 队列 | PG `platform.job` + `FOR UPDATE SKIP LOCKED`（无 Redis/Kafka） |
-| **端点** | **80 个**（API-001~080），28/28 FR 覆盖，验收矩阵 80/80；详细契约 30 个；错误码 47 个 |
+| **端点** | **82 个**（API-001~082），28/28 FR 覆盖，验收矩阵 82/82；详细契约 32 个；错误码 47 个 |
 | 错误码 | ≥30 个（机器可读 `/api/v1/errors`） |
 | ADR | v2 新增 13 条（0013~0025），取代 v1 的 0001/0006/0007/0008 |
 | 扩展点 | 12 个（EP-1~EP-12） |

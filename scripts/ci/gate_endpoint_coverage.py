@@ -25,7 +25,7 @@ TEST_DIRS = (REPO_ROOT / "backend/tests/api", REPO_ROOT / "backend/tests/isolati
 API_PREFIX = "/api/v1"
 ROOT_MARK = "（根）"
 EXPECTED_PERIOD1 = 30
-EXPECTED_ALL_ENDPOINTS = 80
+EXPECTED_ALL_ENDPOINTS = 82
 
 
 def emit(*parts: object) -> None:

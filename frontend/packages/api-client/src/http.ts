@@ -4,6 +4,9 @@
 // 后端契约字段变化会通过 contract.ts 的编译期断言在 `tsc` 阶段暴露。
 
 import type {
+  AssetBuildAccepted,
+  AssetBuildIn,
+  AssetPage,
   AuthTokens,
   BatchList,
   CommitImportBody,
@@ -154,6 +157,16 @@ export interface GetNavQuery {
   to?: string;
   benchmark?: string;
   granularity?: "daily";
+}
+
+/** API-081 资产表查询（日期过滤为闭区间 `[from, to]`；status ∈ ok/blocked/degraded）。 */
+export interface ListAssetsQuery {
+  limit?: number;
+  cursor?: string;
+  from?: string;
+  to?: string;
+  status?: string;
+  sort?: string;
 }
 
 export interface CursorQuery {
@@ -571,6 +584,32 @@ export function createClient(options: ClientOptions) {
     },
   };
 
+  const assets = {
+    /** API-081：每日资产快照列表（游标分页 + 构建摘要 `build`；纯读，不触发构建）。 */
+    list(query: ListAssetsQuery = {}) {
+      return send<AssetPage>({
+        path: "/assets",
+        query: {
+          limit: query.limit,
+          cursor: query.cursor,
+          from: query.from,
+          to: query.to,
+          status: query.status,
+          sort: query.sort,
+        },
+      }).then((r) => r.data);
+    },
+    /** API-082：触发资产表构建（异步 202；body 缺省等价 `{"mode":"auto"}`）。 */
+    build(body: AssetBuildIn, idempotencyKey: string) {
+      return send<AssetBuildAccepted>({
+        path: "/assets/build",
+        method: "POST",
+        body,
+        idempotencyKey,
+      }).then((r) => r.data);
+    },
+  };
+
   const ops = {
     healthz() {
       return send<HealthOut>({ path: "/healthz", root: true, omitAuth: true }).then((r) => r.data);
@@ -592,7 +631,7 @@ export function createClient(options: ClientOptions) {
     },
   };
 
-  return { auth, tokens, imports, jobs, trades, rounds, nav, ops, request: send };
+  return { auth, tokens, imports, jobs, trades, rounds, nav, assets, ops, request: send };
 }
 
 export type ApiClient = ReturnType<typeof createClient>;

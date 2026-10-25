@@ -21,6 +21,7 @@ from datetime import date, datetime
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     Date,
     DateTime,
     ForeignKey,
@@ -194,18 +195,127 @@ class NavDaily(Base):
     )
 
 
+# 资产表行状态：ok（正常） / blocked（阻断：该日缺行情或全局无现金锚点） /
+# degraded（降级：FIFO 数据异常、超卖负持仓、行情未覆盖按最近收盘估值）。
+ASSET_STATUSES: tuple[str, ...] = ("ok", "blocked", "degraded")
+# 构建整体状态（asset_build_state.last_status）：逐日 blocked 使整体为 degraded。
+ASSET_BUILD_STATUSES: tuple[str, ...] = ("ok", "degraded", "blocked")
+# 构建模式：full（全量）/ incremental（增量）/ noop（无变化只记录检查）。
+ASSET_BUILD_MODES: tuple[str, ...] = ("full", "incremental", "noop")
+
+
+class AssetDaily(Base):
+    """每日资产快照（Period2-16）：一行 = 某用户某自然日收盘后的现金 + 持仓估值。
+
+    存在的原因：资产变化与后续回撤族指标需要**全历史、逐自然日、可增量维护**的资产序列；
+    `nav_daily` 按月稀疏且由 GET /nav 隐式写入，不适合做该数据源。
+
+    硬约束（应用层断言 + DB CHECK）：
+    - `total_assets_units = cash_units + market_value_units`；
+    - `holding_count >= 0`；**不设** `market_value >= 0`（超卖日允许负市值，标 degraded）；
+    - blocked 行数值列全 0、`prev_total/daily_pnl/daily_return` 为 NULL、`status_reason` 非空
+      （API 层把 blocked 数值列输出为 null）。
+    主键确定性：`ast_` + sha256(user_id|trade_date)[:32]，重复构建幂等。
+    """
+
+    __tablename__ = "asset_daily"
+    __table_args__ = (
+        UniqueConstraint("user_id", "trade_date", name="uq_asset_daily_user_date"),
+        CheckConstraint(
+            "total_assets_units = cash_units + market_value_units",
+            name="ck_asset_daily_total",
+        ),
+        CheckConstraint("holding_count >= 0", name="ck_asset_daily_holding_count"),
+        {"schema": SCHEMA},
+    )
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey(USER_FK, ondelete="CASCADE"), nullable=False
+    )
+    trade_date: Mapped[date] = mapped_column(Date, nullable=False)
+    cash_units: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    market_value_units: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    total_assets_units: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    holding_cost_units: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    unrealized_pnl_units: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    holding_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    cashflow_units: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    prev_total_assets_units: Mapped[int | None] = mapped_column(BigInteger)
+    daily_pnl_units: Mapped[int | None] = mapped_column(BigInteger)
+    daily_return_units: Mapped[int | None] = mapped_column(BigInteger)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="ok")
+    status_reason: Mapped[str | None] = mapped_column(String(256))
+    definition_version: Mapped[str] = mapped_column(String(16), nullable=False)
+    rebuilt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class AssetBuildState(Base):
+    """每个用户的资产表构建水位线 + 摘要（增量更新与 build 摘要的输入）。
+
+    存在的原因：增量必须知道“上次构建看到了哪些流水/哪个行情 as_of”，no-op 也要能区分
+    “本次是检查还是重建”，否则前端无法展示「已是最新」；同时用 `version` 做状态 CAS，
+    避免并发构建把水位线写乱。
+    """
+
+    __tablename__ = "asset_build_state"
+    __table_args__ = ({"schema": SCHEMA},)
+
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True),
+        ForeignKey(USER_FK, ondelete="CASCADE"),
+        primary_key=True,
+    )
+    start_date: Mapped[date | None] = mapped_column(Date)
+    last_built_through: Mapped[date | None] = mapped_column(Date)
+    last_built_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_trade_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_trade_count: Mapped[int | None] = mapped_column(BigInteger)
+    last_trade_version_sum: Mapped[int | None] = mapped_column(BigInteger)
+    data_as_of: Mapped[date | None] = mapped_column(Date)
+    assumption: Mapped[str | None] = mapped_column(String(16))
+    last_status: Mapped[str] = mapped_column(String(16), nullable=False, default="ok")
+    last_fifo_error: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    status_reason: Mapped[str | None] = mapped_column(String(256))
+    last_mode: Mapped[str] = mapped_column(String(16), nullable=False, default="full")
+    last_rebuild_from: Mapped[date | None] = mapped_column(Date)
+    last_rows_written: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    definition_version: Mapped[str] = mapped_column(String(16), nullable=False)
+    rows_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
 # 供迁移/RLS 门禁/测试 TRUNCATE 引用的表名清单（避免手写遗漏）
 REVIEW_TABLES: tuple[str, ...] = (
     Round.__tablename__,
     RoundFill.__tablename__,
     RoundBuildState.__tablename__,
     NavDaily.__tablename__,
+    AssetDaily.__tablename__,
+    AssetBuildState.__tablename__,
 )
 
 __all__ = [
+    "ASSET_BUILD_MODES",
+    "ASSET_BUILD_STATUSES",
+    "ASSET_STATUSES",
     "NAV_STATUSES",
     "REVIEW_TABLES",
     "ROUND_STATUSES",
+    "AssetBuildState",
+    "AssetDaily",
     "NavDaily",
     "Round",
     "RoundBuildState",

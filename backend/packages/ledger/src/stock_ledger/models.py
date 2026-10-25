@@ -130,6 +130,9 @@ class Trade(Base):
     __table_args__ = (
         Index("ix_trade_user_date_id", "user_id", "trade_date", "id"),
         Index("ix_trade_user_batch", "user_id", "batch_id"),
+        # 资产表增量脏查询（updated_at 水位线）专用：index-only 覆盖
+        # `WHERE user_id = ? AND updated_at >= ? ORDER BY updated_at`。
+        Index("ix_trade_user_updated_at", "user_id", "updated_at", "trade_date"),
         Index(
             "uq_trade_user_dedupe",
             "user_id",

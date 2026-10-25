@@ -9,14 +9,16 @@ import signal
 import uuid
 from typing import Any
 
-from stock_contracts.clock import SystemClock
+from stock_contracts.clock import Clock, SystemClock
 from stock_contracts.enums import JobStatus
 from stock_contracts.errors import ApiError, ErrorCode
+from stock_ledger.market import create_market_source
 from stock_platform import jobs as jobs_module
 from stock_platform.config import Settings, get_settings
 from stock_platform.db import Database
 from stock_platform.jobs import JobQueue
 from stock_platform.obs import configure_logging, get_logger
+from stock_platform.ports import MarketDataSource
 
 from stock_worker.handlers import HANDLERS
 
@@ -33,15 +35,35 @@ class WorkerRunner:
       绝不下发给 handler。这不是“应用运行时时用 owner”，而是控制面与数据面的分离。
     """
 
-    def __init__(self, settings: Settings | None = None, *, concurrency: int = 2) -> None:
+    def __init__(
+        self,
+        settings: Settings | None = None,
+        *,
+        concurrency: int = 2,
+        clock: Clock | None = None,
+    ) -> None:
         self.settings = settings or get_settings()
         self.db = Database(self.settings, role="app")
         self.queue_db = Database(self.settings, role="owner")
-        self.clock = SystemClock()
+        self.clock = clock or SystemClock()
+        # 行情端口**懒装配**（D11）：replay 只读夹具、无网络；live 分支需要 akshare，
+        # 不应在 worker 进程启动时就因缺依赖失败——只有真的执行行情相关任务才装配。
+        self._market_data: MarketDataSource | None = None
         self.queue = JobQueue(self.db, self.clock)
         self.concurrency = concurrency
         self._stopping = False
         self.worker_id = f"w{os.getpid()}"
+
+    @property
+    def market_data(self) -> MarketDataSource:
+        """行情源（懒装配；`session_factory` 必须是无租户的数据面会话工厂）。"""
+        if self._market_data is None:
+            self._market_data = create_market_source(
+                self.settings,
+                session_factory=self.db.session,
+                clock=self.clock,
+            )
+        return self._market_data
 
     async def stop(self) -> None:
         self._stopping = True
@@ -172,7 +194,7 @@ class WorkerRunner:
             # 必须带租户上下文：ledger 业务表都启用了 RLS，会话未 SET LOCAL app.user_id
             # 时仓储查询会看不到任何行（表现为 IMPORT_PREVIEW_NOT_FOUND 之类的假 404）。
             async with self.db.tenant_tx(uuid.UUID(str(job["user_id"]))) as session:
-                await handler(self.queue, session, job, self.clock)
+                await handler(self.queue, session, job, self.clock, self.market_data)
         except asyncio.CancelledError:
             raise
         except ApiError as exc:

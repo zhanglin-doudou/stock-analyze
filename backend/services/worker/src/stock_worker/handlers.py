@@ -1,7 +1,10 @@
 """任务处理器注册表（Architecture §5.2：处理器只做编排，业务在 ledger/review）。
 
-签名统一为 `(queue, session, job, clock) -> dict | None`；
+签名统一为 `(queue, session, job, clock, market_data) -> dict | None`；
 失败由 runner 依据抛出的 ApiError/异常决定重试或终态。
+
+`market_data` 是 worker 懒装配的行情端口（Period2-16 D11）：只有需要行情估值的任务
+（当前是 `build_assets`）才真正使用它；其余 handler 保留参数以统一签名。
 
 集成约定（Period2-02）：导入提交 / 分类复算成功后自动入队 `rebuild_rounds`
 （`scope_key=f"{user_id}:full"`），让回合表跟上明细变化。入队失败（配额/单飞冲突）
@@ -20,9 +23,13 @@ from stock_contracts.clock import Clock
 from stock_contracts.errors import ApiError
 from stock_platform.jobs import JobQueue
 from stock_platform.obs import get_logger
+from stock_platform.ports import MarketDataSource
 
 JobPayload = dict[str, Any]
-JobHandler = Callable[[JobQueue, AsyncSession, JobPayload, Clock], Awaitable[dict[str, Any] | None]]
+JobHandler = Callable[
+    [JobQueue, AsyncSession, JobPayload, Clock, MarketDataSource],
+    Awaitable[dict[str, Any] | None],
+]
 
 log = get_logger("stock_worker.handlers")
 
@@ -51,7 +58,11 @@ async def _enqueue_rebuild(
 
 
 async def _import_commit(
-    queue: JobQueue, session: AsyncSession, job: JobPayload, clock: Clock
+    queue: JobQueue,
+    session: AsyncSession,
+    job: JobPayload,
+    clock: Clock,
+    _market_data: MarketDataSource,
 ) -> dict[str, Any] | None:
     from stock_ledger.application.imports import commit_batch
 
@@ -61,7 +72,11 @@ async def _import_commit(
 
 
 async def _import_revoke(
-    queue: JobQueue, session: AsyncSession, job: JobPayload, clock: Clock
+    queue: JobQueue,
+    session: AsyncSession,
+    job: JobPayload,
+    clock: Clock,
+    _market_data: MarketDataSource,
 ) -> dict[str, Any] | None:
     from stock_ledger.application.imports import revoke_batch
 
@@ -71,7 +86,11 @@ async def _import_revoke(
 
 
 async def _reclassify(
-    queue: JobQueue, session: AsyncSession, job: JobPayload, clock: Clock
+    queue: JobQueue,
+    session: AsyncSession,
+    job: JobPayload,
+    clock: Clock,
+    _market_data: MarketDataSource,
 ) -> dict[str, Any] | None:
     from stock_ledger.application.classify import reclassify_user
 
@@ -81,11 +100,28 @@ async def _reclassify(
 
 
 async def _rebuild_rounds(
-    queue: JobQueue, session: AsyncSession, job: JobPayload, clock: Clock
+    queue: JobQueue,
+    session: AsyncSession,
+    job: JobPayload,
+    clock: Clock,
+    _market_data: MarketDataSource,
 ) -> dict[str, Any] | None:
     from stock_review.application.rebuild import rebuild_rounds_job
 
     return await rebuild_rounds_job(queue, session, job, clock)
+
+
+async def _build_assets(
+    queue: JobQueue,
+    session: AsyncSession,
+    job: JobPayload,
+    clock: Clock,
+    market_data: MarketDataSource,
+) -> dict[str, Any] | None:
+    """Period2-16（API-082）：构建/增量更新每日资产快照（行情估值需要行情端口）。"""
+    from stock_review.application.assets import build_assets_job
+
+    return await build_assets_job(queue, session, job, clock, market_data)
 
 
 HANDLERS: dict[str, JobHandler] = {
@@ -93,4 +129,5 @@ HANDLERS: dict[str, JobHandler] = {
     "import_revoke": _import_revoke,
     "reclassify": _reclassify,
     "rebuild_rounds": _rebuild_rounds,
+    "build_assets": _build_assets,
 }
