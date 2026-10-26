@@ -3,7 +3,7 @@
 > **命名约定**：期次写全称 `Period1/Period2/Period3`，期次任务 ID 为 `Period1-01`；优先级仍可简写 `P0/P1/P2/P3`。
 
 
-> 依据：[PRD-v2.md](prd/PRD-v2.md)（28 FR + 15 NFR）｜[Architecture-v2.md](Architecture-v2.md)｜[API-Catalog.md](architecture/v2/API-Catalog.md)（80 端点）
+> 依据：[PRD-v2.md](prd/PRD-v2.md)（28 FR + 15 NFR）｜[Architecture-v2.md](Architecture-v2.md)｜[API-Catalog.md](architecture/v2/API-Catalog.md)（82 端点）
 > 编排原则：**本地可验证优先，部署与交付最后做**。
 > 估时口径：1 名资深全栈 + AI 编码辅助；1 人日 = 6 小时有效开发。总计 **≈ 93.5 人日**（单线程约 19 周；并行轨道可压到 ≈ 12–14 周）。
 
@@ -88,7 +88,7 @@ verify-p1     verify-p2     verify-p3     smoke+drill
 
 ## 2. 一期：跑通、看得见、可断言（≈29 人日）
 
-**目标**：本地 `make dev` 之后，浏览器能注册登录、上传真实账单、看到流水、撤销导入；`make verify-p1` 全绿；80 个端点里一期的 30 个有完整验收。
+**目标**：本地 `make dev` 之后，浏览器能注册登录、上传真实账单、看到流水、撤销导入；`make verify-p1` 全绿；82 个端点里一期的 30 个有完整验收。
 
 ### 2.1 验收剧本（5 分钟）
 
@@ -181,6 +181,7 @@ open http://localhost:5173/dashboard
 | **Period2-13** | 前端报告与导出页 | 报告列表/预览/下载、导出任务与下载、空态与失败态 | Period2-09 | 浏览器走查 §3.1 第 3 步 | 1.5 |
 | **Period2-14** | 二期验收与越权全量 | 二期端点验收补齐、**受保护端点越权用例 100%**、golden 回归、`make verify-p2` | 全部 P2 | `make verify-p2` 全绿；`make test-isolation` 覆盖全部受保护端点 | 2 |
 | **Period2-15** | 前端零口径门禁 | ESLint 自定义规则（禁算术/禁结论拼接/禁裸 fetch/禁裸术语）+ AST 断言 | Period2-12 | 故意在页面算一次 `a-b` → `make lint` 失败 | 1 |
+| **Period2-16** | 资产表（每日资产快照） | `review.asset_daily/asset_build_state` + 迁移 0006、共享估值原语（`valuation.py`）、增量构建（变更指纹 + 水位线 + 45 天安全窗）、`GET /assets`、`POST /assets/build`、worker 行情装配、`docs/DATABASE.md` | Period2-03 | API-081/082 验收；增量结果与全量逐行相等；`GET /assets` 分页/过滤/blocked 显式 null、`build` 摘要齐全；门禁 82/82 | 2.5 |
 
 ### 3.3 二期不做
 
@@ -308,7 +309,7 @@ make verify-p3
 
 ## 附录 A：端点与需求覆盖
 
-### A.1 端点 → 期次/任务（80/80）
+### A.1 端点 → 期次/任务（82/82）
 
 | 端点 | 期次 | 任务 | 端点 | 期次 | 任务 |
 |---|---|---|---|---|---|
@@ -352,6 +353,7 @@ make verify-p3
 | API-075 | 一 | Period1-06 | API-076 | 一 | Period1-05 |
 | API-077 | 三 | Period3-07 | API-078 | 三 | Period3-07 |
 | API-079 | 二 | Period2-06 | API-080 | 一 | Period1-12 |
+| API-081 | 二 | Period2-16 | API-082 | 二 | Period2-16 |
 
 > 校验：`make api-coverage` 读取本表与 [API-Catalog §1](architecture/v2/API-Catalog.md) 比对，断言 `已映射 / 总数 == 1.0`。
 
@@ -413,4 +415,4 @@ make verify-p3
 | 二期 | 33.5 | 口径全链 + 四问 + 归因 + 月报 + 导出 + ~35 个端点 |
 | 三期 | 23.0 | 闭环 + 趋势 + 提醒 + 分享 + 对话 + 审计 + 限流 + 性能 + 审计 |
 | 交付 | 8.0 | 镜像 + nginx + 迁移 + 备份恢复 + 安全 + CI/CD + 文档 |
-| **合计** | **93.5** | 80/80 端点 + 28/28 FR + 本地可验证 → 上云可交付 |
+| **合计** | **93.5** | 82/82 端点 + 28/28 FR + 本地可验证 → 上云可交付 |

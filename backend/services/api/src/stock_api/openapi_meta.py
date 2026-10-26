@@ -73,6 +73,11 @@ MONEY_FIELDS = frozenset(
         "buy_cost",
         "sell_proceeds",
         "tolerance",
+        # Period2-16（API-081）：**只加资产表独有**金额字段。market_value/total_assets/
+        # prev_total_assets/daily_pnl 与 nav 3 位示例共用同名，若登记会被强制 2 位而契约测试红。
+        "cash",
+        "holding_cost",
+        "unrealized_pnl",
     }
 )
 PRICE_FIELDS = frozenset({"price", "unit_nav"})
@@ -97,6 +102,8 @@ RATIO_FIELDS = frozenset(
         "de",
         # Period2-02：回合收益率（Ratio 标度整数 → 定点字符串）
         "return_rate",
+        # Period2-16（API-081）：资产表日收益率（scale=8 定点字符串）
+        "daily_return",
     }
 )
 _MONEY_VALUE = "1234.56"
@@ -200,6 +207,8 @@ _STRING_EXAMPLES = {
     "token": "pat_" + "A" * 43,
     "type": "import_commit",
     "url": "https://stock-analyze.local/s/01J9Z6ABCDEFGHJKMNPQRSTVWX",
+    # Period2-16（API-081）：后端算好的两位百分比串（前端零口径）。
+    "daily_return_pct": "0.62%",
 }
 _INT_EXAMPLES = {
     "attempt": 1,
@@ -210,6 +219,11 @@ _INT_EXAMPLES = {
     "fill_id": 1,
     "fills_count": 2,
     "holding_days": 18,
+    # Period2-16（API-081/082）：资产表行数 / 构建摘要计数
+    "holding_count": 1,
+    "rows_count": 125,
+    "last_rows_written": 45,
+    "last_trade_count": 12,
     "sequence": 1,
     "total": 2,
     "expires_in": 900,
@@ -238,6 +252,20 @@ _BOOL_EXAMPLES = {
 _DICT_EXAMPLES: dict[str, dict[str, Any]] = {
     "assumptions": {"benchmark_id": "hs300_tr"},
     "backlog": {"pending": 0, "running": 0, "succeeded": 3},
+    "build": {
+        "state": "current",
+        "last_status": "ok",
+        "last_built_at": _DATETIME,
+        "last_built_through": _DATE,
+        "last_mode": "incremental",
+        "last_rebuild_from": "2026-08-17",
+        "last_rows_written": 45,
+        "rows_count": 125,
+        "assumption": "back_solved",
+        "status_reason": None,
+        "has_new_market_data": False,
+        "definition_version": "1.0",
+    },
     "checks": {"db": "ok", "schema_version": "0042"},
     "reverted": {"inserted": 118, "updated": 0},
     "settings": {"benchmark_id": "hs300_tr", "version": 1},
@@ -280,6 +308,24 @@ _FIELD_ERROR_CODES = frozenset({"IDEMPOTENCY_KEY_REUSED", "VALIDATION_ERROR", "W
 # ── 静态元数据（一次性脚本从 API-Catalog §1/§2 生成；勿手改顺序）──
 
 OPERATION_META: dict[str, dict[str, Any]] = {
+    "buildAssets": {
+        "api_id": "API-082",
+        "scope": "write",
+        "idempotent": True,
+        "async": True,
+        "error_codes": [
+            "IDEMPOTENCY_KEY_REUSED",
+            "IDEMPOTENCY_IN_PROGRESS",
+            "JOB_ALREADY_RUNNING",
+            "QUOTA_EXCEEDED",
+            "VALIDATION_ERROR",
+            "TOKEN_EXPIRED",
+            "TOKEN_REVOKED",
+            "MULTIPLE_CREDENTIALS",
+            "INSUFFICIENT_SCOPE",
+            "ADMIN_CANNOT_READ_TRADES",
+        ],
+    },
     "cancelJob": {
         "api_id": "API-064",
         "scope": "write",
@@ -565,6 +611,23 @@ OPERATION_META: dict[str, dict[str, Any]] = {
             "INVALID_CURSOR",
             "UNKNOWN_QUERY_PARAM",
             "VALIDATION_ERROR",
+        ],
+    },
+    "listAssets": {
+        "api_id": "API-081",
+        "scope": "read",
+        "idempotent": False,
+        "async": False,
+        "error_codes": [
+            "INVALID_CURSOR",
+            "INVALID_PERIOD",
+            "INVALID_SORT_FIELD",
+            "UNKNOWN_QUERY_PARAM",
+            "VALIDATION_ERROR",
+            "TOKEN_EXPIRED",
+            "TOKEN_REVOKED",
+            "MULTIPLE_CREDENTIALS",
+            "ADMIN_CANNOT_READ_TRADES",
         ],
     },
     "listJobs": {
@@ -983,6 +1046,59 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
         }
     },
     "getTrade": {"200": _trade_example()},
+    # Period2-16（API-081）：资产表列表（blocked 行的数值字段是显式 null，示例给正常行）。
+    "listAssets": {
+        "200": {
+            "items": [
+                {
+                    "date": "2026-06-30",
+                    "cash": "-70000.00",
+                    "market_value": "170620.00",
+                    "total_assets": "100620.00",
+                    "holding_cost": "170000.00",
+                    "unrealized_pnl": "620.00",
+                    "holding_count": 1,
+                    "cashflow": "0.00",
+                    "prev_total_assets": "100000.00",
+                    "daily_pnl": "620.00",
+                    "daily_return": "0.00620000",
+                    "daily_return_pct": "0.62%",
+                    "status": "ok",
+                    "status_reason": None,
+                }
+            ],
+            "next_cursor": None,
+            "has_more": False,
+            "build": {
+                "state": "current",
+                "last_status": "ok",
+                "last_built_at": _DATETIME,
+                "last_built_through": _DATE,
+                "last_mode": "incremental",
+                "last_rebuild_from": "2026-08-17",
+                "last_rows_written": 45,
+                "rows_count": 125,
+                "assumption": "back_solved",
+                "status_reason": None,
+                "has_new_market_data": False,
+                "definition_version": "1.0",
+            },
+            "definition_version": "1.0",
+            "data_as_of": _DATE,
+        }
+    },
+    # Period2-16（API-082）：202 专用响应（type 必须是 build_assets）。
+    "buildAssets": {
+        "202": {
+            "job_id": "job_" + _ID_SUFFIX,
+            "type": "build_assets",
+            "status": "pending",
+            "links": {
+                "self": f"/api/v1/jobs/job_{_ID_SUFFIX}",
+                "events": f"/api/v1/jobs/job_{_ID_SUFFIX}/events",
+            },
+        }
+    },
 }
 
 

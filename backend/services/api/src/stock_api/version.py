@@ -1,6 +1,6 @@
 """版本常量（Architecture §15 C4：服务启动即校验 schema 版本）。"""
 
 APP_VERSION = "0.1.0"
-SCHEMA_VERSION = "0005_market_cache"
+SCHEMA_VERSION = "0006_review_asset_daily"
 API_VERSION = "v1"
 API_PREFIX = "/api/v1"

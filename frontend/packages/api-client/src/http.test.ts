@@ -244,4 +244,100 @@ describe("createClient", () => {
     expect(url).toContain("status=pending%2Crunning");
     expect(url).toContain("limit=20");
   });
+
+  it("资产表 list 走 /assets 透传分页/闭区间过滤，build 带 Idempotency-Key 与 mode body", async () => {
+    const fetchImpl = vi.fn(
+      async (input: RequestInfo | URL, _init?: RequestInit): Promise<Response> => {
+        const url = String(input);
+        if (url.includes("/assets/build")) {
+          return jsonResponse(202, {
+            job_id: "job_assets",
+            type: "build_assets",
+            status: "pending",
+            links: {
+              self: "/api/v1/jobs/job_assets",
+              events: "/api/v1/jobs/job_assets/events",
+            },
+          });
+        }
+        return jsonResponse(200, {
+          items: [
+            {
+              date: "2026-06-30",
+              cash: "-70000.00",
+              market_value: "170620.00",
+              total_assets: "100620.00",
+              holding_cost: "170000.00",
+              unrealized_pnl: "620.00",
+              holding_count: 1,
+              cashflow: "0.00",
+              prev_total_assets: "100000.00",
+              daily_pnl: "620.00",
+              daily_return: "0.00620000",
+              daily_return_pct: "0.62%",
+              status: "ok",
+              status_reason: null,
+            },
+          ],
+          next_cursor: null,
+          has_more: false,
+          build: {
+            state: "current",
+            last_status: "ok",
+            last_built_at: "2026-09-30T08:00:00Z",
+            last_built_through: "2026-09-30",
+            last_mode: "incremental",
+            last_rebuild_from: "2026-08-17",
+            last_rows_written: 45,
+            rows_count: 125,
+            assumption: "back_solved",
+            status_reason: null,
+            has_new_market_data: false,
+            definition_version: "1.0",
+          },
+          definition_version: "1.0",
+          data_as_of: "2026-09-30",
+        });
+      },
+    );
+    const client = createClient({
+      baseUrl: "/api/v1",
+      getToken: () => ({ access: "token", refresh: null }),
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+
+    const page = await client.assets.list({
+      limit: 50,
+      cursor: "cursor_1",
+      from: "2026-06-01",
+      to: "2026-06-30",
+      status: "blocked",
+      sort: "-trade_date",
+    });
+    expect(page.items[0].total_assets).toBe("100620.00");
+    expect(page.build.state).toBe("current");
+    expect(page.build.last_mode).toBe("incremental");
+    expect(page.data_as_of).toBe("2026-09-30");
+
+    const listUrl = String(fetchImpl.mock.calls[0][0]);
+    expect(listUrl).toContain("/api/v1/assets?");
+    expect(listUrl).toContain("limit=50");
+    expect(listUrl).toContain("cursor=cursor_1");
+    expect(listUrl).toContain("from=2026-06-01");
+    expect(listUrl).toContain("to=2026-06-30");
+    expect(listUrl).toContain("status=blocked");
+    expect(listUrl).toContain("sort=-trade_date");
+
+    const accepted = await client.assets.build({ mode: "auto" }, "idem-assets-1");
+    expect(accepted.job_id).toBe("job_assets");
+    expect(accepted.type).toBe("build_assets");
+    expect(accepted.status).toBe("pending");
+
+    const [url, init] = fetchImpl.mock.calls[1];
+    expect(String(url)).toBe("/api/v1/assets/build");
+    expect(init?.method).toBe("POST");
+    const headers = init?.headers as Headers;
+    expect(headers.get("Idempotency-Key")).toBe("idem-assets-1");
+    expect(JSON.parse(String(init?.body))).toEqual({ mode: "auto" });
+  });
 });

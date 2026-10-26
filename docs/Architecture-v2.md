@@ -254,7 +254,7 @@
 | GET | `/api/v1/openapi.json` | 契约自描述 | P0 |
 | GET | `/api/v1/errors` | 机器可读错误码总表 | P1 |
 
-**规模**：**80 个端点**（API-001~080），覆盖 28 条 FR（权威清单与字段级契约见 [API-Catalog §1](architecture/v2/API-Catalog.md)；覆盖关系见 §19 与 API-Catalog §8）。
+**规模**：**82 个端点**（API-001~082），覆盖 28 条 FR（权威清单与字段级契约见 [API-Catalog §1](architecture/v2/API-Catalog.md)；覆盖关系见 §19 与 API-Catalog §8）。
 
 > 路径约定：本节用**完整路径**；《API-Catalog》§1 省略公共前缀 `/api/v1`（运维端点 `/healthz`、`/readyz`、`/version`、`/metrics` 不在前缀下）。两处端点集合一致，以 API-Catalog 为准。
 

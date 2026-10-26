@@ -1,6 +1,7 @@
 import type { ReactElement } from "react";
 import { Link, Navigate, Outlet, createBrowserRouter, useNavigate } from "react-router-dom";
 import { clearSession, useIsAuthenticated } from "./store/session";
+import { Assets } from "./pages/Assets";
 import { Import } from "./pages/Import";
 import { Imports } from "./pages/Imports";
 import { Login } from "./pages/Login";
@@ -11,13 +12,15 @@ import { Rounds } from "./pages/Rounds";
 import { Settings } from "./pages/Settings";
 import { Trades } from "./pages/Trades";
 
-function RequireAuth({ children }: { children: ReactElement }): ReactElement {
+/** 登录守卫：无 token → 跳 /login。导出供路由测试直接渲染。 */
+export function RequireAuth({ children }: { children: ReactElement }): ReactElement {
   const authenticated = useIsAuthenticated();
   if (!authenticated) return <Navigate to="/login" replace />;
   return children;
 }
 
-function Layout(): ReactElement {
+/** 应用外壳（顶部导航 + 内容区）。导出供测试断言导航与登录守卫。 */
+export function Layout(): ReactElement {
   const navigate = useNavigate();
   return (
     <div className="app">
@@ -27,6 +30,7 @@ function Layout(): ReactElement {
           <Link to="/trades">交易流水</Link>
           <Link to="/rounds">回合</Link>
           <Link to="/nav">净值</Link>
+          <Link to="/assets">资产</Link>
           <Link to="/import">导入</Link>
           <Link to="/imports">导入记录</Link>
           <Link to="/settings">设置</Link>
@@ -65,6 +69,7 @@ export const router = createBrowserRouter([
       { path: "rounds", element: <Rounds /> },
       { path: "rounds/:roundId", element: <RoundDetail /> },
       { path: "nav", element: <Nav /> },
+      { path: "assets", element: <Assets /> },
       { path: "import", element: <Import /> },
       { path: "imports", element: <Imports /> },
       { path: "settings", element: <Settings /> },

@@ -56,12 +56,14 @@ _LEDGER_TABLES = (
     "summary_rule",
     "reconciliation",
 )
-# review 表由迁移 0003/0004 建立（Period2-02/03）；都带 RLS，按 user 级联清理。
+# review 表由迁移 0003/0004/0006 建立（Period2-02/03/16）；都带 RLS，按 user 级联清理。
 _REVIEW_TABLES = (
     "round",
     "round_fill",
     "round_build_state",
     "nav_daily",
+    "asset_daily",
+    "asset_build_state",
 )
 # market schema（迁移 0005）是公共行情缓存：跨用例共享、跨全量测试保留，
 # 避免重复拉取。测试缓存本身的用例（unit/platform/test_market_cache.py）自清理。

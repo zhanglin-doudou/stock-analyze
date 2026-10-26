@@ -180,6 +180,25 @@ async def _seed_round(engine: AsyncEngine, *, user_id: uuid.UUID) -> str:
     return round_id
 
 
+async def _seed_asset_row(engine: AsyncEngine, *, user_id: uuid.UUID) -> date:
+    """直插一条 owner 的资产快照行（owner 绕过 RLS；raw SQL 避免耦合 review 包内部）。"""
+    trade_date = date(2026, 6, 30)
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                "insert into review.asset_daily (id, user_id, trade_date, cash_units, "
+                "market_value_units, total_assets_units, holding_cost_units, "
+                "unrealized_pnl_units, holding_count, cashflow_units, "
+                "prev_total_assets_units, daily_pnl_units, daily_return_units, status, "
+                "status_reason, definition_version, rebuilt_at) "
+                "values (:id, :user_id, :d, 1000000, 0, 1000000, 0, 0, 0, 0, "
+                "NULL, NULL, NULL, 'ok', NULL, '1.0', now())"
+            ),
+            {"id": f"ast_{uuid.uuid4().hex}", "user_id": user_id, "d": trade_date},
+        )
+    return trade_date
+
+
 # ── 矩阵 ─────────────────────────────────────────────────────
 
 #: 资源级端点：用**别人**的 id 访问必须 404（且不泄露存在性）
@@ -216,6 +235,9 @@ ADMIN_FORBIDDEN: list[tuple[str, str]] = [
     ("get", "/reconciliation/bridge"),
     # Period2-03：admin 不可读 NAV + 持仓
     ("get", "/nav"),
+    # Period2-16：admin 不可读写资产表（身份越权 → 403，不是 404）
+    ("get", "/assets"),
+    ("post", "/assets/build"),
 ]
 
 #: 列表型端点：A/B 各自造数据，B 的列表不得包含 A 的行（跨租户列表隔离）
@@ -228,6 +250,8 @@ LIST_ISOLATION_MATRIX: list[tuple[str, str]] = [
     ("get", "/rounds"),
     ("get", "/summary-rules"),
     ("get", "/reconciliation/bridge"),
+    # Period2-16：资产表列表（seed 自定义 asset_daily 行，按 date 断言）
+    ("get", "/assets"),
 ]
 
 #: 无凭证 → 401：覆盖全部受保护端点（gate_tenant_coverage.py 校验 23/23 完整）。
@@ -270,6 +294,9 @@ UNAUTHENTICATED_MATRIX: list[tuple[str, str]] = [
     ("get", "/rounds/{round_id}/fills"),
     # Period2-03（API-032 净值与收益 + 每日持仓）
     ("get", "/nav"),
+    # Period2-16（API-081/082 资产表）
+    ("get", "/assets"),
+    ("post", "/assets/build"),
 ]
 
 #: 路径参数占位值（只用于越权/401 用例；资源不存在时恰好也走 404 分支）。
@@ -323,6 +350,8 @@ def _unauth_kwargs(method: str, template: str) -> dict[str, Any]:
         kwargs["json"] = {"name": "probe"}
     elif template == "/jobs/rebuild-rounds":
         kwargs["json"] = {"scope": "full"}
+    elif template == "/assets/build":
+        kwargs["headers"] = {"Idempotency-Key": "unauth-probe-" + "x" * 20}
     return kwargs
 
 
@@ -394,6 +423,7 @@ async def test_cross_account_list_isolated(
     job_id = await _seed_job(owner_engine, user_id=owner.user_id)
     rule_id = await _seed_rule(owner_engine, user_id=owner.user_id)
     round_id = await _seed_round(owner_engine, user_id=owner.user_id)
+    asset_date = await _seed_asset_row(owner_engine, user_id=owner.user_id)
 
     url = api_prefix + template + _REQUIRED_QUERY.get(template, "")
     resp = await _call(client, method, url, intruder.headers)
@@ -414,6 +444,15 @@ async def test_cross_account_list_isolated(
         assert owner_resp.status_code == 200
         owner_ids = {item["rule_id"] for item in owner_resp.json()["items"]}
         assert rule_id in owner_ids, "A 自己的私有规则应可见（防止假阳性）"
+        return
+
+    if template == "/assets":
+        # 资产行按 (user_id, trade_date) 隔离，且没有通用 id 字段：按 date 断言。
+        assert body["items"] == [], "B 的资产表看到了 A 的行"
+        owner_resp = await _call(client, method, url, owner.headers)
+        assert owner_resp.status_code == 200, owner_resp.text
+        owner_dates = {item["date"] for item in owner_resp.json()["items"]}
+        assert asset_date.isoformat() in owner_dates, "A 自己的资产行应可见（防止假阳性）"
         return
 
     if template == "/reconciliation/bridge":

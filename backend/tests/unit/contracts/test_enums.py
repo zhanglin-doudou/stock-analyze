@@ -51,6 +51,8 @@ def test_import_batch_status_values() -> None:
 def test_other_enum_values() -> None:
     assert JobType.IMPORT_COMMIT.value == "import_commit"
     assert JobType.IMPORT_RECLASSIFY.value == "reclassify"
+    # Period2-16：资产表构建任务（API-082 投递的 kind 必须与 worker handler 一致）。
+    assert JobType.BUILD_ASSETS.value == "build_assets"
     assert MetricStatus.STALE.value == "stale"
     assert SampleStatus.INSUFFICIENT.value == "insufficient"
     assert ScopeType.SECURITY.value == "security"

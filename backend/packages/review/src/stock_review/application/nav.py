@@ -13,11 +13,9 @@
 
 from __future__ import annotations
 
-import bisect
 import hashlib
 import uuid
 from collections import defaultdict
-from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
 
@@ -25,29 +23,48 @@ from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from stock_contracts.clock import Clock
-from stock_contracts.errors import ApiError
 from stock_core.fifo import build_rounds
 from stock_core.nav import CashflowPoint, NavSeries, build_nav_series, compute_xirr
 from stock_ledger.models import Trade
 from stock_ledger.repositories.trades import TradeRepository
-from stock_platform.ports import Bar, MarketDataSource
+from stock_platform.ports import MarketDataSource
 
-from stock_review.application.bridge import (
-    _category,
-    _initial_cash,
-    _is_cash_balance,
-)
+from stock_review.application.bridge import _initial_cash
 from stock_review.application.rebuild import trades_to_events
+from stock_review.application.valuation import (
+    CASHFLOW_CATEGORIES as _CASHFLOW_CATEGORIES,
+)
+from stock_review.application.valuation import (
+    COST_ADD_CATEGORIES as _COST_ADD_CATEGORIES,
+)
+from stock_review.application.valuation import (
+    PRICE_LOOKBACK as _PRICE_LOOKBACK,
+)
+from stock_review.application.valuation import (
+    QTY_PRICE_SCALE as _QTY_PRICE_SCALE,
+)
+from stock_review.application.valuation import (
+    blocked_price_reason as _blocked_reason,
+)
+from stock_review.application.valuation import (
+    category as _category,
+)
+from stock_review.application.valuation import (
+    close_on_or_before as _close_on_or_before,
+)
+from stock_review.application.valuation import (
+    holding_delta as _holding_delta,
+)
+from stock_review.application.valuation import (
+    is_cash_balance as _is_cash_balance,
+)
+from stock_review.application.valuation import (
+    load_prices as _load_prices,
+)
+from stock_review.application.valuation import (
+    total_market_value as _total_market_value,
+)
 from stock_review.models import NavDaily
-
-# 持仓影响类：这些 category 会改变持仓数量。
-_HOLDING_CATEGORIES: frozenset[str] = frozenset({"buy", "sell", "bonus", "rights", "new_stock"})
-# 外部现金流：transfer（银证转账）。
-_CASHFLOW_CATEGORIES: frozenset[str] = frozenset({"transfer"})
-# 数量标度（scale=4）× 价格标度（scale=6）→ 金额标度（scale=2）需除 1e8。
-_QTY_PRICE_SCALE = 10**8
-# 取数回看窗口：期初基准日需要「当日或之前最近收盘」，假期/周末需往前找。
-_PRICE_LOOKBACK = timedelta(days=45)
 
 
 @dataclass(slots=True)
@@ -93,133 +110,12 @@ def _nav_id(user_id: uuid.UUID, trade_date: date) -> str:
     return f"nav_{digest[:32]}"
 
 
-def _holding_delta(category: str, quantity_units: int) -> int:
-    """单笔 trade 对持仓数量的增量（buy/bonus/rights/new_stock 加，sell 减）。"""
-    if category in {"buy", "bonus", "rights", "new_stock"}:
-        return quantity_units
-    if category == "sell":
-        return -quantity_units
-    return 0
-
-
 def _group_trades_by_date(trades: list[Trade]) -> dict[date, list[Trade]]:
     """按 trade_date 分组（trades 已按日期升序）。"""
     grouped: dict[date, list[Trade]] = defaultdict(list)
     for trade in trades:
         grouped[trade.trade_date].append(trade)
     return grouped
-
-
-def _closing_prices(bars: Sequence[Bar], symbols: list[str]) -> dict[str, list[tuple[date, int]]]:
-    """Bar 序列 → {symbol: [(trade_date, close_units)] 升序}。
-
-    用「价格阶梯」而非精确日期查表：非交易日（周末/节假日/月末口径）取**当日或之前
-    最近一个收盘价**，否则任何非交易日的净值都会因「当日无 bar」被误判阻断。
-    """
-    ladder: dict[str, list[tuple[date, int]]] = {symbol: [] for symbol in symbols}
-    for bar in bars:
-        ladder.setdefault(bar.symbol, []).append((bar.trade_date, bar.close_units))
-    for entries in ladder.values():
-        entries.sort(key=lambda item: item[0])
-    return ladder
-
-
-def _close_on_or_before(
-    ladder: dict[str, list[tuple[date, int]]], symbol: str, trade_date: date
-) -> int | None:
-    """该标的在 trade_date 当日或之前最近一个收盘价（scale=6）；无则 None。"""
-    entries = ladder.get(symbol)
-    if not entries:
-        return None
-    index = bisect.bisect_right([d for d, _ in entries], trade_date)
-    if index == 0:
-        return None
-    return entries[index - 1][1]
-
-
-def _total_market_value(
-    holdings: dict[str, int],
-    ladder: dict[str, list[tuple[date, int]]],
-    trade_date: date,
-) -> tuple[int, list[str]]:
-    """当日持仓市值（scale=2）+ 缺失行情的标的列表。
-
-    市值 = Σ qty_units * close_units / 1e8（qty scale=4 × price scale=6 → scale=2）。
-    """
-    total = 0
-    missing: list[str] = []
-    for symbol, qty in holdings.items():
-        if qty == 0:
-            continue
-        close = _close_on_or_before(ladder, symbol, trade_date)
-        if close is None:
-            missing.append(symbol)
-            continue
-        total += qty * close // _QTY_PRICE_SCALE
-    return total, missing
-
-
-# 行情失败类别（适配器写在 `ApiError.metadata["market_failure"]`；D2=A：不新增错误码）。
-_MARKET_FAILURE_KEY = "market_failure"
-_MARKET_FAILURE_LABELS: dict[str, str] = {
-    "unavailable": "（行情源暂时不可用，可重试）",
-    "not_supported": "（标的不在支持范围，仅支持 A 股主板/科创/创业）",
-    "no_data": "（该区间无行情，可能未上市/停牌）",
-}
-_MARKET_FAILURE_PRIORITY: tuple[str, ...] = ("unavailable", "not_supported", "no_data")
-
-
-def _market_failure_cause(exc: ApiError) -> str:
-    raw = exc.metadata.get(_MARKET_FAILURE_KEY)
-    return raw if isinstance(raw, str) and raw in _MARKET_FAILURE_LABELS else ""
-
-
-def _blocked_reason(prefix: str, symbols: list[str], causes: dict[str, str]) -> str:
-    """`缺行情数据：000651` + 三类可读后缀（不可用可重试 / 不在支持范围 / 无行情）。"""
-    base = f"{prefix}：{','.join(sorted(symbols))}"
-    present = {causes[symbol] for symbol in symbols if symbol in causes}
-    for cause in _MARKET_FAILURE_PRIORITY:
-        if cause in present:
-            return base + _MARKET_FAILURE_LABELS[cause]
-    return base
-
-
-async def _load_prices(
-    market_data: MarketDataSource,
-    symbols: list[str],
-    start: date,
-    end: date,
-) -> tuple[dict[str, list[tuple[date, int]]], dict[str, str]]:
-    """取收盘价阶梯 + 每标的失败类别；缺行情时**降级为当日阻断**，不让整段请求失败。
-
-    行情端口对未知标的会抛 `ApiError`（回放夹具没有该标的 / live 不在支持范围）。
-    批量取数失败后按标的逐个重试，取不到的标的跳过 —— 后续逐日推演会把持有该标的
-    的日期判为阻断（缺行情数据），而不是把整段 NAV 变成 404。返回的 `causes` 用于
-    把 `blocked_reason` 细化为三类（见 `docs/architecture/2026-10-22-live-market-data-source.md` §6）。
-    """
-    if not symbols:
-        return {}, {}
-    causes: dict[str, str] = {}
-    try:
-        bars: Sequence[Bar] = await market_data.get_daily_bars(symbols, start, end)
-    except ApiError:
-        collected: list[Bar] = []
-        for symbol in symbols:
-            try:
-                collected.extend(await market_data.get_daily_bars([symbol], start, end))
-            except ApiError as exc:
-                cause = _market_failure_cause(exc)
-                if cause:
-                    causes[symbol] = cause
-                continue  # 该标的无行情 → 持有它的日期阻断
-        ladder = _closing_prices(collected, symbols)
-    else:
-        ladder = _closing_prices(bars, symbols)
-    # 请求了但区间内没有任何 bar：视为 no_data（适配器不必为此造 404）。
-    for symbol in symbols:
-        if not ladder.get(symbol):
-            causes.setdefault(symbol, "no_data")
-    return ladder, causes
 
 
 def investor_cashflows(series: NavSeries) -> list[CashflowPoint]:
@@ -241,13 +137,6 @@ def investor_cashflows(series: NavSeries) -> list[CashflowPoint]:
     last = points[-1]
     flows[-1] = CashflowPoint(last.trade_date, flows[-1].amount_units + last.total_value_units)
     return flows
-
-
-# 这些 category 的 trade 会增加 cost_basis（花钱买入更多持仓）。
-# amount_units 是带符号净现金流：buy/rights/new_stock 为负，且解析器已把
-# 佣金/印花税/其他费折算进净额（买入 = -(成交额 + 全部费用)），取负即得**含费成本**，
-# 不得再叠加 commission/stamp_tax/other_fee 字段（会重复计）。
-_COST_ADD_CATEGORIES: frozenset[str] = frozenset({"buy", "rights", "new_stock"})
 
 
 async def compute_nav_points(

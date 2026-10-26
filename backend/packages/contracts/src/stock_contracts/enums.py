@@ -29,6 +29,8 @@ class JobType(StrEnum):
     IMPORT_RECLASSIFY = "reclassify"
     REBUILD_ROUNDS = "rebuild_rounds"
     REBUILD_NAV = "rebuild_nav"
+    # Period2-16 资产表（每日资产快照）构建/增量更新任务。
+    BUILD_ASSETS = "build_assets"
     DIAGNOSTICS_SELECTION = "diagnostics_selection"
     REPORT_GENERATE = "report_generate"
     EXPORT_CREATE = "export_create"
