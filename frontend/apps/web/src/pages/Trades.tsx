@@ -94,6 +94,7 @@ export function Trades() {
     { key: "quantity", header: "数量", render: (row) => row.quantity },
     { key: "price", header: "价格", render: (row) => row.price },
     { key: "amount", header: "金额", render: (row) => row.amount },
+    { key: "cash_balance", header: "现金余额", render: (row) => row.cash_balance },
     { key: "version", header: "版本", render: (row) => row.version },
     { key: "deleted", header: "状态", render: (row) => (row.deleted_at ? `已删除 ${row.deleted_at}` : "正常") },
     {

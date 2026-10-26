@@ -11,6 +11,10 @@
 补差行靠「同日期同 line_no 时 missing 排在断链行之前」定位，因此只对带账单行号的导入行自动
 补差；手工录入行（`line_no` 为空）无法稳定插到两行之间，保持 `blocked` 交人工修复。
 
+陈旧补差清理：缺口愈合后（被删原行恢复、缺失行随增量导入回链），残留补差行自身会变成新的
+断链点，对它再补差会级联出第二笔反向补差。对账时若发现「移除连续 missing 行后前后行直接
+自洽」，判定该段补差行陈旧并软删，链条绕过它继续核对。
+
 金额口径统一在解析器已归一：`Trade.amount_units` = 带符号的净现金流（买入为负、卖出为正、
 已含费用），因此这里**不再按方向反号、也不再扣费用**（否则费用被扣两次、方向被翻两次，
 真实账单会整片假断链）。
@@ -149,26 +153,61 @@ async def reconcile(
     trades = await repo.balances_ordered(user_id, period_start=period_start, period_end=period_end)
 
     has_balance = any(trade.cash_balance_units is not None for trade in trades)
-    has_missing_rows = any(trade.side == Side.MISSING.value for trade in trades)
     breaks: list[dict[str, Any]] = []
     checked = 0
     filled_count = 0
     unfilled = 0
+    stale_fill_ids: set[str] = set()
+    now = clock.now()
     if has_balance:
+        anchor = trades[0]
         for index in range(1, len(trades)):
-            previous = trades[index - 1]
             current = trades[index]
+            if current.id in stale_fill_ids:
+                # 已判陈旧的补差行：不再作为链节，链条从 anchor 直接续到后继行。
+                continue
+            previous = anchor
             if previous.cash_balance_units is None or current.cash_balance_units is None:
+                anchor = current
                 continue
             if current.side == Side.UNKNOWN.value:
                 # 方向未知的行不做链式核对：金额虽带符号，但方向语义无法独立复核。
                 # 其余额仍是下一行的期初锚点，跳过本行不会造成后续假断链。
+                anchor = current
                 continue
             expected = previous.cash_balance_units + _cash_delta_units(current)
             actual = current.cash_balance_units
-            checked += 1
             delta = actual - expected
+            if abs(delta) > epsilon_units and current.side == Side.MISSING.value:
+                # 补差行自身与前驱不再平衡：先判断它是否“陈旧”——缺口已愈合时
+                # （例如被删原行恢复、或缺失行随增量导入回链），残留补差行会变成新的
+                # 断链点；对它再补差会产出第二笔反向补差（级联）。检测方法：把这段连续
+                # missing 行整体移除后，`前驱余额 + 后继带符号金额 == 后继余额` 成立即愈合，
+                # 此时软删这段陈旧补差行让链条绕过它，而不是再补差。
+                run_end = index
+                while (
+                    run_end + 1 < len(trades)
+                    and trades[run_end + 1].side == Side.MISSING.value
+                    and trades[run_end + 1].cash_balance_units is not None
+                ):
+                    run_end += 1
+                nxt = trades[run_end + 1] if run_end + 1 < len(trades) else None
+                if (
+                    nxt is not None
+                    and nxt.cash_balance_units is not None
+                    and abs(
+                        nxt.cash_balance_units
+                        - (previous.cash_balance_units + _cash_delta_units(nxt))
+                    )
+                    <= epsilon_units
+                ):
+                    for stale_index in range(index, run_end + 1):
+                        await repo.soft_delete(user_id, trades[stale_index].id, at=now)
+                        stale_fill_ids.add(trades[stale_index].id)
+                    continue  # anchor 不前进：下一次核对从 previous 直接到 nxt
+            checked += 1
             if abs(delta) <= epsilon_units:
+                anchor = current
                 continue
             if current.line_no is None:
                 # 手工录入行没有账单行号，补差行无法稳定插到「上一行→本行」之间
@@ -187,6 +226,7 @@ async def reconcile(
                         "filled_trade_id": None,
                     }
                 )
+                anchor = current
                 continue
             fill, created = await _insert_fill(
                 repo,
@@ -199,7 +239,6 @@ async def reconcile(
             )
             if created:
                 filled_count += 1
-            has_missing_rows = True
             breaks.append(
                 {
                     "index": index,
@@ -213,6 +252,12 @@ async def reconcile(
                     "filled_trade_id": fill.id,
                 }
             )
+            anchor = current
+
+    # 区间内仍存在的系统补差行（本轮判陈旧软删的不算）：链已闭合但数据经过自愈，降级提示。
+    has_missing_rows = any(
+        trade.side == Side.MISSING.value and trade.id not in stale_fill_ids for trade in trades
+    )
 
     warning_code: str | None
     if not has_balance:
@@ -229,7 +274,6 @@ async def reconcile(
         status = ReconciliationStatus.OK.value
         warning_code = None
 
-    now = clock.now()
     row = await ReconciliationRepository(session).upsert(
         user_id,
         period_start=period_start,

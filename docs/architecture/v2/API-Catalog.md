@@ -39,7 +39,7 @@
 - **必需**（所有 202 异步写 + 改变资产的 POST）：同 key + 同 body → 重放首次响应（**同一 job_id/同一 body**，`Idempotency-Replayed: true`），副作用只发生一次；同 key 不同 body → `422 IDEMPOTENCY_KEY_REUSED`；首次仍在执行 → `409 IDEMPOTENCY_IN_PROGRESS`（附 `job_id`）。
 - **支持**（PATCH/PUT/撤销/恢复/分享/建规则）：同 key 重放首次结果，不带 key 时按 HTTP 语义。**不适用**（`POST /tokens`、register/login、匿名分享）：token 明文只出现一次，超时用 `GET /tokens` 对齐。
 - 存储 `platform.idempotency`（唯一索引 `(user_id,key)`），保留 24h，只缓存 2xx/409/422，5xx 不缓存。重复 DELETE → 204；重复 restore → 200 同状态；重复 revoke → 409 `IMPORT_ALREADY_REVOKED`。
-- **自愈例外**：`GET /reconciliation`（API-026）首次调用会写入 `side=missing`、`source=system` 的补差流水，使断链闭合；该写入只发生一次（重复调用幂等）。客户端/网关不得假设该 GET 无副作用或长期缓存其响应。导入提交（API-011）也会在收尾自动跑一次对账：补差行归属该批次（`batch_id`），撤销批次时一并软删；其结果通过 API-013 的 `filled_count/fills[]` 暴露。
+- **自愈例外**：`GET /reconciliation`（API-026）首次调用会写入 `side=missing`、`source=system` 的补差流水，使断链闭合；该写入只发生一次（重复调用幂等）。客户端/网关不得假设该 GET 无副作用或长期缓存其响应。导入提交（API-011）也会在收尾自动跑一次对账：补差行归属该批次（`batch_id`），撤销批次时一并软删；其结果通过 API-013 的 `filled_count/fills[]` 暴露。缺口愈合后（被删原行恢复、缺失行随增量导入回链），对账会把已失效的陈旧补差行软删清理（移除该段补差行后前后行余额自洽即判定陈旧），而不是对它再补差。
 ### 0.7 异步任务模式
 - 长任务返回 `202` + `Location: /api/v1/jobs/{id}` + `Retry-After: 1`，body 含 `job_id/type/status/links{self,events}`；轮询 `GET /jobs/{id}` 至终态取 `result_ref`，或订阅 SSE（§5）；SSE 是优化，轮询为兜底。
 - 同类任务去重 `dedupe_key=hash(user_id,type,canonical_params)`：pending/running 已存在 → 返回同一 `job_id`（202 + `X-Job-Reused: true`）；参数不同且超并发 → `429 QUOTA_EXCEEDED`。
