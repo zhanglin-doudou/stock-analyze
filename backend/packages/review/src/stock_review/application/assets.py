@@ -38,6 +38,7 @@ from stock_contracts.errors import ApiError, ErrorCode
 from stock_core.fifo import build_rounds
 from stock_ledger.models import Trade
 from stock_platform.jobs import JobQueue
+from stock_platform.obs import get_logger
 from stock_platform.ports import MarketDataSource
 
 from stock_review.application.bridge import _initial_cash
@@ -55,6 +56,8 @@ from stock_review.application.valuation import (
 from stock_review.models import AssetBuildState as AssetBuildStateRow
 from stock_review.models import AssetDaily
 from stock_review.repositories.assets import AssetRepository
+
+log = get_logger("stock_review.assets")
 
 # 资产表口径版本：bump 后旧 state 触发全量重建。
 ASSET_DEFINITION_VERSION = "1.0"
@@ -660,6 +663,12 @@ async def build_assets(
             start_date=None,
             status_reason=valuations.global_reason,
         )
+        # 监控点：整表被阻断（如无现金余额锚点），人工需立即关注。
+        log.warning(
+            "assets.build_blocked",
+            user_id=str(user_id),
+            reason=valuations.global_reason,
+        )
         return AssetBuildSummary(
             mode=build_mode,
             rebuild_from=None,
@@ -682,6 +691,42 @@ async def build_assets(
     rows_count = await repo.count(user_id)
     overall_status = await repo.overall_status(user_id)
     state_reason = _state_reason(overall_status, fifo_error=fifo_error_now)
+
+    # 监控点：每次构建都打 INFO 摘要；出现阻断/降级行再打 WARNING，附原因聚合与
+    # 行情失败类别，无需复现即可从日志/告警直接定位（如退市标的缺口拉取失败）。
+    blocked_rows = sum(1 for row in valuations.rows if row["status"] == ROW_STATUS_BLOCKED)
+    degraded_rows = sum(1 for row in valuations.rows if row["status"] == ROW_STATUS_DEGRADED)
+    log.info(
+        "assets.build",
+        user_id=str(user_id),
+        mode=build_mode,
+        status=overall_status,
+        start=start.isoformat(),
+        end=end.isoformat(),
+        rows_written=len(valuations.rows),
+        rows_total=rows_count,
+        blocked_rows=blocked_rows,
+        degraded_rows=degraded_rows,
+        data_as_of=market_as_of.isoformat(),
+    )
+    if blocked_rows or degraded_rows:
+        reasons: dict[str, int] = {}
+        for row in valuations.rows:
+            if row["status"] == ROW_STATUS_BLOCKED:
+                key = str(row["status_reason"] or "unknown")
+                reasons[key] = reasons.get(key, 0) + 1
+        log.warning(
+            "assets.build_degraded",
+            user_id=str(user_id),
+            mode=build_mode,
+            start=start.isoformat(),
+            end=end.isoformat(),
+            blocked_rows=blocked_rows,
+            degraded_rows=degraded_rows,
+            blocked_reasons=reasons,
+            market_causes=market_causes,
+            fifo_error=fifo_error_now,
+        )
 
     await _persist_state(
         repo,

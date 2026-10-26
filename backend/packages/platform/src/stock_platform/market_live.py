@@ -44,6 +44,7 @@ from stock_platform.config import Settings
 from stock_platform.market_models import DailyBar, PullRange
 from stock_platform.obs import (
     MARKET_CACHE_HITS,
+    MARKET_CACHE_STALE_FALLBACKS,
     MARKET_FETCH_ERRORS,
     MARKET_FETCH_SECONDS,
     MARKET_FETCH_TOTAL,
@@ -633,11 +634,33 @@ class CachedMarketDataSource:
         if gaps:
             MARKET_CACHE_HITS.labels(cache="miss").inc()
             fetch_start, fetch_end = gaps[0][0], gaps[-1][1]
-            fetched = await self._inner.get_daily_bars([symbol], fetch_start, fetch_end)
-            rows = [(bar.trade_date, bar.close_units, bar.return_units) for bar in fetched]
-            data_end = rows[-1][0] if rows else None
-            await self._store(symbol, fetch_start, fetch_end, rows, data_end)
-            cached = await self._load_bars(symbol, start, end)
+            try:
+                fetched = await self._inner.get_daily_bars([symbol], fetch_start, fetch_end)
+            except ApiError as exc:
+                # 缺口拉取失败：缓存中已有的 bar 仍然有效，不能丢弃。曾导致真实事故：
+                # 已退市标的（如 600077）的尾部缺口 [退市日+1, 今天] 永久拉取失败，
+                # 异常向上传播使整个标的失去全部缓存历史价，持有它的日期全部被判阻断。
+                # 这里降级复用缓存；失败缺口不写 pull_range，下次构建自动重试。
+                cached = await self._load_bars(symbol, start, end)
+                if not cached:
+                    raise
+                MARKET_CACHE_STALE_FALLBACKS.inc()
+                log.warning(
+                    "market.cache",
+                    symbol=symbol,
+                    start=start.isoformat(),
+                    end=end.isoformat(),
+                    result="stale_fallback",
+                    gap_start=fetch_start.isoformat(),
+                    gap_end=fetch_end.isoformat(),
+                    bars=len(cached),
+                    error=str(exc),
+                )
+            else:
+                rows = [(bar.trade_date, bar.close_units, bar.return_units) for bar in fetched]
+                data_end = rows[-1][0] if rows else None
+                await self._store(symbol, fetch_start, fetch_end, rows, data_end)
+                cached = await self._load_bars(symbol, start, end)
         else:
             MARKET_CACHE_HITS.labels(cache="hit").inc()
             log.info(
