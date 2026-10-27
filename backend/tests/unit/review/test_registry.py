@@ -97,22 +97,26 @@ def _write(
 
 def test_support_defs_are_injected_but_not_in_production() -> None:
     registry = build_registry(extra_paths=[SUPPORT_DEFS])
-    assert registry.ids() == ("perf.expectancy_stub", "perf.win_rate_stub")
+    production_ids = build_registry().ids()
+    assert registry.ids() == tuple(sorted((*production_ids, "perf.expectancy_stub", "perf.win_rate_stub")))
     assert registry.get("perf.win_rate_stub") is not None
     assert registry.get("perf.missing") is None
     assert registry.require("perf.win_rate_stub").domain == "perf"
     with pytest.raises(KeyError):
         registry.require("perf.missing")
 
-    assert len(registry) == 2
+    assert len(registry) == len(production_ids) + 2
     assert "perf.win_rate_stub" in registry
     assert len(registry.version) == 64
     assert [item.id for item in registry.topological()] == list(registry.ids())
     assert {item.id for item in registry.by_domain("all")} == set(registry.ids())
-    assert {item.id for item in registry.by_domain("behavior")} == set()
+    assert {item.id for item in registry.by_domain("behavior")} == {
+        item.id for item in build_registry().by_domain("behavior")
+    }
 
     production = build_registry()
-    assert len(production) == 0
+    assert "perf.win_rate_stub" not in production
+    assert "perf.expectancy_stub" not in production
 
 
 def test_deep_chain_and_cycle(tmp_path: Path) -> None:
@@ -165,7 +169,7 @@ def test_bad_version_scope_unit_and_schema(tmp_path: Path) -> None:
 
     (tmp_path / "b.py").unlink()
     _write(tmp_path, "c.py", metric_id="perf.x", unit="z", precision=4)
-    assert build_registry(extra_paths=[tmp_path]).ids() == ("perf.x",)
+    assert "perf.x" in build_registry(extra_paths=[tmp_path]).ids()
     (tmp_path / "c.py").unlink()
 
 

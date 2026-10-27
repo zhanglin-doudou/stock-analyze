@@ -31,7 +31,6 @@ from stock_core.metrics.holdings import (
 from stock_core.metrics.perf import (
     concentration_top3,
     expectancy_annual,
-    fee_breakeven_rate,
     fee_per_round_mean,
     holding_days_mean,
     pnl_ratio,
@@ -73,7 +72,6 @@ __all__ = [
     "daily_portfolio_returns",
     "decision_efficiency",
     "expectancy_annual",
-    "fee_breakeven_rate",
     "fee_per_round_mean",
     "fly_ratio",
     "holding_days_mean",

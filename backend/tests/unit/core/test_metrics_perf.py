@@ -8,7 +8,6 @@ from stock_core.metrics.perf import (
     _mean_dec,
     concentration_top3,
     expectancy_annual,
-    fee_breakeven_rate,
     fee_per_round_mean,
     holding_days_mean,
     pnl_ratio,
@@ -72,20 +71,6 @@ class TestFeePerRoundMean:
 
     def test_empty_returns_none(self) -> None:
         assert fee_per_round_mean([]) is None
-
-
-class TestFeeBreakevenRate:
-    def test_losing_period_returns_positive(self) -> None:
-        # net < 0 → 需要 breakeven
-        fbe = fee_breakeven_rate([-100, -50, -30])
-        assert fbe is not None
-        assert fbe > 0
-
-    def test_profitable_period_returns_none(self) -> None:
-        assert fee_breakeven_rate([100, 50, 30]) is None
-
-    def test_empty_returns_none(self) -> None:
-        assert fee_breakeven_rate([]) is None
 
 
 class TestExpectancyAnnual:

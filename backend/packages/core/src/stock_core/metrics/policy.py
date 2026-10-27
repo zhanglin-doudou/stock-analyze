@@ -29,7 +29,3 @@ DEFAULT_LEVERAGE_SCALE8: Final[int] = 100_000_000  # 1.0（无杠杆）
 # bar 密度阈值：bar_coverage = #有 bar 交易日 / #应交易日
 # 低于此值视为数据稀疏（timing.beta 等择时指标的信号质量下降）
 BAR_DENSITY_THRESHOLD_SCALE8: Final[int] = 95_000_000  # 0.95
-
-# —— 费用 ——
-# 费率参数（fee_breakeven 计算用）
-FEE_RATE_DEFAULT_SCALE8: Final[int] = 3_000_000  # 0.03 → 单边 0.03%（万三）

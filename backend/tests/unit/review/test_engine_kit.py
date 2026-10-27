@@ -239,14 +239,15 @@ def test_params_are_validated_and_bound_to_compute() -> None:
         )
 
 
-def test_test_defs_are_pure_and_production_registry_is_empty() -> None:
+def test_test_defs_are_pure_and_production_registry_excludes_stubs() -> None:
     for path in sorted(SUPPORT_DEFS.glob("*.py")):
         if not path.name.startswith("_"):
             assert_compute_is_pure(path)
 
     production = build_registry()
     assert "perf.win_rate_stub" not in production
-    assert len(production) == 0
+    assert "perf.expectancy_stub" not in production
+    assert len(production) == 18
 
 
 def test_outcome_dict_contains_no_float() -> None:

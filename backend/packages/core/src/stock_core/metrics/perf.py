@@ -1,7 +1,10 @@
-"""绩效域指标（Period2-07）：win_rate / pnl_ratio / holding_days / concentration / fee / fee_breakeven / expectancy。
+"""绩效域指标（Period2-07）：win_rate / pnl_ratio / holding_days / concentration / fee / expectancy。
 
 全部为纯函数，零 I/O、零时钟、零墙钟依赖；输入为回合级元组（pnl_units, holding_days, fee_units...），
 输出为标度整数（scale=8 比率或 scale=2 金额）。
+
+注：perf.fee_breakeven 口径（§7.1.6：年化费用/日均持仓市值）依赖 asset_daily 视图，
+由 review 层 def 直接实现，不在本模块。
 """
 
 from __future__ import annotations
@@ -113,41 +116,6 @@ def fee_per_round_mean(
     if not fee_units:
         return None
     return sum(fee_units) // len(fee_units)  # 整数平均（scale=2 分是整数）
-
-
-def fee_breakeven_rate(
-    pnl_units_ex_fee: list[int],
-    *,
-    fee_rates: list[int] | None = None,
-    scale: int = SCALE_RATIO,
-    fee_total_units: int | None = None,
-) -> int | None:
-    """盈亏平衡费率：净盈亏 = 0 时的单边费率。
-
-    公式：fee_breakeven = (Σ |pnl_ex_fee|) / (Σ |trade_value| × 2)
-    简化近似：用平均 pnl_ex_fee 绝对值 / 2 作为估算——**设计文档 §3.1 未给精确公式**，
-    这里用"如果把净收益全部当作费用，需要多高的费率"来反推。
-
-    当前实现：fee_breakeven_rate = net_profit_total / (sum_abs_pnl × 2)
-    含义：每赚 1 元，你允许自己多付多少费率的交易成本才回本。
-
-    边界：pnl 总和为正（赚钱）→ 不需要 breakeven（负费率才有意义），返回 None。
-    """
-    if fee_rates is None:
-        fee_rates = []
-    if not pnl_units_ex_fee:
-        return None
-    with localcontext() as ctx:
-        ctx.prec = 40
-        net = Decimal(sum(pnl_units_ex_fee))
-        if net >= 0:
-            return None  # 已盈利，无需"breakeven"
-        sum_abs = sum(abs(p) for p in pnl_units_ex_fee)
-        if sum_abs == 0:  # pragma: no cover - sum_abs=0 意味着全零 pnl，net=0 已被上一行 guard
-            return None
-        sf = Decimal(10) ** scale
-        fbe = abs(net) / Decimal(sum_abs * 2)
-        return int((fbe * sf).quantize(Decimal(1), rounding=ROUND_HALF_UP))
 
 
 def expectancy_annual(
