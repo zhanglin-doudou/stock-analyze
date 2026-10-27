@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "metric_id": "perf.pnl_ratio",
+  "definition_version": "1.0",
+  "fixture": {"id": "fx_metrics_core"},
+  "period": "2026-09",
+  "scope": "round",
+  "params": {},
+  "expected": {
+    "value": "1.63381463",
+    "unit": "ratio",
+    "n": 12,
+    "ci_low": null,
+    "ci_high": null,
+    "sample_status": "ok",
+    "status": "ok",
+    "decomposition": {
+      "n_win": 8,
+      "n_loss": 4,
+      "n_zero": 0,
+      "avg_win": "225261",
+      "avg_loss": "137875",
+      "median_win": "102666",
+      "median_loss": "85594",
+      "pnl_ratio_median": "119945323"
+    }
+  },
+  "tolerance": {"kind": "ratio_bp", "eps": "0.0001"},
+  "expected_source": {"kind": "hand_calc", "ref": "§8.4（2252.61375 ÷ 1378.745）", "oracle": null},
+  "review": {"author": "test-designer", "reviewer": null, "approved": false, "approved_at": null},
+  "boundaries": [
+    "全胜/全亏 → value null（本夹具不含，见 fx_n5/fx_n30 变体）",
+    "avg_win 一次舍入 2252.61、avg_loss 四舍五入 1378.75（精确均值 1378.745）"
+  ]
+}

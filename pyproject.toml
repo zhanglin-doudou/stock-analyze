@@ -60,6 +60,8 @@ markers = [
     "integration: 需要真实 PostgreSQL",
     "isolation: 多租户越权用例",
     "live: 需要网络与 akshare optional extra 的联网用例（默认门禁排除）",
+    "golden: 指标黄金用例（L1，三方比对；零 skip/xfail 容差）",
+    "perf: 性能预算用例（PR-full 告警，release 超 2× 阻断）",
 ]
 filterwarnings = ["error::DeprecationWarning:stock_api.*"]
 

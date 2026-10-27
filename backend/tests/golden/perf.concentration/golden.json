@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "metric_id": "perf.concentration",
+  "definition_version": "1.0",
+  "fixture": {"id": "fx_metrics_core"},
+  "period": "2026-09",
+  "scope": "round",
+  "params": {},
+  "expected": {
+    "value": "0.81170984",
+    "unit": "ratio",
+    "n": 8,
+    "ci_low": null,
+    "ci_high": null,
+    "sample_status": "insufficient",
+    "status": "ok",
+    "decomposition": {
+      "cr1": "31427381",
+      "gini": "49793802",
+      "n_pos": 8,
+      "top3_k": 3,
+      "top3_amount": "1462775",
+      "positive_total": "1802091"
+    }
+  },
+  "tolerance": {"kind": "ratio_bp", "eps": "0.0001"},
+  "expected_source": {"kind": "hand_calc", "ref": "§8.4（14627.75÷18020.91；Gini 盈利升序）", "oracle": null},
+  "review": {"author": "test-designer", "reviewer": null, "approved": false, "approved_at": null},
+  "boundaries": [
+    "n_pos=8 < min_n=10 → insufficient：有 value 无 CI（D-08）",
+    "分母仅盈利回合（D-10）；n_pos<3 时 Top3 退化见 fx_n5 变体"
+  ]
+}

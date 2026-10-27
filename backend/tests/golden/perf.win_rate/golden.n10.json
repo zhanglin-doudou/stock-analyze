@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "metric_id": "perf.win_rate",
+  "definition_version": "1.0",
+  "fixture": {"id": "fx_n10"},
+  "period": "2026-09",
+  "scope": "round",
+  "params": {},
+  "expected": {
+    "value": "0.70000000",
+    "unit": "ratio",
+    "n": 10,
+    "ci_low": "0.39677815",
+    "ci_high": "0.89220873",
+    "sample_status": "ok",
+    "status": "ok",
+    "decomposition": {
+      "n_closed": 10,
+      "n_open": 3,
+      "n_data_error": 0,
+      "wins": 7,
+      "n_zero": 0,
+      "n_all": 13,
+      "win_rate_all": "61538462"
+    }
+  },
+  "tolerance": {"kind": "ratio_bp", "eps": "0.0001"},
+  "expected_source": {"kind": "hand_calc", "ref": "§8.2 row 1（n=10 边界：7/10；Wilson(7,10)）", "oracle": "naive_stats.wilson_interval"},
+  "review": {"author": "test-designer", "reviewer": null, "approved": false, "approved_at": null},
+  "boundaries": [
+    "n=10 = min_n → ok 且出 CI（样本维度与交易日维度独立参数化）",
+    "win_rate_all=(7+1)/(10+3)=8/13"
+  ]
+}

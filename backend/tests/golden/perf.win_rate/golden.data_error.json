@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "metric_id": "perf.win_rate",
+  "definition_version": "1.0",
+  "fixture": {"id": "fx_data_error"},
+  "period": "2026-09",
+  "scope": "round",
+  "params": {},
+  "expected": {
+    "value": "0.72727273",
+    "unit": "ratio",
+    "n": 11,
+    "ci_low": "0.43435470",
+    "ci_high": "0.90253941",
+    "sample_status": "ok",
+    "status": "ok",
+    "decomposition": {
+      "n_closed": 11,
+      "n_open": 3,
+      "n_data_error": 1,
+      "wins": 8,
+      "n_zero": 0,
+      "n_all": 14,
+      "win_rate_all": "64285714"
+    }
+  },
+  "tolerance": {"kind": "ratio_bp", "eps": "0.0001"},
+  "expected_source": {"kind": "hand_calc", "ref": "§8.2 row 1（fx_data_error：B2 剔除 → 8/11）", "oracle": "naive_stats.wilson_interval"},
+  "review": {"author": "test-designer", "reviewer": null, "approved": false, "approved_at": null},
+  "boundaries": [
+    "data_error 回合一律剔除出 closed/open 分母，单独计 n_data_error",
+    "win_rate_all=(8+1)/(11+3)=9/14"
+  ]
+}

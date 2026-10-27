@@ -17,7 +17,13 @@ if TYPE_CHECKING:
     import datetime as _dt
 
     from stock_review.metrics.base import MetricContext
-    from stock_review.metrics.views import BarView, BenchmarkView, RoundView, TradeView
+    from stock_review.metrics.views import (
+        AssetDailyView,
+        BarView,
+        BenchmarkView,
+        RoundView,
+        TradeView,
+    )
 
 
 class EmptyParams(BaseModel):
@@ -165,7 +171,7 @@ def benchmark_available(ctx: MetricContext) -> bool:
     return ctx.benchmark is not None and bool(sorted_benchmark(ctx))
 
 
-def asset_days_in_period(ctx: MetricContext) -> list:
+def asset_days_in_period(ctx: MetricContext) -> list[AssetDailyView]:
     """period 内 asset_daily 行（按日期升序）。"""
     rows = [
         row

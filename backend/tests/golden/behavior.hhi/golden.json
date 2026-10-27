@@ -1,0 +1,41 @@
+{
+  "schema_version": 1,
+  "metric_id": "behavior.hhi",
+  "definition_version": "1.0",
+  "fixture": {"id": "fx_hhi_small"},
+  "period": "2026-09",
+  "scope": "day",
+  "params": {},
+  "expected": {
+    "value": "0.58765819",
+    "unit": "ratio",
+    "n": 1,
+    "ci_low": null,
+    "ci_high": null,
+    "sample_status": "insufficient",
+    "status": "ok",
+    "decomposition": {
+      "hhi_total_max": "58765819",
+      "hhi_total_end": "58765819",
+      "hhi_eq_mean": "87630874",
+      "hhi_eq_max": "87630874",
+      "hhi_eq_end": "87630874",
+      "avg_holding_count": "200",
+      "avg_cash_weight": "21349274",
+      "n_days_used": 1,
+      "n_blocked_days": 0,
+      "n_days_empty": 0,
+      "n_recon_mismatch": 0,
+      "n_missing_price": 0,
+      "n_oversell": 0
+    }
+  },
+  "tolerance": {"kind": "ratio_bp", "eps": "0.0001"},
+  "expected_source": {"kind": "hand_calc", "ref": "§8.4 hhi 小例（持仓 172000/12200、现金 50000、总 234200）", "oracle": null},
+  "review": {"author": "test-designer", "reviewer": null, "approved": false, "approved_at": null},
+  "boundaries": [
+    "单日 n=1 < min_n=10 → insufficient：有 value 无 CI",
+    "HHI_total 分母含现金、HHI_eq 分母仅持仓市值（A19 双口径）",
+    "对账不变量 Σmv==asset_daily.market_value（0 分公差）"
+  ]
+}

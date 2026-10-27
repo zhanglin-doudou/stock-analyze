@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "metric_id": "perf.fee",
+  "definition_version": "1.0",
+  "fixture": {"id": "fx_metrics_core"},
+  "period": "2026-09",
+  "scope": "trade",
+  "params": {},
+  "expected": {
+    "value": "0.00047982",
+    "unit": "ratio",
+    "n": 27,
+    "ci_low": null,
+    "ci_high": null,
+    "sample_status": "ok",
+    "status": "ok",
+    "decomposition": {
+      "fee_amount": "125002",
+      "commission": "65132",
+      "stamp_tax": "59870",
+      "other_fee": "0",
+      "standalone_fee": "0",
+      "turnover_gross": "260520000",
+      "turnover_net": "260465390",
+      "fee_ratio_net": "47992",
+      "n_fee_rows": 0
+    }
+  },
+  "tolerance": {"kind": "fee", "eps": "0.00000001", "rel": "0.005"},
+  "expected_source": {"kind": "hand_calc", "ref": "§8.4（1250.02÷2605200.00）", "oracle": null},
+  "review": {"author": "test-designer", "reviewer": null, "approved": false, "approved_at": null},
+  "boundaries": [
+    "费用=佣金+印花+其他+独立费用行（D-27；本夹具无独立费用行）",
+    "成交额主口径毛额 qty×price；turnover_net=Σ|amount| 交叉校验",
+    "amount_units 已含费，不二次扣费"
+  ]
+}

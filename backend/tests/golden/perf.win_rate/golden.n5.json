@@ -1,0 +1,34 @@
+{
+  "schema_version": 1,
+  "metric_id": "perf.win_rate",
+  "definition_version": "1.0",
+  "fixture": {"id": "fx_n5"},
+  "period": "2026-09",
+  "scope": "round",
+  "params": {},
+  "expected": {
+    "value": "0.60000000",
+    "unit": "ratio",
+    "n": 5,
+    "ci_low": null,
+    "ci_high": null,
+    "sample_status": "insufficient",
+    "status": "ok",
+    "decomposition": {
+      "n_closed": 5,
+      "n_open": 0,
+      "n_data_error": 0,
+      "wins": 3,
+      "n_zero": 0,
+      "n_all": 5,
+      "win_rate_all": "60000000"
+    }
+  },
+  "tolerance": {"kind": "ratio_bp", "eps": "0.0001"},
+  "expected_source": {"kind": "hand_calc", "ref": "§8.2 row 1（n=5 边界：3/5=0.6）", "oracle": null},
+  "review": {"author": "test-designer", "reviewer": null, "approved": false, "approved_at": null},
+  "boundaries": [
+    "n=5 < min_n=10 → insufficient：有 value、无 CI、无 conclusion（D-08）",
+    "fx_n5 无 open 回合 → win_rate_all 与 value 同值"
+  ]
+}
