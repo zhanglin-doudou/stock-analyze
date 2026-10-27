@@ -1,10 +1,15 @@
-"""API-033/034/035/079 验收（Period2-06）。
+"""API-033/034/035/079 验收（Period2-06/07）。
 
-覆盖：happy、ETag/304、参数错误码、解释三段式、下钻分页/游标、跨用户隔离。
+覆盖：happy、ETag/304、参数错误码、解释三段式、下钻分页/游标、跨用户隔离、
+blocked 状态传播（§8.7：坏指标无 value 而好指标仍 ok）、insufficient 口径
+（D-08：有 value 无 CI）、裸术语扫描（§8.6 assert_explain_no_jargon）。
+API-038（POST /diagnostics/selection）依赖 D-17 handler，归 Period2-06 收尾
+（E-18），本文件不覆盖。
 """
 
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import UTC, date, datetime
 from pathlib import Path
@@ -21,7 +26,11 @@ pytestmark = pytest.mark.api
 SUPPORT_DEFS = Path(__file__).resolve().parents[1] / "support" / "metric_defs"
 WIN_RATE = "perf.win_rate_stub"
 EXPECTANCY = "perf.expectancy_stub"
+BENCH = "perf.benchmark_stub"
 PERIOD = "2026-06"
+
+# §8.6 assert_explain_no_jargon 词表：结论/口径/动作文案不允许出现裸术语。
+JARGON = re.compile(r"\b(DE|BHAR|PGR|PLR|TWR|MWR|FIFO|HHI|Wilson|IR)\b|[βα]", re.IGNORECASE)
 
 
 @pytest.fixture(autouse=True)
@@ -293,3 +302,207 @@ async def test_api_033_tenant_isolation(client, account_factory, owner_engine):
     assert item["n"] == 0
     assert item["value"] is None
     assert item["sample_status"] == "insufficient"
+
+
+@pytest.mark.asyncio
+async def test_api_033_no_token_401(client):
+    """§8.8：无凭证 → 401。"""
+    r = await client.get("/api/v1/metrics", params={"ids": WIN_RATE, "period": PERIOD})
+    assert r.status_code == 401
+    assert r.json()["code"] == ErrorCode.TOKEN_EXPIRED.value
+
+
+@pytest.mark.asyncio
+async def test_api_033_insufficient_keeps_value_without_ci(client, account_factory, owner_engine):
+    """D-08 门槛表 n=1–9：status=ok、有 value、无 CI、sample_status=insufficient。"""
+    acc = await account_factory()
+    await _seed_rounds(owner_engine, user_id=acc.user_id, wins=3, losses=2)
+
+    r = await client.get(
+        "/api/v1/metrics", params={"ids": WIN_RATE, "period": PERIOD}, headers=acc.headers
+    )
+    assert r.status_code == 200, r.text
+    item = r.json()["items"][0]
+    assert item["status"] == "ok"
+    assert item["sample_status"] == "insufficient"
+    assert item["n"] == 5
+    assert item["value"] == "0.60000000"  # 3/5，insufficient 仍出口 value
+    assert item["ci_low"] is None
+    assert item["ci_high"] is None
+
+
+@pytest.mark.asyncio
+async def test_api_033_blocked_metric_has_no_value_while_others_ok(
+    client, account_factory, owner_engine
+):
+    """§8.7：基准缺失 → 依赖它的指标 blocked（无 value），不依赖的指标仍 ok。
+
+    replay 夹具只有 hs300_tr 月线；``zz500_tr`` 通过 KNOWN_BENCHMARKS 校验但无数据，
+    触发 ``dataset_missing:benchmark_series`` → BENCHMARK_MISSING。
+    """
+    acc = await account_factory()
+    await _seed_rounds(owner_engine, user_id=acc.user_id)
+
+    r = await client.get(
+        "/api/v1/metrics",
+        params={"ids": f"{WIN_RATE},{BENCH}", "period": PERIOD, "benchmark": "zz500_tr"},
+        headers=acc.headers,
+    )
+    assert r.status_code == 200, r.text
+    items = {item["metric_id"]: item for item in r.json()["items"]}
+    assert items[WIN_RATE]["status"] == "ok"
+    assert items[WIN_RATE]["value"] is not None
+
+    blocked = items[BENCH]
+    assert blocked["status"] == "blocked"
+    assert "value" not in blocked  # §8.7：blocked 无 value 键（序列化排除）
+    assert blocked["reason"].startswith("BENCHMARK_MISSING")
+    assert blocked["decomposition"] is None
+
+
+@pytest.mark.asyncio
+async def test_api_033_etag_changes_after_data_change(client, account_factory, owner_engine):
+    """§8.7 ETag/缓存行：数据变更后旧 ETag 不再命中（304 → 200）。"""
+    acc = await account_factory()
+    await _seed_rounds(owner_engine, user_id=acc.user_id)
+
+    first = await client.get(
+        "/api/v1/metrics", params={"ids": WIN_RATE, "period": PERIOD}, headers=acc.headers
+    )
+    assert first.status_code == 200, first.text
+    etag = first.headers["etag"]
+
+    await _seed_rounds(owner_engine, user_id=acc.user_id, wins=1, losses=0)
+
+    second = await client.get(
+        "/api/v1/metrics",
+        params={"ids": WIN_RATE, "period": PERIOD},
+        headers={**acc.headers, "If-None-Match": etag},
+    )
+    assert second.status_code == 200, second.text
+    assert second.headers["etag"] != etag
+    assert second.json()["items"][0]["n"] == 13
+
+
+@pytest.mark.asyncio
+async def test_api_034_unknown_metric_and_missing_period(client, account_factory):
+    acc = await account_factory()
+
+    unknown = await client.get(
+        "/api/v1/metrics/perf.nope/explain", params={"period": PERIOD}, headers=acc.headers
+    )
+    assert unknown.status_code == 404
+    assert unknown.json()["code"] == ErrorCode.METRIC_NOT_FOUND.value
+
+    missing = await client.get(f"/api/v1/metrics/{WIN_RATE}/explain", headers=acc.headers)
+    assert missing.status_code == 422
+    assert missing.json()["code"] == ErrorCode.VALIDATION_ERROR.value
+
+
+@pytest.mark.asyncio
+async def test_api_034_admin_forbidden(client, account_factory):
+    admin = await account_factory(role="admin")
+    r = await client.get(
+        f"/api/v1/metrics/{WIN_RATE}/explain", params={"period": PERIOD}, headers=admin.headers
+    )
+    assert r.status_code == 403
+    assert r.json()["code"] == ErrorCode.ADMIN_CANNOT_READ_TRADES.value
+
+
+@pytest.mark.asyncio
+async def test_api_034_explain_no_jargon(client, account_factory, owner_engine):
+    """§8.6/§8.7：explain 文案（zh+en）零裸术语命中。"""
+    acc = await account_factory()
+    await _seed_rounds(owner_engine, user_id=acc.user_id)
+
+    for language in ("zh-CN", "en-US"):
+        r = await client.get(
+            f"/api/v1/metrics/{WIN_RATE}/explain",
+            params={"period": PERIOD},
+            headers={**acc.headers, "Accept-Language": language},
+        )
+        assert r.status_code == 200, r.text
+        body = r.json()
+        texts = [
+            body["conclusion"],
+            body["method"],
+            body["drilldown"]["description"],
+            body["drilldown"]["endpoint"],
+        ]
+        for text in texts:
+            assert text is not None
+            assert JARGON.search(text) is None, (language, text)
+
+    other = await account_factory()
+    await _seed_rounds(owner_engine, user_id=other.user_id, wins=1, losses=1)
+    small = await client.get(
+        f"/api/v1/metrics/{WIN_RATE}/explain", params={"period": PERIOD}, headers=other.headers
+    )
+    assert small.status_code == 200, small.text
+    what_to_do = small.json()["what_to_do"]
+    assert what_to_do
+    assert JARGON.search(what_to_do) is None
+
+
+@pytest.mark.asyncio
+async def test_api_035_unknown_metric_and_missing_period(client, account_factory):
+    acc = await account_factory()
+
+    unknown = await client.get(
+        "/api/v1/metrics/perf.nope/drilldown", params={"period": PERIOD}, headers=acc.headers
+    )
+    assert unknown.status_code == 404
+    assert unknown.json()["code"] == ErrorCode.METRIC_NOT_FOUND.value
+
+    missing = await client.get(f"/api/v1/metrics/{WIN_RATE}/drilldown", headers=acc.headers)
+    assert missing.status_code == 422
+    assert missing.json()["code"] == ErrorCode.VALIDATION_ERROR.value
+
+
+@pytest.mark.asyncio
+async def test_api_035_admin_forbidden(client, account_factory):
+    admin = await account_factory(role="admin")
+    r = await client.get(
+        f"/api/v1/metrics/{WIN_RATE}/drilldown",
+        params={"period": PERIOD},
+        headers=admin.headers,
+    )
+    assert r.status_code == 403
+    assert r.json()["code"] == ErrorCode.ADMIN_CANNOT_READ_TRADES.value
+
+
+@pytest.mark.asyncio
+async def test_api_035_tenant_isolation_empty_items(client, account_factory, owner_engine):
+    """§8.8：metric_id 是全局注册表键；B 无数据时 drilldown items=[] 而非 404。"""
+    owner = await account_factory()
+    await _seed_rounds(owner_engine, user_id=owner.user_id)
+    other = await account_factory()
+
+    r = await client.get(
+        f"/api/v1/metrics/{WIN_RATE}/drilldown",
+        params={"period": PERIOD},
+        headers=other.headers,
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["items"] == []
+    assert body["total"] == 0
+    assert body["next_cursor"] is None
+
+
+@pytest.mark.asyncio
+async def test_api_079_missing_period_422(client, account_factory):
+    acc = await account_factory()
+    r = await client.get(f"/api/v1/metrics/{WIN_RATE}", headers=acc.headers)
+    assert r.status_code == 422
+    assert r.json()["code"] == ErrorCode.VALIDATION_ERROR.value
+
+
+@pytest.mark.asyncio
+async def test_api_079_admin_forbidden(client, account_factory):
+    admin = await account_factory(role="admin")
+    r = await client.get(
+        f"/api/v1/metrics/{WIN_RATE}", params={"period": PERIOD}, headers=admin.headers
+    )
+    assert r.status_code == 403
+    assert r.json()["code"] == ErrorCode.ADMIN_CANNOT_READ_TRADES.value

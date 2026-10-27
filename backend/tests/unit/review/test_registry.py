@@ -98,14 +98,23 @@ def _write(
 def test_support_defs_are_injected_but_not_in_production() -> None:
     registry = build_registry(extra_paths=[SUPPORT_DEFS])
     production_ids = build_registry().ids()
-    assert registry.ids() == tuple(sorted((*production_ids, "perf.expectancy_stub", "perf.win_rate_stub")))
+    assert registry.ids() == tuple(
+        sorted(
+            (
+                *production_ids,
+                "perf.benchmark_stub",
+                "perf.expectancy_stub",
+                "perf.win_rate_stub",
+            )
+        )
+    )
     assert registry.get("perf.win_rate_stub") is not None
     assert registry.get("perf.missing") is None
     assert registry.require("perf.win_rate_stub").domain == "perf"
     with pytest.raises(KeyError):
         registry.require("perf.missing")
 
-    assert len(registry) == len(production_ids) + 2
+    assert len(registry) == len(production_ids) + 3
     assert "perf.win_rate_stub" in registry
     assert len(registry.version) == 64
     assert [item.id for item in registry.topological()] == list(registry.ids())
