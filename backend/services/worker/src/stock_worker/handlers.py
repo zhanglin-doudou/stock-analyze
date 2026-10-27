@@ -124,10 +124,24 @@ async def _build_assets(
     return await build_assets_job(queue, session, job, clock, market_data)
 
 
+async def _rebuild_period(
+    queue: JobQueue,
+    session: AsyncSession,
+    job: JobPayload,
+    clock: Clock,
+    market_data: MarketDataSource,
+) -> dict[str, Any] | None:
+    """API-083：按月一键编排 rounds → assets → nav → metrics。"""
+    from stock_review.application.rebuild_period import rebuild_period_job
+
+    return await rebuild_period_job(queue, session, job, clock, market_data)
+
+
 HANDLERS: dict[str, JobHandler] = {
     "import_commit": _import_commit,
     "import_revoke": _import_revoke,
     "reclassify": _reclassify,
     "rebuild_rounds": _rebuild_rounds,
     "build_assets": _build_assets,
+    "rebuild_period": _rebuild_period,
 }

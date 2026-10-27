@@ -7,16 +7,20 @@ SSE 只是优化：客户端仍以 `GET /jobs/{id}` 轮询兜底（§5.3）。�
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import json
+import re
 import time
 import uuid
 from collections.abc import AsyncIterator
+from datetime import date
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query, Request, Response
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, Header, Query, Request, Response
+from fastapi.responses import JSONResponse, StreamingResponse
 from stock_contracts.enums import JobStage, JobStatus
-from stock_contracts.errors import ApiError, ErrorCode, NotFoundError
+from stock_contracts.errors import ApiError, ErrorCode, FieldError, NotFoundError
+from stock_platform.idempotency import IdempotencyStore
 from stock_platform.jobs import JobQueue
 from stock_platform.models import Job
 from stock_platform.obs import get_logger
@@ -24,7 +28,7 @@ from stock_platform.tenant import TenantContext
 
 from stock_api.deps import AppState, get_state, get_tenant
 from stock_api.routing import StrictQueryRoute
-from stock_api.schemas import JobOut, JobPage
+from stock_api.schemas import JobAcceptedOut, JobLinks, JobOut, JobPage, RebuildPeriodIn
 
 log = get_logger("stock_api.jobs")
 
@@ -32,6 +36,22 @@ router = APIRouter(tags=["jobs"], route_class=StrictQueryRoute)
 
 SSE_POLL_SECONDS = 1.0
 SSE_KEEPALIVE_SECONDS = 15.0
+
+_JOBS_PREFIX = "/api/v1/jobs"
+_ENDPOINT_REBUILD_PERIOD = "POST /jobs/rebuild-period"
+_PERIOD_RE = re.compile(r"^(\d{4})-(\d{2})$")
+
+
+def _validate_period(period: str, *, today: date) -> None:
+    """YYYY-MM 且不是未来月份；非法 → 422 INVALID_PERIOD。"""
+    matched = _PERIOD_RE.match(period)
+    if matched is None:
+        raise ApiError(ErrorCode.INVALID_PERIOD, detail=f"period 必须是 YYYY-MM: {period}")
+    year, month = int(matched.group(1)), int(matched.group(2))
+    if not 1 <= month <= 12:
+        raise ApiError(ErrorCode.INVALID_PERIOD, detail=f"period 月份非法: {period}")
+    if date(year, month, 1) > today.replace(day=1):
+        raise ApiError(ErrorCode.INVALID_PERIOD, detail=f"period 不能是未来月份: {period}")
 
 
 def _to_out(job: Job) -> JobOut:
@@ -247,3 +267,106 @@ async def cancel_job(
         await session.refresh(job)
         snapshot = _to_out(job)
     return snapshot
+
+
+@router.post(
+    "/jobs/rebuild-period",
+    status_code=202,
+    response_model=JobAcceptedOut,
+    operation_id="rebuildPeriod",
+)
+async def rebuild_period_endpoint(
+    payload: RebuildPeriodIn,
+    request: Request,
+    response: Response,
+    ctx: Annotated[TenantContext, Depends(get_tenant)],
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+) -> JobAcceptedOut | JSONResponse:
+    """API-083：按月一键编排 rounds → assets → nav → metrics（202 + Location）。
+
+    单飞 `scope_key={user_id}:period:{period}`：同参复用同一 job（X-Job-Reused），
+    异参运行中 → 409 JOB_ALREADY_RUNNING。
+    """
+    ctx.forbid_admin_trades()
+    user_id = ctx.require_write()
+    state = get_state(request)
+
+    if not idempotency_key or not 16 <= len(idempotency_key) <= 128:
+        raise ApiError(
+            ErrorCode.VALIDATION_ERROR,
+            errors=[FieldError("Idempotency-Key", "required", "该操作必须携带幂等键(16~128)")],
+        )
+    _validate_period(payload.period, today=state.clock.today())
+
+    # request_hash 基于解析默认值后的规范 body（缺省 include_exploratory=false 与
+    # 显式 false 视为同一请求）。
+    body_json = json.dumps(payload.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
+    request_hash = hashlib.sha256(body_json.encode("utf-8")).hexdigest()
+    params: dict[str, object] = {
+        "period": payload.period,
+        "include_exploratory": payload.include_exploratory,
+        "rf_annual": str(state.settings.rf_annual),
+    }
+
+    async with state.db.session(user_id=user_id, begin=True) as session:
+        try:
+            record = await state.idempotency.begin(
+                session,
+                user_id=user_id,
+                endpoint=_ENDPOINT_REBUILD_PERIOD,
+                key=idempotency_key,
+                request_hash=request_hash,
+            )
+        except ApiError as exc:
+            if exc.code is ErrorCode.IDEMPOTENCY_IN_PROGRESS:
+                job_ref = exc.metadata.get("job_id")
+                raise ApiError(
+                    ErrorCode.IDEMPOTENCY_IN_PROGRESS,
+                    detail="该幂等键正在处理中",
+                    headers={"X-Job-Id": str(job_ref)} if job_ref else {},
+                ) from exc
+            raise
+
+        if record is not None:
+            replayed = IdempotencyStore.payload_of(record)
+            if replayed is not None:
+                return JSONResponse(
+                    content=replayed,
+                    status_code=IdempotencyStore.status_of(record),
+                    headers={
+                        "Idempotency-Replayed": "true",
+                        "Location": f"{_JOBS_PREFIX}/{replayed.get('job_id')}",
+                        "Retry-After": "1",
+                    },
+                )
+
+        job_id, reused = await state.queue.enqueue(
+            session,
+            kind="rebuild_period",
+            user_id=user_id,
+            scope_key=f"{user_id}:period:{payload.period}",
+            params=params,
+        )
+        accepted = JobAcceptedOut(
+            job_id=job_id,
+            type="rebuild_period",
+            links=JobLinks(
+                self=f"{_JOBS_PREFIX}/{job_id}",
+                events=f"{_JOBS_PREFIX}/{job_id}/events",
+            ),
+        )
+        await state.idempotency.complete(
+            session,
+            user_id=user_id,
+            endpoint=_ENDPOINT_REBUILD_PERIOD,
+            key=idempotency_key,
+            status_code=202,
+            body=accepted.model_dump(mode="json"),
+            job_id=job_id,
+        )
+
+    response.headers["Location"] = f"{_JOBS_PREFIX}/{job_id}"
+    response.headers["Retry-After"] = "1"
+    if reused:
+        response.headers["X-Job-Reused"] = "true"
+    return accepted

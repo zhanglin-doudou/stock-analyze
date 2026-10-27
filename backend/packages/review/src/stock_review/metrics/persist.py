@@ -113,10 +113,19 @@ def dependency_rows(user_id: uuid.UUID, outcome: MetricOutcome) -> list[dict[str
 
 
 async def persist_outcome(
-    repository: MetricResultRepository, user_id: uuid.UUID, outcome: MetricOutcome
+    repository: MetricResultRepository,
+    user_id: uuid.UUID,
+    outcome: MetricOutcome,
+    *,
+    force: bool = False,
 ) -> bool:
-    """ok 结果 UPSERT + 同批替换血缘；返回是否写入。"""
-    if not outcome.persistable:
+    """ok 结果 UPSERT + 同批替换血缘；返回是否写入。
+
+    `force=True`（API-083 构建编排路径）时非 ok 的 blocked/stale/unreliable 状态行
+    也落库——构建场景需要把状态矩阵显式物化供指标页展示；读路径（E-01）保持只写
+    ok，且缓存命中仍由 `is_stale` 把非 ok 行视为过期，两条路径互不污染。
+    """
+    if not force and not outcome.persistable:
         return False
     await repository.upsert(user_id, result_values(user_id, outcome))
     await repository.replace_dependencies(

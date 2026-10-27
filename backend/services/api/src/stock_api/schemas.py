@@ -447,6 +447,13 @@ class RebuildRoundsIn(StrictModel):
     reason: str | None = Field(default=None, max_length=200)
 
 
+class RebuildPeriodIn(StrictModel):
+    """API-083：按月一键构建编排（rounds → assets → nav → metrics）。"""
+
+    period: str = Field(min_length=7, max_length=7)
+    include_exploratory: bool = False
+
+
 class RoundOut(BaseModel):
     """API-029/030：回合（金额/数量/比率全部定点字符串）。"""
 
