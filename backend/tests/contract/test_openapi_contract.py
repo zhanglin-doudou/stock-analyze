@@ -75,11 +75,11 @@ def test_validate_contract_returns_no_violations(spec: dict[str, Any]) -> None:
 
 
 def test_covers_all_registered_operations(spec: dict[str, Any]) -> None:
-    """49 个 operation（P2-06 新增 API-033/034/035/079）全部登记且与 OPERATION_META 一致。"""
+    """50 个 operation（P2-07 新增 API-083）全部登记且与 OPERATION_META 一致。"""
     operations = _operations(spec)
     operation_ids = [operation["operationId"] for _, _, operation in operations]
-    assert len(operations) == 49
-    assert len(set(operation_ids)) == 49
+    assert len(operations) == 50
+    assert len(set(operation_ids)) == 50
     assert set(operation_ids) == set(OPERATION_META), "OPERATION_META 与实现端点漂移"
     paths = {path for _, path, _ in operations}
     # 探针/元数据端点（/api/v1/openapi.json 由 FastAPI 自引用，不在 paths 中）。
@@ -119,9 +119,9 @@ def test_every_2xx_has_example(spec: dict[str, Any]) -> None:
                     json_count += 1
                 else:
                     text_count += 1
-    # 49 个 operation 中 2 个文本响应（SSE / Prometheus）、5 个 204 无 body，
-    # 其余 42 个 2xx JSON 响应必须各带确定性示例（新增端点漏示例即失败）。
-    assert json_count == 42
+    # 50 个 operation 中 2 个文本响应（SSE / Prometheus）、5 个 204 无 body，
+    # 其余 43 个 2xx JSON 响应必须各带确定性示例（新增端点漏示例即失败）。
+    assert json_count == 43
     assert text_count == 2  # SSE（API-063）+ Prometheus 文本（API-074）
     stream = _find_operation(spec, "streamJobEvents")["responses"]["200"]["content"]
     assert "text/event-stream" in stream

@@ -2668,6 +2668,28 @@
         "title": "ReadyOut",
         "type": "object"
       },
+      "RebuildPeriodIn": {
+        "additionalProperties": false,
+        "description": "API-083：按月一键构建编排（rounds → assets → nav → metrics）。",
+        "properties": {
+          "include_exploratory": {
+            "default": false,
+            "title": "Include Exploratory",
+            "type": "boolean"
+          },
+          "period": {
+            "maxLength": 7,
+            "minLength": 7,
+            "title": "Period",
+            "type": "string"
+          }
+        },
+        "required": [
+          "period"
+        ],
+        "title": "RebuildPeriodIn",
+        "type": "object"
+      },
       "RebuildRoundsIn": {
         "additionalProperties": false,
         "description": "API-028：重建范围（full 全量 / period 脏窗口）。",
@@ -7403,6 +7425,223 @@
         ],
         "x-idempotent": false,
         "x-required-scope": "read"
+      }
+    },
+    "/api/v1/jobs/rebuild-period": {
+      "post": {
+        "description": "API-083：按月一键编排 rounds → assets → nav → metrics（202 + Location）。\n\n单飞 `scope_key={user_id}:period:{period}`：同参复用同一 job（X-Job-Reused），\n异参运行中 → 409 JOB_ALREADY_RUNNING。",
+        "operationId": "rebuildPeriod",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-api-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RebuildPeriodIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "job_id": "job_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "links": {
+                    "events": "/api/v1/jobs/job_01J9Z6ABCDEFGHJKMNPQRSTVWX/events",
+                    "self": "/api/v1/jobs/job_01J9Z6ABCDEFGHJKMNPQRSTVWX"
+                  },
+                  "status": "pending",
+                  "type": "rebuild_period"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/JobAcceptedOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "TOKEN_EXPIRED",
+                  "detail": "访问凭证已过期。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 401,
+                  "title": "TOKEN_EXPIRED",
+                  "type": "https://stock-analyze.local/errors/TOKEN_EXPIRED",
+                  "user_message": "访问凭证已过期。",
+                  "what_to_do": "用 refresh_token 换新 access，或重建 PAT。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "未认证或凭证无效"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "INSUFFICIENT_SCOPE",
+                  "detail": "当前令牌只有只读权限。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 403,
+                  "title": "INSUFFICIENT_SCOPE",
+                  "type": "https://stock-analyze.local/errors/INSUFFICIENT_SCOPE",
+                  "user_message": "当前令牌只有只读权限。",
+                  "what_to_do": "创建带 write scope 的 PAT。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "权限不足"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "IDEMPOTENCY_IN_PROGRESS",
+                  "detail": "这个请求正在处理中。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": true,
+                  "status": 409,
+                  "title": "IDEMPOTENCY_IN_PROGRESS",
+                  "type": "https://stock-analyze.local/errors/IDEMPOTENCY_IN_PROGRESS",
+                  "user_message": "这个请求正在处理中。",
+                  "what_to_do": "用返回的 job_id 轮询结果。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "资源状态冲突"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "example": {
+                  "code": "INVALID_PERIOD",
+                  "detail": "时间区间不合法。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 422,
+                  "title": "INVALID_PERIOD",
+                  "type": "https://stock-analyze.local/errors/INVALID_PERIOD",
+                  "user_message": "时间区间不合法。",
+                  "what_to_do": "用 YYYY-MM 或 from/to（半开区间）。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "QUOTA_EXCEEDED",
+                  "detail": "同时运行的任务已达上限。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": true,
+                  "status": 429,
+                  "title": "QUOTA_EXCEEDED",
+                  "type": "https://stock-analyze.local/errors/QUOTA_EXCEEDED",
+                  "user_message": "同时运行的任务已达上限。",
+                  "what_to_do": "等运行中的任务结束。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "请求过于频繁"
+          }
+        },
+        "summary": "Rebuild Period Endpoint",
+        "tags": [
+          "jobs"
+        ],
+        "x-async": true,
+        "x-error-codes": [
+          "INVALID_PERIOD",
+          "IDEMPOTENCY_KEY_REUSED",
+          "IDEMPOTENCY_IN_PROGRESS",
+          "JOB_ALREADY_RUNNING",
+          "QUOTA_EXCEEDED",
+          "VALIDATION_ERROR",
+          "TOKEN_EXPIRED",
+          "TOKEN_REVOKED",
+          "MULTIPLE_CREDENTIALS",
+          "INSUFFICIENT_SCOPE",
+          "ADMIN_CANNOT_READ_TRADES"
+        ],
+        "x-idempotent": true,
+        "x-required-scope": "write"
       }
     },
     "/api/v1/jobs/rebuild-rounds": {
