@@ -307,6 +307,8 @@ UNAUTHENTICATED_MATRIX: list[tuple[str, str]] = [
     ("get", "/metrics/{metric_id}"),
     ("get", "/metrics/{metric_id}/explain"),
     ("get", "/metrics/{metric_id}/drilldown"),
+    # Period2-07（API-083 按月编排；admin 403 由 tests/api/test_api_083 显式覆盖）
+    ("post", "/jobs/rebuild-period"),
 ]
 
 #: 路径参数占位值（只用于越权/401 用例；资源不存在时恰好也走 404 分支）。
@@ -368,6 +370,9 @@ def _unauth_kwargs(method: str, template: str) -> dict[str, Any]:
         kwargs["json"] = {"scope": "full"}
     elif template == "/assets/build":
         kwargs["headers"] = {"Idempotency-Key": "unauth-probe-" + "x" * 20}
+    elif template == "/jobs/rebuild-period":
+        kwargs["headers"] = {"Idempotency-Key": "unauth-probe-" + "x" * 20}
+        kwargs["json"] = {"period": "2026-06"}
     return kwargs
 
 
