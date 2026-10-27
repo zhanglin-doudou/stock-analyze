@@ -21,7 +21,11 @@ SCALE_RATIO: Final[int] = 8  # 比率 → 1e-8
 A_SHUFFLE_DAYS: Final[int] = 244  # 年化基数（交易日）
 ANNUALIZATION_BASE: Final[int] = A_SHUFFLE_DAYS
 MIN_CONCLUSION_SAMPLE: Final[int] = 10  # n < 10 → insufficient，不出结论
-MIN_CI_SAMPLE: Final[int] = 10  # bootstrap CI 最小样本
+MIN_CI_SAMPLE: Final[int] = 10  # bootstrap/Wilson CI 最小样本
+Z_95: Final[Decimal] = Decimal("1.959963985")  # 95% 双侧正态分位
+MIN_TRADING_DAYS: Final[int] = 60  # 日频窗口最小交易日数（不足 → pending_window）
+RF_ANNUAL_DEFAULT: Final[Decimal] = Decimal("0.015")  # 无风险利率默认值（D-14）
+ENGINE_VERSION: Final[str] = "1"  # 进 inputs_hash；引擎语义变更时 bump
 
 # ── 业务常量 ───────────────────────────────────────────────
 IMPORT_PREVIEW_TTL_HOURS: Final[int] = 24

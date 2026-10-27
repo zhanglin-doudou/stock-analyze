@@ -159,6 +159,12 @@ test-isolation:
 test-review:
 	@$(UV) pytest backend/tests/unit/review backend/tests/integration/test_rounds_rebuild.py backend/tests/integration/test_assets_incremental.py -q
 
+# ── Period2-05/06（指标注册表与执行引擎）────────────────────
+.PHONY: test-engine
+test-engine:
+	@$(UV) pytest backend/tests/unit/core --cov=stock_core --cov-fail-under=100 -q
+	@$(UV) pytest backend/tests/unit/review -q
+
 .PHONY: test-p2
 test-p2:
 	@$(UV) pytest backend/tests/unit/core --cov=stock_core --cov-fail-under=100 -q

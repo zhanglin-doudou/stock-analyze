@@ -304,7 +304,8 @@ def create_market_source(
     ledger 的原因：`ReplayMarketDataSource` 在本层，platform 不能反向依赖 ledger（L1-L5）。
     """
     if settings.market_mode == "replay":
-        return ReplayMarketDataSource(settings.fixtures_dir / "market" / "quotes.json")
+        bars_file = settings.market_bars_file or (settings.fixtures_dir / "market" / "quotes.json")
+        return ReplayMarketDataSource(bars_file)
 
     from stock_platform.market_live import (
         AkshareMarketDataSource,

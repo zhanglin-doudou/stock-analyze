@@ -1390,6 +1390,369 @@
         "title": "MeOut",
         "type": "object"
       },
+      "MetricBatchOut": {
+        "properties": {
+          "assumptions": {
+            "additionalProperties": true,
+            "title": "Assumptions",
+            "type": "object"
+          },
+          "data_as_of": {
+            "format": "date",
+            "title": "Data As Of",
+            "type": "string"
+          },
+          "definition_version": {
+            "title": "Definition Version",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MetricItemOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "period": {
+            "title": "Period",
+            "type": "string"
+          }
+        },
+        "required": [
+          "period",
+          "data_as_of",
+          "definition_version"
+        ],
+        "title": "MetricBatchOut",
+        "type": "object"
+      },
+      "MetricDrilldownItemOut": {
+        "properties": {
+          "event_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Date"
+          },
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "round_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Round Id"
+          },
+          "security_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Security Code"
+          },
+          "trade_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trade Id"
+          },
+          "unit": {
+            "enum": [
+              "CNY",
+              "ratio",
+              "days",
+              "count",
+              "z"
+            ],
+            "title": "Unit",
+            "type": "string"
+          },
+          "value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Value"
+          }
+        },
+        "required": [
+          "key",
+          "unit",
+          "label"
+        ],
+        "title": "MetricDrilldownItemOut",
+        "type": "object"
+      },
+      "MetricDrilldownOut": {
+        "properties": {
+          "assumptions": {
+            "additionalProperties": true,
+            "title": "Assumptions",
+            "type": "object"
+          },
+          "data_as_of": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data As Of"
+          },
+          "definition_version": {
+            "title": "Definition Version",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MetricDrilldownItemOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "metric_id": {
+            "title": "Metric Id",
+            "type": "string"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "params": {
+            "additionalProperties": true,
+            "title": "Params",
+            "type": "object"
+          },
+          "period": {
+            "title": "Period",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "source_endpoints": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Source Endpoints",
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "blocked",
+              "stale",
+              "unreliable"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "total": {
+            "default": 0,
+            "title": "Total",
+            "type": "integer"
+          },
+          "truncated": {
+            "default": false,
+            "title": "Truncated",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "metric_id",
+          "definition_version",
+          "period",
+          "status"
+        ],
+        "title": "MetricDrilldownOut",
+        "type": "object"
+      },
+      "MetricExplainDrilldown": {
+        "properties": {
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "endpoint": {
+            "title": "Endpoint",
+            "type": "string"
+          },
+          "params": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Params",
+            "type": "object"
+          }
+        },
+        "required": [
+          "endpoint",
+          "description"
+        ],
+        "title": "MetricExplainDrilldown",
+        "type": "object"
+      },
+      "MetricExplainOut": {
+        "properties": {
+          "assumptions": {
+            "additionalProperties": true,
+            "title": "Assumptions",
+            "type": "object"
+          },
+          "conclusion": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conclusion"
+          },
+          "data_as_of": {
+            "format": "date",
+            "title": "Data As Of",
+            "type": "string"
+          },
+          "definition_version": {
+            "title": "Definition Version",
+            "type": "string"
+          },
+          "drilldown": {
+            "$ref": "#/components/schemas/MetricExplainDrilldown"
+          },
+          "method": {
+            "title": "Method",
+            "type": "string"
+          },
+          "metric_id": {
+            "title": "Metric Id",
+            "type": "string"
+          },
+          "period": {
+            "title": "Period",
+            "type": "string"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "blocked",
+              "stale",
+              "unreliable"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "what_to_do": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "What To Do"
+          }
+        },
+        "required": [
+          "metric_id",
+          "definition_version",
+          "period",
+          "method",
+          "drilldown",
+          "status",
+          "data_as_of"
+        ],
+        "title": "MetricExplainOut",
+        "type": "object"
+      },
+      "MetricItemOut": {
+        "additionalProperties": true,
+        "type": "object"
+      },
+      "MetricScopeOut": {
+        "properties": {
+          "cohort": {
+            "title": "Cohort",
+            "type": "string"
+          },
+          "period": {
+            "title": "Period",
+            "type": "string"
+          },
+          "unit": {
+            "title": "Unit",
+            "type": "string"
+          }
+        },
+        "required": [
+          "unit",
+          "cohort",
+          "period"
+        ],
+        "title": "MetricScopeOut",
+        "type": "object"
+      },
       "NavHoldingOut": {
         "description": "单只标的在某日的持仓快照（数量/价格/金额为最多三位小数字符串，去掉尾零）。",
         "properties": {
@@ -7822,6 +8185,1164 @@
           "TOKEN_EXPIRED",
           "MULTIPLE_CREDENTIALS",
           "VALIDATION_ERROR"
+        ],
+        "x-idempotent": false,
+        "x-required-scope": "read"
+      }
+    },
+    "/api/v1/metrics": {
+      "get": {
+        "description": "API-033：指标批量查询（只物化 ok；304 无副作用）。",
+        "operationId": "metrics_batch",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "ids",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Ids"
+            }
+          },
+          {
+            "in": "query",
+            "name": "domain",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Domain"
+            }
+          },
+          {
+            "in": "query",
+            "name": "period",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Period"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "To"
+            }
+          },
+          {
+            "in": "query",
+            "name": "benchmark",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Benchmark"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_exploratory",
+            "required": false,
+            "schema": {
+              "default": false,
+              "title": "Include Exploratory",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-api-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "assumptions": {
+                    "A": 244,
+                    "benchmark_id": "hs300_tr",
+                    "engine_version": "1.0",
+                    "rf_rate": "0.015"
+                  },
+                  "data_as_of": "2026-09-30",
+                  "definition_version": "1.0",
+                  "items": [
+                    {
+                      "assumptions": {
+                        "A": 244,
+                        "adjust": "raw",
+                        "benchmark_id": "hs300_tr",
+                        "calendar": "weekday_proxy",
+                        "engine_version": "1.0",
+                        "period_basis": "natural_month",
+                        "rf_rate": "0.015"
+                      },
+                      "ci_high": "0.81000000",
+                      "ci_low": "0.32000000",
+                      "computed_at": "2026-09-30T09:30:00Z",
+                      "data_as_of": "2026-09-30",
+                      "decomposition": {
+                        "losses": 5,
+                        "wins": 7
+                      },
+                      "definition_version": "1.0",
+                      "domain": "perf",
+                      "inputs_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                      "metric_id": "perf.win_rate",
+                      "n": 12,
+                      "n_pending": 0,
+                      "period": "2026-09",
+                      "precision": 8,
+                      "reason": null,
+                      "sample_status": "ok",
+                      "scope": {
+                        "cohort": "all",
+                        "period": "month",
+                        "unit": "month"
+                      },
+                      "status": "ok",
+                      "unit": "ratio",
+                      "value": "0.58333333"
+                    }
+                  ],
+                  "period": "2026-09"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/MetricBatchOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "304": {
+            "description": "Not Modified（If-None-Match 命中）"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "UNKNOWN_QUERY_PARAM",
+                  "detail": "请求包含未知参数。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 400,
+                  "title": "UNKNOWN_QUERY_PARAM",
+                  "type": "https://stock-analyze.local/errors/UNKNOWN_QUERY_PARAM",
+                  "user_message": "请求包含未知参数。",
+                  "what_to_do": "移除未知参数后重试。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "请求参数错误"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "TOKEN_EXPIRED",
+                  "detail": "访问凭证已过期。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 401,
+                  "title": "TOKEN_EXPIRED",
+                  "type": "https://stock-analyze.local/errors/TOKEN_EXPIRED",
+                  "user_message": "访问凭证已过期。",
+                  "what_to_do": "用 refresh_token 换新 access，或重建 PAT。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "未认证或凭证无效"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "ADMIN_CANNOT_READ_TRADES",
+                  "detail": "管理员账号不能查看交易明细。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 403,
+                  "title": "ADMIN_CANNOT_READ_TRADES",
+                  "type": "https://stock-analyze.local/errors/ADMIN_CANNOT_READ_TRADES",
+                  "user_message": "管理员账号不能查看交易明细。",
+                  "what_to_do": "用数据所有者账号访问。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "权限不足"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "METRIC_NOT_FOUND",
+                  "detail": "没有这个指标。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 404,
+                  "title": "METRIC_NOT_FOUND",
+                  "type": "https://stock-analyze.local/errors/METRIC_NOT_FOUND",
+                  "user_message": "没有这个指标。",
+                  "what_to_do": "从指标目录选择有效指标。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "资源不存在"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "example": {
+                  "code": "INVALID_PERIOD",
+                  "detail": "时间区间不合法。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 422,
+                  "title": "INVALID_PERIOD",
+                  "type": "https://stock-analyze.local/errors/INVALID_PERIOD",
+                  "user_message": "时间区间不合法。",
+                  "what_to_do": "用 YYYY-MM 或 from/to（半开区间）。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Metrics Batch Endpoint",
+        "tags": [
+          "metrics"
+        ],
+        "x-async": false,
+        "x-error-codes": [
+          "METRIC_NOT_FOUND",
+          "INVALID_PERIOD",
+          "UNKNOWN_BENCHMARK",
+          "VALIDATION_ERROR",
+          "UNKNOWN_QUERY_PARAM",
+          "TOKEN_EXPIRED",
+          "TOKEN_REVOKED",
+          "MULTIPLE_CREDENTIALS",
+          "ADMIN_CANNOT_READ_TRADES"
+        ],
+        "x-idempotent": false,
+        "x-required-scope": "read"
+      }
+    },
+    "/api/v1/metrics/{metric_id}": {
+      "get": {
+        "description": "API-079：单指标完整结果（与 API-033 同 period/params 的 item 逐字段相等）。",
+        "operationId": "metrics_detail",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "metric_id",
+            "required": true,
+            "schema": {
+              "title": "Metric Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "period",
+            "required": true,
+            "schema": {
+              "title": "Period",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "benchmark",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Benchmark"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-api-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "assumptions": {
+                    "A": 244,
+                    "adjust": "raw",
+                    "benchmark_id": "hs300_tr",
+                    "calendar": "weekday_proxy",
+                    "engine_version": "1.0",
+                    "period_basis": "natural_month",
+                    "rf_rate": "0.015"
+                  },
+                  "ci_high": "0.81000000",
+                  "ci_low": "0.32000000",
+                  "computed_at": "2026-09-30T09:30:00Z",
+                  "data_as_of": "2026-09-30",
+                  "decomposition": {
+                    "losses": 5,
+                    "wins": 7
+                  },
+                  "definition_version": "1.0",
+                  "domain": "perf",
+                  "inputs_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "metric_id": "perf.win_rate",
+                  "n": 12,
+                  "n_pending": 0,
+                  "period": "2026-09",
+                  "precision": 8,
+                  "reason": null,
+                  "sample_status": "ok",
+                  "scope": {
+                    "cohort": "all",
+                    "period": "month",
+                    "unit": "month"
+                  },
+                  "status": "ok",
+                  "unit": "ratio",
+                  "value": "0.58333333"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/MetricItemOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "304": {
+            "description": "Not Modified（If-None-Match 命中）"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "UNKNOWN_QUERY_PARAM",
+                  "detail": "请求包含未知参数。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 400,
+                  "title": "UNKNOWN_QUERY_PARAM",
+                  "type": "https://stock-analyze.local/errors/UNKNOWN_QUERY_PARAM",
+                  "user_message": "请求包含未知参数。",
+                  "what_to_do": "移除未知参数后重试。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "请求参数错误"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "TOKEN_EXPIRED",
+                  "detail": "访问凭证已过期。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 401,
+                  "title": "TOKEN_EXPIRED",
+                  "type": "https://stock-analyze.local/errors/TOKEN_EXPIRED",
+                  "user_message": "访问凭证已过期。",
+                  "what_to_do": "用 refresh_token 换新 access，或重建 PAT。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "未认证或凭证无效"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "ADMIN_CANNOT_READ_TRADES",
+                  "detail": "管理员账号不能查看交易明细。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 403,
+                  "title": "ADMIN_CANNOT_READ_TRADES",
+                  "type": "https://stock-analyze.local/errors/ADMIN_CANNOT_READ_TRADES",
+                  "user_message": "管理员账号不能查看交易明细。",
+                  "what_to_do": "用数据所有者账号访问。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "权限不足"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "METRIC_NOT_FOUND",
+                  "detail": "没有这个指标。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 404,
+                  "title": "METRIC_NOT_FOUND",
+                  "type": "https://stock-analyze.local/errors/METRIC_NOT_FOUND",
+                  "user_message": "没有这个指标。",
+                  "what_to_do": "从指标目录选择有效指标。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "资源不存在"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "example": {
+                  "code": "INVALID_PERIOD",
+                  "detail": "时间区间不合法。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 422,
+                  "title": "INVALID_PERIOD",
+                  "type": "https://stock-analyze.local/errors/INVALID_PERIOD",
+                  "user_message": "时间区间不合法。",
+                  "what_to_do": "用 YYYY-MM 或 from/to（半开区间）。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Metrics Detail Endpoint",
+        "tags": [
+          "metrics"
+        ],
+        "x-async": false,
+        "x-error-codes": [
+          "METRIC_NOT_FOUND",
+          "INVALID_PERIOD",
+          "UNKNOWN_BENCHMARK",
+          "VALIDATION_ERROR",
+          "UNKNOWN_QUERY_PARAM",
+          "TOKEN_EXPIRED",
+          "TOKEN_REVOKED",
+          "MULTIPLE_CREDENTIALS",
+          "ADMIN_CANNOT_READ_TRADES"
+        ],
+        "x-idempotent": false,
+        "x-required-scope": "read"
+      }
+    },
+    "/api/v1/metrics/{metric_id}/drilldown": {
+      "get": {
+        "description": "API-035：指标下钻明细（def 提供 build_items；引擎只做排序/分页）。",
+        "operationId": "metrics_drilldown",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "metric_id",
+            "required": true,
+            "schema": {
+              "title": "Metric Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "period",
+            "required": true,
+            "schema": {
+              "title": "Period",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "benchmark",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Benchmark"
+            }
+          },
+          {
+            "in": "query",
+            "name": "round_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Round Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "security_code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Security Code"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-api-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "assumptions": {
+                    "A": 244,
+                    "engine_version": "1.0",
+                    "rf_rate": "0.015"
+                  },
+                  "data_as_of": "2026-09-30",
+                  "definition_version": "1.0",
+                  "items": [
+                    {
+                      "event_date": "2026-06-12",
+                      "key": "rnd_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                      "label": "600519 回合收益",
+                      "round_id": "rnd_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                      "security_code": "600519",
+                      "trade_id": null,
+                      "unit": "ratio",
+                      "value": "0.08333333"
+                    }
+                  ],
+                  "metric_id": "perf.win_rate",
+                  "next_cursor": null,
+                  "params": {
+                    "metric_id": "perf.win_rate",
+                    "period": "2026-09"
+                  },
+                  "period": "2026-09",
+                  "reason": null,
+                  "source_endpoints": [
+                    "/api/v1/rounds"
+                  ],
+                  "status": "ok",
+                  "total": 12,
+                  "truncated": false
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/MetricDrilldownOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "INVALID_CURSOR",
+                  "detail": "分页游标无效。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 400,
+                  "title": "INVALID_CURSOR",
+                  "type": "https://stock-analyze.local/errors/INVALID_CURSOR",
+                  "user_message": "分页游标无效。",
+                  "what_to_do": "从第一页重新翻页。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "请求参数错误"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "TOKEN_EXPIRED",
+                  "detail": "访问凭证已过期。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 401,
+                  "title": "TOKEN_EXPIRED",
+                  "type": "https://stock-analyze.local/errors/TOKEN_EXPIRED",
+                  "user_message": "访问凭证已过期。",
+                  "what_to_do": "用 refresh_token 换新 access，或重建 PAT。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "未认证或凭证无效"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "ADMIN_CANNOT_READ_TRADES",
+                  "detail": "管理员账号不能查看交易明细。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 403,
+                  "title": "ADMIN_CANNOT_READ_TRADES",
+                  "type": "https://stock-analyze.local/errors/ADMIN_CANNOT_READ_TRADES",
+                  "user_message": "管理员账号不能查看交易明细。",
+                  "what_to_do": "用数据所有者账号访问。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "权限不足"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "METRIC_NOT_FOUND",
+                  "detail": "没有这个指标。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 404,
+                  "title": "METRIC_NOT_FOUND",
+                  "type": "https://stock-analyze.local/errors/METRIC_NOT_FOUND",
+                  "user_message": "没有这个指标。",
+                  "what_to_do": "从指标目录选择有效指标。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "资源不存在"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "example": {
+                  "code": "INVALID_PERIOD",
+                  "detail": "时间区间不合法。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 422,
+                  "title": "INVALID_PERIOD",
+                  "type": "https://stock-analyze.local/errors/INVALID_PERIOD",
+                  "user_message": "时间区间不合法。",
+                  "what_to_do": "用 YYYY-MM 或 from/to（半开区间）。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Metrics Drilldown Endpoint",
+        "tags": [
+          "metrics"
+        ],
+        "x-async": false,
+        "x-error-codes": [
+          "METRIC_NOT_FOUND",
+          "INVALID_PERIOD",
+          "UNKNOWN_BENCHMARK",
+          "INVALID_CURSOR",
+          "VALIDATION_ERROR",
+          "UNKNOWN_QUERY_PARAM",
+          "TOKEN_EXPIRED",
+          "TOKEN_REVOKED",
+          "MULTIPLE_CREDENTIALS",
+          "ADMIN_CANNOT_READ_TRADES"
+        ],
+        "x-idempotent": false,
+        "x-required-scope": "read"
+      }
+    },
+    "/api/v1/metrics/{metric_id}/explain": {
+      "get": {
+        "description": "API-034：三段式解释（结论/口径/下钻；无裸术语）。",
+        "operationId": "metrics_explain",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "metric_id",
+            "required": true,
+            "schema": {
+              "title": "Metric Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "period",
+            "required": true,
+            "schema": {
+              "title": "Period",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "benchmark",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Benchmark"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Accept-Language",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Accept-Language"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-api-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "assumptions": {
+                    "A": 244,
+                    "engine_version": "1.0",
+                    "rf_rate": "0.015"
+                  },
+                  "conclusion": "本月的盈利回合略多于亏损回合，样本仍然偏少。",
+                  "data_as_of": "2026-09-30",
+                  "definition_version": "1.0",
+                  "drilldown": {
+                    "description": "查看构成该胜率的每个回合。",
+                    "endpoint": "/api/v1/metrics/perf.win_rate/drilldown",
+                    "params": {
+                      "period": "2026-09"
+                    }
+                  },
+                  "method": "按回合统计盈利次数占比（胜率）。",
+                  "metric_id": "perf.win_rate",
+                  "period": "2026-09",
+                  "reason": null,
+                  "status": "ok",
+                  "what_to_do": null
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/MetricExplainOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "UNKNOWN_QUERY_PARAM",
+                  "detail": "请求包含未知参数。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 400,
+                  "title": "UNKNOWN_QUERY_PARAM",
+                  "type": "https://stock-analyze.local/errors/UNKNOWN_QUERY_PARAM",
+                  "user_message": "请求包含未知参数。",
+                  "what_to_do": "移除未知参数后重试。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "请求参数错误"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "TOKEN_EXPIRED",
+                  "detail": "访问凭证已过期。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 401,
+                  "title": "TOKEN_EXPIRED",
+                  "type": "https://stock-analyze.local/errors/TOKEN_EXPIRED",
+                  "user_message": "访问凭证已过期。",
+                  "what_to_do": "用 refresh_token 换新 access，或重建 PAT。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "未认证或凭证无效"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "ADMIN_CANNOT_READ_TRADES",
+                  "detail": "管理员账号不能查看交易明细。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 403,
+                  "title": "ADMIN_CANNOT_READ_TRADES",
+                  "type": "https://stock-analyze.local/errors/ADMIN_CANNOT_READ_TRADES",
+                  "user_message": "管理员账号不能查看交易明细。",
+                  "what_to_do": "用数据所有者账号访问。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "权限不足"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "METRIC_NOT_FOUND",
+                  "detail": "没有这个指标。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 404,
+                  "title": "METRIC_NOT_FOUND",
+                  "type": "https://stock-analyze.local/errors/METRIC_NOT_FOUND",
+                  "user_message": "没有这个指标。",
+                  "what_to_do": "从指标目录选择有效指标。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "资源不存在"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "example": {
+                  "code": "INVALID_PERIOD",
+                  "detail": "时间区间不合法。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 422,
+                  "title": "INVALID_PERIOD",
+                  "type": "https://stock-analyze.local/errors/INVALID_PERIOD",
+                  "user_message": "时间区间不合法。",
+                  "what_to_do": "用 YYYY-MM 或 from/to（半开区间）。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Metrics Explain Endpoint",
+        "tags": [
+          "metrics"
+        ],
+        "x-async": false,
+        "x-error-codes": [
+          "METRIC_NOT_FOUND",
+          "INVALID_PERIOD",
+          "UNKNOWN_BENCHMARK",
+          "VALIDATION_ERROR",
+          "UNKNOWN_QUERY_PARAM",
+          "TOKEN_EXPIRED",
+          "TOKEN_REVOKED",
+          "MULTIPLE_CREDENTIALS",
+          "ADMIN_CANNOT_READ_TRADES"
         ],
         "x-idempotent": false,
         "x-required-scope": "read"

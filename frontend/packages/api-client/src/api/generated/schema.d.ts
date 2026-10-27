@@ -404,6 +404,86 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/metrics": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Metrics Batch Endpoint
+         * @description API-033：指标批量查询（只物化 ok；304 无副作用）。
+         */
+        get: operations["metrics_batch"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/metrics/{metric_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Metrics Detail Endpoint
+         * @description API-079：单指标完整结果（与 API-033 同 period/params 的 item 逐字段相等）。
+         */
+        get: operations["metrics_detail"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/metrics/{metric_id}/drilldown": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Metrics Drilldown Endpoint
+         * @description API-035：指标下钻明细（def 提供 build_items；引擎只做排序/分页）。
+         */
+        get: operations["metrics_drilldown"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/metrics/{metric_id}/explain": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Metrics Explain Endpoint
+         * @description API-034：三段式解释（结论/口径/下钻；无裸术语）。
+         */
+        get: operations["metrics_explain"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/nav": {
         parameters: {
             query?: never;
@@ -1325,6 +1405,143 @@ export interface components {
                 [key: string]: unknown;
             };
             user: components["schemas"]["UserBrief"];
+        };
+        /** MetricBatchOut */
+        MetricBatchOut: {
+            /** Assumptions */
+            assumptions?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Data As Of
+             * Format: date
+             */
+            data_as_of: string;
+            /** Definition Version */
+            definition_version: string;
+            /** Items */
+            items?: components["schemas"]["MetricItemOut"][];
+            /** Period */
+            period: string;
+        };
+        /** MetricDrilldownItemOut */
+        MetricDrilldownItemOut: {
+            /** Event Date */
+            event_date?: string | null;
+            /** Key */
+            key: string;
+            /** Label */
+            label: string;
+            /** Round Id */
+            round_id?: string | null;
+            /** Security Code */
+            security_code?: string | null;
+            /** Trade Id */
+            trade_id?: string | null;
+            /**
+             * Unit
+             * @enum {string}
+             */
+            unit: "CNY" | "ratio" | "days" | "count" | "z";
+            /** Value */
+            value?: string | null;
+        };
+        /** MetricDrilldownOut */
+        MetricDrilldownOut: {
+            /** Assumptions */
+            assumptions?: {
+                [key: string]: unknown;
+            };
+            /** Data As Of */
+            data_as_of?: string | null;
+            /** Definition Version */
+            definition_version: string;
+            /** Items */
+            items?: components["schemas"]["MetricDrilldownItemOut"][];
+            /** Metric Id */
+            metric_id: string;
+            /** Next Cursor */
+            next_cursor?: string | null;
+            /** Params */
+            params?: {
+                [key: string]: unknown;
+            };
+            /** Period */
+            period: string;
+            /** Reason */
+            reason?: string | null;
+            /** Source Endpoints */
+            source_endpoints?: string[];
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "blocked" | "stale" | "unreliable";
+            /**
+             * Total
+             * @default 0
+             */
+            total: number;
+            /**
+             * Truncated
+             * @default false
+             */
+            truncated: boolean;
+        };
+        /** MetricExplainDrilldown */
+        MetricExplainDrilldown: {
+            /** Description */
+            description: string;
+            /** Endpoint */
+            endpoint: string;
+            /** Params */
+            params?: {
+                [key: string]: string;
+            };
+        };
+        /** MetricExplainOut */
+        MetricExplainOut: {
+            /** Assumptions */
+            assumptions?: {
+                [key: string]: unknown;
+            };
+            /** Conclusion */
+            conclusion?: string | null;
+            /**
+             * Data As Of
+             * Format: date
+             */
+            data_as_of: string;
+            /** Definition Version */
+            definition_version: string;
+            drilldown: components["schemas"]["MetricExplainDrilldown"];
+            /** Method */
+            method: string;
+            /** Metric Id */
+            metric_id: string;
+            /** Period */
+            period: string;
+            /** Reason */
+            reason?: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "blocked" | "stale" | "unreliable";
+            /** What To Do */
+            what_to_do?: string | null;
+        };
+        MetricItemOut: {
+            [key: string]: unknown;
+        };
+        /** MetricScopeOut */
+        MetricScopeOut: {
+            /** Cohort */
+            cohort: string;
+            /** Period */
+            period: string;
+            /** Unit */
+            unit: string;
         };
         /**
          * NavHoldingOut
@@ -3528,6 +3745,324 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    metrics_batch: {
+        parameters: {
+            query?: {
+                ids?: string | null;
+                domain?: string | null;
+                period?: string | null;
+                from?: string | null;
+                to?: string | null;
+                benchmark?: string | null;
+                include_exploratory?: boolean;
+            };
+            header?: {
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MetricBatchOut"];
+                };
+            };
+            /** @description Not Modified（If-None-Match 命中） */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 请求参数错误 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    metrics_detail: {
+        parameters: {
+            query: {
+                period: string;
+                benchmark?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path: {
+                metric_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MetricItemOut"];
+                };
+            };
+            /** @description Not Modified（If-None-Match 命中） */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 请求参数错误 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    metrics_drilldown: {
+        parameters: {
+            query: {
+                period: string;
+                benchmark?: string | null;
+                round_id?: string | null;
+                security_code?: string | null;
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path: {
+                metric_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MetricDrilldownOut"];
+                };
+            };
+            /** @description 请求参数错误 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    metrics_explain: {
+        parameters: {
+            query: {
+                period: string;
+                benchmark?: string | null;
+            };
+            header?: {
+                "Accept-Language"?: string | null;
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path: {
+                metric_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MetricExplainOut"];
+                };
+            };
+            /** @description 请求参数错误 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                     "application/problem+json": components["schemas"]["Error"];
                 };
             };

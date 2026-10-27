@@ -743,6 +743,75 @@ OPERATION_META: dict[str, dict[str, Any]] = {
         "async": False,
         "error_codes": ["INTERNAL_ERROR"],
     },
+    "metrics_batch": {
+        "api_id": "API-033",
+        "scope": "read",
+        "idempotent": False,
+        "async": False,
+        "error_codes": [
+            "METRIC_NOT_FOUND",
+            "INVALID_PERIOD",
+            "UNKNOWN_BENCHMARK",
+            "VALIDATION_ERROR",
+            "UNKNOWN_QUERY_PARAM",
+            "TOKEN_EXPIRED",
+            "TOKEN_REVOKED",
+            "MULTIPLE_CREDENTIALS",
+            "ADMIN_CANNOT_READ_TRADES",
+        ],
+    },
+    "metrics_detail": {
+        "api_id": "API-079",
+        "scope": "read",
+        "idempotent": False,
+        "async": False,
+        "error_codes": [
+            "METRIC_NOT_FOUND",
+            "INVALID_PERIOD",
+            "UNKNOWN_BENCHMARK",
+            "VALIDATION_ERROR",
+            "UNKNOWN_QUERY_PARAM",
+            "TOKEN_EXPIRED",
+            "TOKEN_REVOKED",
+            "MULTIPLE_CREDENTIALS",
+            "ADMIN_CANNOT_READ_TRADES",
+        ],
+    },
+    "metrics_drilldown": {
+        "api_id": "API-035",
+        "scope": "read",
+        "idempotent": False,
+        "async": False,
+        "error_codes": [
+            "METRIC_NOT_FOUND",
+            "INVALID_PERIOD",
+            "UNKNOWN_BENCHMARK",
+            "INVALID_CURSOR",
+            "VALIDATION_ERROR",
+            "UNKNOWN_QUERY_PARAM",
+            "TOKEN_EXPIRED",
+            "TOKEN_REVOKED",
+            "MULTIPLE_CREDENTIALS",
+            "ADMIN_CANNOT_READ_TRADES",
+        ],
+    },
+    "metrics_explain": {
+        "api_id": "API-034",
+        "scope": "read",
+        "idempotent": False,
+        "async": False,
+        "error_codes": [
+            "METRIC_NOT_FOUND",
+            "INVALID_PERIOD",
+            "UNKNOWN_BENCHMARK",
+            "VALIDATION_ERROR",
+            "UNKNOWN_QUERY_PARAM",
+            "TOKEN_EXPIRED",
+            "TOKEN_REVOKED",
+            "MULTIPLE_CREDENTIALS",
+            "ADMIN_CANNOT_READ_TRADES",
+        ],
+    },
     "patchTrade": {
         "api_id": "API-018",
         "scope": "write",
@@ -985,8 +1054,104 @@ def _trade_example() -> dict[str, Any]:
     }
 
 
+def _metric_item_example() -> dict[str, Any]:
+    """MetricItemOut 的高保真示例（ratio 8 位定点字符串 + CI + 假设）。"""
+    return {
+        "metric_id": "perf.win_rate",
+        "definition_version": "1.0",
+        "domain": "perf",
+        "scope": {"unit": "month", "cohort": "all", "period": "month"},
+        "period": _PERIOD,
+        "status": "ok",
+        "sample_status": "ok",
+        "reason": None,
+        "value": "0.58333333",
+        "unit": "ratio",
+        "precision": 8,
+        "n": 12,
+        "n_pending": 0,
+        "ci_low": "0.32000000",
+        "ci_high": "0.81000000",
+        "decomposition": {"wins": 7, "losses": 5},
+        "assumptions": {
+            "rf_rate": "0.015",
+            "A": 244,
+            "engine_version": "1.0",
+            "calendar": "weekday_proxy",
+            "period_basis": "natural_month",
+            "adjust": "raw",
+            "benchmark_id": "hs300_tr",
+        },
+        "data_as_of": _DATE,
+        "inputs_hash": "sha256:" + "a" * 64,
+        "computed_at": _DATETIME,
+    }
+
+
 # 关键端点手工示例（其余按 schema 递归生成；生成规则见 _example_for_schema）。
 EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
+    "metrics_batch": {
+        "200": {
+            "period": _PERIOD,
+            "data_as_of": _DATE,
+            "definition_version": "1.0",
+            "assumptions": {
+                "benchmark_id": "hs300_tr",
+                "rf_rate": "0.015",
+                "A": 244,
+                "engine_version": "1.0",
+            },
+            "items": [_metric_item_example()],
+        }
+    },
+    "metrics_detail": {"200": _metric_item_example()},
+    "metrics_explain": {
+        "200": {
+            "metric_id": "perf.win_rate",
+            "definition_version": "1.0",
+            "period": _PERIOD,
+            "conclusion": "本月的盈利回合略多于亏损回合，样本仍然偏少。",
+            "method": "按回合统计盈利次数占比（胜率）。",
+            "drilldown": {
+                "endpoint": "/api/v1/metrics/perf.win_rate/drilldown",
+                "params": {"period": _PERIOD},
+                "description": "查看构成该胜率的每个回合。",
+            },
+            "status": "ok",
+            "reason": None,
+            "what_to_do": None,
+            "assumptions": {"rf_rate": "0.015", "A": 244, "engine_version": "1.0"},
+            "data_as_of": _DATE,
+        }
+    },
+    "metrics_drilldown": {
+        "200": {
+            "metric_id": "perf.win_rate",
+            "definition_version": "1.0",
+            "period": _PERIOD,
+            "status": "ok",
+            "reason": None,
+            "items": [
+                {
+                    "key": "rnd_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                    "value": "0.08333333",
+                    "unit": "ratio",
+                    "label": "600519 回合收益",
+                    "round_id": "rnd_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                    "trade_id": None,
+                    "event_date": "2026-06-12",
+                    "security_code": "600519",
+                }
+            ],
+            "total": 12,
+            "source_endpoints": ["/api/v1/rounds"],
+            "params": {"metric_id": "perf.win_rate", "period": _PERIOD},
+            "next_cursor": None,
+            "truncated": False,
+            "assumptions": {"rf_rate": "0.015", "A": 244, "engine_version": "1.0"},
+            "data_as_of": _DATE,
+        }
+    },
     "getErrors": {
         "200": {
             "count": 1,

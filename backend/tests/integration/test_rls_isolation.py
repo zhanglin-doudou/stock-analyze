@@ -121,7 +121,7 @@ async def test_app_role_cannot_execute_ddl(app_engine: AsyncEngine) -> None:
             await conn.execute(text("create table ledger.ddl_probe (id int)"))
 
 
-# ── review 六表 RLS（Period2-02/03/16，迁移 0003/0004/0006；gate 要求 review 6/6）──
+# ── review 八表 RLS（Period2-02/03/16/05，迁移 0003/0004/0006/0007；gate 要求 review 8/8）──
 
 _REVIEW_TABLES = (
     "round",
@@ -130,6 +130,8 @@ _REVIEW_TABLES = (
     "nav_daily",
     "asset_daily",
     "asset_build_state",
+    "metric_result",
+    "metric_dependency",
 )
 
 _INSERT_ROUND_SQL = """
@@ -188,6 +190,29 @@ insert into review.asset_daily (
 )
 """
 
+_INSERT_METRIC_RESULT_SQL = """
+insert into review.metric_result (
+    id, user_id, metric_id, definition_version, params_hash, params, domain, period, scope,
+    status, sample_status, value_units, unit, precision, n, n_pending, ci_low_units,
+    ci_high_units, decomposition, assumptions, reason, inputs_hash, data_as_of, computed_at
+) values (
+    :metric_result_id, :uid, 'perf.placeholder', '1.0', repeat('a', 64), '{}'::jsonb,
+    'perf', '2026-01', '{"unit":"month","cohort":"all","period":"month"}'::jsonb,
+    'ok', 'ok', 100000000, 'ratio', 8, 1, 0, null,
+    null, null, '{}'::jsonb, null, 'sha256:' || repeat('c', 64), :open_date, now()
+)
+"""
+
+_INSERT_METRIC_DEPENDENCY_SQL = """
+insert into review.metric_dependency (
+    id, user_id, metric_id, period, definition_version, dep_kind, dep_id, dep_hash,
+    metric_result_id
+) values (
+    :dep_id, :uid, 'perf.placeholder', '2026-01', '1.0', 'dataset', 'rounds',
+    'sha256:' || repeat('b', 64), :metric_result_id
+)
+"""
+
 _INSERT_ASSET_BUILD_STATE_SQL = """
 insert into review.asset_build_state (
     user_id, start_date, last_built_through, last_built_at, last_trade_updated_at,
@@ -230,6 +255,23 @@ async def _seed_review_rows(engine: AsyncEngine, user_id: uuid.UUID) -> str:
             {"asset_id": f"ast_{uuid.uuid4().hex[:32]}", "uid": user_id, **trade_ids},
         )
         await conn.execute(text(_INSERT_ASSET_BUILD_STATE_SQL), {"uid": user_id, **trade_ids})
+        metric_result_id = f"mtr_{uuid.uuid4().hex[:32]}"
+        await conn.execute(
+            text(_INSERT_METRIC_RESULT_SQL),
+            {
+                "metric_result_id": metric_result_id,
+                "uid": user_id,
+                "open_date": trade_ids["open_date"],
+            },
+        )
+        await conn.execute(
+            text(_INSERT_METRIC_DEPENDENCY_SQL),
+            {
+                "dep_id": f"mdd_{uuid.uuid4().hex[:32]}",
+                "uid": user_id,
+                "metric_result_id": metric_result_id,
+            },
+        )
     return round_id
 
 

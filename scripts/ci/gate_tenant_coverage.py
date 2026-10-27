@@ -39,6 +39,22 @@ EXEMPT: dict[tuple[str, str], str] = {
         "POST",
         "/imports",
     ): "基于本人 preview_id 提交导入，跨账号 preview 由 404 兜底；API-011 用例覆盖",
+    (
+        "GET",
+        "/metrics",
+    ): "指标 id 是全局代码资产（非用户资源）；数据隔离由仓储显式 user_id + RLS 保证；401/403 参数化已覆盖",
+    (
+        "GET",
+        "/metrics/{metric_id}",
+    ): "指标 id 是全局代码资产（非用户资源）；数据隔离由仓储显式 user_id + RLS 保证；401/403 参数化已覆盖",
+    (
+        "GET",
+        "/metrics/{metric_id}/explain",
+    ): "指标 id 是全局代码资产（非用户资源）；数据隔离由仓储显式 user_id + RLS 保证；401/403 参数化已覆盖",
+    (
+        "GET",
+        "/metrics/{metric_id}/drilldown",
+    ): "指标 id 是全局代码资产（非用户资源）；数据隔离由仓储显式 user_id + RLS 保证；401/403 参数化已覆盖",
 }
 
 #: 必须有跨租户列表隔离用例的列表型端点。
