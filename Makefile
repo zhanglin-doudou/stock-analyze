@@ -43,7 +43,8 @@ help:
 	@echo "  make gate-endpoint  一期 30 端点 + 二期 07 端点（≥3 用例）覆盖门禁"
 	@echo "  make gate-tenant    受保护端点越权（跨租户/401/admin）覆盖门禁"
 	@echo "  make gate-rls       租户表 RLS 策略覆盖门禁"
-	@echo "  make gate-golden    金标审批门禁（MANIFEST sha256 + version + 人工签署）"
+	@echo "  make gate-golden    金标审批门禁（schema/hash/version + 人工签署 + 覆盖矩阵）"
+	@echo "  make gate-golden-structure  金标结构门禁（PR-fast，无人工依赖）"
 	@echo "  make sdk            由 openapi.json 生成前端 SDK"
 	@echo "  make verify-p1      一期全部断言（一条命令全绿）"
 	@echo "  make demo-p1        5 分钟演示脚本"
@@ -175,6 +176,7 @@ test-metrics:
 	@$(UV) pytest backend/tests/unit/review -q
 	@$(UV) pytest backend/tests/golden backend/tests/oracle -q
 	@$(UV) pytest backend/tests/contract/test_metric_plugin.py -q
+	@$(PY) scripts/ci/gate_golden_approval.py --mode structure
 
 .PHONY: test-perf
 test-perf:
@@ -227,6 +229,10 @@ gate-rls:
 .PHONY: gate-golden
 gate-golden:
 	@$(PY) scripts/ci/gate_golden_approval.py
+
+.PHONY: gate-golden-structure
+gate-golden-structure:
+	@$(PY) scripts/ci/gate_golden_approval.py --mode structure
 
 # ── Period2-07（三域指标）变异测试（§8.9 / D-16）────────────
 # mutation：PR 用——mutmut 自带按函数哈希的增量缓存，只重跑受影响 mutant。

@@ -32,6 +32,7 @@ jobs:
       - run: uv run pytest backend/tests/unit/review -q
       - run: uv run pytest backend/tests/golden backend/tests/oracle -q
       - run: uv run pytest backend/tests/contract/test_metric_plugin.py -q
+      - run: uv run python scripts/ci/gate_golden_approval.py --mode structure
       - run: uv run python scripts/ci/gate_endpoint_coverage.py
 
   pr-full:

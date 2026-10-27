@@ -89,5 +89,32 @@
     "timing.chase": "1.0",
     "timing.drawdown": "1.0",
     "timing.fly": "1.0"
+  },
+  "goldens": {
+    "behavior.averaging_down/golden.json": "df771d3e25ad06c3ee07a7e594375be4e172e9218f6b9fa92a77baa40bdc7bc1",
+    "behavior.de/golden.json": "1508481f178024cf3c781bb51d08e254b49ebc46fce8d79b4613f3af2d0f77c6",
+    "behavior.hhi/golden.json": "2c8e0ddb11b5bc53a6544d68e5d6144ec6ade086192d40cf31105a3101871fe7",
+    "behavior.hhi/golden.main.json": "d3ed861ab3460aed3c8b94db5cd78695f6320e9670eabbf95b4b8456220c1060",
+    "behavior.turnover/golden.json": "5e103e79039d8c3f6890ee0cdadebd244d0160cd9e75eebd8523cf164905bb1f",
+    "perf.concentration/golden.json": "9d2f399f5b7300c837d44333b3319f82b392a9b9a097b3774cfd49151362add6",
+    "perf.expectancy/golden.json": "6f4d12d9397c82e7c1d35a94b2efbba240bf854d52253da57507160598111920",
+    "perf.fee/golden.json": "9d97be2a55c08e2cf84c40cd73aab1e06b32fa806a1129322c774b89b98c9d84",
+    "perf.fee_breakeven/golden.blocked.json": "08f9323cfee8e6834e08aea7d80577a40879f66a75d99fc5ee9339f063e1cafa",
+    "perf.fee_breakeven/golden.json": "1ab554b72f2367b6ee1589682d4fffebe5feec82b4a822382497330e137f2bbd",
+    "perf.holding_days/golden.json": "a43910ef39cfb3eb5388136b8151f6f9c6a5d3d5349ecbe2bc7aa3eb51981322",
+    "perf.pnl_ratio/golden.json": "e093b647979285623296430ff35763f5fea20d1977052732084d9672d6faf121",
+    "perf.win_rate/golden.data_error.json": "e352d74b86211ca04335065674334183fffeec372c72f4075e3af69306d0c8da",
+    "perf.win_rate/golden.json": "2a76c74625dcf6721f8c22263dfd64b6f845ef4a9e017779d537a36c0440f3b8",
+    "perf.win_rate/golden.n10.json": "e364b919bb44de75482a064b7ba5336caf1ea3c66a1cd28c2506fdece472c4ba",
+    "perf.win_rate/golden.n5.json": "620bcceea39993000fc3ed4c94b0bb2d802f3e94df099c81c04a1674c6e49841",
+    "perf.win_rate/golden.unreliable.json": "a2b0174a91e439c5514cc2d0eafc4463ac9dbc5fa380da7ce58e11fdb355a7e5",
+    "selection.bhar_20/golden.json": "0307dc502b4b4116350a36e282001c934a8c8a65f091cf79636a4c55ccee4024",
+    "selection.bhar_60/golden.json": "e6f65db24021611621d25e6d5c596de934da3761dc8aea519bd955f19ebe9e1c",
+    "selection.bhar_hit/golden.json": "5e4502982c4298481324867296c802447c7b6f2c6a80d7a862a0464e0eafd7e0",
+    "timing.beta/golden.json": "8cc2235a8bdf919b1d2f2347e7f4e4387560ff888734dff80ea420b02a308667",
+    "timing.chase/golden.json": "c307dba1e69fd9254599ce554fb953f4f5096f8fd140cb5ee3e9baa76dea5dcd",
+    "timing.drawdown/golden.chain60.json": "cc0c6915660ce5719a85b13fbfc38696914054a8b247ac665c6292318da1bd3c",
+    "timing.drawdown/golden.pending.json": "bf069bdaf06d6ca8091f7f3b8b6bfcbdb7a4f22fcf941a607a27b68c4a79dba5",
+    "timing.fly/golden.json": "245e4f42a83f5989af0c85c6af946dcb3ffcef968c1a2f01bba45d0692cd8acc"
   }
 }

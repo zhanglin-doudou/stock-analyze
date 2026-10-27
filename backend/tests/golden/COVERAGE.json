@@ -1,0 +1,325 @@
+{
+  "schema_version": 1,
+  "required": [
+    {
+      "id": "perf.win_rate.base",
+      "metric_id": "perf.win_rate",
+      "file": "perf.win_rate/golden.json",
+      "reason": "正常 n=12 + Wilson CI"
+    },
+    {
+      "id": "perf.win_rate.n5",
+      "metric_id": "perf.win_rate",
+      "file": "perf.win_rate/golden.n5.json",
+      "reason": "n=5 insufficient，有原始值无 CI",
+      "expect_sample_status": "insufficient",
+      "expect_value_present": true
+    },
+    {
+      "id": "perf.win_rate.n10",
+      "metric_id": "perf.win_rate",
+      "file": "perf.win_rate/golden.n10.json",
+      "reason": "n=10=min_n → ok + CI"
+    },
+    {
+      "id": "perf.win_rate.data_error",
+      "metric_id": "perf.win_rate",
+      "file": "perf.win_rate/golden.data_error.json",
+      "reason": "data_error 回合剔除"
+    },
+    {
+      "id": "perf.win_rate.unreliable",
+      "metric_id": "perf.win_rate",
+      "file": "perf.win_rate/golden.unreliable.json",
+      "reason": "unreliable 无 value/无 CI",
+      "expect_status": "unreliable",
+      "expect_value_present": false
+    },
+    {
+      "id": "perf.pnl_ratio.base",
+      "metric_id": "perf.pnl_ratio",
+      "file": "perf.pnl_ratio/golden.json",
+      "reason": "正常"
+    },
+    {
+      "id": "perf.holding_days.base",
+      "metric_id": "perf.holding_days",
+      "file": "perf.holding_days/golden.json",
+      "reason": "正常"
+    },
+    {
+      "id": "perf.concentration.base",
+      "metric_id": "perf.concentration",
+      "file": "perf.concentration/golden.json",
+      "reason": "正常 n_pos=8"
+    },
+    {
+      "id": "perf.fee.base",
+      "metric_id": "perf.fee",
+      "file": "perf.fee/golden.json",
+      "reason": "费用四桶/双边成交额"
+    },
+    {
+      "id": "perf.fee_breakeven.base",
+      "metric_id": "perf.fee_breakeven",
+      "file": "perf.fee_breakeven/golden.json",
+      "reason": "正常"
+    },
+    {
+      "id": "perf.fee_breakeven.blocked",
+      "metric_id": "perf.fee_breakeven",
+      "file": "perf.fee_breakeven/golden.blocked.json",
+      "reason": "区间含 blocked 资产日 → 指标整体 blocked",
+      "expect_status": "blocked",
+      "expect_value_present": false
+    },
+    {
+      "id": "perf.expectancy.base",
+      "metric_id": "perf.expectancy",
+      "file": "perf.expectancy/golden.json",
+      "reason": "正常 + bootstrap CI"
+    },
+    {
+      "id": "behavior.de.base",
+      "metric_id": "behavior.de",
+      "file": "behavior.de/golden.json",
+      "reason": "DE=+0.2222 + CI"
+    },
+    {
+      "id": "behavior.turnover.base",
+      "metric_id": "behavior.turnover",
+      "file": "behavior.turnover/golden.json",
+      "reason": "正常"
+    },
+    {
+      "id": "behavior.averaging_down.base",
+      "metric_id": "behavior.averaging_down",
+      "file": "behavior.averaging_down/golden.json",
+      "reason": "正常摊平占比"
+    },
+    {
+      "id": "behavior.hhi.small",
+      "metric_id": "behavior.hhi",
+      "file": "behavior.hhi/golden.json",
+      "reason": "小例 n<10"
+    },
+    {
+      "id": "behavior.hhi.main",
+      "metric_id": "behavior.hhi",
+      "file": "behavior.hhi/golden.main.json",
+      "reason": "双口径正常"
+    },
+    {
+      "id": "timing.chase.base",
+      "metric_id": "timing.chase",
+      "file": "timing.chase/golden.json",
+      "reason": "追涨占比（HITL：A17 口径待拍板）"
+    },
+    {
+      "id": "timing.fly.base",
+      "metric_id": "timing.fly",
+      "file": "timing.fly/golden.json",
+      "reason": "卖飞占比（HITL：A16 口径待拍板）"
+    },
+    {
+      "id": "timing.beta.base",
+      "metric_id": "timing.beta",
+      "file": "timing.beta/golden.json",
+      "reason": "β 正常（恒等夹具，待补非平凡用例）"
+    },
+    {
+      "id": "timing.drawdown.chain60",
+      "metric_id": "timing.drawdown",
+      "file": "timing.drawdown/golden.chain60.json",
+      "reason": "60 日回撤族"
+    },
+    {
+      "id": "timing.drawdown.pending",
+      "metric_id": "timing.drawdown",
+      "file": "timing.drawdown/golden.pending.json",
+      "reason": "n<60 → pending_window 无 value",
+      "expect_sample_status": "pending_window",
+      "expect_value_present": false
+    },
+    {
+      "id": "selection.bhar_20.base",
+      "metric_id": "selection.bhar_20",
+      "file": "selection.bhar_20/golden.json",
+      "reason": "3 事件 BHAR"
+    },
+    {
+      "id": "selection.bhar_60.base",
+      "metric_id": "selection.bhar_60",
+      "file": "selection.bhar_60/golden.json",
+      "reason": "60 日 BHAR"
+    },
+    {
+      "id": "selection.bhar_hit.base",
+      "metric_id": "selection.bhar_hit",
+      "file": "selection.bhar_hit/golden.json",
+      "reason": "hit 占比"
+    },
+    {
+      "id": "perf.win_rate.n0",
+      "metric_id": "perf.win_rate",
+      "file": "perf.win_rate/golden.n0.json",
+      "reason": "n=0 → insufficient + value:null",
+      "expect_sample_status": "insufficient",
+      "expect_value_present": false
+    },
+    {
+      "id": "perf.win_rate.n30",
+      "metric_id": "perf.win_rate",
+      "file": "perf.win_rate/golden.n30.json",
+      "reason": "n=30 → CI 非空"
+    },
+    {
+      "id": "perf.pnl_ratio.all_win",
+      "metric_id": "perf.pnl_ratio",
+      "file": "perf.pnl_ratio/golden.all_win.json",
+      "reason": "全胜 → value:null + insufficient",
+      "expect_sample_status": "insufficient",
+      "expect_value_present": false
+    },
+    {
+      "id": "perf.pnl_ratio.all_loss",
+      "metric_id": "perf.pnl_ratio",
+      "file": "perf.pnl_ratio/golden.all_loss.json",
+      "reason": "全亏 → value:null + insufficient",
+      "expect_sample_status": "insufficient",
+      "expect_value_present": false
+    },
+    {
+      "id": "perf.holding_days.multilot",
+      "metric_id": "perf.holding_days",
+      "file": "perf.holding_days/golden.multilot.json",
+      "reason": "多 fill 资金占用加权"
+    },
+    {
+      "id": "perf.concentration.npos_lt2",
+      "metric_id": "perf.concentration",
+      "file": "perf.concentration/golden.npos_lt2.json",
+      "reason": "n_pos<2 → insufficient/Gini null",
+      "expect_sample_status": "insufficient",
+      "expect_value_present": false
+    },
+    {
+      "id": "perf.fee.missing_columns",
+      "metric_id": "perf.fee",
+      "file": "perf.fee/golden.missing_columns.json",
+      "reason": "费用列全 0 缺失 → unreliable",
+      "expect_status": "unreliable",
+      "expect_value_present": false
+    },
+    {
+      "id": "perf.expectancy.all_win",
+      "metric_id": "perf.expectancy",
+      "file": "perf.expectancy/golden.all_win.json",
+      "reason": "全胜 → p*=null"
+    },
+    {
+      "id": "behavior.de.no_effect",
+      "metric_id": "behavior.de",
+      "file": "behavior.de/golden.no_effect.json",
+      "reason": "无处置效应 → DE≈0 且 CI 含 0"
+    },
+    {
+      "id": "behavior.de.one_side",
+      "metric_id": "behavior.de",
+      "file": "behavior.de/golden.one_side.json",
+      "reason": "单侧无处置机会 → insufficient",
+      "expect_sample_status": "insufficient",
+      "expect_value_present": false
+    },
+    {
+      "id": "behavior.turnover.empty",
+      "metric_id": "behavior.turnover",
+      "file": "behavior.turnover/golden.empty.json",
+      "reason": "空仓/空区间"
+    },
+    {
+      "id": "behavior.averaging_down.no_addon",
+      "metric_id": "behavior.averaging_down",
+      "file": "behavior.averaging_down/golden.no_addon.json",
+      "reason": "n_addon=0 → insufficient",
+      "expect_sample_status": "insufficient",
+      "expect_value_present": false
+    },
+    {
+      "id": "behavior.hhi.cash_only",
+      "metric_id": "behavior.hhi",
+      "file": "behavior.hhi/golden.cash_only.json",
+      "reason": "全现金 → HHI_total=1"
+    },
+    {
+      "id": "timing.beta.missing_benchmark",
+      "metric_id": "timing.beta",
+      "file": "timing.beta/golden.missing_benchmark.json",
+      "reason": "缺基准 → blocked",
+      "expect_status": "blocked",
+      "expect_value_present": false
+    },
+    {
+      "id": "timing.beta.sxx_zero",
+      "metric_id": "timing.beta",
+      "file": "timing.beta/golden.sxx_zero.json",
+      "reason": "Sxx=0 → blocked",
+      "expect_status": "blocked",
+      "expect_value_present": false
+    },
+    {
+      "id": "timing.beta.n59",
+      "metric_id": "timing.beta",
+      "file": "timing.beta/golden.n59.json",
+      "reason": "59 交易日 → pending_window",
+      "expect_sample_status": "pending_window",
+      "expect_value_present": false
+    },
+    {
+      "id": "timing.drawdown.mdd_zero",
+      "metric_id": "timing.drawdown",
+      "file": "timing.drawdown/golden.mdd_zero.json",
+      "reason": "单调上涨 MDD=0"
+    },
+    {
+      "id": "timing.drawdown.blocked",
+      "metric_id": "timing.drawdown",
+      "file": "timing.drawdown/golden.blocked.json",
+      "reason": "区间含 blocked 日 → blocked",
+      "expect_status": "blocked",
+      "expect_value_present": false
+    },
+    {
+      "id": "selection.bhar_20.no_event",
+      "metric_id": "selection.bhar_20",
+      "file": "selection.bhar_20/golden.no_event.json",
+      "reason": "无买入事件 → n=0/insufficient",
+      "expect_sample_status": "insufficient",
+      "expect_value_present": false
+    },
+    {
+      "id": "selection.bhar_20.pending",
+      "metric_id": "selection.bhar_20",
+      "file": "selection.bhar_20/golden.pending.json",
+      "reason": "窗口未走完 → pending_window",
+      "expect_sample_status": "pending_window",
+      "expect_value_present": false
+    },
+    {
+      "id": "selection.bhar_60.n59",
+      "metric_id": "selection.bhar_60",
+      "file": "selection.bhar_60/golden.n59.json",
+      "reason": "59 交易日 → pending_window",
+      "expect_sample_status": "pending_window",
+      "expect_value_present": false
+    },
+    {
+      "id": "selection.bhar_hit.n0",
+      "metric_id": "selection.bhar_hit",
+      "file": "selection.bhar_hit/golden.n0.json",
+      "reason": "n=0 → insufficient",
+      "expect_sample_status": "insufficient",
+      "expect_value_present": false
+    }
+  ]
+}

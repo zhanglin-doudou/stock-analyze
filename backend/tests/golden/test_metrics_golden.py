@@ -103,6 +103,15 @@ def test_golden(case: GoldenCase) -> None:
     )
     assert outcome.n == case.n, f"{label}: n {outcome.n} ≠ {case.n}"
     assert outcome.unit == case.unit, f"{label}: unit {outcome.unit!r} ≠ {case.unit!r}"
+    if case.n_pending is not None:
+        assert outcome.n_pending == case.n_pending, (
+            f"{label}: n_pending {outcome.n_pending} ≠ {case.n_pending}"
+        )
+    if case.assumptions is not None:
+        for key, expected in case.assumptions.items():
+            assert outcome.assumptions.get(key) == expected, (
+                f"{label}.assumptions.{key}: {outcome.assumptions.get(key)!r} ≠ {expected!r}"
+            )
 
     tolerance = parse_tolerance(case.tolerance, precision=definition.precision)
     assert_within_tolerance(
