@@ -128,7 +128,7 @@ async def test_api_033_domain_filter_and_multi_metric(client, account_factory, o
 
     r = await client.get(
         "/api/v1/metrics",
-        params={"domain": "perf", "period": PERIOD},
+        params={"domain": "perf", "period": PERIOD, "include_exploratory": "true"},
         headers=acc.headers,
     )
     assert r.status_code == 200, r.text
@@ -137,6 +137,42 @@ async def test_api_033_domain_filter_and_multi_metric(client, account_factory, o
         item.id for item in build_registry(extra_paths=[SUPPORT_DEFS]).by_domain("perf")
     )
     assert ids == perf_ids
+
+
+@pytest.mark.asyncio
+async def test_api_033_include_exploratory_default_hides_m1(client, account_factory, owner_engine):
+    """API-033 断言⑤ / §11：默认 false 不含 exploratory，true 含 HHI/换手/摊平。"""
+    acc = await account_factory()
+    await _seed_rounds(owner_engine, user_id=acc.user_id)
+
+    base = await client.get(
+        "/api/v1/metrics", params={"domain": "behavior", "period": PERIOD}, headers=acc.headers
+    )
+    assert base.status_code == 200, base.text
+    assert [item["metric_id"] for item in base.json()["items"]] == ["behavior.de"]
+
+    full = await client.get(
+        "/api/v1/metrics",
+        params={"domain": "behavior", "period": PERIOD, "include_exploratory": "true"},
+        headers=acc.headers,
+    )
+    assert full.status_code == 200, full.text
+    ids = {item["metric_id"] for item in full.json()["items"]}
+    assert ids == {
+        "behavior.de",
+        "behavior.turnover",
+        "behavior.averaging_down",
+        "behavior.hhi",
+    }
+
+    # 显式 ids 不受 include_exploratory 过滤（下钻/详情走 ids 路径）。
+    explicit = await client.get(
+        "/api/v1/metrics",
+        params={"ids": "behavior.hhi", "period": PERIOD},
+        headers=acc.headers,
+    )
+    assert explicit.status_code == 200, explicit.text
+    assert [item["metric_id"] for item in explicit.json()["items"]] == ["behavior.hhi"]
 
 
 @pytest.mark.asyncio
