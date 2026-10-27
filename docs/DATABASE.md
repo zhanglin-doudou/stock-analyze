@@ -68,7 +68,7 @@ STOCK_DB_APP_DSN=postgresql+asyncpg://stock_app:stock_app_pw@127.0.0.1:5432/stoc
 
 **worker 的例外（G7 之后）**：`WorkerRunner` 持有两套连接池——`db`（`stock_app`，handler 的租户事务，受 RLS）与 `queue_db`（`stock_owner`，**仅**用于跨租户的 `claim / reap_expired_leases / heartbeat` 队列控制面）。owner 不下发业务读写；handler 仍只拿 app 会话。
 
-### 2.1 RLS 覆盖范围与例外（G7 / `0002_platform_tenant_rls`；P2-02 / `0003_review_rounds`；Period2-03 / `0004_review_nav`；Period2-16 / `0006_review_asset_daily`）
+### 2.1 RLS 覆盖范围与例外（G7 / `0002_platform_tenant_rls`；P2-02 / `0003_review_rounds`；Period2-03 / `0004_review_nav`；Period2-16 / `0006_review_asset_daily`；Period2-05 / `0007_review_metrics`）
 
 启用 RLS 的租户表（策略名统一 `tenant_isolation`，`USING` 与 `WITH CHECK` 同一谓词，未设变量时 fail-closed）：
 
@@ -76,7 +76,7 @@ STOCK_DB_APP_DSN=postgresql+asyncpg://stock_app:stock_app_pw@127.0.0.1:5432/stoc
 |---|---|
 | `ledger` | `trade` / `trade_history` / `import_batch` / `import_preview` / `quarantine_row` / `summary_rule`（系统规则放行 `user_id IS NULL`）/ `reconciliation` |
 | `platform` | `job` / `idempotency_key` / `user_setting` / `outbox_event`（`user_id IS NULL` 的系统事件只有 owner 可读写） |
-| `review` | `round` / `round_fill` / `round_build_state` / `nav_daily` / `asset_daily` / `asset_build_state`（全部 `user_id` 非空 + `tenant_isolation` 策略） |
+| `review` | `round` / `round_fill` / `round_build_state` / `nav_daily` / `asset_daily` / `asset_build_state` / `metric_result` / `metric_dependency`（全部 `user_id` 非空 + `tenant_isolation` 策略） |
 
 **按设计不启用 RLS 的认证/系统表**（原因见迁移 `0002` docstring；`scripts/ci/gate_rls_coverage.py` 内显式 allowlist）：
 
@@ -91,11 +91,11 @@ STOCK_DB_APP_DSN=postgresql+asyncpg://stock_app:stock_app_pw@127.0.0.1:5432/stoc
 
 > `market` schema 的 `daily_bar` / `pull_range` 是跨用户公共行情缓存（无 `user_id`），**按设计不启用 RLS**；`scripts/ci/gate_rls_coverage.py` 只扫 platform/ledger/review 的租户表，不会误报。写路径仅内部装配（不开放 HTTP 端点），`stock_app` 的 DML 由迁移 `0005_market_cache` 的 `GRANT` 授予。
 
-覆盖门禁（新增租户表未补 RLS 即 CI fail；Period2-16 后 review 6 张表自动纳入）：
+覆盖门禁（新增租户表未补 RLS 即 CI fail；Period2-05 后 review 8 张表自动纳入）：
 
 ```bash
 .venv/bin/python scripts/ci/gate_rls_coverage.py        # 默认取 .env / STOCK_DB_* 的 owner DSN
-# 输出形如：platform: 4/4、ledger: 7/7、review: 6/6，exit 0；缺策略时列出表名并 exit 1
+# 输出形如：platform: 4/4、ledger: 7/7、review: 8/8，exit 0；缺策略时列出表名并 exit 1
 ```
 
 ## 3. 执行迁移

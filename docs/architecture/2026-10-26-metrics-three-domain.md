@@ -16,10 +16,10 @@
 
 | # | 决策点 | 推荐方案 | 备选方案 | 影响/成本 |
 |---|---|---|---|---|
-| **D-01** | Period2-05/06（指标引擎+端点）尚未实现，07 如何在空地基上落地 | **两层交付**：07 先交付 `core/stats` + `core/metrics` + `review/metrics/defs` + golden/oracle（不依赖引擎即可单测）；05/06 作为**硬前置**先补（估 5~7d）。07 的 API 验收在 05/06 合并后联调 | ① 05/06 最小子集并入 07（+2.5~3d，边界模糊）；② 严格串行（周期最长，返工最少） | 推荐可并行开工；07 端到端可用日取决于 05/06 |
+| **D-01** | Period2-05/06（指标引擎+端点）尚未实现，07 如何在空地基上落地 | **两层交付**：07 先交付 `core/stats`（07 份额）+ `core/metrics` + `review/metrics/defs` + golden/oracle（不依赖引擎即可单测）；05/06 作为**硬前置**先补（估 9.5d＝05≈6.5d+06≈3.0d，E-17 已人工裁定接受推荐方案）。07 的 API 验收在 05/06 合并后联调 | ① 05/06 最小子集并入 07（+2.5~3d，边界模糊）；② 严格串行（周期最长，返工最少） | 推荐可并行开工；07 端到端可用日取决于 05/06 |
 | **D-02** | replay 行情月频 9 点，择时域需 20 日窗口/h=5,10,20/日频 β/IR | **新增独立确定性日线夹具** `fixtures/market/daily_bars.json`（≥2 年工作日，含 `hs300_tr`）；replay 按区间返回日线；**不动既有 `quotes.json`**（nav/资产表零回归） | ① 直接把 quotes.json 换日线（nav/asset golden 全变，+2~3d 回归）；② live-only（CI 不可复现）；③ 月频近似（违反 A16/A17/A23/A26） | +0.5~1d（夹具+适配器+测试） |
 | **D-04** | 选股域 PRD 要求 PIT/财报/行业，但本仓无财报/申万行业/PIT 财务表；API-038 断言"不含晚于 as_of 的财报数据"不可执行 | **本期只做价格类 PIT cohort BHAR 20/60**（cohort=买入日；as_of 门禁作用于行情/事件）；修订 API-038 断言；财报/行业/风格另立任务 | ① 引入财报+行业源（+5~8d，需 PIT 版本化表）；② selection 域整体推迟 | 推荐可交付 2 个 P0 指标；备选①显著超期 |
-| **D-06** | 18 个指标、每个 golden + 独立 oracle + mutation ≥80%，DEV-PLAN 估 3.5 人日 | **拆两批 + 修正估时**：07a 核心 10 个（≈9.0~9.5d）、07b exploratory 8 个（≈4.0~4.5d）；合计 13.0~14.0d；不含 05/06 的 5~7d。修正 DEV-PLAN 估时 | ① 严格 3.5d 只交付 6 指标（不满足验收原文）；② 18 全做完整实现（≈14.5d+）；③ 砍独立 oracle（违反 Testing D2） | 唯一能同时满足"18 指标可算 + 每指标 golden + mutation"的排期 |
+| **D-06** | 18 个指标、每个 golden + 独立 oracle + mutation ≥80%，DEV-PLAN 估 3.5 人日 | **拆两批 + 修正估时**：07a 核心 10 个（≈9.0~9.5d）、07b exploratory 8 个（≈4.0~4.5d）；合计 13.0~14.0d；不含 05/06 的 9.5d（E-17 裁定）。修正 DEV-PLAN 估时 | ① 严格 3.5d 只交付 6 指标（不满足验收原文）；② 18 全做完整实现（≈14.5d+）；③ 砍独立 oracle（违反 Testing D2） | 唯一能同时满足"18 指标可算 + 每指标 golden + mutation"的排期 |
 | **D-19** | 演示数据仅 3 个月（≈132 工作日行）+ 月频 9 点，而 A26 要求日频 ≥60 交易日；二期验收剧本要求"五张卡片有数"；且 demo 账单资金余额与持仓不闭合（超卖→全表 degraded，回撤 >100%） | **对齐"流水窗口 / 行情 as_of / 验收 period"三轴**：① 流水 `months=12` 且**止于 2026-06-30**（`generate_huatai_bill` 增 `end_date` 参数，默认 `_ANCHOR=2026-06-30`）；② 日线行情覆盖到 **2026-09-30**（≈60 个交易日的前向缓冲，供 BHAR 20/60、卖飞 h=20、摊平 fwd20 走完窗口）；③ `DEMO_CLOCK=2026-10-01` 不变，`data_as_of=2026-09-30`；④ **验收 period 改为 `2026-06`**（由 data_as_of 反推，写死到 DEV-PLAN §3.1/§11）；⑤ 生成器跟踪逐标的持仓，**禁止卖出超过持仓**（消除两账户 25 次超卖）；⑥ `seed-demo` 收尾触发 `rebuild_rounds`→`rebuild_nav`→`build_assets`（或新增 `make rebuild`）；⑦ 确定性字节可复现 | ① 保持 3 个月，验收剧本改为"卡片显示数据不足"（改 DEV-PLAN §3.1）；② 只加长测试夹具（演示剧本仍不可达） | 推荐才能满足既定验收；+1d（夹具生成器+seed 重放验证） |
 | **D-20** | **DE 方向矛盾**：PRD A15 写 `DE = PLR − PGR`，但 FR-R6/API-Catalog 断言"只卖盈不卖亏 → `DE>0`"（= Odean `PGR − PLR`）。二者相反 | **采用 Odean `DE = PGR − PLR`（DE>0 为处置效应）**，勘误 A15；behavior.de 的 `value` 与 CI 均按此；decomposition 同时给 PGR/PLR/持有天数差 | ① 按 A15 字面 `PLR−PGR`，则 FR-R6/Catalog 断言全部反向（"只卖盈不卖亏"会给负值）；② 双字段并列（`de_odean`/`de_prd`，口径双写、报告难解释） | **阻塞 behavior.de golden 冻结**；推荐与 FR-R6 验收一致 |
 | **D-21** | A17 要求"复权序列对齐"，NFR-2 要求 hfq；但 replay `supports_adjusted=False`、live `ADJUST=""`（v1 只不复权） | **v1 用不复权 + `assumptions.adjust="none"`**；除权嫌疑日（跳空超板块涨跌停）→ `unreliable`；金标夹具窗口内不含除权；复权因子/hfq 单列后续任务（ADR-0025 已预留） | ① 本期实现 hfq 因子版本化（+2~3d，依赖 Period2-04 行情因子表）；② 用后复权价近似（与账单现金流口径冲突，易双计） | 推荐零依赖；影响 BHAR/追涨分位/卖飞率的绝对水平（披露 assumptions） |
@@ -36,7 +36,7 @@
 | **D-10** | A14 集中度：分母"仅 pnl>0"，Gini/CR1 的边界未定义 | 集中度**只在盈利回合上定义**：Top3=前 3 大盈利/Σ盈利、CR1=最大盈利/Σ盈利、Gini 在盈利 pnl 升序分布上；`n_pos<2` → insufficient；`n_pos<3` → Top3 退化为全部盈利并在 decomp 标注 | ① Gini 含亏损（需平移，经济含义不同）；② Gini 用 \|pnl\|（可比性差） | 盈利回合为 0 时无值（insufficient） |
 | **D-11** | A22 "吃掉 TWR 的 Y%" 无公式；两个年化基数不一致（费用 365/D vs TWR 365/首末差）；`|年化TWR|`（ratio）与年化费用（CNY）量纲不可加 | **主 value（core）** `fee_drag_ratio = 年化费用/期间日均持仓市值`（A22 原文"年化平均持仓市值"按"期间日均"落地；费用年化 `365/D`）；`twr_eaten_pct` 仅当 **年化 TWR > 0** 时输出且**标 exploratory**：`= 年化费用/(twr_amount+年化费用)`，`twr_amount = 期间平均总资产 × 年化 TWR`（TWR 年化统一 `365/(last−first)`）；TWR≤0 → null + `unreliable`（避免把"吃掉亏损"讲成"吃掉收益"）；PRD 需补公式（C-15） | ① 只出 `fee_drag_ratio`，不出 Y%（最稳，推荐给"结论"）；② `Y=fee_drag/|TWR|`（量纲错，拒绝） | 可拍板：主 value 无歧义；Y% 作为 exploratory 展示 |
 | **D-12** | 回撤族数据源：`nav_daily` 按月稀疏；`asset_daily` 逐自然日且有现金流调整后 `daily_return_units` | **用 `asset_daily.daily_return_units` 复利链构日度 TWR 指数**；`build.state != current → stale`；区间内任一 `blocked` 行 → `blocked`；任一 `degraded` → `unreliable`；`assumptions.nav_source="asset_daily.daily_return"` | ① `asset_daily` 加 `unit_nav_units` 列（+1d）；② 用 nav_daily（月频，日频 MDD 不可得） | 零迁移；复利链与 A4/A5 同口径 |
-| **D-13** | HHI/换手/全样本浮盈亏需要**每日逐标的持仓/期末持仓**，`asset_daily` 只有聚合值（无明细表） | **指标层内存重建**：新增纯构建器（复用 `valuation.closing_price_ladder/close_on_or_before/holding_delta`），从账户首笔流水重放到 `period_end`；逐日与 `asset_daily` 对账（0 分公差）；预算 p95<200ms；不落库 | ① 新增 `review.asset_daily_holding` 明细表（+1.5d、存储/增量复杂）；② 期末快照近似（日频 HHI 不可得） | 需 05 提供 `positions_end` 视图字段（或 07 自带构建器） |
+| **D-13** | HHI/换手/全样本浮盈亏需要**每日逐标的持仓/期末持仓**，`asset_daily` 只有聚合值（无明细表） | **指标层内存重建**：新增纯构建器（复用 `valuation.closing_price_ladder/close_on_or_before/holding_delta`），从账户首笔流水重放到 `period_end`；逐日与 `asset_daily` 对账（0 分公差）；预算 p95<200ms；不落库 | ① 新增 `review.asset_daily_holding` 明细表（+1.5d、存储/增量复杂）；② 期末快照近似（日频 HHI 不可得） | 07 自带构建器在 def 内基于 `trades`+`bars` 重建（E-06：`positions_end`/`holdings_daily` 不入视图层） |
 | **D-14** | rf 无数据源；PRD 禁止默认 0 | `settings.rf_annual` 默认 `0.015`，`assumptions.rf_rate` 输出；日化 `rf_d=(1+rf_a)^(1/244)−1`；α 年化 `α_d×244` | ① 内置静态 rf 曲线；② 用户自填（设置页 Period2-11 才做） | 默认值需人工确认（1.5% 或 2.0%） |
 | **D-15** | API-035 断言"每项金额 2 位定点"对比率/天数型指标不成立；A13 均值非整数与"天数为整数"冲突 | 下钻 item 增 `unit`；**断言按 `(unit, precision)` 分级**：CNY 2 位、ratio 8 位、days 2 位、count 整数、z 4 位；`SamplePolicy.ci` 支持 `"none"`；`values.py:193` docstring 与实现舍入不一致以代码为准 | ① 强塞金额字段；② 只允许金额型指标下钻 | 弱破坏（用例/文案改） |
 | **D-18** | period 与滚动窗口/lookback 语义；回合型指标归属日（close_date vs open_date）；`page()` 用 `COALESCE(close_date,open_date)` | 回合/已实现事件按 **`close_date`**；open 回合按 `open_date ≤ end` 只进全样本；**`window_start = period.start − lookback`（交易日回退）**，`window_end = max(period.end, period.end + forward)` 且 `≤ data_as_of`；lookback/as_of/benchmark 进 `inputs_hash`；新增 `RoundRepository.in_period()`，不复用 page 的 COALESCE | 严格只算 period 内（期末事件被截断，系统性偏差） | 同一 period 不同实现结果不同的根因 |
@@ -50,11 +50,11 @@
 | # | 决策点 | 推荐方案 | 备选 | 影响 |
 |---|---|---|---|---|
 | **D-16** | 变异测试：无 mutmut 配置/无 CI workflow；文档路径 `core/src/core` 与实际 `stock_core` 不一致 | **mutmut（pin ≥3.2,<4）+ `make mutation`**：新增 `stock_core/stats|metrics` ≥80%，`ci.py`/`tolerance.py` ≥95%；现有 core 不退化；PR diff-only、nightly 全量；修正文档路径 | ① cosmic-ray（与文档不一致，改文档面大）；② 不跑变异（违反验收） | +1d 配置与首轮；nightly ≤40min |
-| **D-17** | API-038 异步诊断 handler 归属（`JobType.DIAGNOSTICS_SELECTION` 已存在但无 handler） | 07 只交付 selection defs/数据视图；handler 归 06 端点补齐或 07b；07 用直接构造的 metric_result 验收 | ① 07 一并实现（+1d，可端到端验 API-038）；② 不做（API-038 不可验收） | 任务边界清晰 |
+| **D-17** | API-038 异步诊断 handler 归属（`JobType.DIAGNOSTICS_SELECTION` 已存在但无 handler） | 07 只交付 selection defs/数据视图；**handler 归 Period2-06 收尾（E-18，05/06 评审 v1.1 已明确）**；07 用直接构造的 metric_result 验收 | ① 07 一并实现（+1d，可端到端验 API-038）；② 不做（API-038 不可验收） | 任务边界清晰 |
 | **D-22** | admin 是否可读指标端点：admin 不可读交易明细，但指标是聚合值；Catalog API-033 未列 `ADMIN_CANNOT_READ_TRADES` | **403 `ADMIN_CANNOT_READ_TRADES`**（与 assets/rounds 一致：聚合值仍源于交易明细）；Catalog 补错误码 | ① 允许 admin 读聚合指标（与"admin 不可读业务数据"原则冲突）；② 新增专用错误码（无必要） | 安全一致性；需改 Catalog |
 | **D-23** | golden 目录双源：Testing §9.1 `fixtures/expected/metrics/` vs Extensibility §12 `backend/tests/golden/<metric_id>/`（Testing §9.3 仅给 oracle 三方比对、未定义 golden 目录）；容差统一 1bp 对微比率（fee≈5e-4）等于 20% 相对误差 | **单源 `backend/tests/golden/<metric_id>/`（Extensibility §12）**；Testing §9.1 勘误为同路径；容差分级：ratio∈[0,1] 用 1bp、微比率用绝对 1e-8+相对 0.5%、CNY 0.01、days 0.01、count 精确；golden 独立 PR + `golden-approved` 标签 | ① 沿用 fixtures/expected（与 Extensibility §12 冲突）；② 统一 1bp（掩盖量级错误） | 校准 Testing 文档（C-15） |
 | **D-24** | `decomposition` 是否进 API（引擎 `MetricValue` 有，`MetricResult` 无）；四数字卡需要 median/全样本/CR1/h=5/10 | `MetricResult` 增可选 `decomposition: object\|null`（additive，旧客户端忽略）；值同样用定点串/整数 | ① 通过 explain 文案带出（前端不可结构化消费）；② 每个变体单列 metric id（指标爆炸，违反 A26 预算） | 契约 additive；需 Catalog 修订（C-05） |
-| **D-29** | 契约修订总包（C-01~C-34，见 §9） | 批准清单，实现阶段统一落（api-snapshot/api-check/sdk 同步） | 逐条另批（低效，易漂移） | 影响 05/06/07 三个任务的契约 |
+| **D-29** | 契约修订总包（C-01~C-43，见 §9；C-35~C-43 来自 05/06 评审 v1.1） | 批准清单，实现阶段统一落（api-snapshot/api-check/sdk 同步） | 逐条另批（低效，易漂移） | 影响 05/06/07 三个任务的契约 |
 
 > **设计内已定、不需人工拍板**：舍入（Decimal ROUND_HALF_UP，出口量化一次）、年化基数 A=244、容差 EPS_AMT=0.01/EPS_R=1bp、金额/比率 scale=2/8、布尔统计用 Wilson、DE/bootstrap 的 percentile 法、费用三列+独立行口径、回撤指数用 asset_daily 日收益、PIT `data_as_of=min(today, market.as_of, build.as_of)`、explain 中英模板——依据见各章与 PRD。
 
@@ -117,7 +117,7 @@
 
 | # | metric_id | 域 | 口径来源 | 主数据源 | 级别 | 依赖 | 单位 | 关键边界 |
 |---|---|---|---|---|---|---|---|---|
-| 1 | `perf.win_rate` | perf | A10 已平仓胜率 + Wilson CI；decomp 全样本胜率/开仓数 | round + positions_end | core | rounds | ratio | pnl=0 不计胜；n=0 → value:null+insufficient |
+| 1 | `perf.win_rate` | perf | A10 已平仓胜率 + Wilson CI；decomp 全样本胜率/开仓数 | round + trades/bars（期末持仓 def 内重建，E-06） | core | rounds | ratio | pnl=0 不计胜；n=0 → value:null+insufficient |
 | 2 | `perf.pnl_ratio` | perf | A11 平均盈利/|平均亏损|；decomp median 版 | round | core | rounds | ratio | 全胜/全亏 → null+insufficient |
 | 3 | `perf.holding_days` | perf | A13 交易日均值；decomp median/自然日/资金占用 | round + fill | expl | rounds,fills | days | open 回合（holding_days=0）排除；工作日近似 |
 | 4 | `perf.concentration` | perf | A14 Top3/全部盈利；decomp CR1/Gini/n_pos | round | expl | rounds | ratio | 仅 pnl>0；n_pos<2 insufficient |
@@ -180,7 +180,7 @@ class WinRateDef:                       # 结构示意（具体基类由 05 提�
     domain = Domain.PERF
     scope = ScopeSpec(unit="round", cohort="close_date", period="month")
     params_schema = WinRateParams        # extra="forbid"
-    dependencies = (DatasetDep("rounds"), DatasetDep("positions_end"))
+    dependencies = (DatasetDep("rounds"), DatasetDep("trades"), DatasetDep("bars_daily"))  # 期末持仓由 def 内基于 trades+bars 重建（E-06/D-13）；dataset 白名单无 positions_end
     sample_policy = SamplePolicy(min_n=10, ci_min_n=10, ci="wilson")
     status_policy = (StatusRule("upstream=blocked"), StatusRule("upstream=stale"))
     unit, precision = Unit.RATIO, 8
@@ -192,7 +192,7 @@ class WinRateDef:                       # 结构示意（具体基类由 05 提�
     drilldown = DrilldownSpec(endpoint="/metrics/perf.win_rate/drilldown", params={"period": "{period}"})
 ```
 
-- **`MetricValue`（07 建议形状，05 确认）**：`value_units: int | None`、`n: int`、`decomposition: dict[str, int|str|None]`、`n_pending: int`、**`ci_sample: tuple[int, ...] | None`（**必须升序排序后传引擎**、仅内存交接**不落库**、长度上限 2000（超限只做确定性抽样并记 assumptions））+ `ci_stat_id: str | None`（内部字段，不出口 API，D-07）**。`ci_stat_id` 指向 `core/stats/estimators.py` 的纯函数注册表（如 `mean`、`ratio_diff_pgr_plr`、`beta_alpha`），引擎按 id 派发——**否则框架无法从原始观测重算 DE 的 bootstrap CI**（Extensibility §3.1 无统计量钩子）。
+- **`MetricValue`（与 05/06 v1.1 §4.2 冻结一致）**：`value_units: int | None`、`n: int`、`decomposition: dict[str, int|str|None]`、`n_pending: int`、**`ci_sample: tuple[tuple[int, ...], ...] | None`（观测=元组，支持成对 bootstrap，E-15；必须升序排序后传引擎、仅内存交接不落库、长度上限 2000（超限只做确定性抽样并记 assumptions））+ `ci_stat_id: str | None`（内部字段，不出口 API，D-07）**。`ci_stat_id` 指向 `core/stats/estimators/` 包内自动发现注册表（pkgutil；07 加文件零改 05；如 `mean`、`ratio_diff_pgr_plr`、`beta_alpha`），引擎按 id 派发——**否则框架无法从原始观测重算 DE 的 bootstrap CI**（Extensibility §3.1 无统计量钩子）。约束：`ci="wilson"` 时占比类指标（如 win_rate）须给 Bernoulli 0/1 观测，引擎从 `ci_sample` 求 `success/n`；`ci="bootstrap"` 要求 `len(ci_sample)==n` 且 `ci_stat_id` 已注册（未注册 → 注册期 fail-fast）；`ci="none"` 时两者必须为 None。
 - **框架代算**：`sample_status`（min_n/ci_min_n/pending）、CI（按 `sample_policy.ci` 策略对 `ci_sample` 计算）、`status`（status_policy + upstream）、`assumptions`、`inputs_hash`、`data_as_of`、`computed_at`、持久化/失效。
 - **纯度**：`compute` 内禁 socket/open/sqlalchemy/session/`datetime.now`/`random`/float；契约 kit 静态+动态扫描（§8.6）。
 - **错误处理**：`compute` 不抛业务 `ApiError`；上游不可用由 `status_policy` 表达；除零/无定义返回 `value_units=None` + decomp 提示，由引擎判 `insufficient/unreliable`。
@@ -211,9 +211,10 @@ class MetricContext:
     bars: BarsView            # 日线（as_of 截断）；benchmark 单独视图
     benchmark: BenchmarkView  # hs300_tr 全收益日收益；available=False 时相关指标 blocked
     calendar: CalendarView    # 交易日（M1=weekday proxy，带 assumption）
-    holdings_daily: HoldingsView   # 07 的内存重建结果（HHI/换手/摊平/浮盈）
     rf_annual: Decimal        # settings，默认 0.015
 ```
+
+- **持仓视图边界（E-06/D-13）**：`holdings_daily`/`positions_end` **不入视图层**（`MetricContext` 不含这两个字段），由 07 def 内基于 `trades`+`bars` 内存重建（§6.5）；registry 的 dataset 白名单不含 `holdings_daily`/`positions_end`；`MetricContext` 字段与各视图字段以 05/06 设计 §4.3 冻结为准。
 
 ### 4.2 端点契约（API-033/034/035/079/038，07 只消费）
 
@@ -230,8 +231,9 @@ class MetricContext:
 | `blocked` / `stale` / `unreliable` | 任意 | **无 value 键**（非 ok 一律不出数字，Architecture §11） | 无 | 无（附 reason/what_to_do） |
 
 - `explain`：`conclusion` 禁裸术语（词表见 §8.6）；非 ok → `conclusion=null` + `reason/what_to_do` 非空。
-- `drilldown`：`items[]` 至少含 `key/round_id?/trade_id?/event_date?/value/unit/label`；`source_endpoints[]` 可复核；`params` 回填 `period`。
-- `ETag`/`304`、`data_as_of`、`definition_version` 由 06 统一；07 保证同输入两次计算 `inputs_hash` 相同。
+- **`DEF` 导出约定**：07 每个 def 模块统一导出模块级实例 `DEF`（Extensibility §3.5，唯一名字，registry 只认 `DEF`；05/06 v1.1 §4.3）。
+- `drilldown`：`items[]` 至少含 `key/round_id?/trade_id?/event_date?/value/unit/label`；`source_endpoints[]` 可复核；`params` 回填 `period`；**07 def 必须实现 `DrilldownSpec.build_items(ctx, filters)`（pure，E-12）**——引擎只负责排序/分页/格式化，上限 5000 + `truncated`。
+- `ETag`（弱校验 `W/"<sha16>"`）/`304`（判定在写库前，304 不写库）、`data_as_of`、`definition_version` 由 06 统一；**`definition_version` bump → 插入新版本行 + 返回 `ok`（旧行保留），对外 `stale` 仅对 `asset_build.state=stale`/`market.as_of` 滞后可达**（E-13/C-41）；07 保证同输入两次计算 `inputs_hash` 相同。
 
 ### 4.3 05/06 前置清单（07 开工前必须就绪）
 
@@ -243,6 +245,8 @@ class MetricContext:
 | P4 | `GET /metrics`、`/{id}`、`/explain`、`/drilldown` | API-033/034/035/079 契约测试可跑 | 06 |
 | P5 | 常量集中：`Z_95/MIN_TRADING_DAYS/RF_ANNUAL_DEFAULT`，`MIN_CI_SAMPLE=10`，`SamplePolicy.ci` 支持 `"none"` | `contracts/constants.py` 与该设计一致（C-17） | 05 |
 
+> **05 验收口径修订（E-13/C-41）**：DEV-PLAN 05 原文"definition_version bump → 旧结果 100% stale"改为"**新版本行插入 + 旧行保留 + `persist.is_stale` 单测**"；对外 `stale` 仅 `asset_build.state=stale`/`market.as_of` 滞后可达。
+
 **并行策略**：05/06 未就绪时，07 先落 `core/stats` + `core/metrics` + defs + golden + oracle + mutation；单测直接调纯函数/用 fake ctx，不依赖引擎，可作为 05/06 的"下游第一个消费者"反向驱动契约。
 
 ---
@@ -253,15 +257,18 @@ class MetricContext:
 
 ### 5.1 模块划分
 
-| 文件 | 职责 | 关键函数 |
-|---|---|---|
-| `numeric.py` | 定点/整数工具 | `div_round(a,b,scale)`、`sqrt_units(a,scale)`、`median_units`、`pct_index`、`xorshift64_star(seed)`（纯整数） |
-| `wilson.py` | 二项比例 CI | `wilson_interval(success, n, z_units=1959964, scale=8)` |
-| `bootstrap.py` | 确定性 bootstrap | `bootstrap_percentile(samples, stat, *, b=1000, seed, alpha_permille=(25,974))` |
-| `regression.py` | OLS β/α、t、IR | `beta_alpha(y_units, x_units, rf_daily_units, scale=8)` → BetaAlpha |
-| `concentration.py` | Gini/CR1/TopK/HHI | `gini_units(sorted_values, scale=8)`、`top_k_share`、`hhi(weights)` |
-| `drawdown.py` | 回撤族 | `drawdown_family(index_units, annualized_twr_units)` → MDD/duration/recovery/underwater/ulcer/calmar |
-| `tstat.py` | 聚类 t 值 | `cluster_t(events: Sequence[tuple[date,int]])` |
+> **归属边界（05/06 v1.1 §4.4，E-05/E-15）**：05 交付 `numeric/wilson/bootstrap` + `estimators/` 框架（含 `mean` estimator）；**07 只交付 `regression/concentration/drawdown/tstat` + 各指标 estimator 文件**（`estimators/` 包内 pkgutil 自动发现，07 加文件零改 05；`ci_stat_id` 未注册 → 注册期 fail-fast）。
+
+| 文件 | 归属 | 职责 | 关键函数 |
+|---|---|---|---|
+| `numeric.py` | 05 | 定点/整数工具 | `div_round(a,b,scale)`、`sqrt_units(a,scale)`、`median_units`、`pct_index`、`xorshift64_star(seed)`（纯整数） |
+| `wilson.py` | 05 | 二项比例 CI | `wilson_interval(success, n, z_units=1959964, scale=8)` |
+| `bootstrap.py` | 05 | 确定性 bootstrap | `bootstrap_percentile(samples, stat, *, b=1000, seed, alpha_permille=(25,974))` |
+| `estimators/` | 05 框架+`mean`；**07 加文件** | estimator 注册表（包内 pkgutil 自动发现） | `register(id)(fn)`；`fn(samples: Sequence[tuple[int,...]]) -> int`（标度整数统计量） |
+| `regression.py` | 07 | OLS β/α、t、IR | `beta_alpha(y_units, x_units, rf_daily_units, scale=8)` → BetaAlpha |
+| `concentration.py` | 07 | Gini/CR1/TopK/HHI | `gini_units(sorted_values, scale=8)`、`top_k_share`、`hhi(weights)` |
+| `drawdown.py` | 07 | 回撤族 | `drawdown_family(index_units, annualized_twr_units)` → MDD/duration/recovery/underwater/ulcer/calmar |
+| `tstat.py` | 07 | 聚类 t 值 | `cluster_t(events: Sequence[tuple[date,int]])` |
 
 ### 5.2 精度与舍入
 
@@ -328,7 +335,7 @@ class MetricContext:
 
 ### 6.2 `period` / lookback / `as_of`（D-18）
 
-- `period=YYYY-MM` → `[月初, min(月末, as_of)]` 闭区间；`from/to` 也闭区间；`period` 与 `from/to` 二选一（API-033）。
+- `period=YYYY-MM` → `[月初, min(月末, as_of)]` **闭区间**；**`from/to` 半开 `[from,to)`，M1 仅接受"月初→次月初"（等价单月），跨月/单端 → 422 `INVALID_PERIOD`**（C-34/EC-P1-2）；`period` 与 `from/to` 二选一（API-033）。
 - **回合型/已实现事件按 `close_date`**；open 回合按 `open_date ≤ end` 只入全样本；**成交型按 `trade_date`；资产型按 `trade_date`；选股 cohort 按买入 `trade_date`**。
 - **滚动窗口 lookback**：`window_start = period.start − lookback_days`（按交易日历回退）；前向窗口 `window_end = max(period.end, period.end + forward_days)` 且 `≤ data_as_of`。lookback 由 def 常量声明，**不是**指标入参；`inputs_hash` 显式包含 `period_start/period_end/lookback/as_of/benchmark_id`。
 - `data_as_of = min(clock.today(), market.as_of, asset_build.data_as_of)`；写入 `MetricResult.data_as_of`；PIT 硬约束 `window_end ≤ data_as_of`。
@@ -348,10 +355,10 @@ class MetricContext:
 | 基准不可用 | #9/#10/#16/#17/#18 | `blocked` | `blocked` | 无 | 无 | 配置基准数据 |
 | `n_trading_days<60` | #10/#11 | `ok` | `pending_window` | **无** | 无 | 积累更多数据 |
 | `n<10` | 统计类 | `ok` | `insufficient` | 有（结构性无定义时 null） | 无 | — |
-| `bar_density<0.8`（0.8 阈值） | #8/#9/#14 | `unreliable` | 按 n | 有 | 无 | 检查行情覆盖 |
-| `definition_version` 不匹配 | 全部 | `stale` | 按 n | 无 | 无 | 触发重算 |
+| `bar_density<0.8`（0.8 阈值） | #8/#9/#14 | `unreliable` | 按 n | **无** | 无 | 检查行情覆盖 |
+| `definition_version` bump（口径升级） | 全部 | `ok`（插入新版本行、旧行保留；E-13/C-41） | 按 n | 有 | 有 | —（自动重算为新版本行） |
 
-> `blocked/stale/unreliable` 无 value 键是硬约束（Architecture §11"非 ok 不返回 value 与 conclusion"；Catalog §0.8 只明写 blocked，c-31 需补 stale/unreliable）；`insufficient` 返回原始值（n=0/结构性无定义为 null）、`pending_window` 无值——四态差异见 §4.2（D-08）。
+> `blocked/stale/unreliable` 无 value 键是硬约束（Architecture §11"非 ok 不返回 value 与 conclusion"；Catalog §0.8 只明写 blocked，c-31 需补 stale/unreliable）；`insufficient` 返回原始值（n=0/结构性无定义为 null）、`pending_window` 无值——四态差异见 §4.2（D-08）。**`stale` 语义收口（E-13/C-41）**：对外 `stale` 仅"上游数据状态过期"可达（`asset_build.state=stale`、`market.as_of` 滞后）；口径 bump 不返回 stale，而是插入新版本行 + 返回 `ok`。
 
 ### 6.4 行情能力协商（replay 现状与目标）
 
@@ -418,7 +425,7 @@ for date in every natural day in [period_start, period_end]:                 # �
 - 口径：A10。公式：`n_closed=#{closed}`、`wins=#{closed ∧ pnl>0}`、`value=HALF_UP(wins×1e8/n_closed)`；`pnl=0` 既不算胜也不算负但计入分母；`n_closed=0 → value:null+insufficient`。
 - decomp：`win_rate_all`（含 open 浮盈浮亏；perf 单测小夹具 5/9 → 0.55555556，主夹具 `fx_metrics_core` → 0.60000000；不可定价时 null+`assumptions.all_sample="unavailable"`）、`n_closed/n_open/n_data_error/wins/n_zero/n_all`。
 - CI：Wilson（n≥10）。校验：`wilson(8,12)=(0.39062209,0.86187991)`；`wilson(18,30)=(0.42320360,0.75409372)`。
-- 输入：`rounds` + `positions_end`（期末逐标的浮盈亏，D-13；缺失仅降级 decomp，不阻断 value）。
+- 输入：`rounds` + 期末逐标的浮盈亏（**07 在 def 内基于 `trades`+`bars` 重建**，E-06/D-13；`positions_end` 不入视图层、不在 registry dataset 白名单；缺失仅降级 decomp，不阻断 value）。
 - golden：`fx_metrics_core` 12 closed、8 盈 → **0.66666667**；`win_rate_all` 9/15=**0.60000000**；n=30 变体 → 0.6 + CI。容差 1bp。
 - 必杀变异：`>`→`>=`（`test_win_rate_excludes_zero_pnl`）；分母 `n_closed`→`n_all`；纳入 data_error；整数截断。
 - explain：zh「这段时间你平掉的 12 笔交易里，8 笔是赚钱的，胜率 66.7%」/en；method「已平仓回合中盈利回合的占比，附 95% 置信区间」。
@@ -562,7 +569,7 @@ for date in every natural day in [period_start, period_end]:                 # �
 | # | 一致性要求 | 落地 |
 |---|---|---|
 | X-1 | DE/PGR/PLR 笔数口径唯一（D-20），不得金额加权 | `core/metrics/behavior.py` 单一实现；golden 显式断言 DE=+0.22222222 |
-| X-2 | 期末持仓/浮盈亏唯一原语（D-13）：perf 全样本胜率、behavior.de、HHI/换手共用 | `core/metrics/holdings.py`（纯）+ `review/application/metrics_positions.py`（装配）；05 可选 `positions_end` 视图；对账不变量 |
+| X-2 | 期末持仓/浮盈亏唯一原语（D-13）：perf 全样本胜率、behavior.de、HHI/换手共用 | `core/metrics/holdings.py`（纯）+ `review/application/metrics_positions.py`（装配）；`positions_end`/`holdings_daily` 不入视图层（E-06），由 07 def 内基于 `trades`+`bars` 重建；对账不变量 |
 | X-3 | TWR 口径唯一：`perf.fee_breakeven` 与 `timing.drawdown` 共用 `asset_daily.daily_return` 复利链 | `core/metrics/portfolio_index.py`；两处值差 ≤1bp（测试断言） |
 | X-4 | 费用/成交额口径唯一：`perf.fee` 与 `behavior.turnover` 共用 `money_mul/turnover` 原语（D-27） | 单一纯函数；`turnover_net` 交叉校验 |
 | X-5 | bootstrap 唯一：DE/BHAR/expectancy 共用 `core/stats/bootstrap.py` 与 seed 规则（D-07） | 同 seed 逐位相等测试 |
@@ -765,7 +772,7 @@ for date in every natural day in [period_start, period_end]:                 # �
 | `assert_purity` | AST 禁 import `time/datetime/random/socket/os/pathlib/sqlalchemy/fastapi/httpx/stock_platform/stock_ledger`、禁 `open/now/utcnow`；运行时 ctx 用"毒属性"桩（访问 `clock/session/random` 即抛） |
 | `assert_deterministic` | 同 ctx 两次结果全等；打乱 rounds/trades 顺序结果不变；两次运行 `inputs_hash` 相同 |
 | `assert_sample_gate` | 参数化 n=0/5/9/10/29/30/59/60（门槛表见下）；断言 compute 不返回 status/ci 字段 |
-| `assert_no_status_leak` | `MetricValue` 字段集 ∈{value,n,decomposition,n_pending,ci_sample,ci_stat_id}；无 status/ci/data_as_of/conclusion 键 |
+| `assert_no_status_leak` | `MetricValue` 字段集 ∈{value_units,n,decomposition,n_pending,ci_sample,ci_stat_id}；无 status/ci/data_as_of/conclusion 键 |
 | `assert_drilldown_callable` | endpoint+params 存在；本人调用 200；item key 稳定；值格式按 unit；租户 B 调用不含 A 的 id |
 | `assert_tenant_scoped` | A/B 同 fixture 各自独立期望；B 结果不含 A 的 UUID/金额；缓存不串；`metric_result` RLS 直连只见本人 |
 | `assert_explain_no_jargon` | 词表 `DE,BHAR,PGR,PLR,TWR,MWR,FIFO,HHI,Wilson,β,α,IR` 词边界忽略大小写扫描 conclusion/reason/what_to_do；`method` 最多 1 个括注术语 |
@@ -792,8 +799,8 @@ for date in every natural day in [period_start, period_end]:                 # �
 |---|---|---|
 | API-033 `GET /metrics` | happy `ids=perf.win_rate,perf.pnl_ratio&period=2026-09`（单测夹具 period；验收剧本用 2026-06）；`domain=behavior`+`include_exploratory=false`；fx_n5→insufficient；fx_blocked→坏指标无 value 而好指标仍 ok；fx_n30→`ci_low<value<ci_high`；越权 B token 只返回 B、body 无 A 的 UUID/金额；admin 403/无 token 401/read PAT 200；`ids`+`domain` 同传 422、未知 id 404、`period=2026-13` 422；`ETag`+304；每 item 含 version/data_as_of/assumptions/inputs_hash | blocked **无 value 键**；insufficient 无 ci 键；flat id 按 D-05 应 404（Catalog 断言须改） |
 | API-034 `/explain` | happy；fx_n5→conclusion=null+reason/what_to_do；未知 metric 404、缺 period 422；Accept-Language=en-US 文案变数值不变；裸术语 0 命中；drilldown.endpoint+params 可调 | 非 ok 无 conclusion；drilldown 是可执行声明 |
-| API-035 `/drilldown` | happy items 非空、item 含 stable key+value+unit+label、params 回填、source_endpoints 可调；格式按 unit；分页无重无漏、非法 cursor 400；越权 B items 为空/404 无 A id；admin 403/无 token 401；未知 metric 404、缺 period 422；`round_id/security_code` 过滤 | 比率型不得套金额 2 位断言（D-15） |
-| API-079 `/metrics/{id}` | 单指标完整血缘；blocked/stale/unreliable 无 value；insufficient 有 value 无 CI；与 API-033 同 item 逐字段相等；ETag/304；两次 `inputs_hash` 相同、改流水后变化；越权/错误码同 033；`definition_version` bump → stale 且无 value | 全字段出现规则与门槛表逐格一致 |
+| API-035 `/drilldown` | happy items 非空、item 含 stable key+value+unit+label、params 回填、source_endpoints 可调；格式按 unit；分页无重无漏、非法 cursor 400；越权 B items 为空/404 无 A id；admin 403/无 token 401；未知 metric 404、缺 period 422；`round_id/security_code` 过滤 | 比率型不得套金额 2 位断言（D-15）；drilldown 断言含 `source_endpoints` 可调、`items` 按 unit 定点（C-37：`event_date/key/truncated`、cursor 绑定查询指纹） |
+| API-079 `/metrics/{id}` | 单指标完整血缘；blocked/stale/unreliable 无 value；insufficient 有 value 无 CI；与 API-033 同 item 逐字段相等；ETag/304；两次 `inputs_hash` 相同、改流水后变化；越权/错误码同 033；`definition_version` bump → 新版本行 + 返回 ok（旧行保留，E-13/C-41） | 全字段出现规则与门槛表逐格一致 |
 | 软删 / 恢复 / 版本 | 软删一条 trade → metrics `inputs_hash` 变；恢复 → 值回到原值；`include_deleted` 不影响指标 | 指标只消费 `deleted_at IS NULL` |
 | ETag / 缓存 | 查询指纹含 `ids/domain/period/benchmark/rf/include_exploratory`；数据变更后 304 → 200；跨用户不命中 | 缓存键含 tenant/params |
 | i18n | 18 个 explain 的 en 模板各 1 条裸术语扫描与数值一致断言 | 英文不泄露裸术语 |
@@ -836,7 +843,7 @@ also_copy = ["backend/tests/fixtures/metrics"]
 1. `pytest backend/tests/unit/core --cov=stock_core --cov-fail-under=100`（L0）
 2. `pytest backend/tests/golden -m golden`（L1 三方）
 3. `pytest backend/tests/contract/test_metric_plugin.py`（L2a）
-4. `pytest backend/tests/api -k "api_033 or api_034 or api_035 or api_079"`（L3；API-038 依赖 D-17 的 handler，若归 06 则 07a 不阻塞，P2-14 验收）
+4. `pytest backend/tests/api -k "api_033 or api_034 or api_035 or api_079"`（L3；API-038 依赖 D-17 的 handler，归 Period2-06 收尾（E-18），07a 不阻塞，P2-14 验收）
 5. `pytest backend/tests -m isolation` + `gate_tenant_coverage` + `gate_rls_coverage`（L4）
 6. `gate_endpoint_coverage.py`（端点 100% + ≥3 用例）
 7. `api-check` + `api-snapshot --check`（契约漂移）
@@ -858,7 +865,7 @@ also_copy = ["backend/tests/fixtures/metrics"]
 
 | # | 文件/位置 | 现状 | 建议改为 | 理由 | 破坏性 |
 |---|---|---|---|---|---|
-| C-01 | API-Catalog §2.3 API-033 | flat id 示例；未定义 insufficient 时 value 是否存在；`ci_min_n` 未写 | dotted id 示例（`perf.win_rate`…）；补 §4.2 状态-字段矩阵（D-08）；写 `ci_min_n=10` | D-05/D-08 一致性 | additive |
+| C-01 | API-Catalog §2.3 API-033 | flat id 示例；未定义 insufficient 时 value 是否存在；`ci_min_n` 未写；`domain` 枚举缺 `perf`；ETag/304 未明写 | dotted id 示例（`perf.win_rate`…）；补 §4.2 状态-字段矩阵（D-08）；写 `ci_min_n=10`；**`domain` 枚举补 `perf`**（EE-P2-1；attribution 本期不收）；补 ETag 弱校验 `W/"<sha16>"` 与 304 说明（E-08/C-36） | D-05/D-08 一致性 | additive |
 | C-02 | API-Catalog §2.3 API-034 | 裸术语清单缺 β/α/IR/HHI/Gini/Ulcer/Calmar/PGR/PLR | 扩充词表；非 ok 的 reason/what_to_do 枚举 | explain 可测 | 否 |
 | C-03 | API-Catalog §2.3 API-035 | 断言②"每项金额 2 位" | item 增 `unit`；按 unit+precision 分格式（CNY 2/ratio 8/days 2/count 0/z 4） | 比率/天数型下钻 | 弱破坏（用例改） |
 | C-04 | API-Catalog §2.3 API-038 | 断言③"不含晚于 as_of 的财报数据" | 改为"行情/事件不含晚于 as_of 的数据；`data_as_of≤as_of`；as_of 前移 BHAR 不变" | 本仓无财报（D-04） | 否 |
@@ -876,7 +883,7 @@ also_copy = ["backend/tests/fixtures/metrics"]
 | C-16 | PRD A26 + FR-R5(405/414) + FR-R8(422) + PRD-v1(108/459) | "N<30 附 CI"与引擎 `ci_min_n=30` 冲突（5 处表述） | 统一为"n≥10 出 CI；n<10 无 CI/无 conclusion；日频<60 pending_window 无 value"；同步改 Extensibility §3.1 `ci_min_n=30→10` | D-08 | 口径统一 |
 | C-17 | `contracts/constants.py:21-24` | 已有 `MIN_CI_SAMPLE=10`（与 PRD 一致）；缺 Z_95/MIN_TRADING_DAYS/RF 常量 | 保持 `MIN_CI_SAMPLE=10`；增 `Z_95=Decimal("1.959963985")`、`MIN_TRADING_DAYS=60`、`RF_ANNUAL_DEFAULT=Decimal("0.015")`；改 Extensibility §3.1 的 `ci_min_n=30→10` | D-07/D-08/D-14 | 内部 |
 | C-18 | Extensibility §3.1 `SamplePolicy.ci` | 枚举仅 `wilson\|bootstrap` | 支持 `"none"`（A11/A13/A14/A21/A22/HHI/换手/摊平无 CI） | D-15 | additive |
-| C-19 | Extensibility §3.1 `MetricValue` | 无 CI 样本字段与统计量 | 增内部 `ci_sample: tuple[int,...]\|None`（排序后交接）+ `ci_stat_id`（指向 `core/stats/estimators.py`）；引擎按 `sample_policy.ci + ci_stat_id` 派发 | D-07 | additive（05） |
+| C-19 | Extensibility §3.1 `MetricValue` | 无 CI 样本字段与统计量 | 增内部 `ci_sample: tuple[tuple[int,...], ...]\|None`（观测=元组，E-15；排序后交接）+ `ci_stat_id`（指向 `core/stats/estimators/` 包内自动发现注册表）；引擎按 `sample_policy.ci + ci_stat_id` 派发（细化见 C-39） | D-07/E-15 | additive（05） |
 | C-20 | Testing §9.1/§12.1 | golden 目录双源（`fixtures/expected/metrics/` vs `golden/<id>/`）；变异路径 `core/src/core` 与实际不符 | 单源 `backend/tests/golden/<metric_id>/`；路径改 `backend/packages/core/src/stock_core` | D-23/D-16 | 否 |
 | C-21 | `core/values.py:193-195` | `mul_ratio` docstring 写"银行家舍入"，实现是 ROUND_HALF_UP | 以代码为准改 docstring | 口径单源 | 否 |
 | C-22 | `review/repositories/rounds.py` | 日期过滤用 `COALESCE(close_date, open_date)` | 新增 `in_period(user_id,start,end,*,statuses)`；`page` 保持原语义（列表展示） | D-18 | additive |
@@ -891,18 +898,27 @@ also_copy = ["backend/tests/fixtures/metrics"]
 | C-31 | Extensibility §3.3 / Architecture §11 / API-Catalog §0.8 | 三处对 stale/unreliable 的 value 语义不一致（Extensibility 旧值 vs Architecture 非 ok 无 value） | 统一为 Architecture 口径：`status≠ok` 一律无 value/conclusion；Extensibility §3.3 与 Catalog §0.8 补 stale/unreliable 说明 | D-08 唯一矩阵 | 契约澄清 |
 | C-32 | PRD A18/A19/A21 + Testing §12.1 | A18 的 Ulcer/水下/持续/恢复、A19 空仓日 HHI、A21 独立费用行/红利税均无 PRD 修订项；Testing §12.1 仍写 `DE = PLR − PGR` | 补 A18/A19/A21 口径段落；Testing §12.1 同步改为 `DE = PGR − PLR`（D-20） | 口径单源/可测 | 文档 |
 | C-33 | DEV-PLAN §3.1 验收剧本 | 用 `period=2026-09` 与 `make rebuild`/`make demo-broken` | 改为 `period=2026-06`（D-19 三轴），补 `make rebuild`/`demo-broken` 归属 | D-19 | 计划修订 |
-| C-34 | `docs/architecture/v2/API-Catalog.md` §0.4/API-033 | 全局 `from/to` 半开 `[from,to)`，指标文档写闭区间 | 明确：`period=YYYY-MM` 闭区间；`from/to` 遵循 Catalog §0.4 **半开 `[from,to)`**；`deps/date` 统一说明 | 区间语义单源 | 契约澄清 |
+| C-34 | `docs/architecture/v2/API-Catalog.md` §0.4/API-033 | 全局 `from/to` 半开 `[from,to)`，指标文档写闭区间 | 明确：`period=YYYY-MM` 闭区间；`from/to` 遵循 Catalog §0.4 **半开 `[from,to)`**，M1 仅接受"月初→次月初"（等价单月），跨月/单端 422 `INVALID_PERIOD`（EC-P1-2）；`deps/date` 统一说明 | 区间语义单源 | 契约澄清 |
+| C-35 | API-Catalog API-033/079 | 顶层 `definition_version`/`assumptions` 聚合语义未定 | 顶层 `definition_version`（所有 item 一致取该值，混合→`"mixed"`）与顶层 `assumptions` 聚合（`benchmark_id/rf_rate/A/engine_version`）（E-14） | 顶层聚合可解释 | additive |
+| C-36 | API-Catalog API-033/079 | GET 的 read-through 写副作用与负缓存未明写；ETag 强度未定义 | 明写 GET 的 read-through 写副作用 + 负缓存策略（E-01/E-11）；ETag 弱校验 `W/"<sha16>"`、304 判定在写库前（304 不写库） | 缓存语义单源 | 契约澄清 |
+| C-37 | API-Catalog API-035 | item schema 未正式化 | item schema 正式化：`event_date/key`、`truncated`、cursor 绑定查询指纹；`DrilldownSpec.build_items` 契约（E-12）；items 按 unit 定点（C-03） | 下钻可实现/可测 | additive |
+| C-38 | API-Catalog API-033 | 校验矩阵不全 | 补校验矩阵：ids 上限/去重/空、from/to 单月、`benchmark` 错误码（`UNKNOWN_BENCHMARK`）、`UNKNOWN_QUERY_PARAM`（E-09） | 校验可测 | 契约澄清 |
+| C-39 | Extensibility §3.1 / 本文档 §4.1/§5.1/C-19 | `ci_sample` 单层、estimator 注册与 def 导出名未约定 | `ci_sample` 嵌套观测形状（E-15）+ `core/stats/estimators/` 自动发现注册表 + 07 def 统一导出 `DEF`（Extensibility §3.5） | 契约/实现同步 | additive |
+| C-40 | DEV-PLAN | 05/06 估时 3d+2d | 改 6.5d+3.0d（E-17 已人工裁定接受推荐方案，合计 9.5d） | 计划修订 | 计划修订 |
+| C-41 | DEV-PLAN 05 验收 / Extensibility §3.3 | "definition_version bump → 旧结果 100% stale" | 改"**新版本行插入 + 旧行保留 + `persist.is_stale` 单测**"；对外 `stale` 仅 `asset_build.state=stale`/`market.as_of` 滞后可达（E-13） | 口径统一 | 契约澄清 |
+| C-42 | `Makefile`（并入 C-25） | 无 `test-engine` target | `make test-engine` 并入 C-25 的 target 清单；内含 `alembic downgrade 0006 && upgrade head` 幂等步骤 | 迁移可验 | additive |
+| C-43 | `openapi_meta.py` / Catalog §1.1 | 4 个 metrics operationId 未登记 | 登记 4 个 metrics operationId 的示例/错误码/`x-error-codes`；operationId 命名与实现一致（snake_case）；`openapi.json` 生成后 `api-check` 通过 | 契约完整性 | additive |
 
 ---
 
 ## 10. 实施顺序与估时
 
-> **结论**：18 指标 + 每指标 golden + 独立 oracle + mutation ≥80% 在 **3.5 人日不可达**。按域设计者实测估时汇总：perf 5.4d、timing 5.5d、behavior+selection 3.0d、测试设计 3.9d、共享 stats 1.5d（已含在域内；去重后与 S1~S9 的 13.5d 对齐）→ 去重后 **13~14.5 人日**（不含 05/06 前置约 5~6d）。建议拆 07a/07b 并修正 DEV-PLAN（D-06/C-23）。
+> **结论**：18 指标 + 每指标 golden + 独立 oracle + mutation ≥80% 在 **3.5 人日不可达**。按域设计者实测估时汇总：perf 5.4d、timing 5.5d、behavior+selection 3.0d、测试设计 3.9d、共享 stats 1.5d（已含在域内；去重后与 S1~S9 的 13.5d 对齐）→ 去重后 **13~14.5 人日**（不含 05/06 前置 9.5d，E-17 已人工裁定接受推荐方案）。建议拆 07a/07b 并修正 DEV-PLAN（D-06/C-23）。
 
 | 步骤 | 内容 | 产出 | 人日 | 依赖 |
 |---|---|---|---|---|
-| S0 | **前置**：05 引擎最小内核 + 06 端点（§4.3 P1~P5） | registry/context/CI/status/persist/`/metrics` | 5~7（归属 05/06；含迁移/RLS/多视图/`ci_sample`+`ci_stat_id` 交接） | — |
-| S1 | `core/stats`（numeric/wilson/bootstrap/regression/concentration/drawdown/tstat）+ 单测 | 纯函数 + 100% 覆盖 | 2.0 | — |
+| S0 | **前置**：05 引擎最小内核 + 06 端点（§4.3 P1~P5） | registry/context/CI/status/persist/`/metrics` | 9.5（05≈6.5+06≈3.0，E-17 已人工裁定接受推荐方案；含迁移/RLS/多视图/`ci_sample`+`ci_stat_id` 交接） | — |
+| S1 | `core/stats` **07 份额**（`regression/concentration/drawdown/tstat` + estimator 文件；`numeric/wilson/bootstrap/estimators` 框架归 05，见 §5.1）+ 单测 | 纯函数 + 100% 覆盖 | 1.2（原 2.0，−0.8：S-3 交付边界调整） | — |
 | S2 | 夹具：`daily_bars.json`（≥2 年）、`fx_metrics_core`（30 行）、约 23 个变体、loader/MANIFEST；demo 扩到 12 个月并修数据闭合 | fixtures | 1.8 | D-02/D-19 |
 | S3 | `core/metrics` 纯公式（perf 7 + timing 4 + behavior 4 + selection 3） | 纯函数 + 单测 | 3.0 | S1 |
 | S4 | `review/metrics/defs/*`（18 个文件）+ explain/drilldown/params/status_policy | 注册即发现 | 1.5 | S3 |
@@ -910,7 +926,7 @@ also_copy = ["backend/tests/fixtures/metrics"]
 | S6 | 独立 oracle（naive_metrics/stats/timing/bhar）+ 三方比对 | oracle + 参数化测试 | 1.0 | S3 |
 | S7 | 契约 kit + API 验收（033/034/035/079/038，含越权/blocked/ETag/PIT） | `tests/contract`、`tests/api` | 1.2 | S0/S4 |
 | S8 | mutation 配置 + 必杀算子 + 首轮跑通 + 门禁接线 | `make mutation` + CI | 0.8 | S1/S3 |
-| S9 | 联调（`positions_end`/`in_period`/MetricDep 传播/`ci_sample`）、回归修复、实现日志 | 全绿 | 1.0 | 全部 |
+| S9 | 联调（持仓重建装配（def 内，E-06）/`in_period`/MetricDep 传播/`ci_sample`）、回归修复、实现日志 | 全绿 | 1.0 | 全部 |
 | — | **07a 合计（核心 10 指标）= ΣS1..S9 − S10 ≈ 9.0~9.5** | | **9.0~9.5** | — |
 | S10 | exploratory 8 指标（holding_days/concentration/expectancy/fly/turnover/averaging_down/hhi/bhar_hit）：defs+golden+oracle 增量（**拆分自 S2–S9，不重复计总量**） | 其余 defs+golden | 4.0~4.5 | S1~S9 |
 | — | **07 合计（不含 05/06）= ΣS1..S9 = 13.5（取整 13.0~14.0）** | | **13.0~14.0** | — |
@@ -970,7 +986,7 @@ curl "…/api/v1/metrics?domain=timing&period=2026-06" \
 
 **D-01｜依赖：05/06 未实现**
 - 事实：无 `review/metrics`、无 `metric_result` 迁移（止于 0006）、无 `/metrics` 路由；DEV-PLAN 明确 07 依赖 Period2-05。
-- 推荐：两层交付（§4.3）；05/06 先补 5d。备选：① 并入 07（+2.5~3d，边界模糊）；② 严格串行（周期最长）。
+- 推荐：两层交付（§4.3）；05/06 先补 9.5d（05≈6.5d+06≈3.0d，E-17 已人工裁定接受推荐方案）。备选：① 并入 07（+2.5~3d，边界模糊）；② 严格串行（周期最长）。
 - 不决后果：07 无法单独完成 API 验收；强行并行开发引擎返工风险高。
 - 追踪：H-X?（不适用）
 
@@ -985,7 +1001,7 @@ curl "…/api/v1/metrics?domain=timing&period=2026-06" \
 - 不决后果：坚持 PRD 原文则 07 无法验收 selection。追踪：H-B6、H-B11、H-X?。
 
 **D-06｜范围与估时**
-- 事实：域设计实测估时 perf 5.4d、timing 5.5d、behavior+selection 3.0d、测试 3.9d；去重后 13.0~14.0d（不含 05/06 的 5~7d）。
+- 事实：域设计实测估时 perf 5.4d、timing 5.5d、behavior+selection 3.0d、测试 3.9d；去重后 13.0~14.0d（不含 05/06 的 9.5d，E-17 裁定）。
 - 推荐：07a 核心 10（9.0~9.5d）+ 07b 8 个 exploratory（4.0~4.5d），合计 13.0~14.0d；修正 DEV-PLAN（C-23）。备选：① 3.5d 只做 6 指标（不满足验收）；② 18 全做（≈14.5d+）；③ 砍 oracle（违反 D2）。
 - 不决后果：按 3.5d 排期必然延期或降级验收。追踪：H-P*（perf 估时 5.4d）、H-T5（timing 估时 5.5d）、H-B11（behavior 估值）、H-X13（test 估时 3.9d）。
 
@@ -1047,7 +1063,7 @@ curl "…/api/v1/metrics?domain=timing&period=2026-06" \
 
 | 编号 | 决策 | 推荐 |
 |---|---|---|
-| D-01 | 05/06 先补 5~7d，07 两层交付 | ☐ 同意 ☐ 改：______ |
+| D-01 | 05/06 先补 9.5d（E-17 已裁定），07 两层交付 | ☐ 同意 ☐ 改：______ |
 | D-02 | 新增独立日线夹具，不动 quotes.json | ☐ 同意 ☐ 改：______ |
 | D-04 | selection 只做价格类 PIT BHAR + 改断言 | ☐ 同意 ☐ 改：______ |
 | D-06 | 07 拆 07a（9.0~9.5d）/07b（4.0~4.5d），合计 13.0~14.0d；修正 DEV-PLAN | ☐ 同意 ☐ 改：______ |
@@ -1069,11 +1085,11 @@ curl "…/api/v1/metrics?domain=timing&period=2026-06" \
 | D-14 | rf_annual 默认 0.015、日化公式 | ☐ 同意 ☐ 改：______ |
 | D-15 | 下钻按 unit+precision 分格式；`ci="none"` | ☐ 同意 ☐ 改：______ |
 | D-16 | mutmut 3.2+，新增模块 ≥80% | ☐ 同意 ☐ 改：______ |
-| D-17 | API-038 handler 归 06/07b，07a 不阻塞 | ☐ 同意 ☐ 改：______ |
+| D-17 | API-038 handler **归 Period2-06 收尾（E-18）**，07a 不阻塞 | ☐ 同意 ☐ 改：______ |
 | D-18 | 归属日 close_date/trade_date + lookback 进 inputs_hash | ☐ 同意 ☐ 改：______ |
 | D-23 | golden 单源 `tests/golden/<id>/` + 容差分级 | ☐ 同意 ☐ 改：______ |
 | D-28 | bar_index + 密度<0.8→unreliable | ☐ 同意 ☐ 改：______ |
-| D-29 | 契约修订总包 C-01~C-34（开工首日一次性提交） | ☑ 批准 |
+| D-29 | 契约修订总包 C-01~C-43（开工首日一次性提交；C-35~C-43 来自 05/06 评审 v1.1） | ☑ 批准 |
 
 ### 13.4 人工决策记录（2026-10-26，已拍板）
 
@@ -1081,7 +1097,7 @@ curl "…/api/v1/metrics?domain=timing&period=2026-06" \
 
 | 决策 | 裁定 | 备注 |
 |---|---|---|
-| D-01/D-06 范围与排期 | **采纳推荐**：05/06 先补 5~7d；07 拆 07a 核心 10（9.0~9.5d）+ 07b exploratory 8（4.0~4.5d），合计 13.0~14.0d；修正 DEV-PLAN 估时 | 需同步 C-23/C-33 |
+| D-01/D-06 范围与排期 | **采纳推荐**：05/06 先补 9.5d（05≈6.5d+06≈3.0d；原批 5~7d 由 05/06 评审 E-17 人工裁定上调，v1.1 同步）；07 拆 07a 核心 10（9.0~9.5d）+ 07b exploratory 8（4.0~4.5d），合计 13.0~14.0d；修正 DEV-PLAN 估时 | 需同步 C-23/C-33/C-40 |
 | D-02/D-19 数据 | **采纳推荐**：新增独立日线夹具（≥2 年、含 `hs300_tr`，不动 `quotes.json`）；演示数据三轴对齐（流水 12 个月止于 2026-06-30、行情延到 2026-09-30、验收 `period=2026-06`）+ 修数据闭合 | C-28/C-33 |
 | D-20 DE 方向 | **采纳推荐**：`DE = PGR − PLR`（Odean），勘误 PRD A15；`definition_version=1.0` 按此冻结 | C-12/C-32 |
 | D-03/D-04 选股域 | **采纳推荐**：本期只做价格类 PIT cohort BHAR 20/60；live 缺基准 → `blocked`；财报/行业/风格另立任务；修订 API-038 财报断言 | C-04/C-07 |
@@ -1127,4 +1143,5 @@ curl "…/api/v1/metrics?domain=timing&period=2026-06" \
 | v0.9 | 2026-10-26 | Lead 主稿 + 4 份域设计稿合并；18 指标 spec、测试设计、29 项决策、契约修订清单 |
 | **v1.0-rc** | 2026-10-26 | 三方交叉评审（13 P0/24 P1）修复：状态-字段四态矩阵、CI 门槛 n≥10、OLS 公式、主夹具去超卖、D-19 三轴对齐、估时/core 计数、契约 C-01~C-34；新增第二轮验证 |
 | **v1.0** | 2026-10-26 | 第二轮验证 APPROVED_WITH_FIXES：修完 V-P1-1~9（状态矩阵残留/CI 常量/expectancy 中间值/估时加平/ci_stat_id/kit、D-11 去绝对值、C 清单重排、C-33/C-34 立项、状态头）；**人工决策批准（全部推荐方案）→ 定稿**，见 §13.4 |
+| **v1.1** | 2026-10-26 | 05/06 设计评审（v1.1）回写：S-1~S-10 同步（ci_sample 成对观测、positions_end 内部重建、stats 交付边界、DEF 导出/build_items、API-038 归 06、估时 9.5d、stale 语义收口、perf 枚举与 ETag、from/to 半开）；评审记录 docs/reviews/2026-10-26-DevDesign-Review-metrics-engine-endpoints.md |
 | v1.0 | 待定 | 三方交叉评审意见收敛 + 人工拍板后定稿（评审记录 `docs/reviews/2026-10-26-DevDesign-Review-metrics-three-domain.md`） |
