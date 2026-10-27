@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "metric_id": "timing.beta",
+  "definition_version": "1.0",
+  "fixture": {"id": "fx_beta"},
+  "period": "2026-06",
+  "scope": "day",
+  "params": {},
+  "expected": {
+    "value": "1.00000000",
+    "unit": "ratio",
+    "n": 60,
+    "ci_low": null,
+    "ci_high": null,
+    "sample_status": "ok",
+    "status": "ok",
+    "decomposition": {
+      "benchmark_id": "hs300_tr",
+      "rf_rate": "0.015",
+      "a_base": 244,
+      "alpha_annual": 0,
+      "alpha_t": 0,
+      "ir": 0,
+      "tracking_error": 0,
+      "excess_arith": 0,
+      "excess_geo": 0,
+      "n_obs": 60,
+      "n_missing": 0,
+      "sxx_zero": 0
+    }
+  },
+  "tolerance": {"kind": "ratio_bp", "eps": "0.0001"},
+  "expected_source": {"kind": "hand_calc", "ref": "§5.5 OLS：组合日收益 ≡ 基准日收益（±0.01 交替）→ β=1；残差/超额恒 0 → α=t=IR=TE=excess=0", "oracle": null},
+  "review": {"author": "test-designer", "reviewer": null, "approved": false, "approved_at": null},
+  "boundaries": [
+    "估计窗口取 trade_date<=period_end 的最后 60 对（MIN_TRADING_DAYS=60）",
+    "rf 同时从 y/x 扣除，y=x 时斜率不受 rf 影响"
+  ]
+}

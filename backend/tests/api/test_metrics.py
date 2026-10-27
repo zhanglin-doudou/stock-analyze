@@ -124,7 +124,10 @@ async def test_api_033_domain_filter_and_multi_metric(client, account_factory, o
     )
     assert r.status_code == 200, r.text
     ids = [item["metric_id"] for item in r.json()["items"]]
-    assert ids == sorted([EXPECTANCY, WIN_RATE])
+    perf_ids = sorted(
+        item.id for item in build_registry(extra_paths=[SUPPORT_DEFS]).by_domain("perf")
+    )
+    assert ids == perf_ids
 
 
 @pytest.mark.asyncio

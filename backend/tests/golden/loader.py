@@ -4,7 +4,8 @@
 展示字符串——避免逐 key 单位映射，防 float 中转的目的不变）：
 - `expected.value` / `ci_low` / `ci_high`：展示字符串（如 "0.66666667"、"1042.16"）或 null，
   由测试侧按 `definition.precision` 折算回标度整数；
-- `expected.decomposition`：key → 标度整数字符串（"-75"）、计数 int、或 null；
+- `expected.decomposition`：key → 标度整数字符串（"-75"）、计数 int、非整数文本（如
+  `benchmark_id`）或 null；
 - 解析全程拒绝 float（`parse_float`/`parse_int` 不走浮点）。
 """
 
@@ -42,10 +43,11 @@ def _parse_display(text: str | None, precision: int, *, path: str) -> int | None
     return int(scaled)
 
 
-def _parse_decomposition(raw: object, *, path: str) -> dict[str, int | None]:
+def _parse_decomposition(raw: object, *, path: str) -> dict[str, int | str | None]:
+    """decomposition 值：整数字符串 → 标度整数；非整数文本 → 原样字符串（如 benchmark_id）。"""
     if not isinstance(raw, dict):
         raise GoldenFormatError(f"{path}: decomposition 必须是对象")
-    parsed: dict[str, int | None] = {}
+    parsed: dict[str, int | str | None] = {}
     for key, value in raw.items():
         if value is None:
             parsed[key] = None
@@ -56,10 +58,10 @@ def _parse_decomposition(raw: object, *, path: str) -> dict[str, int | None]:
         elif isinstance(value, str):
             try:
                 parsed[key] = int(value)
-            except ValueError as exc:
-                raise GoldenFormatError(f"{path}.{key}: 非法整数字符串 {value!r}") from exc
+            except ValueError:
+                parsed[key] = value
         else:
-            raise GoldenFormatError(f"{path}.{key}: 只接受整数字符串/int/null，实际 {value!r}")
+            raise GoldenFormatError(f"{path}.{key}: 只接受整数字符串/文本/int/null，实际 {value!r}")
     return parsed
 
 
@@ -80,7 +82,7 @@ class GoldenCase:
     ci_high_text: str | None
     sample_status: str
     status: str
-    decomposition: dict[str, int | None]
+    decomposition: dict[str, int | str | None]
     tolerance: dict[str, str]
     expected_source: dict[str, object]
     boundaries: tuple[str, ...]

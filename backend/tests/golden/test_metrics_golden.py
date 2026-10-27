@@ -24,6 +24,20 @@ from support.fx_metrics_core import (
     make_n5_context,
     make_n10_context,
 )
+from support.fx_metrics_domains import (
+    make_bars_chase_context,
+    make_bars_fly_context,
+    make_beta_context,
+    make_bhar20_context,
+    make_bhar60_context,
+    make_dd_chain_60_context,
+    make_dd_small_context,
+    make_fee_breakeven_blocked_context,
+    make_fee_breakeven_context,
+    make_hhi_main_context,
+    make_multilot_context,
+    make_turnover_context,
+)
 from support.tolerance import assert_within_tolerance, parse_tolerance
 
 pytestmark = pytest.mark.golden
@@ -34,6 +48,18 @@ FIXTURE_BUILDERS: dict[str, Callable[[], MetricContextData]] = {
     "fx_n5": make_n5_context,
     "fx_n10": make_n10_context,
     "fx_data_error": make_data_error_context,
+    "fx_fee_breakeven": make_fee_breakeven_context,
+    "fx_fee_breakeven_blocked": make_fee_breakeven_blocked_context,
+    "fx_turnover": make_turnover_context,
+    "fx_multilot": make_multilot_context,
+    "fx_bars_chase": make_bars_chase_context,
+    "fx_bars_fly": make_bars_fly_context,
+    "fx_beta": make_beta_context,
+    "fx_dd_small": make_dd_small_context,
+    "fx_dd_chain_60": make_dd_chain_60_context,
+    "fx_hhi_main": make_hhi_main_context,
+    "fx_bhar20": make_bhar20_context,
+    "fx_bhar60": make_bhar60_context,
 }
 
 _COMPUTED_AT = datetime(2026, 9, 30, 15, 0, tzinfo=UTC)
@@ -103,8 +129,8 @@ def test_golden(case: GoldenCase) -> None:
     )
     for key, expected in case.decomposition.items():
         actual = actual_decomp[key]
-        assert isinstance(actual, int) or actual is None, (
-            f"{label}.decomposition.{key}: 非整数 {actual!r}"
+        assert isinstance(actual, (int, str)) or actual is None, (
+            f"{label}.decomposition.{key}: 非整数/文本 {actual!r}"
         )
         assert actual == expected, (
             f"{label}.decomposition.{key}: {actual} ≠ {expected}"

@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "metric_id": "timing.chase",
+  "definition_version": "1.0",
+  "fixture": {"id": "fx_bars_chase"},
+  "period": "2026-06",
+  "scope": "trade",
+  "params": {},
+  "expected": {
+    "value": "0.50000000",
+    "unit": "ratio",
+    "n": 2,
+    "ci_low": null,
+    "ci_high": null,
+    "sample_status": "insufficient",
+    "status": "ok",
+    "decomposition": {
+      "n_events": 2,
+      "n_valid": 2,
+      "n_pending": 0,
+      "post_window": 20
+    }
+  },
+  "tolerance": {"kind": "ratio_bp", "eps": "0.0001"},
+  "expected_source": {"kind": "hand_calc", "ref": "§7.2.1：买入后 20 根最高收盘 > 买入价×1.03 判追涨；10.40>10.30 命中、10.20<10.30 未命中 → 1/2", "oracle": null},
+  "review": {"author": "test-designer", "reviewer": null, "approved": false, "approved_at": null},
+  "boundaries": [
+    "6-01 买入，窗口取其后 20 根 bar（不含买入当日）",
+    "3% 阈值固定为 policy.CHASE_THRESHOLD_SCALE8"
+  ]
+}

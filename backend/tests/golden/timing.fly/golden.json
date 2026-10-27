@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "metric_id": "timing.fly",
+  "definition_version": "1.0",
+  "fixture": {"id": "fx_bars_fly"},
+  "period": "2026-06",
+  "scope": "trade",
+  "params": {},
+  "expected": {
+    "value": "1.00000000",
+    "unit": "ratio",
+    "n": 1,
+    "ci_low": null,
+    "ci_high": null,
+    "sample_status": "insufficient",
+    "status": "ok",
+    "decomposition": {
+      "n_events": 1,
+      "n_valid": 1,
+      "n_pending": 0,
+      "fly_share_h5": "100000000",
+      "fly_share_h10": "100000000",
+      "benchmark_id": "hs300_tr"
+    }
+  },
+  "tolerance": {"kind": "ratio_bp", "eps": "0.0001"},
+  "expected_source": {"kind": "hand_calc", "ref": "§7.2.2：卖出后窗口最高收盘 10.40 > 卖出价 10.00×1.03 → 1/1；h5/h10 同命中", "oracle": null},
+  "review": {"author": "test-designer", "reviewer": null, "approved": false, "approved_at": null},
+  "boundaries": [
+    "卖出后 5/10/20 根窗口的峰值均高于 3% 阈值 → 三个 share 均为 1",
+    "基准序列存在（仅前置校验，不参与 fly 计算）"
+  ]
+}
