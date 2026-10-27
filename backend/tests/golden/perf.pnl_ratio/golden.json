@@ -27,7 +27,7 @@
   },
   "tolerance": {"kind": "ratio_bp", "eps": "0.0001"},
   "expected_source": {"kind": "hand_calc", "ref": "§8.4（2252.61375 ÷ 1378.745）", "oracle": null},
-  "review": {"author": "test-designer", "reviewer": null, "approved": false, "approved_at": null},
+  "review": {"author": "test-designer", "reviewer": "zhang", "approved": true, "approved_at": "2026-10-27"},
   "boundaries": [
     "全胜/全亏 → value null（本夹具不含，见 fx_n5/fx_n30 变体）",
     "avg_win 一次舍入 2252.61、avg_loss 四舍五入 1378.75（精确均值 1378.745）"

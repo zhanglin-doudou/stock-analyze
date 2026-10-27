@@ -26,7 +26,7 @@
   },
   "tolerance": {"kind": "ratio_bp", "eps": "0.0001"},
   "expected_source": {"kind": "hand_calc", "ref": "§8.2 row 1（fx_data_error：B2 剔除 → 8/11）", "oracle": "naive_stats.wilson_interval"},
-  "review": {"author": "test-designer", "reviewer": null, "approved": false, "approved_at": null},
+  "review": {"author": "test-designer", "reviewer": "zhang", "approved": true, "approved_at": "2026-10-27"},
   "boundaries": [
     "data_error 回合一律剔除出 closed/open 分母，单独计 n_data_error",
     "win_rate_all=(8+1)/(11+3)=9/14"

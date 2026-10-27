@@ -32,7 +32,7 @@
   },
   "tolerance": {"kind": "ratio_bp", "eps": "0.0001"},
   "expected_source": {"kind": "hand_calc", "ref": "单持仓市值 1000.00 + 现金 1000.00 → HHI_total=(1000²+1000²)/2000²=0.5、HHI_eq=1、现金权重 0.5", "oracle": null},
-  "review": {"author": "test-designer", "reviewer": null, "approved": false, "approved_at": null},
+  "review": {"author": "test-designer", "reviewer": "zhang", "approved": true, "approved_at": "2026-10-27"},
   "boundaries": [
     "10 个资产日持仓不变 → 日均/最大/期末 HHI 全相等",
     "持仓市值与 bars 收盘严格对账（Σmv==asset_daily.market_value）"

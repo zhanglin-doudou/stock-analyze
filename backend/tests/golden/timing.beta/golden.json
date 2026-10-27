@@ -31,7 +31,7 @@
   },
   "tolerance": {"kind": "ratio_bp", "eps": "0.0001"},
   "expected_source": {"kind": "hand_calc", "ref": "§5.5 OLS：组合日收益 ≡ 基准日收益（±0.01 交替）→ β=1；残差/超额恒 0 → α=t=IR=TE=excess=0", "oracle": null},
-  "review": {"author": "test-designer", "reviewer": null, "approved": false, "approved_at": null},
+  "review": {"author": "test-designer", "reviewer": "zhang", "approved": true, "approved_at": "2026-10-27"},
   "boundaries": [
     "估计窗口取 trade_date<=period_end 的最后 60 对（MIN_TRADING_DAYS=60）",
     "rf 同时从 y/x 扣除，y=x 时斜率不受 rf 影响"

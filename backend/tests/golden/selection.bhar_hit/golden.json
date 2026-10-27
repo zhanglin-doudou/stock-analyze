@@ -26,7 +26,7 @@
   },
   "tolerance": {"kind": "ratio_bp", "eps": "0.0001"},
   "expected_source": {"kind": "hand_calc", "ref": "复用 BHAR_20 三事件：+0.05/−0.07/+0.05 → hit 2/3=0.66666667、mean 0.01、median 0.05", "oracle": null},
-  "review": {"author": "test-designer", "reviewer": null, "approved": false, "approved_at": null},
+  "review": {"author": "test-designer", "reviewer": "zhang", "approved": true, "approved_at": "2026-10-27"},
   "boundaries": [
     "bhar_hit 与 bhar_20 共享事件集，仅统计 BHAR>0 的占比",
     "n=3<min_n=10 → insufficient：有 value 无 Wilson CI"

@@ -28,7 +28,7 @@
   },
   "tolerance": {"kind": "ratio_bp", "eps": "0.0001"},
   "expected_source": {"kind": "hand_calc", "ref": "§8.4：个股 100→125（+25%），基准 +10% → BHAR=0.15", "oracle": null},
-  "review": {"author": "test-designer", "reviewer": null, "approved": false, "approved_at": null},
+  "review": {"author": "test-designer", "reviewer": "zhang", "approved": true, "approved_at": "2026-10-27"},
   "boundaries": [
     "单事件 60 日窗口，窗口内 bar 覆盖率 100%",
     "单聚类（G=1）→ cluster t 无定义（null）"

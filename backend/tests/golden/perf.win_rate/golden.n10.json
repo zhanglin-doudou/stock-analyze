@@ -26,7 +26,7 @@
   },
   "tolerance": {"kind": "ratio_bp", "eps": "0.0001"},
   "expected_source": {"kind": "hand_calc", "ref": "§8.2 row 1（n=10 边界：7/10；Wilson(7,10)）", "oracle": "naive_stats.wilson_interval"},
-  "review": {"author": "test-designer", "reviewer": null, "approved": false, "approved_at": null},
+  "review": {"author": "test-designer", "reviewer": "zhang", "approved": true, "approved_at": "2026-10-27"},
   "boundaries": [
     "n=10 = min_n → ok 且出 CI（样本维度与交易日维度独立参数化）",
     "win_rate_all=(7+1)/(10+3)=8/13"

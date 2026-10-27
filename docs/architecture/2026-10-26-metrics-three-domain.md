@@ -614,7 +614,7 @@ for date in every natural day in [period_start, period_end]:                 # �
     "decomposition": {"win_rate_all": "0.60000000", "n_pos": 8, "n_neg": 4, "n_open": 3, "n_data_error": 0}},
   "tolerance": {"kind": "ratio_bp", "eps": "0.0001"},
   "expected_source": {"kind": "hand_calc", "ref": "§8.4 表 4-2", "oracle": null},
-  "review": {"author": "test-designer", "reviewer": null, "approved": false, "approved_at": null},
+  "review": {"author": "test-designer", "reviewer": "zhang", "approved": true, "approved_at": "2026-10-27"},
   "boundaries": ["n=12 ≥ min_n：出 Wilson CI", "data_error 不入分母", "open 仅入 win_rate_all"]
 }
 ```

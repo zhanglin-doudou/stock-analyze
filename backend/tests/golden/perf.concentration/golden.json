@@ -25,7 +25,7 @@
   },
   "tolerance": {"kind": "ratio_bp", "eps": "0.0001"},
   "expected_source": {"kind": "hand_calc", "ref": "§8.4（14627.75÷18020.91；Gini 盈利升序）", "oracle": null},
-  "review": {"author": "test-designer", "reviewer": null, "approved": false, "approved_at": null},
+  "review": {"author": "test-designer", "reviewer": "zhang", "approved": true, "approved_at": "2026-10-27"},
   "boundaries": [
     "n_pos=8 < min_n=10 → insufficient：有 value 无 CI（D-08）",
     "分母仅盈利回合（D-10）；n_pos<3 时 Top3 退化见 fx_n5 变体"

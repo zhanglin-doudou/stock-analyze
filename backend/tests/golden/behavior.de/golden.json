@@ -28,7 +28,7 @@
   },
   "tolerance": {"kind": "ratio_bp", "eps": "0.0001"},
   "expected_source": {"kind": "hand_calc+oracle", "ref": "§8.4（PGR=8/9、PLR=4/6、DE=+0.22222222，Odean 口径 D-20）；CI=naive_stats.bootstrap_percentile(ratio_diff_pgr_plr)", "oracle": "naive_stats.bootstrap_percentile+ratio_diff_pgr_plr_stat"},
-  "review": {"author": "test-designer", "reviewer": null, "approved": false, "approved_at": null},
+  "review": {"author": "test-designer", "reviewer": "zhang", "approved": true, "approved_at": "2026-10-27"},
   "boundaries": [
     "纸面盈亏取 open RoundView.pnl_units（A6 盈、B5/C5 亏），不重建",
     "holding_days_diff=亏均−盈均=3.50−4.25=−0.75 天",

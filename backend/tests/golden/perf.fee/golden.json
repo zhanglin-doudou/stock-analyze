@@ -28,7 +28,7 @@
   },
   "tolerance": {"kind": "fee", "eps": "0.00000001", "rel": "0.005"},
   "expected_source": {"kind": "hand_calc", "ref": "§8.4（1250.02÷2605200.00）", "oracle": null},
-  "review": {"author": "test-designer", "reviewer": null, "approved": false, "approved_at": null},
+  "review": {"author": "test-designer", "reviewer": "zhang", "approved": true, "approved_at": "2026-10-27"},
   "boundaries": [
     "费用=佣金+印花+其他+独立费用行（D-27；本夹具无独立费用行）",
     "成交额主口径毛额 qty×price；turnover_net=Σ|amount| 交叉校验",

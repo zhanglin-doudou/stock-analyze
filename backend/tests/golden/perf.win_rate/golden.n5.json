@@ -26,7 +26,7 @@
   },
   "tolerance": {"kind": "ratio_bp", "eps": "0.0001"},
   "expected_source": {"kind": "hand_calc", "ref": "§8.2 row 1（n=5 边界：3/5=0.6）", "oracle": null},
-  "review": {"author": "test-designer", "reviewer": null, "approved": false, "approved_at": null},
+  "review": {"author": "test-designer", "reviewer": "zhang", "approved": true, "approved_at": "2026-10-27"},
   "boundaries": [
     "n=5 < min_n=10 → insufficient：有 value、无 CI、无 conclusion（D-08）",
     "fx_n5 无 open 回合 → win_rate_all 与 value 同值"

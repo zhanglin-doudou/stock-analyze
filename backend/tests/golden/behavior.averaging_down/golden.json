@@ -26,7 +26,7 @@
   },
   "tolerance": {"kind": "ratio_bp", "eps": "0.0001"},
   "expected_source": {"kind": "hand_calc", "ref": "§8.4：首建 1000 股@10.00（成本 10000）+500@9.00 → depth=(10−9)/10=0.10；另一笔 11.00 非摊平 → 1/2", "oracle": null},
-  "review": {"author": "test-designer", "reviewer": null, "approved": false, "approved_at": null},
+  "review": {"author": "test-designer", "reviewer": "zhang", "approved": true, "approved_at": "2026-10-27"},
   "boundaries": [
     "首建仓（qty_before=0）不计入加仓候选，只计 n_first_build",
     "两笔加仓：9.00 低于前均价判摊平，11.00 高于前均价判未摊平"

@@ -30,7 +30,7 @@
   },
   "tolerance": {"kind": "ratio_bp", "eps": "0.0001"},
   "expected_source": {"kind": "hand_calc", "ref": "+1%×20 / −2%×20 / +1%×20；谷底 0.98^20 → MDD=1−0.98^20=0.33239203；峰值后 40 天均水下", "oracle": null},
-  "review": {"author": "test-designer", "reviewer": null, "approved": false, "approved_at": null},
+  "review": {"author": "test-designer", "reviewer": "zhang", "approved": true, "approved_at": "2026-10-27"},
   "boundaries": [
     "60 个资产日、observed_trading_days=60 → sample_status=ok",
     "峰值出现在 t=20，谷底 t=40 → duration=20；最后 20 天反弹仍未回到峰值 → 未恢复"

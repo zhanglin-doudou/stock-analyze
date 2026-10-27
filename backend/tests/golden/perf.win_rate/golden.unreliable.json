@@ -18,7 +18,7 @@
   },
   "tolerance": {"kind": "exact", "eps": "0"},
   "expected_source": {"kind": "hand_calc", "ref": "§6.3 状态传播矩阵：unreliable 无 value 键、无 conclusion（D-08 硬约束）", "oracle": null},
-  "review": {"author": "test-designer", "reviewer": null, "approved": false, "approved_at": null},
+  "review": {"author": "test-designer", "reviewer": "zhang", "approved": true, "approved_at": "2026-10-27"},
   "boundaries": [
     "status≠ok → value/ci 缺省、decomposition 不下发（引擎统一抹零）",
     "sample_status 独立判定（n=12 ≥ min_n → ok），与 status 不混"

@@ -25,7 +25,7 @@
   },
   "tolerance": {"kind": "ratio_bp", "eps": "0.0001"},
   "expected_source": {"kind": "hand_calc", "ref": "§7.2.2：卖出后窗口最高收盘 10.40 > 卖出价 10.00×1.03 → 1/1；h5/h10 同命中", "oracle": null},
-  "review": {"author": "test-designer", "reviewer": null, "approved": false, "approved_at": null},
+  "review": {"author": "test-designer", "reviewer": "zhang", "approved": true, "approved_at": "2026-10-27"},
   "boundaries": [
     "卖出后 5/10/20 根窗口的峰值均高于 3% 阈值 → 三个 share 均为 1",
     "基准序列存在（仅前置校验，不参与 fly 计算）"
