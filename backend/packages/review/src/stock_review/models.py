@@ -32,6 +32,7 @@ from sqlalchemy import (
     func,
     text,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.dialects.postgresql import UUID as PGUUID
 from sqlalchemy.orm import Mapped, mapped_column
 from stock_platform.db import Base
@@ -297,6 +298,152 @@ class AssetBuildState(Base):
     )
 
 
+# 指标状态（MetricStatus）与样本状态（SampleStatus）取值，供 DB CHECK + 门禁引用。
+METRIC_STATUSES: tuple[str, ...] = ("ok", "stale", "blocked", "unreliable")
+SAMPLE_STATUSES: tuple[str, ...] = ("ok", "insufficient", "pending_window", "blocked")
+METRIC_UNITS: tuple[str, ...] = ("CNY", "ratio", "days", "count", "z")
+
+
+class MetricResult(Base):
+    """指标物化结果（Period2-05）：一行 = 某用户某指标在某 period/口径版本下的最近一次成功计算。
+
+    存在的原因：GET /metrics 需要「读即命中」而不是每次全量重算；report/trends 也需要
+    历史可读的指标行。主键确定性（`mtr_` + sha256(user|metric|period|version)[:32]），
+    重复计算按唯一键 UPSERT 幂等；口径 bump 后新版本插入、旧版本保留（趋势断点可读历史段）。
+
+    硬约束（应用层 + DB CHECK）：
+    - 数值一律 BigInteger 标度整数（scale = 10**precision）；
+    - `status != 'ok'` 时 `value_units` 必须为 NULL（非 ok 不出数字）；
+    - `ci_low_units` 与 `ci_high_units` 必须成对出现。
+    """
+
+    __tablename__ = "metric_result"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "metric_id",
+            "period",
+            "definition_version",
+            "params_hash",
+            name="uq_metric_result_user_metric_period_version_params",
+        ),
+        CheckConstraint(
+            "status IN ('ok','stale','blocked','unreliable')",
+            name="ck_metric_result_status",
+        ),
+        CheckConstraint(
+            "sample_status IN ('ok','insufficient','pending_window','blocked')",
+            name="ck_metric_result_sample_status",
+        ),
+        CheckConstraint(
+            "definition_version ~ '^[0-9]+[.][0-9]+$'",
+            name="ck_metric_result_definition_version",
+        ),
+        CheckConstraint(
+            r"period ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'",
+            name="ck_metric_result_period",
+        ),
+        CheckConstraint("unit IN ('CNY','ratio','days','count','z')", name="ck_metric_result_unit"),
+        CheckConstraint("precision BETWEEN 0 AND 8", name="ck_metric_result_precision"),
+        CheckConstraint("n >= 0 AND n_pending >= 0", name="ck_metric_result_n_nonneg"),
+        CheckConstraint(
+            "value_units IS NULL OR (status = 'ok' AND sample_status IN ('ok','insufficient'))",
+            name="ck_metric_result_value_gate",
+        ),
+        CheckConstraint(
+            "(ci_low_units IS NULL) = (ci_high_units IS NULL) "
+            "AND (ci_low_units IS NULL OR (status = 'ok' AND sample_status = 'ok'))",
+            name="ck_metric_result_ci_gate",
+        ),
+        CheckConstraint(
+            "NOT (status = 'ok' AND sample_status = 'blocked') AND (status = 'ok' OR reason IS NOT NULL)",
+            name="ck_metric_result_status_gate",
+        ),
+        Index("ix_metric_result_user_period", "user_id", "period"),
+        Index("ix_metric_result_user_domain", "user_id", "domain"),
+        Index("ix_metric_result_user_metric_period", "user_id", "metric_id", "period"),
+        {"schema": SCHEMA},
+    )
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey(USER_FK, ondelete="CASCADE"), nullable=False
+    )
+    metric_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    definition_version: Mapped[str] = mapped_column(String(16), nullable=False)
+    params_hash: Mapped[str] = mapped_column(String(64), nullable=False)
+    params: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False, default=dict)
+    domain: Mapped[str] = mapped_column(String(16), nullable=False)
+    period: Mapped[str] = mapped_column(String(7), nullable=False)
+    scope: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False)
+    sample_status: Mapped[str] = mapped_column(String(16), nullable=False)
+    value_units: Mapped[int | None] = mapped_column(BigInteger)
+    unit: Mapped[str] = mapped_column(String(8), nullable=False)
+    precision: Mapped[int] = mapped_column(Integer, nullable=False)
+    n: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    n_pending: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    ci_low_units: Mapped[int | None] = mapped_column(BigInteger)
+    ci_high_units: Mapped[int | None] = mapped_column(BigInteger)
+    decomposition: Mapped[dict[str, object] | None] = mapped_column(JSONB)
+    assumptions: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False, default=dict)
+    reason: Mapped[str | None] = mapped_column(String(128))
+    inputs_hash: Mapped[str] = mapped_column(String(80), nullable=False)
+    data_as_of: Mapped[date] = mapped_column(Date, nullable=False)
+    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class MetricDependency(Base):
+    """指标血缘（Period2-05）：一次物化实际消费的上游指标 / 数据集 + 各自的指纹。
+
+    存在的原因：缓存命中/失效必须能解释「为什么这次重算」；lineage 审计需要知道
+    某指标依赖了哪些数据集与上游指标。失效判定本身走运行时 DAG（注册表是静态代码），
+    本表只做记录，不参与判定。
+    """
+
+    __tablename__ = "metric_dependency"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "metric_id",
+            "period",
+            "definition_version",
+            "dep_kind",
+            "dep_id",
+            name="uq_metric_dependency_key",
+        ),
+        CheckConstraint("dep_kind IN ('metric','dataset')", name="ck_metric_dependency_kind"),
+        Index("ix_metric_dependency_user_metric", "user_id", "metric_id", "period"),
+        Index("ix_metric_dependency_user_dep", "user_id", "dep_kind", "dep_id"),
+        {"schema": SCHEMA},
+    )
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey(USER_FK, ondelete="CASCADE"), nullable=False
+    )
+    metric_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    period: Mapped[str] = mapped_column(String(7), nullable=False)
+    definition_version: Mapped[str] = mapped_column(String(16), nullable=False)
+    dep_kind: Mapped[str] = mapped_column(String(16), nullable=False)
+    dep_id: Mapped[str] = mapped_column(String(64), nullable=False)
+    dep_hash: Mapped[str] = mapped_column(String(80), nullable=False)
+    metric_result_id: Mapped[str] = mapped_column(
+        String(40),
+        ForeignKey(f"{SCHEMA}.metric_result.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 # 供迁移/RLS 门禁/测试 TRUNCATE 引用的表名清单（避免手写遗漏）
 REVIEW_TABLES: tuple[str, ...] = (
     Round.__tablename__,
@@ -305,17 +452,24 @@ REVIEW_TABLES: tuple[str, ...] = (
     NavDaily.__tablename__,
     AssetDaily.__tablename__,
     AssetBuildState.__tablename__,
+    MetricResult.__tablename__,
+    MetricDependency.__tablename__,
 )
 
 __all__ = [
     "ASSET_BUILD_MODES",
     "ASSET_BUILD_STATUSES",
     "ASSET_STATUSES",
+    "METRIC_STATUSES",
+    "METRIC_UNITS",
     "NAV_STATUSES",
     "REVIEW_TABLES",
     "ROUND_STATUSES",
+    "SAMPLE_STATUSES",
     "AssetBuildState",
     "AssetDaily",
+    "MetricDependency",
+    "MetricResult",
     "NavDaily",
     "Round",
     "RoundBuildState",

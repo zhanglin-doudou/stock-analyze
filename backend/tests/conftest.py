@@ -64,6 +64,9 @@ _REVIEW_TABLES = (
     "nav_daily",
     "asset_daily",
     "asset_build_state",
+    # Period2-05（迁移 0007）
+    "metric_result",
+    "metric_dependency",
 )
 # market schema（迁移 0005）是公共行情缓存：跨用例共享、跨全量测试保留，
 # 避免重复拉取。测试缓存本身的用例（unit/platform/test_market_cache.py）自清理。

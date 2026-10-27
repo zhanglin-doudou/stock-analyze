@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "metric_id": "selection.bhar_60",
+  "definition_version": "1.0",
+  "fixture": {"id": "fx_bhar60"},
+  "period": "2026-06",
+  "scope": "trade",
+  "params": {},
+  "expected": {
+    "value": "0.15000000",
+    "unit": "ratio",
+    "n": 1,
+    "ci_low": null,
+    "ci_high": null,
+    "sample_status": "insufficient",
+    "status": "ok",
+    "decomposition": {
+      "median": "15000000",
+      "t": null,
+      "hit_rate": "100000000",
+      "n": 1,
+      "n_pending": 0,
+      "n_excluded_suspended": 0,
+      "n_excluded_delisted": 0,
+      "n_excluded_noprice": 0,
+      "mean_benchmark_return": "10000000"
+    }
+  },
+  "tolerance": {"kind": "ratio_bp", "eps": "0.0001"},
+  "expected_source": {"kind": "hand_calc", "ref": "§8.4：个股 100→125（+25%），基准 +10% → BHAR=0.15", "oracle": null},
+  "review": {"author": "test-designer", "reviewer": "zhang", "approved": true, "approved_at": "2026-10-27"},
+  "boundaries": [
+    "单事件 60 日窗口，窗口内 bar 覆盖率 100%",
+    "单聚类（G=1）→ cluster t 无定义（null）"
+  ]
+}

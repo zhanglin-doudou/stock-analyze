@@ -125,6 +125,32 @@ async def _pull_rows(db: Database) -> list[PullRange]:
         return list((await session.execute(select(PullRange))).scalars().all())
 
 
+class FailingGapMarketDataSource(StubMarketDataSource):
+    """模拟「缺口拉取失败」的行情源：请求起点 ≥ fail_from 时一律抛 ApiError。
+
+    复现真实事故：已退市标的首次全区间拉取成功（数据止于退市日），此后每次构建
+    都要拉尾部缺口 [退市日+1, 今天]，上游对该缺口永久失败（连接被断开）。
+    """
+
+    def __init__(self, bars: dict[str, list[Bar]], *, fail_from: date) -> None:
+        super().__init__(bars)
+        self._fail_from = fail_from
+
+    async def get_daily_bars(self, symbols: Sequence[str], start: date, end: date) -> Sequence[Bar]:
+        if start >= self._fail_from:
+            self.calls.append((tuple(symbols), start, end))
+            raise _market_error_unavailable()
+        return await super().get_daily_bars(symbols, start, end)
+
+
+def _market_error_unavailable() -> ApiError:
+    return ApiError(
+        ErrorCode.INTERNAL_ERROR,
+        detail="行情源暂时不可用",
+        metadata={"market_failure": "unavailable"},
+    )
+
+
 # ── 纯函数：覆盖判定 ────────────────────────────────────────
 def test_plan_fetch_all_missing() -> None:
     assert plan_fetch(
@@ -326,3 +352,47 @@ async def test_latest_quotes_reads_through_cache(
     assert isinstance(cache, MarketDataSource)
     assert cache.capabilities.mode == "live"
     assert cache.provenance == "stub:market#cache"
+
+
+# ── 事故回归：缺口拉取失败不得丢弃缓存（2026-10 退市股 600077 全量阻断）──
+async def test_gap_fetch_failure_falls_back_to_cached_bars(
+    app_db: Database, cache_settings: Settings, clock: FrozenClock
+) -> None:
+    """退市股场景：首次全区间拉取成功（数据止于退市日）；此后缺口 [退市日+1, 今天]
+    永久拉取失败。缓存必须继续供给已有 bar，而不是让整个标的全量阻断。"""
+    delisted_bars = _bars(
+        "600077", (date(2021, 10, 28), 10_000_000), (date(2021, 10, 29), 10_100_000)
+    )
+    stub = FailingGapMarketDataSource({"600077": delisted_bars}, fail_from=date(2021, 10, 30))
+    cache = _cache(app_db, cache_settings, clock, stub)
+
+    # 首次构建：全区间拉取成功（上游返回止于退市日的数据）。
+    first = await cache.get_daily_bars(["600077"], date(2021, 10, 1), TODAY)
+    assert len(first) == 2
+    assert len(stub.calls) == 1
+
+    # 二次构建：缺口 [2021-10-30, TODAY] 拉取失败 → 降级复用缓存，不抛错。
+    again = await cache.get_daily_bars(["600077"], date(2021, 10, 1), TODAY)
+    assert len(again) == 2
+    assert [(bar.trade_date, bar.close_units) for bar in again] == [
+        (date(2021, 10, 28), 10_000_000),
+        (date(2021, 10, 29), 10_100_000),
+    ]
+    assert len(stub.calls) == 2
+    # 失败缺口不写 pull_range：下次构建仍会重试该缺口。
+    pull_rows = await _pull_rows(app_db)
+    assert len(pull_rows) == 1
+    assert pull_rows[0].range_end == date(2021, 10, 29)
+    assert pull_rows[0].complete is False
+
+
+async def test_gap_fetch_failure_without_cached_bars_raises(
+    app_db: Database, cache_settings: Settings, clock: FrozenClock
+) -> None:
+    """缓存为空时缺口失败仍须抛错：调用方需要据此记录失败类别（unavailable）。"""
+    stub = FailingGapMarketDataSource({}, fail_from=date(2021, 10, 1))
+    cache = _cache(app_db, cache_settings, clock, stub)
+    with pytest.raises(ApiError) as caught:
+        await cache.get_daily_bars(["600077"], date(2021, 10, 1), TODAY)
+    assert caught.value.metadata["market_failure"] == "unavailable"
+    assert len(stub.calls) == 1

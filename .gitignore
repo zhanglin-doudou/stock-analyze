@@ -31,3 +31,8 @@ fixtures/real/
 
 # uv 本地缓存（沙箱内 uv run 用）
 .uvcache/
+
+# mutmut 变异测试工作目录（缓存可重建，不入库）
+mutants/
+# mutmut 布局软链（make mutation 自动创建；见 pyproject.toml [tool.mutmut] 注释）
+/stock_core

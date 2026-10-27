@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "metric_id": "timing.drawdown",
+  "definition_version": "1.0",
+  "fixture": {"id": "fx_dd_chain_60"},
+  "period": "2026-04..2026-06",
+  "scope": "day",
+  "params": {},
+  "expected": {
+    "value": "0.33239203",
+    "unit": "ratio",
+    "n": 60,
+    "ci_low": null,
+    "ci_high": null,
+    "sample_status": "ok",
+    "status": "ok",
+    "decomposition": {
+      "mdd_duration_td": 20,
+      "mdd_recovery_td": null,
+      "recovery_censored": 1,
+      "underwater_ratio": "66666667",
+      "ulcer": "19290084",
+      "calmar": "-7201990",
+      "twr": "-602270",
+      "ann_twr": "-2393884",
+      "n_obs": 60,
+      "n_missing": 0,
+      "n_trading_days": 60
+    }
+  },
+  "tolerance": {"kind": "ratio_bp", "eps": "0.0001"},
+  "expected_source": {"kind": "hand_calc", "ref": "+1%×20 / −2%×20 / +1%×20；谷底 0.98^20 → MDD=1−0.98^20=0.33239203；峰值后 40 天均水下", "oracle": null},
+  "review": {"author": "test-designer", "reviewer": "zhang", "approved": true, "approved_at": "2026-10-27"},
+  "boundaries": [
+    "60 个资产日、observed_trading_days=60 → sample_status=ok",
+    "峰值出现在 t=20，谷底 t=40 → duration=20；最后 20 天反弹仍未回到峰值 → 未恢复"
+  ]
+}

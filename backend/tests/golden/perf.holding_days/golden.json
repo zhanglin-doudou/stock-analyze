@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "metric_id": "perf.holding_days",
+  "definition_version": "1.0",
+  "fixture": {"id": "fx_metrics_core"},
+  "period": "2026-09",
+  "scope": "round",
+  "params": {},
+  "expected": {
+    "value": "4.00",
+    "unit": "days",
+    "n": 12,
+    "ci_low": null,
+    "ci_high": null,
+    "sample_status": "ok",
+    "status": "ok",
+    "decomposition": {
+      "median_holding_days": "400",
+      "mean_natural_days": "567",
+      "median_natural_days": "600",
+      "capital_weighted_days": "353"
+    }
+  },
+  "tolerance": {"kind": "days", "eps": "0.01"},
+  "expected_source": {"kind": "hand_calc", "ref": "§8.4（48÷12=4.00；自然日 68÷12=5.67）", "oracle": null},
+  "review": {"author": "test-designer", "reviewer": "zhang", "approved": true, "approved_at": "2026-10-27"},
+  "boundaries": [
+    "交易日口径为工作日近似（D-09）",
+    "capital_weighted 由 fills 买入成本加权（418004480÷118429601=3.53）",
+    "open 回合不入样本"
+  ]
+}

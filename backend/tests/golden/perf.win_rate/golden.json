@@ -1,0 +1,35 @@
+{
+  "schema_version": 1,
+  "metric_id": "perf.win_rate",
+  "definition_version": "1.0",
+  "fixture": {"id": "fx_metrics_core"},
+  "period": "2026-09",
+  "scope": "round",
+  "params": {},
+  "expected": {
+    "value": "0.66666667",
+    "unit": "ratio",
+    "n": 12,
+    "ci_low": "0.39062209",
+    "ci_high": "0.86187991",
+    "sample_status": "ok",
+    "status": "ok",
+    "decomposition": {
+      "n_closed": 12,
+      "n_open": 3,
+      "n_data_error": 0,
+      "wins": 8,
+      "n_zero": 0,
+      "n_all": 15,
+      "win_rate_all": "60000000"
+    }
+  },
+  "tolerance": {"kind": "ratio_bp", "eps": "0.0001"},
+  "expected_source": {"kind": "hand_calc", "ref": "§8.4 表 4-2（8/12；Wilson z=1.959963985）", "oracle": "naive_stats.wilson_interval"},
+  "review": {"author": "test-designer", "reviewer": "zhang", "approved": true, "approved_at": "2026-10-27"},
+  "boundaries": [
+    "n=12 ≥ min_n=10：出 Wilson CI",
+    "pnl=0 计分母非胜非负（本夹具无零回合）",
+    "open 回合只入 win_rate_all（(8+1)/(12+3)=0.6）"
+  ]
+}

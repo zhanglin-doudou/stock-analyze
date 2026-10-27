@@ -1,0 +1,83 @@
+name: p2-metrics
+
+# Period2-07 三域指标 CI（C-25）：
+#   pr-fast  —— 无 DB：core 单测 + golden/oracle 三方 + 契约 kit + 端点覆盖
+#   pr-full  —— 真实 PostgreSQL：API/越权/RLS + 契约完整性
+#   nightly  —— mutation-full + Pf-10 microbench + 金标审批（需人工签署，未批即红）
+on:
+  pull_request:
+    paths:
+      - "backend/packages/core/**"
+      - "backend/packages/review/**"
+      - "backend/tests/**"
+      - "scripts/ci/**"
+      - "docs/architecture/2026-10-26-metrics-three-domain.md"
+      - "pyproject.toml"
+      - "Makefile"
+  schedule:
+    - cron: "0 18 * * *"
+  workflow_dispatch:
+
+jobs:
+  pr-fast:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync
+      - run: uv run pytest backend/tests/unit/core --cov=stock_core --cov-fail-under=100 -q
+      - run: uv run pytest backend/tests/unit/review -q
+      - run: uv run pytest backend/tests/golden backend/tests/oracle -q
+      - run: uv run pytest backend/tests/contract/test_metric_plugin.py -q
+      - run: uv run python scripts/ci/gate_golden_approval.py --mode structure
+      - run: uv run python scripts/ci/gate_endpoint_coverage.py
+
+  pr-full:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      STOCK_DB_OWNER_DSN: postgresql+asyncpg://stock_owner:stock_owner_pw@127.0.0.1:5433/stock_analyze
+      STOCK_DB_APP_DSN: postgresql+asyncpg://stock_app:stock_app_pw@127.0.0.1:5433/stock_analyze
+      PGHOST: 127.0.0.1
+      PGPORT: 5433
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      SUPERUSER: postgres
+      DB_NAME: stock_analyze
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync
+      - run: make db-bootstrap
+      - run: make migrate
+      - run: make test-p2
+
+  nightly:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+      - run: uv sync
+      - run: make mutation-full
+      - run: make test-perf
+      - run: make gate-golden

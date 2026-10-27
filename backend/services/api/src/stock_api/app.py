@@ -35,6 +35,7 @@ from stock_api.routers import (
     auth,
     imports,
     jobs,
+    metrics,
     nav,
     ops,
     reconciliation,
@@ -129,6 +130,7 @@ def create_app(settings: Settings | None = None, *, clock: Clock | None = None) 
         rounds,
         nav,
         assets,
+        metrics,
     ):
         app.include_router(module.router, prefix=API_PREFIX)
     # 探针/根路由按容器惯例不带前缀（/healthz、/readyz、/version、/metrics、/）

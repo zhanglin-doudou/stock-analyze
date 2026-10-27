@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "metric_id": "timing.drawdown",
+  "definition_version": "1.0",
+  "fixture": {"id": "fx_dd_small"},
+  "period": "2026-06",
+  "scope": "day",
+  "params": {},
+  "expected": {
+    "value": null,
+    "unit": "ratio",
+    "n": 10,
+    "ci_low": null,
+    "ci_high": null,
+    "sample_status": "pending_window",
+    "status": "ok",
+    "decomposition": {
+      "mdd_duration_td": 4,
+      "mdd_recovery_td": null,
+      "recovery_censored": 1,
+      "underwater_ratio": "80000000",
+      "ulcer": "4165262",
+      "calmar": "-179780271",
+      "twr": "-1239210",
+      "ann_twr": "-14076479",
+      "n_obs": 10,
+      "n_missing": 0,
+      "n_trading_days": 10
+    }
+  },
+  "tolerance": {"kind": "ratio_bp", "eps": "0.0001"},
+  "expected_source": {"kind": "hand_calc", "ref": "§8.4 drawdown 小例：10 收益 → MDD=0.07829824、水下 8、Ulcer=0.04165262；n<60 → pending_window", "oracle": null},
+  "review": {"author": "test-designer", "reviewer": "zhang", "approved": true, "approved_at": "2026-10-27"},
+  "boundaries": [
+    "10 个日收益（n=10≥min_n）但 observed_trading_days=10<60 → pending_window，value=None",
+    "峰值在 t=1、谷底在 t=5 → mdd_duration_td=4；此后未回到峰值 → recovery 截尾"
+  ]
+}

@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "note": "Pf-10 基线：18 个 MetricDef.compute 中位数（ms，REPEATS=9）；更新需人工审批 PR",
+  "repeats": 9,
+  "metrics": {
+    "behavior.averaging_down": 0.00475,
+    "behavior.de": 0.008625,
+    "behavior.hhi": 0.044917,
+    "behavior.turnover": 0.0055,
+    "perf.concentration": 0.008333,
+    "perf.expectancy": 0.009333,
+    "perf.fee": 0.014,
+    "perf.fee_breakeven": 0.012667,
+    "perf.holding_days": 0.009,
+    "perf.pnl_ratio": 0.01025,
+    "perf.win_rate": 0.009917,
+    "selection.bhar_20": 0.0765,
+    "selection.bhar_60": 0.040417,
+    "selection.bhar_hit": 0.082833,
+    "timing.beta": 0.163083,
+    "timing.chase": 0.013167,
+    "timing.drawdown": 0.120541,
+    "timing.fly": 0.022292
+  }
+}

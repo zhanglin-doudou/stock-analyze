@@ -34,13 +34,17 @@ help:
 	@echo "  make test-core      core 内核单测 + 覆盖门禁"
 	@echo "  make test-review    Period2 review 域单测 + rebuild/资产表增量集成测试"
 	@echo "  make test-p2        Period2-01/02 全量断言（fifo/review/API/越权/契约）"
+	@echo "  make test-metrics   07 指标全套（core 单测 + golden + oracle 三方 + 契约 kit）"
+	@echo "  make test-perf      Pf-10 纯函数 microbench（≤2× 基线或 0.5ms）"
 	@echo "  make test-api       API 验收套件（一期 + 二期已实现端点）"
 	@echo "  make test-rls       RLS 隔离集成测试"
 	@echo "  make test-isolation 越权负向矩阵"
 	@echo "  make api-check      契约完整性检查（示例/错误码/operationId）"
-	@echo "  make gate-endpoint  一期 30 端点实现/测试引用覆盖门禁"
+	@echo "  make gate-endpoint  一期 30 端点 + 二期 07 端点（≥3 用例）覆盖门禁"
 	@echo "  make gate-tenant    受保护端点越权（跨租户/401/admin）覆盖门禁"
 	@echo "  make gate-rls       租户表 RLS 策略覆盖门禁"
+	@echo "  make gate-golden    金标审批门禁（schema/hash/version + 人工签署 + 覆盖矩阵）"
+	@echo "  make gate-golden-structure  金标结构门禁（PR-fast，无人工依赖）"
 	@echo "  make sdk            由 openapi.json 生成前端 SDK"
 	@echo "  make verify-p1      一期全部断言（一条命令全绿）"
 	@echo "  make demo-p1        5 分钟演示脚本"
@@ -159,6 +163,25 @@ test-isolation:
 test-review:
 	@$(UV) pytest backend/tests/unit/review backend/tests/integration/test_rounds_rebuild.py backend/tests/integration/test_assets_incremental.py -q
 
+# ── Period2-05/06（指标注册表与执行引擎）────────────────────
+.PHONY: test-engine
+test-engine:
+	@$(UV) pytest backend/tests/unit/core --cov=stock_core --cov-fail-under=100 -q
+	@$(UV) pytest backend/tests/unit/review -q
+
+# ── Period2-07（三域指标）：§11 验收剧本前置 ─────────────────
+.PHONY: test-metrics
+test-metrics:
+	@$(UV) pytest backend/tests/unit/core --cov=stock_core --cov-fail-under=100 -q
+	@$(UV) pytest backend/tests/unit/review -q
+	@$(UV) pytest backend/tests/golden backend/tests/oracle -q
+	@$(UV) pytest backend/tests/contract/test_metric_plugin.py -q
+	@$(PY) scripts/ci/gate_golden_approval.py --mode structure
+
+.PHONY: test-perf
+test-perf:
+	@$(UV) pytest backend/tests/perf -q
+
 .PHONY: test-p2
 test-p2:
 	@$(UV) pytest backend/tests/unit/core --cov=stock_core --cov-fail-under=100 -q
@@ -202,6 +225,34 @@ gate-tenant:
 .PHONY: gate-rls
 gate-rls:
 	@$(PY) scripts/ci/gate_rls_coverage.py
+
+.PHONY: gate-golden
+gate-golden:
+	@$(PY) scripts/ci/gate_golden_approval.py
+
+.PHONY: gate-golden-structure
+gate-golden-structure:
+	@$(PY) scripts/ci/gate_golden_approval.py --mode structure
+
+# ── Period2-07（三域指标）变异测试（§8.9 / D-16）────────────
+# mutation：PR 用——mutmut 自带按函数哈希的增量缓存，只重跑受影响 mutant。
+# mutation-full：nightly 用——清缓存全量重跑。
+# 软链：mutmut 3.8 要求「文件路径推导模块名 == 运行时 import 名」，monorepo 的
+# backend/packages/core/src/stock_core 不满足，故在仓库根建同名软链（已 gitignore）。
+.PHONY: mutation
+mutation:
+	@ln -sfn backend/packages/core/src/stock_core stock_core
+	@$(UV) mutmut run
+	@$(UV) mutmut export-cicd-stats
+	@$(PY) scripts/ci/gate_mutation_score.py
+
+.PHONY: mutation-full
+mutation-full:
+	@ln -sfn backend/packages/core/src/stock_core stock_core
+	rm -rf mutants
+	@$(UV) mutmut run
+	@$(UV) mutmut export-cicd-stats
+	@$(PY) scripts/ci/gate_mutation_score.py
 
 .PHONY: verify-p1
 verify-p1:

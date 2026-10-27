@@ -1,0 +1,29 @@
+{
+  "_skeleton": true,
+  "target": "behavior.de/golden.no_effect.json",
+  "metric_id": "behavior.de",
+  "definition_version": "1.0",
+  "fixture": {
+    "id": "TODO_fixture"
+  },
+  "period": "2026-09",
+  "scenario": "behavior.de.no_effect",
+  "expected": null,
+  "expected_source": {
+    "kind": "hand_calc",
+    "ref": "TODO：手算表或独立 oracle 推导（禁止用生产代码生成）"
+  },
+  "review": {
+    "author": "test-designer",
+    "reviewer": null,
+    "approved": false,
+    "approved_at": null
+  },
+  "todo": [
+    "在 backend/tests/support/fx_metrics_*.py 增加 fixture builder（或复用现有夹具）",
+    "按 07 设计 §8.2/§8.3 手算 expected（value/n/CI/decomposition）",
+    "填 expected.n_pending/assumptions（可选但推荐）",
+    "本地跑 pytest backend/tests/golden，确认生产==golden==oracle",
+    "更新 MANIFEST.goldens 并请人工复核签署"
+  ]
+}

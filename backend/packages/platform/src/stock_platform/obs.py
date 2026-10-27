@@ -43,6 +43,11 @@ MARKET_FETCH_SECONDS = Histogram(
 )
 MARKET_FETCH_ERRORS = Counter("sa_market_fetch_errors_total", "行情拉取失败原因", ["reason"])
 MARKET_CACHE_HITS = Counter("sa_market_cache_hits_total", "行情缓存命中情况", ["cache"])
+# 缺口拉取失败但降级复用缓存的次数：意味着该标的数据可能不完整（如退市股尾部缺口
+# 永久失败），持续增长说明有标的长期无法补全行情，需要人工关注。
+MARKET_CACHE_STALE_FALLBACKS = Counter(
+    "sa_market_cache_stale_fallback_total", "缺口拉取失败降级复用缓存次数"
+)
 
 
 def new_request_id_ctx() -> str:

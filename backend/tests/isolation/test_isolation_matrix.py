@@ -238,6 +238,11 @@ ADMIN_FORBIDDEN: list[tuple[str, str]] = [
     # Period2-16：admin 不可读写资产表（身份越权 → 403，不是 404）
     ("get", "/assets"),
     ("post", "/assets/build"),
+    # Period2-06：admin 不可读指标（身份越权 → 403）
+    ("get", "/metrics"),
+    ("get", "/metrics/{metric_id}"),
+    ("get", "/metrics/{metric_id}/explain"),
+    ("get", "/metrics/{metric_id}/drilldown"),
 ]
 
 #: 列表型端点：A/B 各自造数据，B 的列表不得包含 A 的行（跨租户列表隔离）
@@ -297,6 +302,11 @@ UNAUTHENTICATED_MATRIX: list[tuple[str, str]] = [
     # Period2-16（API-081/082 资产表）
     ("get", "/assets"),
     ("post", "/assets/build"),
+    # Period2-06（API-033/034/035/079 指标）
+    ("get", "/metrics"),
+    ("get", "/metrics/{metric_id}"),
+    ("get", "/metrics/{metric_id}/explain"),
+    ("get", "/metrics/{metric_id}/drilldown"),
 ]
 
 #: 路径参数占位值（只用于越权/401 用例；资源不存在时恰好也走 404 分支）。
@@ -307,6 +317,7 @@ _PLACEHOLDERS = {
     "token_id": "tok_01J9Z6PLACEHOLDER",
     "rule_id": "rul_01J9Z6PLACEHOLDER",
     "round_id": "rnd_01J9Z6PLACEHOLDER",
+    "metric_id": "perf.placeholder",
 }
 
 #: 必填 query 参数的端点（矩阵里的通用请求需要补最小合法 query）。
@@ -315,6 +326,11 @@ _REQUIRED_QUERY: dict[str, str] = {
     "/reconciliation/bridge": "?period=2026-06",
     # Period2-03：/nav 需要 period 参数才能通过 StrictQueryRoute 校验（避免 400 而非 401）
     "/nav": "?period=2026-06",
+    # Period2-06：指标端点需 period 才能通过 query 校验
+    "/metrics": "?period=2026-06",
+    "/metrics/{metric_id}": "?period=2026-06",
+    "/metrics/{metric_id}/explain": "?period=2026-06",
+    "/metrics/{metric_id}/drilldown": "?period=2026-06",
 }
 
 

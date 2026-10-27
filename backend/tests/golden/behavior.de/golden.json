@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "metric_id": "behavior.de",
+  "definition_version": "1.0",
+  "fixture": {"id": "fx_metrics_core"},
+  "period": "2026-09",
+  "scope": "round",
+  "params": {},
+  "expected": {
+    "value": "0.22222222",
+    "unit": "ratio",
+    "n": 15,
+    "ci_low": "-0.20000000",
+    "ci_high": "0.71428571",
+    "sample_status": "ok",
+    "status": "ok",
+    "decomposition": {
+      "n_sold_gain": 8,
+      "n_sold_loss": 4,
+      "n_paper_gain": 1,
+      "n_paper_loss": 2,
+      "n_zero": 0,
+      "n_data_error": 0,
+      "pgr": "88888889",
+      "plr": "66666667",
+      "holding_days_diff": "-75"
+    }
+  },
+  "tolerance": {"kind": "ratio_bp", "eps": "0.0001"},
+  "expected_source": {"kind": "hand_calc+oracle", "ref": "§8.4（PGR=8/9、PLR=4/6、DE=+0.22222222，Odean 口径 D-20）；CI=naive_stats.bootstrap_percentile(ratio_diff_pgr_plr)", "oracle": "naive_stats.bootstrap_percentile+ratio_diff_pgr_plr_stat"},
+  "review": {"author": "test-designer", "reviewer": "zhang", "approved": true, "approved_at": "2026-10-27"},
+  "boundaries": [
+    "纸面盈亏取 open RoundView.pnl_units（A6 盈、B5/C5 亏），不重建",
+    "holding_days_diff=亏均−盈均=3.50−4.25=−0.75 天",
+    "CI 含 0（n=15 小样本；FR-R6 的『CI 不含 0』由 fx_de_pos30 覆盖）"
+  ]
+}

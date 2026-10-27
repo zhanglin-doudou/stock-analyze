@@ -188,6 +188,29 @@ class RoundRepository:
             or 0
         )
 
+    async def in_period(self, user_id: uuid.UUID, start: date, end: date) -> list[Round]:
+        """指标视图：闭区间 `[start, end]` 内的回合（close_date 优先，open 回合按 open_date）。"""
+        effective = func.coalesce(Round.close_date, Round.open_date)
+        rows = await self._session.scalars(
+            select(Round)
+            .where(Round.user_id == user_id, effective >= start, effective <= end)
+            .order_by(effective, Round.id)
+        )
+        return list(rows)
+
+    async def fills_in_period(self, user_id: uuid.UUID, start: date, end: date) -> list[RoundFill]:
+        """指标视图：平仓日落在区间内的逐 chunk 明细。"""
+        rows = await self._session.scalars(
+            select(RoundFill)
+            .where(
+                RoundFill.user_id == user_id,
+                RoundFill.close_date >= start,
+                RoundFill.close_date <= end,
+            )
+            .order_by(RoundFill.close_date, RoundFill.round_id, RoundFill.sequence)
+        )
+        return list(rows)
+
     # ── 写 ──────────────────────────────────────────────────
     async def delete_all(self, user_id: uuid.UUID) -> int:
         """删除该用户全部回合（明细由 FK ON DELETE CASCADE 级联）。"""

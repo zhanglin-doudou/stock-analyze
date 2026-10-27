@@ -10,7 +10,7 @@ import uuid
 from datetime import date, datetime
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_serializer
 
 
 class StrictModel(BaseModel):
@@ -679,3 +679,99 @@ class VersionOut(BaseModel):
 class ErrorCatalogOut(BaseModel):
     count: int
     items: list[dict[str, Any]]
+
+
+# ── 指标（API-033/034/035/079，Period2-06）────────────────────
+
+
+class MetricScopeOut(BaseModel):
+    unit: str
+    cohort: str
+    period: str
+
+
+class MetricItemOut(BaseModel):
+    """单个指标结果；`value` 在非 ok / pending_window 时**整键省略**（C-31）。"""
+
+    metric_id: str
+    definition_version: str
+    domain: str
+    scope: MetricScopeOut
+    period: str
+    status: Literal["ok", "blocked", "stale", "unreliable"]
+    sample_status: Literal["ok", "insufficient", "pending_window", "blocked"]
+    reason: str | None = None
+    value: str | None = None
+    unit: Literal["CNY", "ratio", "days", "count", "z"]
+    precision: int
+    n: int
+    n_pending: int
+    ci_low: str | None = None
+    ci_high: str | None = None
+    decomposition: dict[str, Any] | None = None
+    assumptions: dict[str, Any] = Field(default_factory=dict)
+    data_as_of: date
+    inputs_hash: str
+    computed_at: datetime
+
+    @model_serializer(mode="wrap")
+    def _omit_empty_value(self, handler: Any) -> dict[str, Any]:
+        payload: dict[str, Any] = handler(self)
+        if self.status != "ok" or self.sample_status == "pending_window":
+            payload.pop("value", None)
+        return payload
+
+
+class MetricBatchOut(BaseModel):
+    period: str
+    data_as_of: date
+    definition_version: str
+    assumptions: dict[str, Any] = Field(default_factory=dict)
+    items: list[MetricItemOut] = Field(default_factory=list)
+
+
+class MetricExplainDrilldown(BaseModel):
+    endpoint: str
+    params: dict[str, str] = Field(default_factory=dict)
+    description: str
+
+
+class MetricExplainOut(BaseModel):
+    metric_id: str
+    definition_version: str
+    period: str
+    conclusion: str | None = None
+    method: str
+    drilldown: MetricExplainDrilldown
+    status: Literal["ok", "blocked", "stale", "unreliable"]
+    reason: str | None = None
+    what_to_do: str | None = None
+    assumptions: dict[str, Any] = Field(default_factory=dict)
+    data_as_of: date
+
+
+class MetricDrilldownItemOut(BaseModel):
+    key: str
+    value: str | None = None
+    unit: Literal["CNY", "ratio", "days", "count", "z"]
+    label: str
+    round_id: str | None = None
+    trade_id: str | None = None
+    event_date: date | None = None
+    security_code: str | None = None
+
+
+class MetricDrilldownOut(BaseModel):
+    metric_id: str
+    definition_version: str
+    period: str
+    status: Literal["ok", "blocked", "stale", "unreliable"]
+    reason: str | None = None
+    items: list[MetricDrilldownItemOut] = Field(default_factory=list)
+    total: int = 0
+    source_endpoints: list[str] = Field(default_factory=list)
+    params: dict[str, Any] = Field(default_factory=dict)
+    next_cursor: str | None = None
+    truncated: bool = False
+    assumptions: dict[str, Any] = Field(default_factory=dict)
+    data_as_of: date | None = None

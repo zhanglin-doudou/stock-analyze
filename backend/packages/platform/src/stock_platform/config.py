@@ -2,13 +2,18 @@
 
 from __future__ import annotations
 
+from decimal import Decimal
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
 from pydantic import Field, computed_field
 from pydantic_settings import BaseSettings, SettingsConfigDict
-from stock_contracts.constants import ACCESS_TOKEN_TTL_SECONDS, DEFAULT_REFRESH_TTL_SECONDS
+from stock_contracts.constants import (
+    ACCESS_TOKEN_TTL_SECONDS,
+    DEFAULT_REFRESH_TTL_SECONDS,
+    RF_ANNUAL_DEFAULT,
+)
 
 REPO_ROOT = Path(__file__).resolve().parents[5]
 
@@ -65,6 +70,10 @@ class Settings(BaseSettings):
     market_live_max_concurrency: int = Field(2, alias="MARKET_LIVE_MAX_CONCURRENCY")
     market_live_retry_attempts: int = Field(2, alias="MARKET_LIVE_RETRY_ATTEMPTS")
     market_live_retry_backoff_seconds: float = Field(1.5, alias="MARKET_LIVE_RETRY_BACKOFF_SECONDS")
+    # replay 日线能力声明（C-28）：显式配置日线夹具；未配置时 replay 仅月频序列。
+    market_bars_file: Path | None = Field(None, alias="MARKET_BARS_FILE")
+    # 指标引擎：无风险利率（C-24，D-14）
+    rf_annual: Decimal = Field(RF_ANNUAL_DEFAULT, alias="RF_ANNUAL")
     llm_provider: Literal["none", "glm", "local"] = Field("none", alias="LLM_PROVIDER")
 
     # ── 运维 ──────────────────────────────────────────────
