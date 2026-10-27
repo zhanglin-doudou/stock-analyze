@@ -81,7 +81,7 @@ class DrawdownDef:
         method_zh="把现金流调整后的日收益复利成指数，取峰谷最大落差。",
         method_en="Compound cashflow-adjusted daily returns and take the max peak-to-trough.",
         what_to_do_zh="回撤偏深时，回看水下天数与恢复期评估是否需要降仓。",
-        what_to_do_en="When deep, check underwater days and recovery before de-risking.",
+        what_to_do_en="When deep, check underwater days and recovery before cutting risk.",
     )
     drilldown = DrilldownSpec(
         endpoint="/api/v1/metrics/timing.drawdown/drilldown",

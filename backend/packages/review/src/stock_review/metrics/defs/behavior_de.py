@@ -73,11 +73,11 @@ class DispositionEffectDef:
     benchmark_required = False
     mvp = "P0"
     explain = ExplainSpec(
-        conclusion_zh="DE 为正说明倾向于过早卖盈、过久抱亏；越大处置效应越明显。",
-        conclusion_en="Positive DE means winners are sold too early and losers held too long.",
+        conclusion_zh="处置效应为正说明倾向于过早卖盈、过久抱亏；越大越明显。",
+        conclusion_en="A positive disposition effect means winners are sold too early and losers held too long.",
         method_zh="比较盈利与亏损的「实现比例」之差（PGR−PLR），附重抽样置信区间。",
         method_en="Difference between gain and loss realization rates (PGR−PLR), with CI.",
-        what_to_do_zh="DE 偏高时，给亏损单预设止损、给盈利单更多持有时间。",
+        what_to_do_zh="处置效应偏高时，给亏损单预设止损、给盈利单更多持有时间。",
         what_to_do_en="When high, preset stops for losers and give winners more room.",
     )
     drilldown = DrilldownSpec(

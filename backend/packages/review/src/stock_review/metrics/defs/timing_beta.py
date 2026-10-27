@@ -81,12 +81,12 @@ class BetaDef:
     benchmark_required = True
     mvp = "P0"
     explain = ExplainSpec(
-        conclusion_zh="β 大于 1 说明组合波动放大基准，小于 1 说明更抗跌。",
+        conclusion_zh="回归系数大于 1 说明组合波动放大基准，小于 1 说明更抗跌。",
         conclusion_en="Beta above 1 amplifies the benchmark; below 1 is more defensive.",
         method_zh="用期末回看 60 个交易日的组合与基准日收益做超额回归。",
         method_en="Excess-return OLS of portfolio vs benchmark over the last 60 trading days.",
-        what_to_do_zh="结合 IR 与超额收益看 β 是否换来了足够的主动收益。",
-        what_to_do_en="Read with IR and excess return to judge whether beta paid off.",
+        what_to_do_zh="结合信息比率与超额收益看回归系数是否换来了足够的主动收益。",
+        what_to_do_en="Read with the information ratio and excess return to judge whether beta paid off.",
     )
     drilldown = DrilldownSpec(
         endpoint="/api/v1/metrics/timing.beta/drilldown",

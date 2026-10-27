@@ -109,7 +109,7 @@ class Bhar20Def:
         conclusion_en="Mean 20-trading-day post-buy excess vs benchmark; positive adds value.",
         method_zh="对每个买入事件计算买入持有超额收益并取均值，附重抽样置信区间。",
         method_en="Buy-and-hold abnormal return per buy event, averaged, with bootstrap CI.",
-        what_to_do_zh="BHAR 持续为负时，检查买点是否系统性偏晚。",
+        what_to_do_zh="买入后超额收益持续为负时，检查买点是否系统性偏晚。",
         what_to_do_en="When persistently negative, check whether entries are systematically late.",
     )
     drilldown = DrilldownSpec(

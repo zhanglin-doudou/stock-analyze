@@ -50,7 +50,9 @@ KNOWN_BENCHMARKS: frozenset[str] = frozenset({"hs300_tr", "zz500_tr", "csi1000_t
 DOMAIN_FILTERS: frozenset[str] = frozenset(
     {"all", "perf", "timing", "behavior", "selection", "attribution"}
 )
-EXPLORATORY_MVP = "M2"
+# 核心/探索口径（D-08）：18 个 def 中 10 个核心标记 mvp="P0"，8 个 exploratory 标记
+# mvp="M1"。`include_exploratory=false`（默认）只返回 P0；显式 `ids=` 不受此过滤影响。
+CORE_MVP = "P0"
 DRILLDOWN_MAX_ITEMS = 5000
 
 _REGISTRY: MetricRegistry | None = None
@@ -153,7 +155,7 @@ def _select_definitions(
         selected_ids = [
             definition.id
             for definition in registry.by_domain(domain_value)
-            if include_exploratory or definition.mvp != EXPLORATORY_MVP
+            if include_exploratory or definition.mvp == CORE_MVP
         ]
 
     closure: set[str] = set()
