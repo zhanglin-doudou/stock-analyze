@@ -209,6 +209,26 @@ gate-tenant:
 gate-rls:
 	@$(PY) scripts/ci/gate_rls_coverage.py
 
+# ── Period2-07（三域指标）变异测试（§8.9 / D-16）────────────
+# mutation：PR 用——mutmut 自带按函数哈希的增量缓存，只重跑受影响 mutant。
+# mutation-full：nightly 用——清缓存全量重跑。
+# 软链：mutmut 3.8 要求「文件路径推导模块名 == 运行时 import 名」，monorepo 的
+# backend/packages/core/src/stock_core 不满足，故在仓库根建同名软链（已 gitignore）。
+.PHONY: mutation
+mutation:
+	@ln -sfn backend/packages/core/src/stock_core stock_core
+	@$(UV) mutmut run
+	@$(UV) mutmut export-cicd-stats
+	@$(PY) scripts/ci/gate_mutation_score.py
+
+.PHONY: mutation-full
+mutation-full:
+	@ln -sfn backend/packages/core/src/stock_core stock_core
+	rm -rf mutants
+	@$(UV) mutmut run
+	@$(UV) mutmut export-cicd-stats
+	@$(PY) scripts/ci/gate_mutation_score.py
+
 .PHONY: verify-p1
 verify-p1:
 	@$(PY) -m stock_api.cli verify-p1

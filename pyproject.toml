@@ -48,6 +48,7 @@ dev = [
     "mypy>=1.13",
     "import-linter>=2.1",
     "types-pyyaml",
+    "mutmut>=3.2,<4",
 ]
 
 [tool.pytest.ini_options]
@@ -101,6 +102,32 @@ disallow_untyped_calls = false
 [[tool.mypy.overrides]]
 module = ["akshare", "akshare.*", "pandas", "pandas.*"]
 ignore_missing_imports = true
+
+# ── 变异测试（Period2-07 §8.9 / D-16）────────────────────────
+# pin mutmut>=3.2,<4（当前锁定 3.8.0；3.x 键名与 2.x 不同——source_paths /
+# pytest_add_cli_args_test_selection，以 mutmut 3.8 configuration.py 为准）。
+# 布局：mutmut 3.8 硬性要求「文件路径推导的模块名 == 运行时 import 名」，
+# 且 setup_source_paths 只认 mutants/{.,src,source} 三种根；monorepo 的
+# backend/packages/core/src/stock_core 两种机制都不兼容。故由 Makefile 在仓库根
+# 建软链 stock_core -> backend/packages/core/src/stock_core（已 gitignore），
+# mutmut 经软链把包复制为 mutants/stock_core/——mutants/. 入 sys.path 后
+# `import stock_core` 即命中变异副本，路径推导名 stock_core.* 与之一致。
+# 变异范围用 only_mutate 收窄到 §8.9 规定的 metrics/** 与 stats/**
+# （fnmatch 的 * 可跨 /，含子目录）。
+# pytest 在 mutants/ 目录下执行，故 also_copy 必须把测试目录/夹具/conftest 一并
+# 复制进去；pyproject.toml 复制用于锚定 rootdir 与 pythonpath。
+[tool.mutmut]
+source_paths = ["stock_core"]
+only_mutate = [
+    "stock_core/metrics/*",
+    "stock_core/stats/*",
+]
+pytest_add_cli_args_test_selection = ["backend/tests/unit/core", "backend/tests/golden"]
+pytest_add_cli_args = ["-x", "-q", "-p", "no:cacheprovider"]
+also_copy = [
+    "pyproject.toml",
+    "backend/tests",
+]
 
 [tool.importlinter]
 root_packages = ["stock_contracts", "stock_core", "stock_platform", "stock_ledger", "stock_review", "stock_delivery", "stock_api", "stock_worker"]
