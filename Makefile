@@ -34,13 +34,16 @@ help:
 	@echo "  make test-core      core 内核单测 + 覆盖门禁"
 	@echo "  make test-review    Period2 review 域单测 + rebuild/资产表增量集成测试"
 	@echo "  make test-p2        Period2-01/02 全量断言（fifo/review/API/越权/契约）"
+	@echo "  make test-metrics   07 指标全套（core 单测 + golden + oracle 三方 + 契约 kit）"
+	@echo "  make test-perf      Pf-10 纯函数 microbench（≤2× 基线或 0.5ms）"
 	@echo "  make test-api       API 验收套件（一期 + 二期已实现端点）"
 	@echo "  make test-rls       RLS 隔离集成测试"
 	@echo "  make test-isolation 越权负向矩阵"
 	@echo "  make api-check      契约完整性检查（示例/错误码/operationId）"
-	@echo "  make gate-endpoint  一期 30 端点实现/测试引用覆盖门禁"
+	@echo "  make gate-endpoint  一期 30 端点 + 二期 07 端点（≥3 用例）覆盖门禁"
 	@echo "  make gate-tenant    受保护端点越权（跨租户/401/admin）覆盖门禁"
 	@echo "  make gate-rls       租户表 RLS 策略覆盖门禁"
+	@echo "  make gate-golden    金标审批门禁（MANIFEST sha256 + version + 人工签署）"
 	@echo "  make sdk            由 openapi.json 生成前端 SDK"
 	@echo "  make verify-p1      一期全部断言（一条命令全绿）"
 	@echo "  make demo-p1        5 分钟演示脚本"
@@ -165,6 +168,18 @@ test-engine:
 	@$(UV) pytest backend/tests/unit/core --cov=stock_core --cov-fail-under=100 -q
 	@$(UV) pytest backend/tests/unit/review -q
 
+# ── Period2-07（三域指标）：§11 验收剧本前置 ─────────────────
+.PHONY: test-metrics
+test-metrics:
+	@$(UV) pytest backend/tests/unit/core --cov=stock_core --cov-fail-under=100 -q
+	@$(UV) pytest backend/tests/unit/review -q
+	@$(UV) pytest backend/tests/golden backend/tests/oracle -q
+	@$(UV) pytest backend/tests/contract/test_metric_plugin.py -q
+
+.PHONY: test-perf
+test-perf:
+	@$(UV) pytest backend/tests/perf -q
+
 .PHONY: test-p2
 test-p2:
 	@$(UV) pytest backend/tests/unit/core --cov=stock_core --cov-fail-under=100 -q
@@ -208,6 +223,10 @@ gate-tenant:
 .PHONY: gate-rls
 gate-rls:
 	@$(PY) scripts/ci/gate_rls_coverage.py
+
+.PHONY: gate-golden
+gate-golden:
+	@$(PY) scripts/ci/gate_golden_approval.py
 
 # ── Period2-07（三域指标）变异测试（§8.9 / D-16）────────────
 # mutation：PR 用——mutmut 自带按函数哈希的增量缓存，只重跑受影响 mutant。
