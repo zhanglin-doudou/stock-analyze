@@ -1,0 +1,93 @@
+{
+  "schema_version": 1,
+  "fixtures": {
+    "fx_metrics_core": {
+      "module": "support/fx_metrics_core.py",
+      "sha256": "82022652b4e29d4bee6f89895d1a12edd91319651e6787d356abb6f3096c4c0e"
+    },
+    "fx_hhi_small": {
+      "module": "support/fx_metrics_core.py",
+      "sha256": "82022652b4e29d4bee6f89895d1a12edd91319651e6787d356abb6f3096c4c0e"
+    },
+    "fx_n5": {
+      "module": "support/fx_metrics_core.py",
+      "sha256": "82022652b4e29d4bee6f89895d1a12edd91319651e6787d356abb6f3096c4c0e"
+    },
+    "fx_n10": {
+      "module": "support/fx_metrics_core.py",
+      "sha256": "82022652b4e29d4bee6f89895d1a12edd91319651e6787d356abb6f3096c4c0e"
+    },
+    "fx_data_error": {
+      "module": "support/fx_metrics_core.py",
+      "sha256": "82022652b4e29d4bee6f89895d1a12edd91319651e6787d356abb6f3096c4c0e"
+    },
+    "fx_fee_breakeven": {
+      "module": "support/fx_metrics_domains.py",
+      "sha256": "0e2cc27d0cc957bc94ef5c17f79b06621daa8aee006a084ebb1762345b0df629"
+    },
+    "fx_fee_breakeven_blocked": {
+      "module": "support/fx_metrics_domains.py",
+      "sha256": "0e2cc27d0cc957bc94ef5c17f79b06621daa8aee006a084ebb1762345b0df629"
+    },
+    "fx_turnover": {
+      "module": "support/fx_metrics_domains.py",
+      "sha256": "0e2cc27d0cc957bc94ef5c17f79b06621daa8aee006a084ebb1762345b0df629"
+    },
+    "fx_multilot": {
+      "module": "support/fx_metrics_domains.py",
+      "sha256": "0e2cc27d0cc957bc94ef5c17f79b06621daa8aee006a084ebb1762345b0df629"
+    },
+    "fx_bars_chase": {
+      "module": "support/fx_metrics_domains.py",
+      "sha256": "0e2cc27d0cc957bc94ef5c17f79b06621daa8aee006a084ebb1762345b0df629"
+    },
+    "fx_bars_fly": {
+      "module": "support/fx_metrics_domains.py",
+      "sha256": "0e2cc27d0cc957bc94ef5c17f79b06621daa8aee006a084ebb1762345b0df629"
+    },
+    "fx_beta": {
+      "module": "support/fx_metrics_domains.py",
+      "sha256": "0e2cc27d0cc957bc94ef5c17f79b06621daa8aee006a084ebb1762345b0df629"
+    },
+    "fx_dd_small": {
+      "module": "support/fx_metrics_domains.py",
+      "sha256": "0e2cc27d0cc957bc94ef5c17f79b06621daa8aee006a084ebb1762345b0df629"
+    },
+    "fx_dd_chain_60": {
+      "module": "support/fx_metrics_domains.py",
+      "sha256": "0e2cc27d0cc957bc94ef5c17f79b06621daa8aee006a084ebb1762345b0df629"
+    },
+    "fx_hhi_main": {
+      "module": "support/fx_metrics_domains.py",
+      "sha256": "0e2cc27d0cc957bc94ef5c17f79b06621daa8aee006a084ebb1762345b0df629"
+    },
+    "fx_bhar20": {
+      "module": "support/fx_metrics_domains.py",
+      "sha256": "0e2cc27d0cc957bc94ef5c17f79b06621daa8aee006a084ebb1762345b0df629"
+    },
+    "fx_bhar60": {
+      "module": "support/fx_metrics_domains.py",
+      "sha256": "0e2cc27d0cc957bc94ef5c17f79b06621daa8aee006a084ebb1762345b0df629"
+    }
+  },
+  "definition_versions": {
+    "behavior.averaging_down": "1.0",
+    "behavior.de": "1.0",
+    "behavior.hhi": "1.0",
+    "behavior.turnover": "1.0",
+    "perf.concentration": "1.0",
+    "perf.expectancy": "1.0",
+    "perf.fee": "1.0",
+    "perf.fee_breakeven": "1.0",
+    "perf.holding_days": "1.0",
+    "perf.pnl_ratio": "1.0",
+    "perf.win_rate": "1.0",
+    "selection.bhar_20": "1.0",
+    "selection.bhar_60": "1.0",
+    "selection.bhar_hit": "1.0",
+    "timing.beta": "1.0",
+    "timing.chase": "1.0",
+    "timing.drawdown": "1.0",
+    "timing.fly": "1.0"
+  }
+}

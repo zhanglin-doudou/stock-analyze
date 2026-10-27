@@ -26,6 +26,14 @@ API_PREFIX = "/api/v1"
 ROOT_MARK = "（根）"
 EXPECTED_PERIOD1 = 30
 EXPECTED_ALL_ENDPOINTS = 82
+EXPECTED_PERIOD2 = 28
+
+# 07 指标端点所属任务（DEV-PLAN A.1 第 3/6 列）：Period2-06 = 指标端点，
+# Period2-07 = 三域指标实现。这些端点必须实现且每端点 ≥3 条用例（C-27）。
+REQUIRED_PHASE2_TASKS = {"Period2-06", "Period2-07"}
+# E-18：API-038（POST /diagnostics/selection）handler 归 Period2-06 收尾，07 阶段只报告不判红。
+DEFERRED_PHASE2 = {"API-038": "E-18 → Period2-06 收尾"}
+MIN_CASES_PER_ENDPOINT = 3
 
 
 def emit(*parts: object) -> None:
@@ -56,17 +64,22 @@ def _table_rows(block: str, ncols: int) -> list[list[str]]:
     return rows
 
 
-def load_period1_ids() -> list[str]:
-    """附录 A.1：一期（期次 = 一）的 API-ID 集合（期望 30 个）。"""
+def load_period_rows(period: str) -> dict[str, str]:
+    """附录 A.1：期次 = ``period`` 的 API-ID → 任务（``Period2-06`` 等）。"""
     text = DEV_PLAN.read_text(encoding="utf-8")
     block = _section(text, "### A\\.1", "### A\\.2")
-    ids: list[str] = []
+    rows: dict[str, str] = {}
     for cells in _table_rows(block, 6):
         for index in (0, 3):
             api_id = cells[index]
-            if re.fullmatch(r"API-\d{3}", api_id) and cells[index + 1] == "一":
-                ids.append(api_id)
-    return sorted(set(ids))
+            if re.fullmatch(r"API-\d{3}", api_id) and cells[index + 1] == period:
+                rows[api_id] = cells[index + 2]
+    return rows
+
+
+def load_period1_ids() -> list[str]:
+    """附录 A.1：一期（期次 = 一）的 API-ID 集合（期望 30 个）。"""
+    return sorted(load_period_rows("一"))
 
 
 def load_catalog_endpoints() -> dict[str, dict[str, object]]:
@@ -139,6 +152,18 @@ def load_test_references() -> set[str]:
     return referenced
 
 
+def load_test_case_counts() -> dict[str, int]:
+    """按 ``test_api_NNN_*`` 函数名统计每个 API-ID 的用例条数（不算 docstring 引用）。"""
+    counts: dict[str, int] = {}
+    for directory in TEST_DIRS:
+        for test_file in sorted(directory.glob("*.py")):
+            text = test_file.read_text(encoding="utf-8")
+            for suffix in re.findall(r"test_api_(\d{3})_", text):
+                api_id = f"API-{suffix}"
+                counts[api_id] = counts.get(api_id, 0) + 1
+    return counts
+
+
 def main() -> int:
     emit("== G6b 端到端门禁①：一期端点实现覆盖 + 测试引用覆盖 ==")
     period1 = load_period1_ids()
@@ -191,14 +216,60 @@ def main() -> int:
     if missing_tests:
         failures.append(f"{len(missing_tests)} 个一期端点无测试引用：" + "、".join(missing_tests))
 
+    # ── 二期（07 指标端点）：实现 + 每端点 ≥3 条用例（C-27） ──
+    period2 = load_period_rows("二")
+    required = {api_id: task for api_id, task in period2.items() if task in REQUIRED_PHASE2_TASKS}
+    case_counts = load_test_case_counts()
+    implemented_phase2 = [
+        api_id
+        for api_id in period2
+        if api_id in catalog and is_implemented(api_id, catalog[api_id], runtime)
+    ]
+    emit("")
+    emit("== G6b 端点门禁②：二期 Period2-06/07 端点实现 + 每端点 ≥3 用例 ==")
+    emit(
+        f"二期 API-ID {len(period2)}/{EXPECTED_PERIOD2}；已实现 {len(implemented_phase2)} 个；"
+        f"06/07 必检 {len(required)} 个"
+    )
+    if len(period2) != EXPECTED_PERIOD2:
+        failures.append(
+            f"DEV-PLAN A.1 二期 API-ID 应为 {EXPECTED_PERIOD2} 个，实际 {len(period2)} 个"
+        )
+
+    for api_id in sorted(required):
+        row = catalog.get(api_id)
+        if row is None:
+            failures.append(f"{api_id}（API-Catalog §1 未登记）")
+            emit(f"  [✗] {api_id} API-Catalog §1 未登记")
+            continue
+        if api_id in DEFERRED_PHASE2:
+            emit(
+                f"  [–] {api_id} {row['method']!s:6s} {row['path']!s:38s} 延后：{DEFERRED_PHASE2[api_id]}"
+            )
+            continue
+        implemented = is_implemented(api_id, row, runtime)
+        cases = case_counts.get(api_id, 0)
+        if not implemented:
+            failures.append(f"{api_id} 未实现：{row['method']} {row['path']}")
+        if cases < MIN_CASES_PER_ENDPOINT:
+            failures.append(f"{api_id} 用例 {cases} 条 < {MIN_CASES_PER_ENDPOINT}")
+        mark = "✓" if implemented and cases >= MIN_CASES_PER_ENDPOINT else "✗"
+        emit(
+            f"  [{mark}] {api_id} {row['method']!s:6s} {row['path']!s:38s} "
+            f"impl={'yes' if implemented else 'NO ':3s} cases={cases:<2d} "
+            f"{_implementation_note(api_id, row, runtime)}"
+        )
+
     if failures:
         for failure in failures:
             emit(f"❌ {failure}")
         emit("❌ G6b 端点门禁失败")
         return 1
+    checked = [api_id for api_id in required if api_id not in DEFERRED_PHASE2]
     emit(
-        f"✅ G6b 端点门禁通过：实现 {len(period1)}/{EXPECTED_PERIOD1}；"
-        f"测试引用 {len(period1)}/{EXPECTED_PERIOD1}"
+        f"✅ G6b 端点门禁通过：一期实现/测试引用 {len(period1)}/{EXPECTED_PERIOD1}；"
+        f"二期 06/07 端点 {len(checked)}/{len(checked)} 且每端点 ≥{MIN_CASES_PER_ENDPOINT} 用例"
+        f"（延后 {len(DEFERRED_PHASE2)} 个）"
     )
     return 0
 
