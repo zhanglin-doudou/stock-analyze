@@ -21,6 +21,7 @@ import type {
   LoginIn,
   LoginResponse,
   MeOut,
+  MetricBatch,
   Nav,
   PatCreateResponse,
   Preview,
@@ -29,6 +30,7 @@ import type {
   ProblemFieldError,
   QuarantinePage,
   ReadyOut,
+  RebuildPeriodBody,
   RebuildRoundsBody,
   RefreshIn,
   RefreshOut,
@@ -167,6 +169,15 @@ export interface ListAssetsQuery {
   to?: string;
   status?: string;
   sort?: string;
+}
+
+/** API-033 指标批量查询（period=YYYY-MM 或 from/to；ids 逗号分隔，与 domain 二选一）。 */
+export interface GetMetricsQuery {
+  ids?: string;
+  domain?: string;
+  period?: string;
+  benchmark?: string;
+  include_exploratory?: boolean;
 }
 
 export interface CursorQuery {
@@ -421,6 +432,15 @@ export function createClient(options: ClientOptions) {
     cancel(jobId: string) {
       return send<Job>({ path: `/jobs/${jobId}/cancel`, method: "POST" }).then((r) => r.data);
     },
+    /** API-083：按月一键编排 rounds → assets → nav → metrics（202；同 period 单飞）。 */
+    rebuildPeriod(body: RebuildPeriodBody, idempotencyKey: string) {
+      return send<JobAccepted>({
+        path: "/jobs/rebuild-period",
+        method: "POST",
+        body,
+        idempotencyKey,
+      }).then((r) => r.data);
+    },
     /** SSE 进度流：支持 Last-Event-ID 断线续传（浏览器 EventSource 无法带 Bearer，故用 fetch 流）。 */
     async *events(
       jobId: string,
@@ -610,6 +630,22 @@ export function createClient(options: ClientOptions) {
     },
   };
 
+  const metricsApi = {
+    /** API-033：指标批量查询（read-through；默认核心 10，`include_exploratory` 按需）。 */
+    batch(query: GetMetricsQuery = {}) {
+      return send<MetricBatch>({
+        path: "/metrics",
+        query: {
+          ids: query.ids,
+          domain: query.domain,
+          period: query.period,
+          benchmark: query.benchmark,
+          include_exploratory: query.include_exploratory,
+        },
+      }).then((r) => r.data);
+    },
+  };
+
   const ops = {
     healthz() {
       return send<HealthOut>({ path: "/healthz", root: true, omitAuth: true }).then((r) => r.data);
@@ -631,7 +667,7 @@ export function createClient(options: ClientOptions) {
     },
   };
 
-  return { auth, tokens, imports, jobs, trades, rounds, nav, assets, ops, request: send };
+  return { auth, tokens, imports, jobs, trades, rounds, nav, assets, metrics: metricsApi, ops, request: send };
 }
 
 export type ApiClient = ReturnType<typeof createClient>;

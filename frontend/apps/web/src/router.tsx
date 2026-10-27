@@ -5,6 +5,7 @@ import { Assets } from "./pages/Assets";
 import { Import } from "./pages/Import";
 import { Imports } from "./pages/Imports";
 import { Login } from "./pages/Login";
+import { Metrics } from "./pages/Metrics";
 import { Nav } from "./pages/Nav";
 import { Register } from "./pages/Register";
 import { RoundDetail } from "./pages/RoundDetail";
@@ -31,6 +32,7 @@ export function Layout(): ReactElement {
           <Link to="/rounds">回合</Link>
           <Link to="/nav">净值</Link>
           <Link to="/assets">资产</Link>
+          <Link to="/metrics">指标</Link>
           <Link to="/import">导入</Link>
           <Link to="/imports">导入记录</Link>
           <Link to="/settings">设置</Link>
@@ -70,6 +72,7 @@ export const router = createBrowserRouter([
       { path: "rounds/:roundId", element: <RoundDetail /> },
       { path: "nav", element: <Nav /> },
       { path: "assets", element: <Assets /> },
+      { path: "metrics", element: <Metrics /> },
       { path: "import", element: <Import /> },
       { path: "imports", element: <Imports /> },
       { path: "settings", element: <Settings /> },

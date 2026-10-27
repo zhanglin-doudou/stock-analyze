@@ -322,6 +322,29 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/jobs/rebuild-period": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rebuild Period Endpoint
+         * @description API-083：按月一键编排 rounds → assets → nav → metrics（202 + Location）。
+         *
+         *     单飞 `scope_key={user_id}:period:{period}`：同参复用同一 job（X-Job-Reused），
+         *     异参运行中 → 409 JOB_ALREADY_RUNNING。
+         */
+        post: operations["rebuildPeriod"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/jobs/rebuild-rounds": {
         parameters: {
             query?: never;
@@ -1873,6 +1896,19 @@ export interface components {
              * @enum {string}
              */
             status: "ready" | "not_ready";
+        };
+        /**
+         * RebuildPeriodIn
+         * @description API-083：按月一键构建编排（rounds → assets → nav → metrics）。
+         */
+        RebuildPeriodIn: {
+            /**
+             * Include Exploratory
+             * @default false
+             */
+            include_exploratory: boolean;
+            /** Period */
+            period: string;
         };
         /**
          * RebuildRoundsIn
@@ -3469,6 +3505,62 @@ export interface operations {
             };
             /** @description 未认证或凭证无效 */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    rebuildPeriod: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RebuildPeriodIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobAcceptedOut"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };
