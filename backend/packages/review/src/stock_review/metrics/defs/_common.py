@@ -31,6 +31,7 @@ class EmptyParams(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
+
 TRADE_LEGS: frozenset[str] = frozenset({"buy", "sell"})
 _PRICE_QTY_TO_MONEY: int = 10 ** (SCALE_QTY + SCALE_PRICE - SCALE_AMOUNT)  # 1e8
 
@@ -74,7 +75,9 @@ def period_trades(ctx: MetricContext) -> list[TradeView]:
 
 def trades_until(ctx: MetricContext) -> list[TradeView]:
     """`trade_date ≤ period_end` 的全部成交行（持仓/摊平重建用，含 period 前历史）。"""
-    rows = [item for item in ctx.trades if item.deleted_at is None and item.trade_date <= ctx.period_end]
+    rows = [
+        item for item in ctx.trades if item.deleted_at is None and item.trade_date <= ctx.period_end
+    ]
     return sorted(rows, key=lambda item: (item.trade_date, item.line_no, item.id))
 
 
@@ -173,9 +176,5 @@ def benchmark_available(ctx: MetricContext) -> bool:
 
 def asset_days_in_period(ctx: MetricContext) -> list[AssetDailyView]:
     """period 内 asset_daily 行（按日期升序）。"""
-    rows = [
-        row
-        for row in ctx.asset_daily
-        if ctx.period_start <= row.trade_date <= ctx.period_end
-    ]
+    rows = [row for row in ctx.asset_daily if ctx.period_start <= row.trade_date <= ctx.period_end]
     return sorted(rows, key=lambda row: row.trade_date)

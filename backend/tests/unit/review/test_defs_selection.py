@@ -70,9 +70,7 @@ def test_bhar20_missing_benchmark() -> None:
     assert no_config.n == 0
     assert no_config.decomposition["benchmark_id"] is None
 
-    no_series = selection_bhar_20.DEF.compute(
-        _bhar20_ctx(benchmark="000300.SH", with_series=False)
-    )
+    no_series = selection_bhar_20.DEF.compute(_bhar20_ctx(benchmark="000300.SH", with_series=False))
     assert no_series.value_units is None
     assert no_series.n == 0
 
@@ -163,7 +161,8 @@ def _bhar_hit_ctx(*, benchmark: str | None = "000300.SH"):
     )
     bars_b = tuple(
         make_bar(
-            day, security_code="000001",
+            day,
+            security_code="000001",
             close_units=19_000_000 if day == JUNE_DAYS[20] else 20_000_000,
         )
         for day in JUNE_DAYS

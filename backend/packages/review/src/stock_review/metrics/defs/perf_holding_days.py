@@ -99,7 +99,9 @@ class HoldingDaysDef:
                 },
             )
         trading_days = [item.holding_days for item in closed]
-        natural_days = [(item.close_date - item.open_date).days for item in closed if item.close_date]
+        natural_days = [
+            (item.close_date - item.open_date).days for item in closed if item.close_date
+        ]
         round_ids = {item.id for item in closed}
         fills = [fill for fill in ctx.fills if fill.round_id in round_ids]
         capital = sum(fill.buy_cost_units for fill in fills)

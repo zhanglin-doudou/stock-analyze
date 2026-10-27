@@ -105,7 +105,9 @@ class FeeDef:
             "n_fee_rows": breakdown.n_fee_rows,
         }
         if breakdown.turnover_gross == 0:
-            return MetricValue(value_units=None, n=breakdown.n_trade_legs, decomposition=decomposition)
+            return MetricValue(
+                value_units=None, n=breakdown.n_trade_legs, decomposition=decomposition
+            )
         return MetricValue(
             value_units=div_round(breakdown.fee_amount, breakdown.turnover_gross, scale=8),
             n=breakdown.n_trade_legs,

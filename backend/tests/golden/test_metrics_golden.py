@@ -132,6 +132,4 @@ def test_golden(case: GoldenCase) -> None:
         assert isinstance(actual, (int, str)) or actual is None, (
             f"{label}.decomposition.{key}: 非整数/文本 {actual!r}"
         )
-        assert actual == expected, (
-            f"{label}.decomposition.{key}: {actual} ≠ {expected}"
-        )
+        assert actual == expected, f"{label}.decomposition.{key}: {actual} ≠ {expected}"

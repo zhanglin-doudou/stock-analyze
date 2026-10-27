@@ -174,9 +174,7 @@ def test_averaging_down_first_build_and_empty() -> None:
 
 
 def _hhi_ctx(rows: tuple) -> object:
-    trades = (
-        make_trade(1, date(2026, 5, 29), price_units=10_000_000, amount_units=-100000),
-    )
+    trades = (make_trade(1, date(2026, 5, 29), price_units=10_000_000, amount_units=-100000),)
     bars = tuple(make_bar(day, close_units=10_000_000) for day in JUNE_DAYS[:2])
     return dataclasses.replace(make_context(), trades=trades, bars=bars, asset_daily=rows)
 

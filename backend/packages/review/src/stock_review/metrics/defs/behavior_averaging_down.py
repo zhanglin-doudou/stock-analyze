@@ -114,9 +114,7 @@ class AveragingDownDef:
                     elif trade.price_units <= 0:
                         n_invalid_price += 1
                     else:
-                        avg_price6 = div_round(
-                            cost_before * _QTY_PRICE_TO_PRICE6, qty_before
-                        )
+                        avg_price6 = div_round(cost_before * _QTY_PRICE_TO_PRICE6, qty_before)
                         is_down = trade.price_units < avg_price6
                         candidates.append((True, avg_price6, trade.price_units))
                         if is_down:
@@ -129,7 +127,10 @@ class AveragingDownDef:
             elif trade.category == "sell":
                 qty = qty_before - trade.quantity_units
                 if qty_before > 0:
-                    cost = cost_before - cost_before * min(trade.quantity_units, qty_before) // qty_before
+                    cost = (
+                        cost_before
+                        - cost_before * min(trade.quantity_units, qty_before) // qty_before
+                    )
                 else:
                     cost = cost_before
                 if qty <= 0:

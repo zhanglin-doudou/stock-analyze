@@ -11,10 +11,7 @@ pytestmark = pytest.mark.golden
 
 
 def _golden_dirs() -> set[str]:
-    return {
-        path.parent.name
-        for path in GOLDEN_ROOT.glob("**/golden*.json")
-    }
+    return {path.parent.name for path in GOLDEN_ROOT.glob("**/golden*.json")}
 
 
 def test_golden_dirs_cover_registry() -> None:

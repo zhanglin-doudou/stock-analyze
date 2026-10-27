@@ -134,4 +134,3 @@ def compute_bhar_events(ctx: MetricContext, *, horizon: int) -> BharEvents | Non
         n_excluded_delisted=n_delisted,
         n_excluded_noprice=n_noprice,
     )
-

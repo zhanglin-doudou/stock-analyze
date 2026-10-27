@@ -124,7 +124,9 @@ class DrawdownDef:
             return MetricValue(
                 value_units=None, n=family.n_obs, decomposition={**decomposition, "unreliable": 1}
             )
-        return MetricValue(value_units=family.mdd_units, n=family.n_obs, decomposition=decomposition)
+        return MetricValue(
+            value_units=family.mdd_units, n=family.n_obs, decomposition=decomposition
+        )
 
     def validate_config(self) -> None:
         assert self.params_schema.model_config.get("extra") == "forbid"

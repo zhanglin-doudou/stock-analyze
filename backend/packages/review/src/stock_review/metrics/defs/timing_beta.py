@@ -97,7 +97,11 @@ class BetaDef:
     )
 
     def compute(self, ctx: MetricContext) -> MetricValue:
-        base = {"benchmark_id": ctx.benchmark, "rf_rate": str(ctx.rf_annual), "a_base": A_SHUFFLE_DAYS}
+        base = {
+            "benchmark_id": ctx.benchmark,
+            "rf_rate": str(ctx.rf_annual),
+            "a_base": A_SHUFFLE_DAYS,
+        }
         if not benchmark_available(ctx):
             return MetricValue(value_units=None, n=0, decomposition=base)
         period_rows = asset_days_in_period(ctx)
@@ -133,7 +137,12 @@ class BetaDef:
             return MetricValue(
                 value_units=None,
                 n=len(pairs),
-                decomposition={**base, "n_obs": len(pairs), "n_missing": n_missing, "unreliable": 1},
+                decomposition={
+                    **base,
+                    "n_obs": len(pairs),
+                    "n_missing": n_missing,
+                    "unreliable": 1,
+                },
             )
         result = timing_beta(y, x, rf_annual=ctx.rf_annual)
         value = result.beta_units if not (result.blocked or result.unreliable) else None

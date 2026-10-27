@@ -89,9 +89,15 @@ class TestBetaAlpha:
         r_p = _pct_to_scale8([0.55, -0.20, 1.10, 0.30, -0.85, 0.60])
         ba = beta_alpha(r_p, r_b, rf_daily_units=0)
         for field in (
-            "beta_units", "alpha_daily_units", "alpha_annual_units",
-            "se_alpha_units", "t_alpha_units", "te_units",
-            "ir_units", "excess_arith_units", "excess_geo_units",
+            "beta_units",
+            "alpha_daily_units",
+            "alpha_annual_units",
+            "se_alpha_units",
+            "t_alpha_units",
+            "te_units",
+            "ir_units",
+            "excess_arith_units",
+            "excess_geo_units",
         ):
             assert getattr(ba, field) is not None, f"{field} should be present"
         assert ba.insufficient is False

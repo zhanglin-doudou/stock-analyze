@@ -176,7 +176,7 @@ def _inputs_payload(
         "rf_annual": format(ctx.rf_annual, "f"),
         "datasets": datasets,
         # 只含「声明的指标依赖」的指纹：把整批上游全混入会让 inputs_hash 随批量组合漂移
-        #（CI seed 不确定、缓存失效），golden 不可复现（S5 暴露）。
+        # （CI seed 不确定、缓存失效），golden 不可复现（S5 暴露）。
         "upstream": {
             key: upstream_hashes[key]
             for key in sorted(metric_dependencies(definition))

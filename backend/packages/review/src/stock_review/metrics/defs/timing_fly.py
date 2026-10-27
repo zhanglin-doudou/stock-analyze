@@ -111,9 +111,7 @@ class FlyDef:
             dates, closes = ladder
             start = bisect_right(dates, trade.trade_date)
             post = [
-                closes[index]
-                for index in range(start, len(dates))
-                if dates[index] <= ctx.as_of
+                closes[index] for index in range(start, len(dates)) if dates[index] <= ctx.as_of
             ][:window]
             if len(post) < window:
                 n_pending += 1

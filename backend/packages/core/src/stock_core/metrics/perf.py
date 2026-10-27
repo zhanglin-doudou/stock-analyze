@@ -16,6 +16,7 @@ from stock_contracts.constants import A_SHUFFLE_DAYS, SCALE_RATIO
 
 # —— 回合级数据结构（纯函数用的输入容器）——
 
+
 def _mean_dec(values: Sequence[Decimal]) -> Decimal:
     if not values:
         return Decimal(0)
@@ -23,6 +24,7 @@ def _mean_dec(values: Sequence[Decimal]) -> Decimal:
 
 
 # —— 通用分位锚点 ——
+
 
 def win_rate(
     pnl_units: list[int],

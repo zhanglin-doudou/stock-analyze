@@ -88,9 +88,7 @@ def test_chase_empty() -> None:
 
 
 def _fly_ctx(*, benchmark: str | None, with_series: bool = True):
-    trades = (
-        make_trade(1, JUNE_DAYS[0], side="sell", category="sell", amount_units=100000),
-    )
+    trades = (make_trade(1, JUNE_DAYS[0], side="sell", category="sell", amount_units=100000),)
     bars = _bars("600519", 10_400_000)
     series = _bench_series() if with_series else ()
     return dataclasses.replace(
@@ -183,9 +181,7 @@ def test_beta_degraded_row_suppresses_value() -> None:
 
 def test_drawdown_happy() -> None:
     returns = [-10_000_000] + [0] * 9
-    rows = tuple(
-        make_asset_day(JUNE_DAYS[i], daily_return_units=returns[i]) for i in range(10)
-    )
+    rows = tuple(make_asset_day(JUNE_DAYS[i], daily_return_units=returns[i]) for i in range(10))
     ctx = dataclasses.replace(make_context(), asset_daily=rows)
     value = timing_drawdown.DEF.compute(ctx)
     assert value.value_units == 10000000  # 首日 −10% 后走平 → MDD=10%

@@ -112,21 +112,15 @@ class DispositionEffectDef:
             "holding_days_diff": (
                 None
                 if not (sold_gain and sold_loss)
-                else div_round(
-                    sum(item.holding_days for item in sold_loss) * 100, len(sold_loss)
-                )
-                - div_round(
-                    sum(item.holding_days for item in sold_gain) * 100, len(sold_gain)
-                )
+                else div_round(sum(item.holding_days for item in sold_loss) * 100, len(sold_loss))
+                - div_round(sum(item.holding_days for item in sold_gain) * 100, len(sold_gain))
             ),
         }
         n = gain_total + loss_total
         if gain_total == 0 or loss_total == 0:
             return MetricValue(value_units=None, n=n, decomposition=decomposition)
         numerator = big_g * loss_total - big_l * gain_total
-        codes = sorted(
-            [(0,)] * big_g + [(1,)] * big_l + [(2,)] * small_g + [(3,)] * small_l
-        )
+        codes = sorted([(0,)] * big_g + [(1,)] * big_l + [(2,)] * small_g + [(3,)] * small_l)
         return MetricValue(
             value_units=div_round(numerator, gain_total * loss_total, scale=8),
             n=n,

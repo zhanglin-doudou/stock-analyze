@@ -175,7 +175,9 @@ def beta_alpha(
             total_return_b *= Decimal(1) + Decimal(xt) / scale_factor
         excess_arith = mean_excess * annual_base_dec
         if total_return_b > 0:
-            excess_geo = ((total_return_p / total_return_b) ** (annual_base_dec / Decimal(n))) - Decimal(1)
+            excess_geo = (
+                (total_return_p / total_return_b) ** (annual_base_dec / Decimal(n))
+            ) - Decimal(1)
         else:
             excess_geo = Decimal("0")
 

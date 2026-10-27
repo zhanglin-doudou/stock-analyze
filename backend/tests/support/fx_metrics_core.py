@@ -318,9 +318,7 @@ def make_n5_context() -> MetricContextData:
 
 def make_n10_context() -> MetricContextData:
     """10 closed（7 盈 3 亏）+ 3 open：n=10 边界 → ok、出 Wilson CI。"""
-    chosen = tuple(
-        item for item in ROUNDS if item.id in _N10_IDS or item.status == "open"
-    )
+    chosen = tuple(item for item in ROUNDS if item.id in _N10_IDS or item.status == "open")
     return make_fx_context(rounds=chosen, fills=(), trades=())
 
 

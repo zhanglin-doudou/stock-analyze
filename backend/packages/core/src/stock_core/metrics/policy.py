@@ -11,7 +11,7 @@ from typing import Final
 # —— 择时阈值 ——
 # 追涨/杀跌的"反向价格运动"百分比阈值（默认 3%）
 CHASE_THRESHOLD_SCALE8: Final[int] = 3_000_000  # 0.03
-FLY_THRESHOLD_SCALE8: Final[int] = 3_000_000   # 0.03
+FLY_THRESHOLD_SCALE8: Final[int] = 3_000_000  # 0.03
 
 # —— 行为域 ——
 # 换手率日均分位锚（用于判断"过度交易"的绝对水平）

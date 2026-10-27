@@ -122,9 +122,7 @@ class FeeBreakevenDef:
         natural_days = (ctx.period_end - ctx.period_start).days + 1
         annualized_fee = div_round(breakdown.fee_amount * 365, natural_days)
         avg_holding_mv = div_round(sum(row.market_value_units for row in rows), len(rows))
-        returns = [
-            row.daily_return_units for row in rows if row.daily_return_units is not None
-        ]
+        returns = [row.daily_return_units for row in rows if row.daily_return_units is not None]
         twr_units = compound_index(returns)
         span_days = (rows[-1].trade_date - rows[0].trade_date).days
         annualized_twr = _annualized_twr_units(twr_units, span_days)
@@ -136,9 +134,7 @@ class FeeBreakevenDef:
             if denominator > 0:
                 twr_eaten = div_round(annualized_fee, denominator, scale=8)
 
-        value = (
-            div_round(annualized_fee, avg_holding_mv, scale=8) if avg_holding_mv > 0 else None
-        )
+        value = div_round(annualized_fee, avg_holding_mv, scale=8) if avg_holding_mv > 0 else None
         return MetricValue(
             value_units=value,
             n=len(rows),

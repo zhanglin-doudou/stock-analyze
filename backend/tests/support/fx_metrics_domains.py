@@ -140,18 +140,14 @@ def _context(
 
 
 def make_fee_breakeven_context(*, blocked: bool = False) -> MetricContextData:
-    rows = tuple(
-        _asset(day, mv=1_000_000, cash=0, total=1_000_000, ret=0) for day in JUNE[:10]
-    )
+    rows = tuple(_asset(day, mv=1_000_000, cash=0, total=1_000_000, ret=0) for day in JUNE[:10])
     if blocked:
         rows = (
             *rows[:3],
             dataclasses.replace(rows[3], status="blocked"),
             *rows[4:],
         )
-    trades = (
-        _trade("trd_fee_1", JUNE[1], category="buy", amount=-1_001_000, commission=1000),
-    )
+    trades = (_trade("trd_fee_1", JUNE[1], category="buy", amount=-1_001_000, commission=1000),)
     return _context(
         period="2026-06",
         period_start=date(2026, 6, 1),
@@ -171,9 +167,7 @@ def make_fee_breakeven_blocked_context() -> MetricContextData:
 
 
 def make_turnover_context() -> MetricContextData:
-    rows = tuple(
-        _asset(day, mv=1_000_000, cash=0, total=1_000_000, ret=0) for day in JUNE[:10]
-    )
+    rows = tuple(_asset(day, mv=1_000_000, cash=0, total=1_000_000, ret=0) for day in JUNE[:10])
     trades = (
         _trade("trd_turn_1", JUNE[1], category="buy", amount=-120_000),
         _trade("trd_turn_2", JUNE[2], category="sell", amount=80_000),
@@ -286,9 +280,7 @@ def make_beta_context() -> MetricContextData:
         observed_trading_days=60,
         asset_daily=rows,
         benchmark="hs300_tr",
-        benchmark_series=tuple(
-            _bench(day, returns[index]) for index, day in enumerate(days)
-        ),
+        benchmark_series=tuple(_bench(day, returns[index]) for index, day in enumerate(days)),
     )
 
 
@@ -439,10 +431,7 @@ def make_bhar60_context() -> MetricContextData:
             amount=-100_000_000,
         ),
     )
-    bench = tuple(
-        _bench(day, 10_000_000 if index == 1 else 0)
-        for index, day in enumerate(LONG)
-    )
+    bench = tuple(_bench(day, 10_000_000 if index == 1 else 0) for index, day in enumerate(LONG))
     return _context(
         period="2026-06",
         period_start=date(2026, 6, 1),

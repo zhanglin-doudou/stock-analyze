@@ -56,9 +56,7 @@ def test_win_rate_happy() -> None:
 
 
 def test_win_rate_open_rounds_only_in_all_sample() -> None:
-    opened = dataclasses.replace(
-        make_round(200), pnl_units=80, status="open", close_date=None
-    )
+    opened = dataclasses.replace(make_round(200), pnl_units=80, status="open", close_date=None)
     errored = dataclasses.replace(make_round(201), data_error=True)
     ctx = make_context(rounds=(*_rounds_8w4l(), opened, errored))
     value = perf_win_rate.DEF.compute(ctx)
@@ -97,9 +95,7 @@ def test_pnl_ratio_happy() -> None:
 
 
 def test_pnl_ratio_all_wins_or_empty_is_undefined() -> None:
-    all_wins = perf_pnl_ratio.DEF.compute(
-        make_context(rounds=(_round(0, 200), _round(1, 100)))
-    )
+    all_wins = perf_pnl_ratio.DEF.compute(make_context(rounds=(_round(0, 200), _round(1, 100))))
     assert all_wins.value_units is None
     assert all_wins.n == 2
 
@@ -291,9 +287,7 @@ def test_expectancy_happy() -> None:
 
 
 def test_expectancy_degenerate_p_star() -> None:
-    all_wins = perf_expectancy.DEF.compute(
-        make_context(rounds=(_round(0, 200), _round(1, 100)))
-    )
+    all_wins = perf_expectancy.DEF.compute(make_context(rounds=(_round(0, 200), _round(1, 100))))
     assert all_wins.value_units == 150
     assert all_wins.decomposition["p_star"] is None
 

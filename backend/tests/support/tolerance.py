@@ -65,7 +65,9 @@ def assert_within_tolerance(
 ) -> None:
     """None 只能对 None；否则按容差判定，失败信息带路径与双方值。"""
     if expected is None or actual is None:
-        assert actual is None and expected is None, f"{path}: actual={actual!r} expected={expected!r}"
+        assert actual is None and expected is None, (
+            f"{path}: actual={actual!r} expected={expected!r}"
+        )
         return
     assert tolerance.allows(actual, expected), (
         f"{path}: |{actual} - {expected}| = {abs(actual - expected)} 超容差 "

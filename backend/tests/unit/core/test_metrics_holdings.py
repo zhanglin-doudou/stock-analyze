@@ -34,7 +34,9 @@ class TestBuildDailyPortfolio:
     def test_sell_reduces_position(self) -> None:
         """持有后卖出部分。"""
         prior_cash = 0
-        prior_lots = {"AAPL": (20_000, 10_000_000)}  # 2 股（scale=4 = 0.0002 股？不对，10_000/10_000=1股）
+        prior_lots = {
+            "AAPL": (20_000, 10_000_000)
+        }  # 2 股（scale=4 = 0.0002 股？不对，10_000/10_000=1股）
         # 修正：20_000 scale=4 表示 2.0000 股
         day_fills = [("AAPL", -10_000, 12_000_000, 2_000)]  # 卖 1 股
         day_closes = {"AAPL": 13_000_000}

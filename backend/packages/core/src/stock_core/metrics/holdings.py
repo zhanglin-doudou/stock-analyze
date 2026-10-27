@@ -126,9 +126,13 @@ def build_daily_portfolio(
             # market_value = qty(股) × close_price(元) × 100(分/元)
             mv_dec = qty * close_price * (Decimal(10) ** scale_money)
 
-            close_u_actual = close_u if close_u is not None else int(
-                (close_price * (Decimal(10) ** scale_price)).quantize(
-                    Decimal(1), rounding=ROUND_HALF_UP
+            close_u_actual = (
+                close_u
+                if close_u is not None
+                else int(
+                    (close_price * (Decimal(10) ** scale_price)).quantize(
+                        Decimal(1), rounding=ROUND_HALF_UP
+                    )
                 )
             )
             result_lots.append(
@@ -140,9 +144,7 @@ def build_daily_portfolio(
                             Decimal(1), rounding=ROUND_HALF_UP
                         )
                     ),
-                    market_value_units=int(
-                        mv_dec.quantize(Decimal(1), rounding=ROUND_HALF_UP)
-                    ),
+                    market_value_units=int(mv_dec.quantize(Decimal(1), rounding=ROUND_HALF_UP)),
                     closing_price_units=close_u_actual,
                 )
             )

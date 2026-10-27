@@ -105,9 +105,7 @@ class ChaseDef:
             dates, closes = ladder
             start = bisect_right(dates, trade.trade_date)
             window = [
-                closes[index]
-                for index in range(start, len(dates))
-                if dates[index] <= ctx.as_of
+                closes[index] for index in range(start, len(dates)) if dates[index] <= ctx.as_of
             ][:POST_WINDOW]
             if len(window) < POST_WINDOW:
                 n_pending += 1
