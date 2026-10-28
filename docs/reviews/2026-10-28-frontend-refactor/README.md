@@ -711,7 +711,13 @@ cd docs/reviews/2026-10-28-frontend-refactor
 
 > A/B 使用 CDP 全页截图（`Page.getLayoutMetrics` + `captureBeyondViewport`）以获得自然高度；C 使用固定 1600×2000 视口。对比图由 Pillow 按统一宽度缩放后拼接（标签用 Hiragino Sans GB）。
 
-**实施状态**：D1–D10 已确认（见 §15）。Phase 0 已完成决策文档并提交；后续按 §13 路线图逐阶段开发，每阶段独立 commit。
+**实施状态**：D1–D10 已确认（见 §15）。Phase 0–5 全部完成，按 §13 路线图逐阶段开发并独立 commit。
+
+**最终验收（2026-10-29）**
+- 前端：`pnpm -r lint` ✅ / `typecheck` ✅ / `test` 23 files 100 tests ✅ / `build` ✅ / `budget` ✅（首屏 gzip 84.87KB / CSS 4.58KB）
+- 后端：API-085 6 条 + contract 134 条 ✅；`make lint` / `make typecheck` ✅；`api-check` / `api-snapshot --check` ✅
+- 视觉：浅色/深色 Dashboard、Assets、Settings 在 1600/1024/768 走查（截图在 `var/`，未入库）
+- 已知限制：① 本地 backend `test_dashboard` 隔离用例偶发 job 时序 flake（与本次前端改动无关，单独复跑通过）；② Playwright 视觉回归按 PRD 标注 SKIP；③ iPad Safari 真机未实测（月份降级已按特性探测实现）。
 
 | 阶段 | 状态 | Commit | 备注 |
 |---|---|---|---|
@@ -728,4 +734,4 @@ cd docs/reviews/2026-10-28-frontend-refactor
 | Phase 4a | ✅ 已完成 | `3b0d8ef` | ESLint + 零口径 no-restricted-syntax + 前端 CI（lint/typecheck/test/build） |
 | Phase 4b | ✅ 已完成 | `1cc1582` | ⌘K 命令面板 + F 专注模式 + 键盘地图 |
 | Phase 4c | ✅ 已完成 | `c2dfd3a` | a11y（skip-link/焦点/图表数据表/progressbar）、iPadOS 月份降级、性能预算门禁；Playwright 视觉回归按 PRD 标注 SKIP |
-| Phase 5 | ✅ 已完成 | 本提交 | 深色主题（同名 token 覆盖 + 旧组件暗色补丁）+ Settings 主题切换；浅色仍为默认 |
+| Phase 5 | ✅ 已完成 | `81aa307` | 深色主题（同名 token 覆盖 + 旧组件暗色补丁）+ Settings 主题切换；浅色仍为默认 |
