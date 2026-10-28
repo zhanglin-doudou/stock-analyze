@@ -1,0 +1,177 @@
+/*
+ * Phase 0 · 设计 tokens（唯一视觉变量来源）
+ *
+ * 来源：docs/reviews/2026-10-28-frontend-refactor/README.md §9.1（已拍板 A+ 混合方案）。
+ * 约定：
+ * - 组件只消费语义 token，不写裸 hex/px；新组件不得新增私有色值。
+ * - 趋势色默认 A 股「红涨绿跌」；`--up` 语义是“上涨”，不是“红色”。
+ * - 深色主题在 Phase 5 通过 [data-theme="dark"] 覆盖同名变量实现。
+ * - Phase 0 仅建立变量层，旧 styles.css 尚未迁移，因此引入本文件不改变现有视觉。
+ */
+
+:root {
+  color-scheme: light;
+
+  /* ── 基础色（A 静观 · 纸感浅色）────────────────────── */
+  --bg: #f6f5f0;
+  --surface: #fbfaf6;
+  --surface-2: #f1efe8;
+  --surface-raised: #ffffff;
+  --text: #1b1d19;
+  --text-2: #3c4038;
+  --muted: #7d8278;
+  --faint: #a7ab9f;
+  --line: #e3e1d6;
+  --line-strong: #d3d1c4;
+
+  /* ── 强调色（单一低饱和墨绿）────────────────────────── */
+  --accent: #3b5f4b;
+  --accent-soft: #ecefe8;
+  --accent-contrast: #ffffff;
+
+  /* ── 趋势语义：默认 A 股红涨绿跌（可用 data-trend 切换）── */
+  --up: #a8483a;
+  --up-soft: rgba(168, 72, 58, 0.1);
+  --down: #2f6b4f;
+  --down-soft: rgba(47, 107, 79, 0.1);
+  --flat: #7d8278;
+
+  /* ── 状态语义（build_state / data_status 两轴共用）────── */
+  --status-ok: #2f6b4f;
+  --status-ok-soft: rgba(47, 107, 79, 0.1);
+  --status-degraded: #94703a;
+  --status-degraded-soft: rgba(148, 112, 58, 0.1);
+  --status-blocked: #a8483a;
+  --status-blocked-soft: rgba(168, 72, 58, 0.1);
+  --status-missing: #7d8278;
+  --status-missing-soft: rgba(125, 130, 120, 0.12);
+  --status-insufficient: #94703a;
+  --status-insufficient-soft: rgba(148, 112, 58, 0.1);
+  --status-unreliable: #7d8278;
+  --status-unreliable-soft: rgba(125, 130, 120, 0.12);
+  --status-pending: #7d8278;
+  --status-pending-soft: transparent;
+  --warn: #94703a;
+  --warn-soft: rgba(148, 112, 58, 0.1);
+  --danger: #a8483a;
+  --danger-soft: rgba(168, 72, 58, 0.1);
+  --info: #3b5f4b;
+  --info-soft: rgba(59, 95, 75, 0.1);
+
+  /* ── 字体 ────────────────────────────────────────── */
+  --font-ui: -apple-system, "SF Pro Text", "PingFang SC", "Hiragino Sans GB",
+    "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+  --font-display: "Songti SC", "STSong", "Noto Serif CJK SC", "SimSun", serif;
+  --font-mono: "SF Mono", "JetBrains Mono", Menlo, ui-monospace, monospace;
+
+  --fs-display: 58px;
+  --fs-h1: 42px;
+  --fs-h2: 21px;
+  --fs-h3: 15px;
+  --fs-body: 14px;
+  --fs-sm: 12.5px;
+  --fs-xs: 11px;
+  --fs-micro: 10px;
+
+  --lh-tight: 1.2;
+  --lh-body: 1.55;
+
+  --fw-regular: 400;
+  --fw-medium: 500;
+  --fw-semibold: 600;
+
+  /* ── 间距（4px 网格）────────────────────────────── */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s5: 24px;
+  --s6: 32px;
+  --s7: 48px;
+
+  /* ── 布局 ────────────────────────────────────────── */
+  --gutter: 48px;
+  --content-max: 1440px;
+  --rail-width: 76px;
+  --rail-width-compact: 64px;
+  --side-col: 400px;
+  --topbar-h: 64px;
+  --control-h: 34px;
+  --touch-min: 44px;
+
+  /* ── 圆角 / 阴影 / 焦点 ──────────────────────────── */
+  --r-sm: 6px;
+  --r-md: 10px;
+  --r-lg: 14px;
+  --r-card: 0px;
+  --r-pill: 999px;
+  --shadow-1: 0 1px 2px rgba(27, 29, 25, 0.04);
+  --shadow-2: 0 8px 24px rgba(27, 29, 25, 0.06);
+  --focus-ring: 0 0 0 3px rgba(59, 95, 75, 0.28);
+
+  /* ── 密度（Phase 1 起由 ThemeProvider 写 data-density）──── */
+  --row-h: 40px;
+  --panel-pad: 0px;
+  --panel-gap: 24px;
+
+  /* ── 动效 ────────────────────────────────────────── */
+  --ease: cubic-bezier(0.2, 0.6, 0.2, 1);
+  --dur: 160ms;
+
+  /* ── 图表（Phase 1 geometry 只消费这些色值）─────────── */
+  --chart-1: #3b5f4b;
+  --chart-2: #7d9c8b;
+  --chart-3: #b78a3f;
+  --chart-4: #1f6feb;
+  --chart-5: #858a7e;
+  --chart-grid: #e3e1d6;
+  --chart-grid-strong: #d3d1c4;
+  --chart-band: rgba(168, 72, 58, 0.1);
+  --chart-band-line: rgba(168, 72, 58, 0.5);
+  --chart-area: rgba(59, 95, 75, 0.1);
+
+  /* ── 层级 ────────────────────────────────────────── */
+  --z-rail: 20;
+  --z-topbar: 30;
+  --z-drawer: 40;
+  --z-dialog: 50;
+  --z-command: 60;
+  --z-toast: 70;
+}
+
+/* 紧凑密度：只改行高/内边距，不改字号层级（调研 §9 规则 ⑤） */
+[data-density="compact"] {
+  --row-h: 32px;
+  --panel-pad: 16px;
+  --panel-gap: 16px;
+}
+
+[data-density="cozy"] {
+  --row-h: 44px;
+  --panel-pad: 20px;
+  --panel-gap: 28px;
+}
+
+/* 国际惯例/用户偏好：绿涨红跌。默认不生效（红涨绿跌）。 */
+[data-trend="green-up"] {
+  --up: #2f6b4f;
+  --up-soft: rgba(47, 107, 79, 0.1);
+  --down: #a8483a;
+  --down-soft: rgba(168, 72, 58, 0.1);
+}
+
+/* 对比度偏好：提高边框/次级文字对比（WCAG 2.2 AA 兜底） */
+@media (prefers-contrast: more) {
+  :root {
+    --line: #b9b6a8;
+    --line-strong: #8f8c7e;
+    --muted: #5b6057;
+    --faint: #6f746a;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --dur: 0ms;
+  }
+}

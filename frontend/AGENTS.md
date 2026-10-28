@@ -2,6 +2,8 @@
 
 **前置**：必读根目录 `AGENTS.md`。本文件只补前端层的特有约定。
 
+> 当前阶段（2026-10-28）：前端重构按 [调研与选型 README](../docs/reviews/2026-10-28-frontend-refactor/README.md) §13 分阶段进行；已拍板 A+ 混合方案、A 股红涨绿跌、TanStack Query（Phase 1 引入）、后端 chart-ready 视图 + geometry 白名单（Phase 1/2）、WCAG 2.2 AA。Phase 0 已落地设计 tokens（`apps/web/src/styles/tokens.css`）与主题偏好（`apps/web/src/theme/theme.ts`）。
+
 ## 定位
 
 前端分三层：
@@ -10,7 +12,7 @@
 |---|---|---|
 | API client 传输层 | `packages/api-client/src/http.ts` | 手写 fetch：Bearer 注入、RFC 7807 解析、401 刷新重放、SSE 流 |
 | API client 类型层 | `packages/api-client/src/api/generated/schema.d.ts` | **自动生成**（openapi-typescript），勿手改 |
-| Web 应用 | `apps/web/` | 页面 / 路由守卫 / TanStack Query / 组件库 |
+| Web 应用 | `apps/web/` | 页面 / 路由守卫 / 数据请求（Phase 1 起 TanStack Query）/ 设计系统（tokens + 组件） |
 
 ## 规则速查
 
@@ -29,7 +31,9 @@ const total = trades.reduce((s, t) => s + Number(t.amount), 0);   // 绝对禁�
 
 // 一期前端不做计算——展示层只 sort / filter；二期收益计算走后端 metrics API
 ```
-**零口径 ESLint 规则**（二期 P2-15 启用）：自定义规则禁止在业务页面里 `parseFloat` / `parseInt` / `Number(` / `toFixed`。一期先遵守此约定，避免临时代码积累后再清理。
+**零口径 ESLint 规则**：Phase 4 启用（重构路线图 D6）；在此之前由 `?raw` 源码断言兜底，Phase 1 起把扫描范围扩到 `src/**`。任何业务页面禁止 `parseFloat` / `parseInt` / `Number(` / `toFixed`。
+
+> 图表几何是唯一例外：只允许 `apps/web/src/charts/geometry.ts` 做 domain→pixel 投影（Phase 1 落地），业务页面仍不得解析/计算业务数值；后端 `views/*`（Phase 2）是主路径。
 
 ### 2. `packages/api-client/src/api/generated/schema.d.ts` 自动生成，勿手改
 
@@ -83,6 +87,8 @@ async function* events(jobId, { lastEventId } = {}) {
 
 ### 6. TanStack Query + 路由守卫
 
+> **状态**：Phase 1 起引入 TanStack Query；当前页面仍是手写 `useState/useEffect`，迁移期允许新旧共存，不得在未迁移页面强制引入第二套数据层。
+
 ```typescript
 // 路由守卫：无 token → 跳 /login；有 token 但 role 不匹配 → 403 页
 // Query 键按资源类型前缀：queryKey: ["trades", filters]
@@ -106,20 +112,32 @@ export default defineConfig({
 ```
 生产构建产物同源部署（nginx 反代）。
 
+### 8. 设计系统 / 主题 / 图表零口径（Phase 0 起）
+
+- **唯一视觉变量来源**：`apps/web/src/styles/tokens.css`。组件只消费语义 token（`--surface/--line/--accent/--up/--down/...`），禁止新增私有 hex；新增 token 需同步本文件与评审文档。
+- **主题**：`<html data-theme="light|dark" data-density="cozy|compact" data-trend="red-up|green-up">`；默认 `light + cozy + red-up`（A 股红涨绿跌），深色 Phase 5。
+- **数字排版**：金额/比率列右对齐 + `font-variant-numeric: tabular-nums`；格式（千分位/小数位/符号）一律来自后端字符串，前端不补零/不四舍五入。
+- **状态语义**：`build_state` 与 `data_status` 两轴共用一组 status token；禁止只用颜色表达状态（WCAG 2.2 1.4.1），必须带文案与形状。
+- **图表**：Phase 1 先自研 SVG，几何投影收敛到 `src/charts/geometry.ts`（唯一允许 `Number()` 的模块，配 golden `path d` 测试）；Phase 2 起后端 `GET /views/*` 返回归一化序列为主路径。
+
 ## 文件清单
 
 | 路径 | 职责 |
 |---|---|
 | `packages/api-client/src/http.ts` | 手写传输层：fetch + Bearer + 7807 + 401 刷新 + SSE |
 | `packages/api-client/src/api/generated/schema.d.ts` | openapi-typescript 自动生成的 TS 类型（勿手改） |
-| `apps/web/src/pages/` | 页面（Import.tsx 上传预览、TradeList.tsx 流水、Settings.tsx PAT） |
+| `apps/web/src/pages/` | 页面（Import.tsx 上传预览、Trades.tsx 流水、Settings.tsx PAT） |
 | `apps/web/src/ui/` | 通用组件（Cursor.tsx 游标、Problem.tsx 错误态、Table.tsx 表格） |
+| `apps/web/src/theme/theme.test.ts` | 偏好回落/持久化/根属性测试 |
+| `apps/web/src/styles/tokens.css` | Phase 0 设计 tokens（颜色/字体/间距/圆角/状态/图表/密度），组件只消费语义变量 |
+| `apps/web/src/theme/theme.ts` | Phase 0 主题/密度/趋势色偏好读写（`data-theme`/`data-density`/`data-trend`） |
 
 ## 门禁命令
 
 ```bash
-cd frontend && pnpm -r lint       # eslint
+cd frontend && pnpm -r lint       # 当前 = tsc；Phase 4 起接入 eslint
 cd frontend && pnpm -r typecheck   # tsc --noEmit 全量（含 api-client + web + api）
 cd frontend && pnpm -r test        # vitest
+cd frontend && pnpm -r build       # tsc + vite build
 make sdk                           # 从后端快照同步 TS 类型（后端改接口后必先跑）
 ```

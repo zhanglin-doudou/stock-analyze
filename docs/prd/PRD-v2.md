@@ -428,6 +428,7 @@ Internet ──TLS──▶   │  nginx  :443  ──静态资源──▶ Reac
 #### FR-D1 Web 应用（React SPA，薄客户端）—— P0
 
 - 技术约束：React + TypeScript（strict）+ Vite + TanStack Query + React Router + ECharts；**API 客户端由 OpenAPI 生成**；不引入组件库重依赖（"轻前"）。
+  > 2026-10-28 前端重构决策（D3/D4）：TanStack Query 于 Phase 1 引入；ECharts 暂不引入，改用自研 SVG（`docs/reviews/2026-10-28-frontend-refactor/README.md` §11）。
 - 页面：登录/注册、看板（5 卡）、回合列表与下钻、指标详情（三段式 + 口径抽屉）、对账、导入向导、月报、日志、设置（Token/基准/隐私开关）、审计。
 - **前端零口径**约束：前端不得实现指标计算与结论拼接（架构约束测试可验证）。
 - **API 验收**（前端依赖的契约）：SPA 所需的全部数据端点已在《API-Catalog》登记且 100% 通过验收套件；前端构建产物由 `GET /` 提供且 `200`。
@@ -489,7 +490,7 @@ Internet ──TLS──▶   │  nginx  :443  ──静态资源──▶ Reac
 | NFR-4 | 数据可信优先 | 导入自动对账（0.01 元）；对账闸门分级；`MetricResult` 携带 `definition_version/inputs_hash/n/data_as_of` |
 | NFR-5 | 幂等与可重放 | 导入 bag 去重 + 批次撤销；写接口支持 `Idempotency-Key`；派生数据可全量重建；同输入重复计算 diff=0 |
 | NFR-6 | **认证授权与多租户隔离**（替换 v1.1 的"无鉴权"） | JWT + 轮换 refresh + PAT；仓储层强制 `user_id` 过滤 + PostgreSQL RLS 双层；越权按 404 处理；管理端点独立前缀且不可读明细 |
-| NFR-7 | **测试与验收** | 分层覆盖率（后端同 v1.1 门禁）+ **API 验收套件覆盖 100% 端点** + **OpenAPI 契约测试** + 前端 Vitest/Playwright + 跨用户越权负向用例 100% 覆盖 |
+| NFR-7 | **测试与验收** | 分层覆盖率（后端同 v1.1 门禁）+ **API 验收套件覆盖 100% 端点** + **OpenAPI 契约测试** + 前端 Vitest（Playwright 暂未引入，视觉回归 Phase 4 可选） + 跨用户越权负向用例 100% 覆盖 |
 | NFR-8 | **工程一致性（Monorepo）** | 单仓双栈：Python（uv workspace）+ Node（pnpm workspace）；OpenAPI 快照为契约单源；前端 SDK 由契约生成；CI 路径过滤；Conventional Commits |
 | NFR-9 | 依赖 | 主行情源 akshare（须经校验层），可选灾备源；适配器结构；关键数据本地缓存；**不引入 Redis/Kafka** |
 | NFR-10 | **性能与容量** | API 读 p95 ≤300ms、写 p95 ≤500ms（不含异步任务）；首页看板数据 ≤1s；全量重算 ≤60s（单租户 5 万行）；容量目标：**100 用户 / 500 万行**，可水平扩 API 与 worker |
