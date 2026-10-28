@@ -127,6 +127,8 @@ export default defineConfig({
 | `packages/api-client/src/http.ts` | 手写传输层：fetch + Bearer + 7807 + 401 刷新 + SSE |
 | `packages/api-client/src/api/generated/schema.d.ts` | openapi-typescript 自动生成的 TS 类型（勿手改） |
 | `apps/web/src/pages/` | 页面（Import.tsx 上传预览、Trades.tsx 流水、Settings.tsx PAT） |
+| `apps/web/src/layout/` | Phase 1b AppShell（76/64px 图标栏、面包屑、5 组导航）、navigation 配置、页面标题映射 |
+| `apps/web/src/ui/icons.tsx` | Phase 1b 自研线性图标集（不引图标库） |
 | `apps/web/src/ui/` | 通用组件（Cursor.tsx 游标、Problem.tsx 错误态、Table.tsx 表格） |
 | `apps/web/src/theme/theme.test.ts` | 偏好回落/持久化/根属性测试 |
 | `apps/web/src/data/queryClient.ts` | Phase 1 TanStack Query Client 与 queryKeys 约定 |

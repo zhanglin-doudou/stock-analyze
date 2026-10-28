@@ -717,6 +717,6 @@ cd docs/reviews/2026-10-28-frontend-refactor
 |---|---|---|---|
 | 选型文档 | ✅ 已完成 | `5e5a8c1` | 三方案 + 预览 + 审计 + 调研 + D1–D10 |
 | Phase 0 | ✅ 已完成 | `d1108b0` | tokens/主题骨架 + 文档漂移修正 + 基线红灯修复 |
-| Phase 1a | ✅ 已完成 | 待提交 | TanStack Query Provider、status 两轴、geometry 白名单、零口径全量门禁 |
-| Phase 1b | ⏳ 进行中 | — | AppShell + 导航 5 组 + 路由懒加载 + 页面标题 |
+| Phase 1a | ✅ 已完成 | `80608b6` | TanStack Query Provider、status 两轴、geometry 白名单、零口径全量门禁 |
+| Phase 1b | ✅ 已完成 | 本提交 | AppShell + 导航 5 组 + 路由懒加载 + 页面标题 |
 | Phase 1c | ⏳ 待开始 | — | Dashboard 重做 + 图表 + 响应式 |
