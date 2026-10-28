@@ -2,6 +2,15 @@
 
 本文档是**本仓 AI 编程助手的第一入口**。任何未阅读本文档就开始编码的 AI 会在 30 秒内踩坑。
 
+## 0. 当前阶段与固定本地账号（2026-10-28）
+
+- **一期**：已完成；**二期核心**（回合、净值、资产、18 指标、Dashboard、API-083 月度编排）已落地/验收；**二期剩余**（归因/月报/导出/设置增强/报告页/verify-p2/零口径 ESLint）暂停，未完成功能只用占位入口，禁止伪造数据/下载。
+- **固定本地测试 / 体验账号**：`1234@dev.com` / `1234`（仅本地；由 `make seed-tenants` / `make seed-demo` 创建）。
+  - 隔离对照：`a@demo.example.com` / `b@demo.example.com`，管理员：`admin@demo.example.com`；本地 seed 口令统一为 `1234`。
+  - `backend/tests/conftest.py` 的 `DEV_EMAIL/DEV_PASSWORD` 即该固定账号；测试和手工验收优先使用它，不要再造临时账号。
+  - **禁止**把该弱口令/seed 账号用于生产或对外环境。
+- 项目状态与操作入口见 [README.md](README.md)；未完成项/占位/验收 SKIP 见 [Dashboard 设计 §7](docs/architecture/2026-10-28-dashboard.md)。
+
 ## 🚨 AI 最容易踩的 7 个坑（必须前置阅读）
 
 ### 1. 禁止 float，金额/价格/数量/比率一律用标度整数
@@ -112,8 +121,8 @@ api / worker   顶层，可依赖所有下层；下层禁止反向依赖
 
 | 约定 | 示例 |
 |---|---|
-| 所有 `.py` 文件首行 `from __future__ import annotations` | 70/70 文件覆盖 |
-| Router 层一律 `APIRouter(route_class=StrictQueryRoute)` | 6/6 router |
+| 所有 `.py` 文件首行 `from __future__ import annotations` | 强制 |
+| Router 层一律 `APIRouter(route_class=StrictQueryRoute)` | 所有 Router |
 | Pydantic schema 加 `operation_id="xxx"`（与 API-Catalog 对齐） | 必填 |
 | Repository 方法签名 `async def method(self, session, user_id, ...)` | 强制 user_id 参数 |
 | 写操作三件套：幂等键 Idempotency-Key、审计留痕（不含敏感明文）、RFC 7807 错误体 | 长任务必须 202 + `Location: /jobs/{id}` |
@@ -142,13 +151,18 @@ from stock_platform.tenant import TenantContext
 ## 门禁命令（提交前必跑）
 
 ```bash
-make verify-p1     # ruff / pytest / api-check 全绿
-make typecheck     # mypy strict + import-linter + tsc
-make lint          # ruff fix + eslint
-make api-snapshot  # 新增/改动端点后更新契约
-make api-check     # 契约完整性校验
-make sdk           # 同步前端 TS 类型
+make lint                 # ruff + 前端 tsc（当前前端 lint 即 tsc）
+make typecheck            # mypy strict + import-linter + tsc
+make test-p2              # 二期主套餐（core/review/integration/API/隔离/契约）
+make test-metrics         # 指标 golden/oracle/契约 + 金标结构门禁
+make test-isolation       # 越权负向矩阵
+make gate-golden-structure # 金标结构门禁（PR 用）
+make api-snapshot         # 新增/改动端点后更新 contracts/openapi.json
+make api-check            # 契约完整性校验
+make sdk                  # 同步前端 TS 类型
 ```
+
+> `make verify-p1` 仅覆盖一期；`verify-p2` 尚未提供（Period2-14 暂停）。二期验收使用 `test-p2` + `test-metrics` + 各 gate，并在记录中明确 SKIP。
 
 ## 各子系统专属约定
 

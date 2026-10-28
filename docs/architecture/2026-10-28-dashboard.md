@@ -430,8 +430,8 @@ def max_drawdown_window(...) -> DrawdownWindow:
 set -euo pipefail
 BASE="${BASE:-http://127.0.0.1:8000/api/v1}"
 PERIOD="${PERIOD:-2026-06}"        # demo 流水止于 2026-06（D-19 未落时的已知 period）
-EMAIL="${EMAIL:-a@demo.example.com}"
-PASS="${PASS:-Demo!Passw0rd2026}"
+EMAIL="${EMAIL:-1234@dev.com}"
+PASS="${PASS:-1234}"
 SKIPS=()
 
 # 0) 前置：当前可用命令

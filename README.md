@@ -1,56 +1,63 @@
 # stock-analyze — 个人交易复盘平台
 
-面向个人投资者的交易复盘系统：导入券商对账单，自动落库、分类与对账，产出多维复盘分析。一期（Phase 1）已交付**多租户底座 + 对账单导入链路 + 任务队列 + 流水维护 + 前端骨架**。
+面向个人投资者的交易复盘系统：导入券商对账单，自动落库/分类/对账，建立 FIFO 回合、净值/资产序列与三域指标，并在 Dashboard 中聚合展示。
 
-## 功能特性（一期）
+> **当前阶段（2026-10-28）**
+>
+> - **一期**：已完成（认证/多租户/RLS、导入、任务队列、流水维护、契约链路）。
+> - **二期核心**：已完成验收或已落地——FIFO 回合、`GET /nav`、资产表、18 指标引擎与 `/metrics`、**Dashboard 两板块（API-084）**、`POST /jobs/rebuild-period`（API-083）。
+> - **二期剩余**：归因、月报、导出、设置增强、报告/导出前端页按计划**暂停**；前端已预留 `/reports`、`/exports`、`/attribution` 占位入口，验收中按缺失清单 SKIP，不伪造数据。
+> - **三期**：未开始。
+>
+> 设计与验收记录见 [Dashboard 设计](docs/architecture/2026-10-28-dashboard.md)、[月度报告设计](docs/architecture/2026-10-28-monthly-report.md)、[S10 验收记录](docs/reviews/2026-10-27-p207-S10-acceptance.md)。
 
-- **多租户与安全**：注册 / 登录 / 刷新令牌轮换 / 登出 / 个人访问令牌（PAT）CRUD，登录限速
-- **双层隔离**：仓储层强制 `user_id` 过滤 + PostgreSQL RLS（`SET LOCAL app.user_id`），跨账号访问一律 404，admin 角色禁止读写业务明细
-- **对账单导入**：华泰账单解析、列映射预检、预览（不落库）→ 提交（异步任务）→ 批次撤销、隔离区查询、bag 去重
-- **流水维护**：游标分页 / ETag 缓存 / If-Match 并发控制 / 单行修正 / 软删与恢复 / 修改历史
-- **任务系统**：PG 队列（SKIP LOCKED + 租约 + 心跳 + 单飞去重 + 同用户并发上限）、SSE 进度流、取消、积压统计
-- **对账**：资金余额链核对，断链精确定位到具体行
-- **契约链路**：OpenAPI 快照 → `api-check` 契约完整性门禁 → 前端 TS SDK 生成
-- **标度整数**：金额 2 位 / 价格 6 位 / 数量 4 位 / 比率 8 位，全程禁 float，API 边界输出定点字符串
+## 功能特性
+
+- **多租户与安全**：注册 / 登录 / 刷新令牌轮换 / 登出 / PAT；仓储层强制 `user_id` + PostgreSQL RLS 双层隔离；跨账号 404，admin 禁读业务明细。
+- **对账单导入**：华泰账单解析、列映射预检、预览不落库 → 提交异步任务 → 批次撤销、隔离区、bag 去重、断链补差。
+- **流水维护**：游标分页 / ETag / If-Match 并发控制 / 修正 / 软删恢复 / 历史。
+- **FIFO 回合**：稳定配对、分批减仓、股息归属、送转/配股、桥接恒等式；回合列表与配对明细。
+- **净值与收益**：份额法 TWR、XIRR/MWR、日资产/现金流、`GET /nav`。
+- **资产快照**：`review.asset_daily` 逐日现金/市值/成本/浮盈；`GET /assets`、`POST /assets/build`。
+- **三域指标**：18 个指标（核心 10 + 探索 8）、DAG/`definition_version`/CI/门禁状态机、`/metrics` 与三段式解释/下钻；月度一键构建（API-083）rounds→assets→nav→metrics。
+- **Dashboard 看板**：`/dashboard` 两个板块——资产概览（持仓/现金/仓位/总收益/峰值成本/费用）与历史概览（平仓统计/盈亏占比/最大收益/最大回撤）；旧五卡以子块合并；未完成功能有占位入口。
+- **质量与契约**：OpenAPI 快照 → `api-check` → 前端 SDK；标度整数零 float；RLS/越权/端点/租户/金标门禁；pytest/vitest。
 
 ## 技术栈
 
 | 层 | 技术 |
 |---|---|
-| 后端 | Python ≥ 3.12 · uv workspace · FastAPI · SQLAlchemy 2.0 (async) · asyncpg · Alembic |
+| 后端 | Python ≥ 3.12 · uv workspace · FastAPI · SQLAlchemy 2.0 async · asyncpg · Alembic |
 | 数据库 | PostgreSQL 16（多 schema + RLS） |
-| 任务 | PG 队列 + 独立 worker 进程（SKIP LOCKED） |
-| 前端 | Vite · React 18 · TypeScript · React Router · TanStack Query |
-| 质量 | ruff · mypy (strict) · import-linter · pytest · vitest · eslint |
+| 任务 | PG 队列 + 独立 worker（SKIP LOCKED / 租约 / 心跳 / 单飞） |
+| 前端 | Vite · React 18 · TypeScript（strict）· React Router · Vitest/RTL |
+| 明确未引入 | TanStack Query、ECharts、MSW、Playwright（当前仓库依赖中没有；不要假设已安装） |
+| 质量 | ruff · mypy strict · import-linter · pytest · vitest · tsc |
 
 ## 目录结构
 
 ```
 stock-analyze/
 ├── backend/
-│   ├── packages/            # 分层包（依赖只允许自上而下）
-│   │   ├── contracts/       # DTO / 枚举 / 错误码 / 常量 / Clock（不依赖任何包）
-│   │   ├── core/            # 纯计算内核：标度整数、零 I/O、零 wall-clock
-│   │   ├── platform/        # DB / 配置 / 任务队列 / 仓储基座 / 幂等 / 限速
-│   │   ├── ledger/          # 流水域：模型 / 解析器 / 导入应用层 / 仓储
-│   │   ├── review/          # 复盘域（二期）
-│   │   └── delivery/        # 交付域（三期）
+│   ├── packages/
+│   │   ├── contracts/       # DTO/枚举/错误码/常量/Clock
+│   │   ├── core/            # 纯计算：标度整数、FIFO、指标/回撤等
+│   │   ├── platform/        # DB/配置/任务队列/幂等/限速/tenant
+│   │   ├── ledger/          # 流水域：模型/解析/导入/仓储
+│   │   ├── review/          # 回合/净值/资产/指标应用层
+│   │   └── delivery/        # 交付域（当前仅占位）
 │   ├── services/
-│   │   ├── api/             # FastAPI 应用 + CLI（stock_api.cli）
-│   │   └── worker/          # 任务消费者（stock_worker）
-│   ├── migrations/          # Alembic（多 schema + RLS 策略）
-│   └── tests/               # unit / api / integration / isolation / architecture
+│   │   ├── api/             # FastAPI 应用 + `stock_api.cli`
+│   │   └── worker/          # 任务消费者 `stock_worker`
+│   ├── migrations/          # Alembic（schema + RLS）
+│   └── tests/               # unit/api/integration/isolation/golden/oracle/contract...
 ├── frontend/
-│   ├── apps/web/            # Vite + React 应用
-│   └── packages/api-client/ # fetch 传输层（401 刷新重放）+ 生成的 TS 类型
-├── contracts/openapi.json   # API 契约快照（api-snapshot 生成，api-check 校验）
-├── fixtures/market/         # 行情 / 账单夹具（seed-demo 生成，确定性）
-├── infra/
-│   ├── compose/             # docker-compose.dev.yml（本地 PostgreSQL）
-│   ├── postgres/init/       # 容器首次初始化 SQL（角色 + 库 + 扩展）
-│   └── .env.example         # 环境变量模板
-├── scripts/db_bootstrap.sql # 本机 PostgreSQL 引导脚本（无 Docker 时）
-└── docs/                    # 架构 / 开发计划 / PRD / 数据库指引
+│   ├── apps/web/            # Vite + React（pages: Dashboard/Metrics/Nav/Assets/Rounds...）
+│   └── packages/api-client/ # 手写传输层 + 生成 TS 类型
+├── contracts/openapi.json   # 契约快照（make api-snapshot）
+├── fixtures/market/         # 行情/账单夹具（seed-demo 生成，确定性）
+├── infra/                   # compose / PG init / env 模板
+└── docs/                    # 架构 / PRD / 计划 / 验收 / 设计
 ```
 
 ## 快速开始
@@ -61,24 +68,24 @@ stock-analyze/
 - Node.js ≥ 20 与 [pnpm](https://pnpm.io/)
 - PostgreSQL 16+（Docker 或本机安装，见 [docs/DATABASE.md](docs/DATABASE.md)）
 
-### 五步启动
+### 启动
 
 ```bash
-# 1. 环境变量（首次）
-make env                 # 复制 infra/.env.example → .env
+# 1) 环境变量（首次）
+make env
 
-# 2. 启动数据库并建表（二选一）
-make db-up && make migrate      # Docker 方式（端口 5433）
-# make db-bootstrap && make migrate   # 本机 PostgreSQL 方式（端口 5432，需覆盖 DSN，见 DATABASE.md）
+# 2) 启动数据库并迁移（二选一）
+make db-up && make migrate                 # Docker，端口 5433
+# make db-bootstrap && make migrate        # 本机 PG，端口 5432（见 DATABASE.md 覆盖 DSN）
 
-# 3. 安装依赖
-uv sync                  # 后端整套（uv workspace 聚合）
+# 3) 安装依赖
+uv sync
 cd frontend && pnpm install && cd ..
 
-# 4. 造演示数据（A/B/admin 三账号）
-make seed-tenants
+# 4) 造演示数据（固定体验账号 + 行情回放 + 账单）
+make seed-demo
 
-# 5. 一键起服务（api + worker + web）
+# 5) 起服务（api + worker + web；不会自动起 DB）
 make dev
 ```
 
@@ -86,178 +93,137 @@ make dev
 
 | 入口 | 地址 |
 |---|---|
+| **Dashboard** | http://127.0.0.1:5173/dashboard |
 | Web | http://127.0.0.1:5173 |
 | API | http://127.0.0.1:8000/api/v1 |
 | OpenAPI | http://127.0.0.1:8000/api/v1/openapi.json |
-| 健康检查 | /healthz · /readyz · /version · /metrics |
+| 健康检查 | `/healthz` · `/readyz` · `/version` · `/metrics` |
 
-演示账号（`make seed-tenants` 生成，密码 `Demo!Passw0rd2026`）：
+### 固定本地测试 / 体验账号
 
-| 账号 | 角色 | 说明 |
+> **仅限本地开发环境**；生产环境不执行 `seed-tenants` / `seed-demo`。
+
+| 账号 | 密码 | 角色/用途 |
 |---|---|---|
-| a@demo.example.com | user | 演示账号 A（有业务数据） |
-| b@demo.example.com | user | 演示账号 B（有业务数据） |
-| admin@demo.example.com | admin | 运维管理员（不可读写业务明细） |
+| **1234@dev.com** | **1234** | **固定测试/体验账号**（全新 seed 有业务数据；Dashboard/指标验收主账号） |
+| a@demo.example.com | 1234 | 隔离对照 A（有业务数据） |
+| b@demo.example.com | 1234 | 隔离对照 B（有业务数据） |
+| admin@demo.example.com | 1234 | 运维管理员（不可读写业务明细） |
+
+- `make seed-tenants` / `make seed-demo` 使用固定口令 `1234`；`backend/tests/conftest.py` 的 `DEV_EMAIL/DEV_PASSWORD` 与体验账号一致。
+- 账号/口令仅用于本地测试，**禁止用于生产或对外环境**。
+- 全新数据库（或 `make db-reset` 后）四个账号口令均为 `1234`；旧数据库里此前创建的账号 seed 会重置口令；已有有效流水会跳过导入，无流水账号会重新导入。需要完全重建数据时请 `make db-reset` 后重新 seed。
+
+### 首次看板数据
+
+`seed-demo` 导入账单后只会自动建立回合；资产/净值/指标需要构建：
+
+```bash
+# 方式 1：前端 /metrics 页面点「按月构建复盘数据」（API-083）
+# 方式 2：直接调 API-083（write PAT，替换 period/token）
+curl -X POST http://127.0.0.1:8000/api/v1/jobs/rebuild-period \
+  -H "Authorization: Bearer $PAT" -H "Content-Type: application/json" \
+  -H "Idempotency-Key: $(uuidgen)" -d '{"period":"2026-06"}'
+# 轮询 GET /api/v1/jobs/{job_id}，succeeded 后打开 /dashboard
+```
+
+> 默认全新 seed 的演示流水为 2026-04~06（`DEMO_CLOCK=2026-10-01`，行情截至 2026-09-30）；**实际构建月以 `GET /api/v1/dashboard` 返回的 `legacy_period` 为准**。若资产未构建，Dashboard 会显示 `missing` +「去构建」入口。
 
 ## 常用命令
 
+```bash
+make help              # 全部目标
+
+# 环境/运行
+make env / db-up / db-bootstrap / migrate
+make dev               # api(热重载) + worker + web
+make api / worker / web
+
+# 数据
+make seed-tenants      # 固定体验账号 + A/B/admin + 账单
+make seed-demo         # 演示数据 + 行情回放（推荐首次使用）
+
+# 质量
+make lint              # ruff + 前端 tsc（当前前端 lint 即 tsc）
+make typecheck         # mypy + import-linter + tsc
+make test              # 快速单测
+make test-p2           # 二期主套餐（core/review/integration/API/隔离/契约）
+make test-metrics      # 指标 golden/oracle/契约 + 金标结构门禁
+make test-isolation    # 越权矩阵
+make test-perf         # core microbench
+make gate-endpoint     # 端点覆盖
+make gate-tenant       # 租户越权覆盖
+make gate-rls          # RLS 覆盖
+make gate-golden-structure  # 金标结构门禁（PR 用）
+make gate-golden       # 金标人工审批门禁（当前仍需人工收尾）
+
+# 契约
+make api-snapshot / api-check / sdk / api-coverage
 ```
-make help        查看全部目标
 
-── 环境 ──
-make env             生成 .env（首次）
-make db-up           启动 Docker PostgreSQL（5433）
-make db-bootstrap    本机 PostgreSQL 建角色/库（无 Docker 替代）
-make db-down         停止数据库
-make db-reset        销毁并重建数据库
-make migrate         执行 Alembic 迁移（schema + 表 + RLS）
-
-── 运行 ──
-make dev             api(热重载) + worker + web
-make api / worker / web   单独启动某进程
-
-── 数据 ──
-make seed-tenants    造 A/B/admin 账号与账单
-make seed-demo       造演示数据（含行情回放）
-
-── 质量 ──
-make lint            ruff + eslint
-make format          ruff 自动修复 + 格式化
-make typecheck       mypy + import-linter + tsc
-make test            快速单测（不含 api/integration）
-make test-core       core 单测 + 100% 覆盖门禁
-make test-api        API 验收套件（需 PostgreSQL）
-make test-review     Period2 review 域单测 + rebuild 集成测试
-make test-p2         Period2-01/02 全量断言（fifo/review/API/越权/契约）
-make test-rls        RLS 隔离集成测试
-make test-isolation  越权负向矩阵
-make verify-p1       一期质量门禁一条命令全绿
-
-── 契约 ──
-make api-snapshot    生成 contracts/openapi.json
-make api-check       契约完整性检查（operationId/示例/错误码）
-make sdk             由快照生成前端 TS 类型
-make api-coverage    端点覆盖报告
-make demo-p1         打印 5 分钟演示脚本
-```
+> `make verify-p2` 尚未提供（Period2-14 暂停）；请使用 `test-p2` + `test-metrics` + 各 gate，并在验收记录中标注 SKIP。`make rebuild`/`make demo-broken` 同样未提供，构建用 API-083 或 `/metrics` 页面。
 
 ## 调试指引
 
 ### 后端
 
-- **日志级别**：`.env` 中 `STOCK_LOG_LEVEL=DEBUG`；compose 已开启慢查询日志（>200ms）。
-- **单独调试 API**：`make api`（uvicorn `--reload`），断点用 VS Code 配置：
-
-```jsonc
-// .vscode/launch.json（需安装 Python Debugger / debugpy 扩展）
-{
-  "type": "debugpy",
-  "request": "launch",
-  "name": "FastAPI",
-  "module": "uvicorn",
-  "args": ["stock_api.app:create_app", "--factory", "--host", "127.0.0.1", "--port", "8000"],
-  "cwd": "${workspaceFolder}",
-  "envFile": "${workspaceFolder}/.env"
-}
-```
-
-- **跑单个用例**：
+- 日志级别：`.env` 中 `STOCK_LOG_LEVEL=DEBUG`；compose 已开慢查询。
+- 单测/标记：
 
 ```bash
-uv run pytest backend/tests/api/test_imports_trades_jobs.py -k "api_011" -x   # 按 API-ID/关键词
-uv run pytest -m isolation -q                                                 # 按标记
-uv run pytest backend/tests/integration -q                                    # 真库用例
+uv run pytest backend/tests/api/test_dashboard.py -q
+uv run pytest backend/tests/unit/review -q
+uv run pytest -m isolation -q
 ```
 
-- **错误排查**：所有错误为 RFC 7807 体，带 `request_id`，可对照 `docs/architecture/v2/API-Catalog.md` §3 错误码表定位；`curl -s http://127.0.0.1:8000/api/v1/errors` 可列出全部错误码。
-
-- **调试任务/队列**：直接查库（角色见 [docs/DATABASE.md](docs/DATABASE.md)）：
-
-```sql
-SELECT id, kind, status, attempt, stage, progress, last_error FROM platform.job ORDER BY created_at DESC LIMIT 10;
-SELECT job_id, seq, type, payload FROM platform.job_event WHERE job_id = 'job_xxx' ORDER BY seq;
-```
-
-- **CLI 调试**：`uv run python -m stock_api.cli <cmd> --help`；`seed-tenants` / `seed-demo` 使用 FrozenClock（2026-10-01），数据确定性可复放。
+- **错误排查**：RFC 7807 错误体带 `code/user_message/what_to_do/request_id`；`GET /api/v1/errors` 列出错误码。
+- **任务/队列**：`SELECT id, kind, status, attempt, progress FROM platform.job ...`；任务详情 `GET /api/v1/jobs/{id}`。
+- **CLI**：`uv run python -m stock_api.cli <cmd> --help`；`seed-*` 使用 FrozenClock（2026-10-01），数据可复放。
 
 ### 前端
 
 ```bash
 cd frontend
-pnpm --filter web dev        # Vite dev server（/api 代理到 8000）
-pnpm -r typecheck            # tsc 全量检查
+pnpm --filter web dev        # Vite（/api 代理到 8000）
+pnpm -r typecheck
 pnpm -r test                 # vitest
 ```
 
-- API client 分两层：`packages/api-client/src/http.ts`（手写传输层：Bearer 注入、RFC 7807 解析、401 刷新重放）+ `src/api/generated/schema.d.ts`（由契约生成，勿手改）。改接口后先 `make api-snapshot && make sdk`。
-- 页面：登录/注册、交易流水、**回合（列表 + FIFO 配对详情）**、导入 / 导入记录、设置。导入账单成功后 worker 会自动建立 FIFO 回合；回合页可查询/筛选/重建并下钻配对明细。
-
-### 数据库调试
-
-见 [docs/DATABASE.md](docs/DATABASE.md)——含双角色连接方式、RLS 验证 SQL、慢查询定位、重置流程与常见故障排查。
-
-## 开发指引
-
-### 分层铁律（import-linter 强制）
-
-```
-stock_contracts   不依赖任何其它包
-stock_core        只依赖 stock_contracts
-stock_platform    只依赖 stock_contracts / stock_core
-stock_ledger      只依赖 stock_contracts / stock_core / stock_platform
-api / worker   顶层，可依赖所有下层；下层禁止反向依赖
-```
-
-改动后运行 `uv run lint-imports`（已并入 `make typecheck`）验证。
-
-### 关键约定
-
-1. **禁 float**：金额/价格/数量/比率一律用 `stock_core.values` 的标度整数（`Money`/`Price`/`Qty`/`Ratio`），API 边界输出定点字符串。
-2. **零 wall-clock**：domain 层时间一律注入 `Clock`（contracts 提供 `SystemClock`/`FrozenClock`）。
-3. **租户上下文**：`user_id` 只能来自凭证（`get_tenant` 依赖），仓储方法必须显式接收 `user_id` 并过滤；禁止由请求参数覆盖。
-4. **写操作三件事**：幂等键（Idempotency-Key）、审计留痕（不含敏感明文）、RFC 7807 错误。
-5. **长任务**：走 `stock_platform.jobs.JobQueue`（单飞 + 租约），API 返回 202 + `Location: /api/v1/jobs/{id}`，禁止同步阻塞。
-
-### 新增端点的标准流程（契约先行）
-
-```bash
-# 1. 在 stock_api/routers/ 写路由 + stock_api/schemas.py 定义 Pydantic 模型（operation_id 必填）
-# 2. 更新 docs/architecture/v2/API-Catalog.md §1 端点表与 §6 验收矩阵
-make api-snapshot          # 重新生成契约快照
-make api-check             # 校验 operationId 唯一 / 错误码一致 / 文档覆盖
-make sdk                   # 同步前端 TS 类型
-# 3. 在 backend/tests/api/ 补用例：每个 API-ID 至少 happy / 越权 / 关键错误码 三条
-# 4. 迁移有表结构变更时：uv run alembic -c backend/alembic.ini revision --autogenerate -m "..."
-```
-
-### 提交前自检
-
-```bash
-make verify-p1    # 后端门禁（ruff / 单测 / api-check）
-make typecheck    # mypy + import-linter + tsc
-make lint         # ruff + eslint
-```
+- API client：`packages/api-client/src/http.ts`（手写传输层）+ `src/api/generated/schema.d.ts`（契约生成，勿手改）；改接口后 `make api-snapshot && make sdk`。
+- 页面：登录/注册、**Dashboard**、交易流水、回合/详情、净值、资产、指标/详情、导入/导入记录、设置；`/reports`、`/exports`、`/attribution` 为未完成功能占位页（可见、不返回假数据）。
 
 ## 测试说明
 
 | 套件 | 命令 | 依赖 |
 |---|---|---|
-| 单测（core/contracts） | `make test` | 无 |
-| core 覆盖门禁 | `make test-core`（要求 100%） | 无 |
-| API 验收（真实 ASGI + 真库） | `make test-api` | PostgreSQL |
-| Period2 review 域（回合落库/rebuild） | `make test-review` | PostgreSQL |
-| Period2-01/02 套餐（fifo/review/API/越权/契约） | `make test-p2` | PostgreSQL |
-| RLS 双层隔离 | `make test-rls` | PostgreSQL |
-| 越权负向矩阵 | `make test-isolation` | PostgreSQL |
-| 架构（import-linter 元测试） | `make test-architecture` | 无 |
+| 快速单测 | `make test` | 无 |
+| core 覆盖门禁 | `make test-core`（100%） | 无 |
+| API 验收 | `make test-api` | PostgreSQL |
+| 二期主套餐 | `make test-p2` | PostgreSQL |
+| review/rebuild/资产增量 | `make test-review` | PostgreSQL |
+| 指标 golden/oracle/契约 | `make test-metrics` | 无/部分真库 |
+| RLS/越权 | `make test-rls` / `make test-isolation` | PostgreSQL |
+| 前端 | `cd frontend && pnpm -r test` | Node |
 
-测试硬约束：不 mock 数据库（RLS 必须真连库）；每个用例自造数据自清理，不依赖执行顺序。测试读根 `.env` 的真实配置。
+硬约束：不 mock 数据库（RLS 必须真连库）；测试读根 `.env`；跨租户/401/403/404 由隔离矩阵强制。
+
+## 已知未完成（二期暂停项）
+
+- Period2-08 归因、Period2-09 月报、Period2-10 导出、Period2-11 设置增强、Period2-13 报告/导出页、Period2-14 `verify-p2`、Period2-15 零口径 ESLint 门禁。
+- G8 金标审批仍有 22 个 COVERAGE 骨架 + `perf.fee_breakeven` 口径待收尾；`make gate-golden` 可能红。
+- 具体缺失/占位/验收 SKIP 见 [Dashboard 设计 §7](docs/architecture/2026-10-28-dashboard.md)。
+
+## 开发约定
+
+- 入口：[AGENTS.md](AGENTS.md)（跨子系统强制约定；仓库无 `AGENT.md`）。
+- 架构：[Architecture-v2](docs/Architecture-v2.md) · 计划：[DEV-PLAN-v2](docs/DEV-PLAN-v2.md) · 契约：[API-Catalog](docs/architecture/v2/API-Catalog.md)
+- 数据库：[docs/DATABASE.md](docs/DATABASE.md) · 测试：[Testing](docs/architecture/v2/Testing.md) · 可靠性/扩展：[Reliability](docs/architecture/v2/Reliability.md) / [Extensibility](docs/architecture/v2/Extensibility.md)
+- 关键约定：禁 float、Clock 注入、仓储显式 `user_id`、契约先行、`ApiError(ErrorCode.*)`、跨账号 404、长任务 202 + JobQueue。
 
 ## 文档索引
 
-- [Architecture-v2](docs/Architecture-v2.md) — 架构总纲（分层 / 隔离 / 任务 / 可靠性）
-- [DEV-PLAN-v2](docs/DEV-PLAN-v2.md) — 开发计划（Period1~Period3 任务拆解与验收）
-- [API-Catalog](docs/architecture/v2/API-Catalog.md) — 端点总表 / 错误码表 / 验收矩阵
-- [数据库安装与 SQL 指引](docs/DATABASE.md) — 本文档配套的数据库专项文档
-- [Testing](docs/architecture/v2/Testing.md) / [Reliability](docs/architecture/v2/Reliability.md) / [Extensibility](docs/architecture/v2/Extensibility.md) / [ADR](docs/architecture/v2/ADR.md)
-- [Period2-01/02 实施与验收日志](docs/reviews/Period2-01-02-Implementation-Log.md) — FIFO 引擎与回合落库的交付物/口径/证据
+- [Dashboard 设计（Period2-12）](docs/architecture/2026-10-28-dashboard.md)
+- [月度报告设计（Period2-09，暂停）](docs/architecture/2026-10-28-monthly-report.md)
+- [S10 验收记录](docs/reviews/2026-10-27-p207-S10-acceptance.md)
+- [Period2-01/02 实施日志](docs/reviews/Period2-01-02-Implementation-Log.md)
+- [开发计划](docs/DEV-PLAN-v2.md) · [PRD](docs/prd/PRD-v2.md)
