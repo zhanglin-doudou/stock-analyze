@@ -87,6 +87,27 @@ export function TrendChart({
         <span>{series[Math.floor(series.length / 2)]?.label}</span>
         <span>{last?.label}</span>
       </div>
+      {/* WCAG 2.2：图表提供可展开数据表替代（不依赖视觉形状）。 */}
+      <details className="dash-chart-data">
+        <summary>查看数据表（{series.length} 行）</summary>
+        <table>
+          <caption>{title}数据表</caption>
+          <thead>
+            <tr>
+              <th scope="col">日期</th>
+              <th scope="col">总资产</th>
+            </tr>
+          </thead>
+          <tbody>
+            {series.map((point) => (
+              <tr key={`${point.label}-${point.value}`}>
+                <td>{point.label}</td>
+                <td className="num">{point.display ?? point.value}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </details>
     </div>
   );
 }

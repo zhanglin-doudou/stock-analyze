@@ -3,6 +3,7 @@ import { Link, useParams, useSearchParams } from "react-router-dom";
 import type { MetricDrilldown, MetricDrilldownItem, MetricExplain } from "@sa/api-client";
 import { api } from "../client";
 import { currentMonth } from "../lib/date";
+import { MonthInput } from "../ui/MonthInput";
 import { ProblemView } from "../ui/Problem";
 import { DataTable, type DataTableColumn } from "../ui/DataTable";
 import "./detail.css";
@@ -111,10 +112,9 @@ export function MetricDetail() {
         <div className="row-actions">
           <label>
             月份{" "}
-            <input
-              type="month"
+            <MonthInput
               value={period}
-              onChange={(event) => setSearchParams({ period: event.target.value })}
+              onChange={(value) => setSearchParams({ period: value })}
             />
           </label>
           <button

@@ -67,6 +67,9 @@ export function AppShell() {
 
   return (
     <div className="app-shell" data-focus={focusMode ? "true" : "false"}>
+      <a className="skip-link" href="#main-content">
+        跳到主要内容
+      </a>
       <aside className="shell-rail">
         <div className="shell-brand" aria-label="交易复盘">
           <span className="shell-brand-mark" aria-hidden="true">
@@ -143,7 +146,7 @@ export function AppShell() {
         </header>
 
         <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
-        <main className="shell-content">
+        <main className="shell-content" id="main-content" tabIndex={-1}>
           <Suspense fallback={<p className="shell-loading">加载中…</p>}>
             <Outlet />
           </Suspense>

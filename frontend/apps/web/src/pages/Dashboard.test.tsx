@@ -272,6 +272,8 @@ describe("Dashboard 看板", () => {
     expect(screen.getByTestId("history-overview")).toBeTruthy();
     // Phase 1c：总资产日线来自 /assets（真实数据，几何由 charts/geometry 完成）
     expect(await screen.findByRole("img", { name: /总资产曲线/ })).toBeTruthy();
+    // Phase 4c：图表提供可展开数据表替代
+    expect(screen.getByText(/查看数据表/)).toBeTruthy();
 
     for (const testId of [
       "kpi-market-value",

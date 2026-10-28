@@ -15,6 +15,24 @@
   border: 0;
 }
 
+.skip-link {
+  position: fixed;
+  top: -48px;
+  left: var(--s2);
+  z-index: var(--z-toast);
+  padding: 8px 14px;
+  border-radius: var(--r-sm);
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-size: var(--fs-sm);
+  text-decoration: none;
+  transition: top var(--dur) var(--ease);
+}
+
+.skip-link:focus {
+  top: var(--s2);
+}
+
 .app-shell {
   min-height: 100vh;
   background: var(--bg);

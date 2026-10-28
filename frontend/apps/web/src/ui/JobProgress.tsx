@@ -69,10 +69,17 @@ export function JobProgress({ jobId, onDone }: JobProgressProps) {
 
   return (
     <div className="job-progress">
-      <div className="job-progress-bar">
+      <div
+        className="job-progress-bar"
+        role="progressbar"
+        aria-label="任务进度"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={progress}
+      >
         <div className="job-progress-fill" style={{ width: `${progress}%` }} />
       </div>
-      <p className="muted">
+      <p className="muted" aria-live="polite">
         任务 {jobId}：{progress}%{stage ? ` · ${stage}` : ""}{status ? ` · ${status}` : ""}
       </p>
       {message ? <p className="muted">{message}</p> : null}

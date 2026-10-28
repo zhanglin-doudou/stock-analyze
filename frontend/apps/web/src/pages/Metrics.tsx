@@ -9,6 +9,7 @@ import {
 } from "@sa/api-client";
 import { api } from "../client";
 import { currentMonth } from "../lib/date";
+import { MonthInput } from "../ui/MonthInput";
 import { JobProgress } from "../ui/JobProgress";
 import { ProblemView } from "../ui/Problem";
 import { DataTable, type DataTableColumn } from "../ui/DataTable";
@@ -272,11 +273,10 @@ export function Metrics() {
         <div className="row-actions">
           <label>
             月份{" "}
-            <input
-              type="month"
+            <MonthInput
               value={period}
               disabled={executing}
-              onChange={(event) => setSearchParams({period: event.target.value})}
+              onChange={(value) => setSearchParams({ period: value })}
             />
           </label>
           <button

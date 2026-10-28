@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { Layout, RequireAuth } from "./router";
 import { clearSession, saveTokens } from "./store/session";
@@ -26,7 +26,9 @@ describe("router / Layout（FT-09 导航与登录保护）", () => {
     expect(screen.getByRole("link", { name: "看板" }).getAttribute("href")).toBe("/dashboard");
     expect(screen.getByText("资产页占位")).toBeTruthy();
     // Phase 1b：导航按 5 组排列，前 5 项为 概览/交易/分析 的前三个入口
-    const labels = screen.getAllByRole("link").map((item) => item.textContent);
+    const labels = within(screen.getByRole("navigation", { name: "主导航" }))
+      .getAllByRole("link")
+      .map((item) => item.textContent);
     expect(labels.slice(0, 5)).toEqual(["看板", "交易流水", "回合", "净值与收益", "指标"]);
     // 当前页激活态由 NavLink 提供
     expect(link.getAttribute("aria-current")).toBe("page");

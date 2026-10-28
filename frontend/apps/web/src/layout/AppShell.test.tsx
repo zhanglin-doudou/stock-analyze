@@ -27,6 +27,7 @@ describe("AppShell（Phase 1b）", () => {
   it("按 5 组渲染导航，占位入口可见", () => {
     renderShell("/metrics");
     expect(screen.getByRole("navigation", { name: "主导航" })).toBeTruthy();
+    expect(screen.getByRole("link", { name: "跳到主要内容" })).toBeTruthy();
     expect(screen.getByRole("group", { name: "概览" })).toBeTruthy();
     expect(screen.getByRole("group", { name: "交易" })).toBeTruthy();
     expect(screen.getByRole("group", { name: "分析" })).toBeTruthy();

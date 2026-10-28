@@ -5,6 +5,7 @@ import { api } from "../client";
 import { currentMonth } from "../lib/date";
 import { ProblemView } from "../ui/Problem";
 import { DataTable, type DataTableColumn } from "../ui/DataTable";
+import { MonthInput } from "../ui/MonthInput";
 
 const STATUS_LABELS: Record<NavStatus, string> = {
   ok: "正常",
@@ -176,11 +177,9 @@ export function Nav() {
       <div className="card filters">
         <label>
           月份
-          <input
-            type="month"
+          <MonthInput
             value={period}
-            onChange={(e) => setSearchParams({ period: e.target.value })}
-            aria-label="月份"
+            onChange={(value) => setSearchParams({ period: value })}
           />
         </label>
         <div className="row-actions">

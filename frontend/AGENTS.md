@@ -144,6 +144,8 @@ export default defineConfig({
 | `apps/web/eslint.config.js` | Phase 4 ESLint flat config + 零口径 no-restricted-syntax |
 | `apps/web/src/ui/CommandPalette.tsx` | Phase 4b 命令面板（⌘K/Ctrl+K，combobox+listbox） |
 | `apps/web/src/ui/command-palette.css` | Phase 4b 命令面板样式（tokens-only） |
+| `apps/web/src/ui/MonthInput.tsx` | Phase 4c 月份输入（iPadOS Safari 降级为年+月 select） |
+| `frontend/scripts/check-budget.mjs` | Phase 4c 首屏性能预算门禁（JS ≤220KB gzip / CSS ≤30KB） |
 | `.github/workflows/frontend.yml` | Phase 4 前端 CI（lint/typecheck/test/build） |
 | `apps/web/src/ui/DataTable.tsx` | Phase 2 统一数据表（粘性表头/列优先级/键盘行/空加载态） |
 | `apps/web/src/charts/zero-caliber.test.ts` | 全 src 零口径门禁（geometry 白名单除外） |
@@ -157,5 +159,6 @@ cd frontend && pnpm -r lint       # eslint（含零口径规则）+ tsc
 cd frontend && pnpm -r typecheck   # tsc --noEmit 全量（含 api-client + web + api）
 cd frontend && pnpm -r test        # vitest
 cd frontend && pnpm -r build       # tsc + vite build
+cd frontend && pnpm budget         # 首屏 JS ≤220KB gzip / CSS ≤30KB（需先 build）
 make sdk                           # 从后端快照同步 TS 类型（后端改接口后必先跑）
 ```
