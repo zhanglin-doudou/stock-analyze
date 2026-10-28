@@ -42,7 +42,7 @@ PRICE_LOOKBACK = timedelta(days=45)
 _MARKET_FAILURE_KEY = "market_failure"
 _MARKET_FAILURE_LABELS: dict[str, str] = {
     "unavailable": "（行情源暂时不可用，可重试）",
-    "not_supported": "（标的不在支持范围，仅支持 A 股主板/科创/创业）",
+    "not_supported": "（标的不在支持范围，支持 A 股主板/科创/创业与场内基金 ETF/LOF/REITs）",
     "no_data": "（该区间无行情，可能未上市/停牌）",
 }
 _MARKET_FAILURE_PRIORITY: tuple[str, ...] = ("unavailable", "not_supported", "no_data")

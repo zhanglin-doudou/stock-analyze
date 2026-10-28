@@ -4,7 +4,8 @@
 
 - 列名/类型边界：中文列、`date`/字符串日期、float64 收盘 → 标度整数（禁 float 进内部）；
 - NaN/None/负价/重复日期/坏日期 → fail-closed（`INTERNAL_ERROR` + `invalid_data`）；
-- 标的白名单：仅 A 股主板/科创/创业，其余 `NOT_FOUND` + `not_supported`；
+- 标的校验：A 股主板/科创/创业 + 场内基金（沪 5、深 15/16/18）放行；其余 `NOT_FOUND` + `not_supported`；
+- 股票多源：东财 → 新浪 → 腾讯（退市股兜底）；基金多源：东财基金 → 新浪基金（全量过滤）；
 - 真超时：`timeout=` 必须传给 akshare；瞬时故障重试耗尽 → `INTERNAL_ERROR` + `unavailable`；
 - 空 DataFrame（合法标的）→ 空序列（不抛）；
 - `as_of` / `capabilities` / `provenance` / `get_latest_quotes` 语义。
@@ -43,11 +44,23 @@ class _Frame:
 class _FakeAkshare:
     __version__ = "9.9.9"
 
-    def __init__(self, handler: Any, sina_handler: Any | None = None) -> None:
-        # stock_zh_a_hist（东财，中文列名）和 stock_zh_a_daily（新浪，英文列名）
-        # 是真实 akshare 里的两个独立接口，这里允许测试分别注入。
+    def __init__(
+        self,
+        handler: Any,
+        sina_handler: Any | None = None,
+        tx_handler: Any | None = None,
+        fund_em_handler: Any | None = None,
+        fund_sina_handler: Any | None = None,
+    ) -> None:
+        # stock_zh_a_hist（东财，中文列名）/ stock_zh_a_daily（新浪，英文列名）/
+        # stock_zh_a_hist_tx（腾讯，英文列名）/ fund_etf_hist_em / fund_etf_hist_sina
+        # 是真实 akshare 里的独立接口，这里允许测试分别注入。
+        # tx 默认跟随 sina（保持既有「东财挂→兜底也挂」测试的调用计数语义）。
         self.stock_zh_a_hist = handler
         self.stock_zh_a_daily = sina_handler if sina_handler is not None else handler
+        self.stock_zh_a_hist_tx = tx_handler if tx_handler is not None else self.stock_zh_a_daily
+        self.fund_etf_hist_em = fund_em_handler if fund_em_handler is not None else handler
+        self.fund_etf_hist_sina = fund_sina_handler if fund_sina_handler is not None else handler
 
 
 def _sina_fallback_transient(**_kwargs: Any) -> _Frame:
@@ -83,12 +96,21 @@ def _source(
     monkeypatch: pytest.MonkeyPatch,
     *,
     sina_handler: Any | None = None,
+    tx_handler: Any | None = None,
+    fund_em_handler: Any | None = None,
+    fund_sina_handler: Any | None = None,
     **overrides: Any,
 ) -> Any:
     monkeypatch.setattr(
         market_live,
         "_import_akshare",
-        lambda: _FakeAkshare(handler, sina_handler=sina_handler),
+        lambda: _FakeAkshare(
+            handler,
+            sina_handler=sina_handler,
+            tx_handler=tx_handler,
+            fund_em_handler=fund_em_handler,
+            fund_sina_handler=fund_sina_handler,
+        ),
     )
     return market_live.AkshareMarketDataSource(_settings(**overrides), _clock())
 
@@ -154,7 +176,22 @@ def test_validate_symbols_accepts_a_share_prefixes(symbol: str) -> None:
     assert market_live.validate_symbols([symbol]) == (symbol,)
 
 
-@pytest.mark.parametrize("symbol", ["510300", "159915", "113001", "900901", "200002", "830799"])
+@pytest.mark.parametrize(
+    "symbol",
+    [
+        "510300",  # 沪 ETF
+        "159915",  # 深 ETF
+        "501018",  # 沪 LOF
+        "161039",  # 深 LOF
+        "508099",  # 沪 REITs
+        "184801",  # 深 REITs
+    ],
+)
+def test_validate_symbols_accepts_fund_prefixes(symbol: str) -> None:
+    assert market_live.validate_symbols([symbol]) == (symbol,)
+
+
+@pytest.mark.parametrize("symbol", ["113001", "900901", "200002", "830799"])
 def test_validate_symbols_rejects_unsupported_products(symbol: str) -> None:
     with pytest.raises(ApiError) as caught:
         market_live.validate_symbols([symbol])
@@ -263,7 +300,7 @@ async def test_empty_frame_returns_empty_sequence(monkeypatch: pytest.MonkeyPatc
 async def test_unsupported_symbol_does_not_call_akshare(monkeypatch: pytest.MonkeyPatch) -> None:
     source = _source(_noop_handler, monkeypatch)
     with pytest.raises(ApiError) as caught:
-        await source.get_daily_bars(["510300"], date(2021, 10, 1), date(2021, 10, 31))
+        await source.get_daily_bars(["113001"], date(2021, 10, 1), date(2021, 10, 31))
     assert caught.value.code is ErrorCode.NOT_FOUND
 
 
@@ -283,9 +320,130 @@ async def test_latest_quotes_uses_last_bar(monkeypatch: pytest.MonkeyPatch) -> N
             return _Frame([])
         return _Frame(_records((date(2021, 10, 28), 10.0), (date(2021, 10, 29), 10.5)))
 
-    source = _source(handler, monkeypatch)
+    def empty_fallback(**_kwargs: Any) -> _Frame:
+        # 新浪/腾讯调用带 sh/sz 前缀，绕开 handler 的 "601688" 匹配；显式返回空
+        return _Frame([])
+
+    source = _source(handler, monkeypatch, sina_handler=empty_fallback, tx_handler=empty_fallback)
     quotes = await source.get_latest_quotes(["600519", "601688"])
     assert len(quotes) == 1
     assert quotes[0].symbol == "600519"
     assert quotes[0].as_of == date(2021, 10, 29)
     assert quotes[0].close_units == 10_500_000
+
+
+# ── 基金路由 / 退市股兜底 ─────────────────────────────────
+async def test_fund_routes_to_fund_interfaces(monkeypatch: pytest.MonkeyPatch) -> None:
+    """基金标的走 fund_etf_hist_em（中文列），不调用股票接口。"""
+
+    def fund_em(**kwargs: Any) -> _Frame:
+        assert kwargs["symbol"] == "510300"
+        assert kwargs["adjust"] == ""
+        assert kwargs["start_date"] == "20211001"
+        assert kwargs["end_date"] == "20211031"
+        return _Frame(_records((date(2021, 10, 28), 4.0), (date(2021, 10, 29), 4.1)))
+
+    source = _source(
+        _noop_handler,
+        monkeypatch,
+        fund_em_handler=fund_em,
+        fund_sina_handler=_noop_handler,
+    )
+    bars = await source.get_daily_bars(["510300"], date(2021, 10, 1), date(2021, 10, 31))
+    assert [bar.trade_date for bar in bars] == [date(2021, 10, 28), date(2021, 10, 29)]
+    assert bars[0].close_units == 4_000_000
+    assert bars[1].return_units == 2_500_000  # +2.5%
+
+
+async def test_fund_sina_fallback_filters_full_history(monkeypatch: pytest.MonkeyPatch) -> None:
+    """东财基金瞬时故障 → 新浪基金全量返回 → 本地按窗口过滤，returns 在全序列上派生。"""
+
+    def fund_sina(**kwargs: Any) -> _Frame:
+        assert kwargs["symbol"] == "sh510300"
+        return _Frame(
+            [
+                {"date": date(2021, 10, 27), "close": 4.0},
+                {"date": date(2021, 10, 28), "close": 4.1},
+                {"date": date(2021, 10, 29), "close": 4.0},
+                {"date": date(2021, 11, 1), "close": 4.2},
+            ]
+        )
+
+    source = _source(
+        _noop_handler,
+        monkeypatch,
+        fund_em_handler=_sina_fallback_transient,
+        fund_sina_handler=fund_sina,
+        market_live_retry_attempts=1,
+    )
+    bars = await source.get_daily_bars(["510300"], date(2021, 10, 28), date(2021, 10, 29))
+    assert [bar.trade_date for bar in bars] == [date(2021, 10, 28), date(2021, 10, 29)]
+    # 窗口首根保留全序列派生的真实收益：4.0→4.1 = +2.5%
+    assert bars[0].return_units == 2_500_000
+    assert bars[1].return_units == -2_439_024  # 4.1→4.0 = -2.439024%（ROUND_HALF_UP）
+
+
+async def test_delisted_stock_falls_back_to_tx(monkeypatch: pytest.MonkeyPatch) -> None:
+    """退市股：东财/新浪均瞬时故障（新浪对退市股返回空响应）→ 腾讯兜底成功。"""
+
+    def tx(**kwargs: Any) -> _Frame:
+        assert kwargs["symbol"] == "sz000418"
+        assert kwargs["adjust"] == ""
+        assert kwargs["timeout"] == 10.0
+        return _Frame(
+            [
+                {"date": date(2019, 5, 6), "close": 50.0},
+                {"date": date(2019, 5, 7), "close": 51.0},
+            ]
+        )
+
+    source = _source(
+        _sina_fallback_transient,
+        monkeypatch,
+        sina_handler=_sina_fallback_transient,
+        tx_handler=tx,
+        market_live_retry_attempts=1,
+    )
+    bars = await source.get_daily_bars(["000418"], date(2019, 5, 1), date(2019, 5, 31))
+    assert [bar.trade_date for bar in bars] == [date(2019, 5, 6), date(2019, 5, 7)]
+    assert bars[1].return_units == 2_000_000  # +2%
+
+
+async def test_tx_unknown_symbol_maps_to_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    """腾讯对「查无此票」抛 IndexError → 映射为空结果（走负缓存，不判 invalid_data）。"""
+
+    def empty(**_kwargs: Any) -> _Frame:
+        return _Frame([])
+
+    def tx_index_error(**_kwargs: Any) -> _Frame:
+        raise IndexError("list index out of range")
+
+    source = _source(
+        empty,
+        monkeypatch,
+        sina_handler=empty,
+        tx_handler=tx_index_error,
+        market_live_retry_attempts=1,
+    )
+    bars = await source.get_daily_bars(["600519"], date(2021, 10, 1), date(2021, 10, 31))
+    assert bars == ()
+
+
+async def test_empty_result_cross_validates_next_source(monkeypatch: pytest.MonkeyPatch) -> None:
+    """单源空结果不立即返回：继续交叉验证下一源（东财空、腾讯有数 → 用腾讯数据）。"""
+
+    def empty(**_kwargs: Any) -> _Frame:
+        return _Frame([])
+
+    def tx(**_kwargs: Any) -> _Frame:
+        return _Frame([{"date": date(2021, 10, 28), "close": 10.0}])
+
+    source = _source(
+        empty,
+        monkeypatch,
+        sina_handler=empty,
+        tx_handler=tx,
+        market_live_retry_attempts=1,
+    )
+    bars = await source.get_daily_bars(["600519"], date(2021, 10, 1), date(2021, 10, 31))
+    assert [bar.trade_date for bar in bars] == [date(2021, 10, 28)]
