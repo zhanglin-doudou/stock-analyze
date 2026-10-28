@@ -129,6 +129,10 @@ export default defineConfig({
 | `apps/web/src/pages/` | 页面（Import.tsx 上传预览、Trades.tsx 流水、Settings.tsx PAT） |
 | `apps/web/src/ui/` | 通用组件（Cursor.tsx 游标、Problem.tsx 错误态、Table.tsx 表格） |
 | `apps/web/src/theme/theme.test.ts` | 偏好回落/持久化/根属性测试 |
+| `apps/web/src/data/queryClient.ts` | Phase 1 TanStack Query Client 与 queryKeys 约定 |
+| `apps/web/src/charts/geometry.ts` | Phase 1 图表像素投影（零口径唯一白名单） |
+| `apps/web/src/ui/status.ts` | Phase 1 两轴状态语义（文案/色调/优先级） |
+| `apps/web/src/charts/zero-caliber.test.ts` | 全 src 零口径门禁（geometry 白名单除外） |
 | `apps/web/src/styles/tokens.css` | Phase 0 设计 tokens（颜色/字体/间距/圆角/状态/图表/密度），组件只消费语义变量 |
 | `apps/web/src/theme/theme.ts` | Phase 0 主题/密度/趋势色偏好读写（`data-theme`/`data-density`/`data-trend`） |
 

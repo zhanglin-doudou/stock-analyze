@@ -712,3 +712,11 @@ cd docs/reviews/2026-10-28-frontend-refactor
 > A/B 使用 CDP 全页截图（`Page.getLayoutMetrics` + `captureBeyondViewport`）以获得自然高度；C 使用固定 1600×2000 视口。对比图由 Pillow 按统一宽度缩放后拼接（标签用 Hiragino Sans GB）。
 
 **实施状态**：D1–D10 已确认（见 §15）。Phase 0 已完成决策文档并提交；后续按 §13 路线图逐阶段开发，每阶段独立 commit。
+
+| 阶段 | 状态 | Commit | 备注 |
+|---|---|---|---|
+| 选型文档 | ✅ 已完成 | `5e5a8c1` | 三方案 + 预览 + 审计 + 调研 + D1–D10 |
+| Phase 0 | ✅ 已完成 | `d1108b0` | tokens/主题骨架 + 文档漂移修正 + 基线红灯修复 |
+| Phase 1a | ✅ 已完成 | 待提交 | TanStack Query Provider、status 两轴、geometry 白名单、零口径全量门禁 |
+| Phase 1b | ⏳ 进行中 | — | AppShell + 导航 5 组 + 路由懒加载 + 页面标题 |
+| Phase 1c | ⏳ 待开始 | — | Dashboard 重做 + 图表 + 响应式 |
