@@ -1,0 +1,673 @@
+/*
+ * Phase 1c · Dashboard 样式（A+ 混合：纸感 + 细线 + 现代组件）
+ * 只消费 styles/tokens.css；旧页面类名不受影响。
+ */
+
+.dash {
+  color: var(--text);
+  font-size: var(--fs-body);
+}
+
+/* ── 页头 ─────────────────────────────────── */
+.dash-head {
+  border-bottom: 1px solid var(--line-strong);
+  padding-bottom: var(--s5);
+  margin-bottom: var(--s5);
+}
+
+.dash-eyebrow {
+  font-size: var(--fs-xs);
+  letter-spacing: 0.14em;
+  color: var(--muted);
+  text-transform: uppercase;
+}
+
+.dash-title {
+  margin: var(--s2) 0 var(--s2);
+  font-family: var(--font-display);
+  font-size: var(--fs-h1);
+  font-weight: var(--fw-medium);
+  line-height: var(--lh-tight);
+  letter-spacing: 0.01em;
+}
+
+.dash-sub {
+  margin: 0;
+  max-width: 640px;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+.dash-head-meta {
+  margin-top: var(--s4);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s4);
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+
+.dash-head-meta > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ── 通用面板/排版 ─────────────────────────── */
+.dash-panel {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--r-card);
+  padding: var(--s5);
+  margin-bottom: var(--s4);
+}
+
+.dash-panel-head {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s3);
+  margin-bottom: var(--s4);
+}
+
+.dash-panel-head h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--fs-h2);
+  font-weight: var(--fw-medium);
+  letter-spacing: 0.01em;
+}
+
+.dash-panel-meta {
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+
+.dash-grow {
+  flex: 1;
+}
+
+.dash-muted {
+  color: var(--muted);
+}
+
+.dash-link {
+  color: var(--accent);
+  font-size: var(--fs-sm);
+  text-decoration: none;
+  border-bottom: 1px solid transparent;
+}
+
+.dash-link:hover {
+  border-bottom-color: var(--accent);
+}
+
+.dash-btn {
+  height: var(--control-h);
+  padding: 0 14px;
+  border: 1px solid var(--accent);
+  border-radius: var(--r-sm);
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.dash-btn:disabled {
+  opacity: 0.55;
+  cursor: progress;
+}
+
+.dash-btn-ghost {
+  background: var(--surface);
+  color: var(--accent);
+}
+
+.dash-notice {
+  margin: 0 0 var(--s4);
+  padding: 10px 12px;
+  border: 1px solid var(--line-strong);
+  border-left: 3px solid var(--warn);
+  background: var(--warn-soft);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+
+/* ── 状态徽标（颜色 + 文案；不单独用颜色编码）────── */
+.dash-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 7px;
+  border-radius: var(--r-pill);
+  font-size: var(--fs-micro);
+  line-height: 1.6;
+  border: 1px solid var(--line);
+  color: var(--muted);
+  background: var(--surface-2);
+  white-space: nowrap;
+}
+
+.dash-badge.is-ok,
+.dash-badge.is-current {
+  color: var(--status-ok);
+  border-color: color-mix(in srgb, var(--status-ok) 35%, transparent);
+  background: var(--status-ok-soft);
+}
+
+.dash-badge.is-degraded,
+.dash-badge.is-insufficient,
+.dash-badge.is-unreliable {
+  color: var(--status-degraded);
+  border-color: color-mix(in srgb, var(--status-degraded) 35%, transparent);
+  background: var(--status-degraded-soft);
+}
+
+.dash-badge.is-stale {
+  color: var(--status-degraded);
+  border-color: color-mix(in srgb, var(--status-degraded) 35%, transparent);
+  background: var(--status-degraded-soft);
+}
+
+.dash-badge.is-blocked {
+  color: var(--status-blocked);
+  border-color: color-mix(in srgb, var(--status-blocked) 35%, transparent);
+  background: var(--status-blocked-soft);
+}
+
+.dash-badge.is-missing,
+.dash-badge.is-pending_window {
+  color: var(--status-missing);
+  border-color: var(--line-strong);
+  background: var(--status-missing-soft);
+}
+
+/* ── 资产概览 hero ─────────────────────────── */
+.dash-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: var(--s7);
+  padding: var(--s5) 0 var(--s6);
+  border-bottom: 1px solid var(--line-strong);
+  margin-bottom: var(--s5);
+}
+
+.dash-hero-value {
+  margin: var(--s2) 0 0;
+  font-size: var(--fs-display);
+  font-weight: var(--fw-medium);
+  letter-spacing: -0.02em;
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+}
+
+.dash-cny {
+  font-size: 26px;
+  color: var(--faint);
+  font-weight: var(--fw-regular);
+  margin-right: 4px;
+}
+
+.dash-hero-delta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s4);
+  margin-top: var(--s4);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}
+
+.dash-hero-note {
+  margin: var(--s4) 0 0;
+  padding-left: var(--s4);
+  border-left: 2px solid var(--line-strong);
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+
+.dash-mini {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border-left: 1px solid var(--line);
+}
+
+.dash-kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: var(--s2) var(--s4) var(--s4);
+  border-bottom: 1px solid var(--line);
+  min-width: 0;
+}
+
+.dash-mini .dash-kpi:nth-child(even) {
+  border-left: 1px solid var(--line);
+}
+
+/* 7 个迷你指标：最后一项整行，避免 2 列网格出现空位 */
+.dash-mini .dash-kpi:last-child {
+  grid-column: 1 / -1;
+  border-left: 0;
+}
+
+.dash-kpi-label {
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  letter-spacing: 0.04em;
+}
+
+.dash-kpi strong {
+  font-size: 22px;
+  font-weight: var(--fw-medium);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dash-kpi-hint {
+  font-size: var(--fs-micro);
+  color: var(--faint);
+}
+
+.dash-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0 var(--s4);
+  margin-top: var(--s4);
+}
+
+.dash-kpi-grid .dash-kpi {
+  padding-left: 0;
+  padding-right: 0;
+}
+
+.num {
+  font-variant-numeric: tabular-nums;
+}
+
+.is-pos {
+  color: var(--up);
+}
+
+/* 涨跌语义：A 股默认红涨绿跌；数值符号来自后端字符串 */
+.is-neg {
+  color: var(--down);
+}
+
+/* ── 趋势图 ────────────────────────────────── */
+.dash-chart-panel {
+  padding-bottom: var(--s3);
+}
+
+.dash-trend-svg {
+  display: block;
+  width: 100%;
+  height: 260px;
+}
+
+.dash-trend-axis {
+  display: flex;
+  justify-content: space-between;
+  padding: 0 4px var(--s3);
+  font-size: var(--fs-micro);
+  color: var(--faint);
+  font-variant-numeric: tabular-nums;
+}
+
+.dash-chart-empty {
+  margin: 0;
+  padding: var(--s7) 0;
+  text-align: center;
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+.dash-chart-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s5);
+  padding-top: var(--s2);
+  border-top: 1px solid var(--line);
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── 两列 ──────────────────────────────────── */
+.dash-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--s4);
+  align-items: start;
+}
+
+/* ── 胜负堆叠条 ────────────────────────────── */
+.dash-win-stack {
+  display: flex;
+  height: 6px;
+  width: 100%;
+  margin: var(--s2) 0 var(--s3);
+  background: var(--line);
+  overflow: hidden;
+}
+
+.dash-win-stack i {
+  display: block;
+  height: 100%;
+}
+
+.dash-win-stack .is-win {
+  background: var(--up);
+}
+
+.dash-win-stack .is-loss {
+  background: var(--down);
+}
+
+.dash-win-stack .is-flat {
+  background: var(--line-strong);
+}
+
+.dash-win-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s4);
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+
+.dash-win-legend b {
+  color: var(--text);
+  font-weight: var(--fw-medium);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── 回撤 ──────────────────────────────────── */
+.dash-drawdown {
+  margin-top: var(--s4);
+  padding-top: var(--s4);
+  border-top: 1px solid var(--line);
+  display: flex;
+  align-items: flex-start;
+  gap: var(--s5);
+}
+
+.dash-drawdown strong {
+  display: block;
+  margin-top: 2px;
+  font-size: 28px;
+  font-weight: var(--fw-medium);
+  font-variant-numeric: tabular-nums;
+}
+
+.dash-drawdown-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+
+.dash-drawdown-meta > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* ── 表格 ──────────────────────────────────── */
+.dash-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.dash-table th {
+  padding: 0 0 var(--s2);
+  border-bottom: 1px solid var(--line-strong);
+  font-size: var(--fs-micro);
+  font-weight: var(--fw-regular);
+  letter-spacing: 0.1em;
+  color: var(--muted);
+  text-align: right;
+  text-transform: uppercase;
+}
+
+.dash-table th:first-child,
+.dash-table td:first-child {
+  text-align: left;
+}
+
+.dash-table td {
+  padding: 11px 0;
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+  text-align: right;
+  color: var(--text-2);
+}
+
+.dash-table tbody tr:hover {
+  background: var(--accent-soft);
+}
+
+.dash-holding-name {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+  color: var(--text);
+}
+
+.dash-holding-code {
+  font-size: var(--fs-micro);
+  color: var(--faint);
+  letter-spacing: 0.04em;
+}
+
+.dash-weight-cell {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: var(--s2);
+}
+
+.dash-weight-track {
+  display: block;
+  width: 90px;
+  height: 3px;
+  background: var(--line);
+  overflow: hidden;
+  flex: none;
+}
+
+/* weight_pct 为比率字符串（如 0.3705），仅做 CSS 几何宽度；不转 number */
+.dash-weight-track > i {
+  display: block;
+  height: 100%;
+  width: calc(var(--w) * 100%);
+  max-width: 100%;
+  background: var(--text-2);
+}
+
+.dash-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s4);
+  margin-top: var(--s4);
+  padding-top: var(--s3);
+  border-top: 1px solid var(--line);
+  font-size: var(--fs-xs);
+}
+
+.dash-links a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.dash-links a:hover {
+  text-decoration: underline;
+}
+
+/* ── 回合列表 ──────────────────────────────── */
+.dash-rounds {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.dash-round {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px var(--s3);
+  padding: var(--s2) 0;
+  border-bottom: 1px dotted var(--line);
+}
+
+.dash-round:last-child {
+  border-bottom: 0;
+}
+
+.dash-round-name {
+  color: var(--text);
+  font-size: 13px;
+}
+
+.dash-round-name a {
+  color: inherit;
+  text-decoration: none;
+}
+
+.dash-round-name a:hover {
+  color: var(--accent);
+}
+
+.dash-round-meta {
+  grid-column: 1 / -1;
+  color: var(--faint);
+  font-size: var(--fs-micro);
+  font-variant-numeric: tabular-nums;
+}
+
+.dash-round > .num {
+  font-size: 13px;
+}
+
+/* ── 缺失清单 / 旧指标 ──────────────────────── */
+.dash-missing {
+  margin: 0;
+  padding-left: 18px;
+  font-size: var(--fs-sm);
+}
+
+.dash-missing li {
+  margin-bottom: var(--s2);
+}
+
+.dash-missing code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: var(--surface-2);
+  padding: 0 4px;
+  border-radius: 3px;
+}
+
+.dash-legacy-table {
+  margin-top: var(--s4);
+}
+
+.dash-legacy-table td:first-child a {
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.dash-legacy-table td:first-child a:hover {
+  text-decoration: underline;
+}
+
+.dash-foot {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s4);
+  padding-top: var(--s4);
+  border-top: 1px solid var(--line);
+  color: var(--faint);
+  font-size: var(--fs-micro);
+}
+
+/* ── 平板 ──────────────────────────────────── */
+@media (max-width: 1279px) {
+  .dash-hero {
+    grid-template-columns: 1fr;
+    gap: var(--s5);
+  }
+
+  .dash-hero-value {
+    font-size: 46px;
+  }
+
+  .dash-mini {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+    padding-top: var(--s4);
+  }
+
+  .dash-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .dash-trend-svg {
+    height: 220px;
+  }
+
+  .dash-title {
+    font-size: 34px;
+  }
+
+  .dash-kpi strong {
+    font-size: 19px;
+  }
+
+  .dash-drawdown strong {
+    font-size: 24px;
+  }
+}
+
+@media (max-width: 767px) {
+  .dash-hero {
+    padding-bottom: var(--s5);
+  }
+
+  .dash-hero-value {
+    font-size: 38px;
+  }
+
+  .dash-mini {
+    grid-template-columns: 1fr;
+  }
+
+  .dash-mini .dash-kpi:nth-child(even) {
+    border-left: 0;
+  }
+
+  .dash-mini .dash-kpi:last-child {
+    grid-column: auto;
+  }
+
+  .dash-panel {
+    padding: var(--s4);
+  }
+
+  .dash-drawdown {
+    flex-direction: column;
+    gap: var(--s2);
+  }
+
+  .dash-trend-svg {
+    height: 180px;
+  }
+
+  .dash-table th:nth-child(2),
+  .dash-table td:nth-child(2) {
+    display: none;
+  }
+}

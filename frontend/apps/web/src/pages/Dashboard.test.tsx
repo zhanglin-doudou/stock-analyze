@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import {
+  type AssetPage,
   type DashboardOut,
   type DashboardRoundOut,
   type MetricBatch,
@@ -14,11 +16,13 @@ vi.mock("../client", () => ({
   api: {
     dashboard: { get: vi.fn() },
     metrics: { batch: vi.fn() },
+    assets: { list: vi.fn() },
   },
 }));
 
 const getDashboard = vi.mocked(api.dashboard.get);
 const batchMetrics = vi.mocked(api.metrics.batch);
+const listAssets = vi.mocked(api.assets.list);
 
 function makeRound(overrides: Partial<DashboardRoundOut> = {}): DashboardRoundOut {
   return {
@@ -204,11 +208,73 @@ function makeMetricBatch(): MetricBatch {
   };
 }
 
+function makeAssetPage(): AssetPage {
+  return {
+    build: {
+      state: "current",
+      last_status: "ok",
+      last_built_at: "2026-07-01T10:00:00Z",
+      last_built_through: "2026-07-01",
+      last_mode: "incremental",
+      last_rebuild_from: null,
+      last_rows_written: 2,
+      rows_count: 2,
+      assumption: null,
+      status_reason: null,
+      has_new_market_data: false,
+      definition_version: "1.0",
+    },
+    data_as_of: "2026-09-30",
+    definition_version: "1.0",
+    has_more: false,
+    next_cursor: null,
+    items: [
+      {
+        date: "2026-06-29",
+        total_assets: "100000.00",
+        cash: "-70000.00",
+        market_value: "170000.00",
+        holding_cost: "170000.00",
+        unrealized_pnl: "0.00",
+        holding_count: 1,
+        cashflow: "0.00",
+        prev_total_assets: null,
+        daily_pnl: null,
+        daily_return: null,
+        daily_return_pct: null,
+        status: "ok",
+        status_reason: null,
+      },
+      {
+        date: "2026-06-30",
+        total_assets: "100620.00",
+        cash: "-70000.00",
+        market_value: "170620.00",
+        holding_cost: "170000.00",
+        unrealized_pnl: "620.00",
+        holding_count: 1,
+        cashflow: "0.00",
+        prev_total_assets: "100000.00",
+        daily_pnl: "620.00",
+        daily_return: "0.00620000",
+        daily_return_pct: "0.62%",
+        status: "ok",
+        status_reason: null,
+      },
+    ],
+  };
+}
+
 function renderPage(): ReturnType<typeof render> {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
   return render(
-    <MemoryRouter initialEntries={["/dashboard"]}>
-      <Dashboard />
-    </MemoryRouter>,
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={["/dashboard"]}>
+        <Dashboard />
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
@@ -216,6 +282,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   getDashboard.mockResolvedValue(makeDashboard());
   batchMetrics.mockResolvedValue(makeMetricBatch());
+  listAssets.mockResolvedValue(makeAssetPage());
 });
 
 afterEach(cleanup);
@@ -226,6 +293,8 @@ describe("Dashboard 看板", () => {
 
     expect(await screen.findByTestId("asset-overview")).toBeTruthy();
     expect(screen.getByTestId("history-overview")).toBeTruthy();
+    // Phase 1c：总资产日线来自 /assets（真实数据，几何由 charts/geometry 完成）
+    expect(await screen.findByRole("img", { name: /总资产曲线/ })).toBeTruthy();
 
     for (const testId of [
       "kpi-market-value",
