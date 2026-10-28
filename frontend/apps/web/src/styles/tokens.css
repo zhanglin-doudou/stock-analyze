@@ -19,8 +19,9 @@
   --surface-raised: #ffffff;
   --text: #1b1d19;
   --text-2: #3c4038;
-  --muted: #7d8278;
-  --faint: #a7ab9f;
+  /* 次级文字对比度按 WCAG AA 4.5:1 校准（paper #f6f5f0） */
+  --muted: #5b6057;
+  --faint: #686d63;
   --line: #e3e1d6;
   --line-strong: #d3d1c4;
 
@@ -171,7 +172,8 @@
   --text: #d7e0ea;
   --text-2: #aab7c7;
   --muted: #8a97a8;
-  --faint: #647183;
+  /* dark 下次级微文字也需 ≥4.5:1（bg #0b0e12） */
+  --faint: #6f7d8e;
   --line: #1f2933;
   --line-strong: #2e3a47;
 
