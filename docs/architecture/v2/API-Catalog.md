@@ -326,9 +326,9 @@
 #### API-034 GET /metrics/{metric_id}/explain
 - 用途：三段式（conclusion/method/drilldown）+ 人话术语；FR-D3；认证：read；同步。
 - 请求：path `metric_id`；query `period`(必填) / `benchmark`(可选)；头 Accept-Language。
-- 响应 200：`metric_id` / `definition_version` / `period` / `conclusion`(string|null) / `method` / `drilldown{endpoint,params,description}` / `status` / `reason?` / `what_to_do?` / `assumptions` / `data_as_of`。
+- 响应 200：`metric_id` / `definition_version` / `period` / `meaning`（指标含义，**恒非空**，含 status!="ok"）/ `conclusion`(string|null，本期结论，仅样本可用时) / `method` / `domain` / `unit` / `precision` / `sample{n,n_pending,sample_status,min_n,ci_min_n,ci}` / `drilldown{endpoint,params,description}` / `status` / `reason?` / `what_to_do?` / `assumptions` / `data_as_of`。
 - 错误码：METRIC_NOT_FOUND(404)、INVALID_PERIOD(422)、VALIDATION_ERROR(422)。
-- 验收断言：① conclusion 不含裸术语（DE/BHAR/PGR/PLR/TWR/MWR/FIFO/HHI 均不出现）；② status!="ok" 时 conclusion==null 且 reason/what_to_do 非空；③ drilldown.endpoint + params 直接调用 → 200 且 items 非空；④ Accept-Language=en-US 时文案变化但 code/数值不变。
+- 验收断言：① conclusion/meaning 不含裸术语（DE/BHAR/PGR/PLR/TWR/MWR/FIFO/HHI 均不出现）；② status!="ok" 时 conclusion==null 且 reason/what_to_do 非空，但 meaning 仍非空；③ drilldown.endpoint + params 直接调用 → 200 且 items 非空；④ Accept-Language=en-US 时文案变化但 code/数值不变；⑤ sample.min_n/ci_min_n/ci 与 def 的 sample_policy 一致，sample.n 与同 period GET /metrics 的 n 一致。
 #### API-035 GET /metrics/{metric_id}/drilldown
 - 用途：指标可追溯下钻明细；FR-D3；认证：read；同步；游标分页。
 - 请求：path `metric_id`；query `period`(必填) / `round_id?` / `security_code?` / `limit` / `cursor`。

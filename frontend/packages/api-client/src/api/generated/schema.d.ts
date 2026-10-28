@@ -1537,22 +1537,58 @@ export interface components {
             data_as_of: string;
             /** Definition Version */
             definition_version: string;
+            /** Domain */
+            domain: string;
             drilldown: components["schemas"]["MetricExplainDrilldown"];
+            /** Meaning */
+            meaning: string;
             /** Method */
             method: string;
             /** Metric Id */
             metric_id: string;
             /** Period */
             period: string;
+            /** Precision */
+            precision: number;
             /** Reason */
             reason?: string | null;
+            sample: components["schemas"]["MetricExplainSample"];
             /**
              * Status
              * @enum {string}
              */
             status: "ok" | "blocked" | "stale" | "unreliable";
+            /**
+             * Unit
+             * @enum {string}
+             */
+            unit: "CNY" | "ratio" | "days" | "count" | "z";
             /** What To Do */
             what_to_do?: string | null;
+        };
+        /**
+         * MetricExplainSample
+         * @description 解释页的样本口径：当前样本量 + 该指标定义里的判定门槛。
+         */
+        MetricExplainSample: {
+            /**
+             * Ci
+             * @enum {string}
+             */
+            ci: "wilson" | "bootstrap" | "none";
+            /** Ci Min N */
+            ci_min_n: number;
+            /** Min N */
+            min_n: number;
+            /** N */
+            n: number;
+            /** N Pending */
+            n_pending: number;
+            /**
+             * Sample Status
+             * @enum {string}
+             */
+            sample_status: "ok" | "insufficient" | "pending_window" | "blocked";
         };
         MetricItemOut: {
             [key: string]: unknown;
@@ -3568,6 +3604,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Error"];
                 };
             };
+            /** @description 资源状态冲突 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -3575,6 +3620,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 请求过于频繁 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
                     "application/problem+json": components["schemas"]["Error"];
                 };
             };

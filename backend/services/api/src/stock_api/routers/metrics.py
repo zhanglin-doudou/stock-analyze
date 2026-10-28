@@ -35,6 +35,7 @@ from stock_api.schemas import (
     MetricDrilldownOut,
     MetricExplainDrilldown,
     MetricExplainOut,
+    MetricExplainSample,
     MetricItemOut,
     MetricScopeOut,
 )
@@ -210,8 +211,13 @@ async def metrics_explain_endpoint(
         metric_id=result.metric_id,
         definition_version=result.definition_version,
         period=result.period,
+        meaning=result.meaning,
         conclusion=result.conclusion,
         method=result.method,
+        domain=result.domain,
+        unit=result.unit,
+        precision=result.precision,
+        sample=MetricExplainSample(**result.sample),
         drilldown=MetricExplainDrilldown(
             endpoint=str(result.drilldown["endpoint"]),
             params=dict(result.drilldown.get("params") or {}),

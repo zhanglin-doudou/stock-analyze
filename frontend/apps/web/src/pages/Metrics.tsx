@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   newIdempotencyKey,
   type JobStatus,
@@ -36,7 +36,7 @@ const SAMPLE_STATUS_LABELS: Record<string, string> = {
   blocked: "阻断",
 };
 
-const UNIT_LABELS: Record<string, string> = {
+export const UNIT_LABELS: Record<string, string> = {
   CNY: "元",
   ratio: "",
   days: "天",
@@ -81,7 +81,8 @@ function jobFailureProblem(status: JobStatus): Problem {
 
 /** 指标页（/metrics）：按月一键构建复盘数据（rounds → 资产 → 净值 → 指标）+ 结果展示。 */
 export function Metrics() {
-  const [period, setPeriod] = useState(() => new Date().toISOString().slice(0, 7));
+  const [searchParams, setSearchParams] = useSearchParams();
+  const period = searchParams.get('period') || new Date().toISOString().slice(0, 7);
   const [includeExploratory, setIncludeExploratory] = useState(false);
   const [batch, setBatch] = useState<MetricBatch | null>(null);
   const [loading, setLoading] = useState(false);
@@ -211,7 +212,16 @@ export function Metrics() {
   const executing = activeJobId !== null || submitting;
 
   const columns: Array<Column<MetricItem>> = [
-    { key: "metric_id", header: "指标", render: (row) => row.metric_id },
+    {
+      key: "metric_id",
+      header: "指标",
+      // 点指标名进入详情页（解释 / 计算方式 / 样本），带上当前月份。
+      render: (row) => (
+        <Link to={`/metrics/${encodeURIComponent(row.metric_id)}?period=${batch?.period ?? period}`}>
+          {row.metric_id}
+        </Link>
+      ),
+    },
     { key: "domain", header: "域", render: (row) => domainLabel(row.domain) },
     { key: "value", header: "值", render: (row) => valueCell(row) },
     {
@@ -265,7 +275,7 @@ export function Metrics() {
               type="month"
               value={period}
               disabled={executing}
-              onChange={(event) => setPeriod(event.target.value)}
+              onChange={(event) => setSearchParams({period: event.target.value})}
             />
           </label>
           <button

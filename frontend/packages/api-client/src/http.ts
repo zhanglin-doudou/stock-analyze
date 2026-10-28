@@ -22,6 +22,8 @@ import type {
   LoginResponse,
   MeOut,
   MetricBatch,
+  MetricDrilldown,
+  MetricExplain,
   Nav,
   PatCreateResponse,
   Preview,
@@ -178,6 +180,22 @@ export interface GetMetricsQuery {
   period?: string;
   benchmark?: string;
   include_exploratory?: boolean;
+}
+
+/** API-034 指标解释（meaning / method / 样本门槛；period 必填）。 */
+export interface GetMetricExplainQuery {
+  period: string;
+  benchmark?: string;
+}
+
+/** API-035 指标下钻明细（样本行；游标分页）。 */
+export interface GetMetricDrilldownQuery {
+  period: string;
+  benchmark?: string;
+  round_id?: string;
+  security_code?: string;
+  limit?: number;
+  cursor?: string;
 }
 
 export interface CursorQuery {
@@ -641,6 +659,27 @@ export function createClient(options: ClientOptions) {
           period: query.period,
           benchmark: query.benchmark,
           include_exploratory: query.include_exploratory,
+        },
+      }).then((r) => r.data);
+    },
+    /** API-034：三段式解释（meaning 恒非空；conclusion 仅样本可用时）。 */
+    explain(metricId: string, query: GetMetricExplainQuery) {
+      return send<MetricExplain>({
+        path: `/metrics/${metricId}/explain`,
+        query: { period: query.period, benchmark: query.benchmark },
+      }).then((r) => r.data);
+    },
+    /** API-035：指标下钻明细（详情页的「样本」表）。 */
+    drilldown(metricId: string, query: GetMetricDrilldownQuery) {
+      return send<MetricDrilldown>({
+        path: `/metrics/${metricId}/drilldown`,
+        query: {
+          period: query.period,
+          benchmark: query.benchmark,
+          round_id: query.round_id,
+          security_code: query.security_code,
+          limit: query.limit,
+          cursor: query.cursor,
         },
       }).then((r) => r.data);
     },

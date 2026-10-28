@@ -116,6 +116,8 @@ export type MetricItemOut = ApiSchemas["MetricItemOut"];
 export type MetricBatchOut = ApiSchemas["MetricBatchOut"];
 export type MetricScopeOut = ApiSchemas["MetricScopeOut"];
 export type RebuildPeriodIn = ApiSchemas["RebuildPeriodIn"];
+export type MetricExplainOut = ApiSchemas["MetricExplainOut"];
+export type MetricDrilldownOut = ApiSchemas["MetricDrilldownOut"];
 
 export type HealthOut = ApiSchemas["HealthOut"];
 export type ReadyOut = ApiSchemas["ReadyOut"];
@@ -262,6 +264,14 @@ export interface MetricBatch extends Omit<MetricBatchOut, "items"> {
 export type MetricStatus = MetricItem["status"];
 /** API-083 请求体：`{"period": "YYYY-MM", "include_exploratory"?: boolean}`。 */
 export type RebuildPeriodBody = RebuildPeriodIn;
+
+/** Period2-07：指标详情页（API-034 解释 + API-035 样本明细）。
+ * 两个模型都没有 wrap 序列化器，generated 的类型可直接使用。
+ */
+export type MetricExplain = MetricExplainOut;
+export type MetricExplainSampleInfo = MetricExplainOut["sample"];
+export type MetricDrilldown = MetricDrilldownOut;
+export type MetricDrilldownItem = NonNullable<MetricDrilldownOut["items"]>[number];
 
 // ── 编译期断言：后端契约变化必须在这里/typecheck 里炸出来 ─────────────────
 

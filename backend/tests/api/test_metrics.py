@@ -255,6 +255,18 @@ async def test_api_034_explain_happy_and_insufficient(client, account_factory, o
     assert body["method"]
     assert body["drilldown"]["endpoint"] == "/api/v1/rounds"
     assert body["status"] == "ok"
+    # 详情页三要素：含义恒非空、计算方式、样本（n + 判定门槛）。
+    assert body["meaning"] == body["conclusion"]
+    assert body["domain"] == "perf"
+    assert body["unit"] == "ratio"
+    assert body["sample"] == {
+        "n": 12,
+        "n_pending": 0,
+        "sample_status": "ok",
+        "min_n": 10,
+        "ci_min_n": 10,
+        "ci": "wilson",
+    }
 
     en = await client.get(
         f"/api/v1/metrics/{WIN_RATE}/explain",
@@ -277,6 +289,12 @@ async def test_api_034_explain_happy_and_insufficient(client, account_factory, o
     assert small_body["conclusion"] is None
     assert small_body["reason"] == "INSUFFICIENT_SAMPLE"
     assert small_body["what_to_do"]
+    # 样本不足时含义与计算方式仍必须可见（详情页不依赖 conclusion 是否可下）。
+    assert small_body["meaning"]
+    assert small_body["method"]
+    assert small_body["sample"]["n"] == 2
+    assert small_body["sample"]["sample_status"] == "insufficient"
+    assert small_body["sample"]["min_n"] == 10
 
 
 @pytest.mark.asyncio

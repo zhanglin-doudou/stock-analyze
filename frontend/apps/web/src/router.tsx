@@ -5,6 +5,7 @@ import { Assets } from "./pages/Assets";
 import { Import } from "./pages/Import";
 import { Imports } from "./pages/Imports";
 import { Login } from "./pages/Login";
+import { MetricDetail } from "./pages/MetricDetail";
 import { Metrics } from "./pages/Metrics";
 import { Nav } from "./pages/Nav";
 import { Register } from "./pages/Register";
@@ -73,6 +74,7 @@ export const router = createBrowserRouter([
       { path: "nav", element: <Nav /> },
       { path: "assets", element: <Assets /> },
       { path: "metrics", element: <Metrics /> },
+      { path: "metrics/:metricId", element: <MetricDetail /> },
       { path: "import", element: <Import /> },
       { path: "imports", element: <Imports /> },
       { path: "settings", element: <Settings /> },

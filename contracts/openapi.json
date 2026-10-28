@@ -1666,8 +1666,16 @@
             "title": "Definition Version",
             "type": "string"
           },
+          "domain": {
+            "title": "Domain",
+            "type": "string"
+          },
           "drilldown": {
             "$ref": "#/components/schemas/MetricExplainDrilldown"
+          },
+          "meaning": {
+            "title": "Meaning",
+            "type": "string"
           },
           "method": {
             "title": "Method",
@@ -1681,6 +1689,10 @@
             "title": "Period",
             "type": "string"
           },
+          "precision": {
+            "title": "Precision",
+            "type": "integer"
+          },
           "reason": {
             "anyOf": [
               {
@@ -1692,6 +1704,9 @@
             ],
             "title": "Reason"
           },
+          "sample": {
+            "$ref": "#/components/schemas/MetricExplainSample"
+          },
           "status": {
             "enum": [
               "ok",
@@ -1700,6 +1715,17 @@
               "unreliable"
             ],
             "title": "Status",
+            "type": "string"
+          },
+          "unit": {
+            "enum": [
+              "CNY",
+              "ratio",
+              "days",
+              "count",
+              "z"
+            ],
+            "title": "Unit",
             "type": "string"
           },
           "what_to_do": {
@@ -1718,12 +1744,67 @@
           "metric_id",
           "definition_version",
           "period",
+          "meaning",
           "method",
+          "domain",
+          "unit",
+          "precision",
+          "sample",
           "drilldown",
           "status",
           "data_as_of"
         ],
         "title": "MetricExplainOut",
+        "type": "object"
+      },
+      "MetricExplainSample": {
+        "description": "解释页的样本口径：当前样本量 + 该指标定义里的判定门槛。",
+        "properties": {
+          "ci": {
+            "enum": [
+              "wilson",
+              "bootstrap",
+              "none"
+            ],
+            "title": "Ci",
+            "type": "string"
+          },
+          "ci_min_n": {
+            "title": "Ci Min N",
+            "type": "integer"
+          },
+          "min_n": {
+            "title": "Min N",
+            "type": "integer"
+          },
+          "n": {
+            "title": "N",
+            "type": "integer"
+          },
+          "n_pending": {
+            "title": "N Pending",
+            "type": "integer"
+          },
+          "sample_status": {
+            "enum": [
+              "ok",
+              "insufficient",
+              "pending_window",
+              "blocked"
+            ],
+            "title": "Sample Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "n",
+          "n_pending",
+          "sample_status",
+          "min_n",
+          "ci_min_n",
+          "ci"
+        ],
+        "title": "MetricExplainSample",
         "type": "object"
       },
       "MetricItemOut": {

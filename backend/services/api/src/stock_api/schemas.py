@@ -743,12 +743,30 @@ class MetricExplainDrilldown(BaseModel):
     description: str
 
 
+class MetricExplainSample(BaseModel):
+    """解释页的样本口径：当前样本量 + 该指标定义里的判定门槛。"""
+
+    n: int
+    n_pending: int
+    sample_status: Literal["ok", "insufficient", "pending_window", "blocked"]
+    min_n: int
+    ci_min_n: int
+    ci: Literal["wilson", "bootstrap", "none"]
+
+
 class MetricExplainOut(BaseModel):
     metric_id: str
     definition_version: str
     period: str
+    # meaning 恒非空（含 status!="ok"）：指标是什么、为什么重要；
+    # conclusion 只在样本可用时给出本期结论（C-31 同源口径）。
+    meaning: str
     conclusion: str | None = None
     method: str
+    domain: str
+    unit: Literal["CNY", "ratio", "days", "count", "z"]
+    precision: int
+    sample: MetricExplainSample
     drilldown: MetricExplainDrilldown
     status: Literal["ok", "blocked", "stale", "unreliable"]
     reason: str | None = None
