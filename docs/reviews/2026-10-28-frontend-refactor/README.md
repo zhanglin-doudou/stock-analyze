@@ -725,5 +725,6 @@ cd docs/reviews/2026-10-28-frontend-refactor
 | Phase 2c | ✅ 已完成 | `5302f78` | 后端 API-085 `GET /assets/chart` + Dashboard 切换 |
 | Phase 3a | ✅ 已完成 | `dc50cb3` | Settings 外观偏好 + 后端 display 字段 + Register/UTC 月份修复 |
 | Phase 3b | ✅ 已完成 | `b524d50` | MetricDetail/RoundDetail/Import tokens 化 + 导入列映射 DataTable |
-| Phase 4a | ✅ 已完成 | 本提交 | ESLint + 零口径 no-restricted-syntax + 前端 CI（lint/typecheck/test/build） |
-| Phase 4b | ⏳ 待开始 | — | 命令面板/键盘/专注模式 + a11y/性能走查 |
+| Phase 4a | ✅ 已完成 | `3b0d8ef` | ESLint + 零口径 no-restricted-syntax + 前端 CI（lint/typecheck/test/build） |
+| Phase 4b | ✅ 已完成 | 本提交 | ⌘K 命令面板 + F 专注模式 + 键盘地图 |
+| Phase 4c | ⏳ 待开始 | — | a11y 走查（焦点/对比度/图表替代）、性能预算、视觉回归可选 |

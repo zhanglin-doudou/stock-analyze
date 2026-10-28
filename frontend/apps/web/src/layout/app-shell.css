@@ -255,6 +255,15 @@
   font-size: var(--fs-sm);
 }
 
+/* 专注模式：隐藏图标栏，内容占满宽度（仍保留顶栏与退出按钮） */
+.app-shell[data-focus="true"] .shell-rail {
+  display: none;
+}
+
+.app-shell[data-focus="true"] .shell-main {
+  margin-left: 0;
+}
+
 /* ── 平板（iPad 横/竖）───────────────────────── */
 @media (max-width: 1279px) {
   .shell-rail {

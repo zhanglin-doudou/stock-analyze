@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { Layout } from "../router";
 import { clearSession } from "../store/session";
@@ -32,6 +32,20 @@ describe("AppShell（Phase 1b）", () => {
     expect(screen.getByRole("group", { name: "分析" })).toBeTruthy();
     expect(screen.getByRole("group", { name: "数据" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "月报（占位）" })).toBeTruthy();
+  });
+
+  it("⌘K 打开命令面板，F 切换专注模式", () => {
+    const { container } = renderShell("/assets");
+    fireEvent.keyDown(window, { key: "k", metaKey: true });
+    expect(screen.getByRole("dialog", { name: "命令面板" })).toBeTruthy();
+
+    fireEvent.keyDown(screen.getByRole("combobox"), { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "命令面板" })).toBeNull();
+
+    const shell = container.querySelector(".app-shell");
+    expect(shell?.getAttribute("data-focus")).toBe("false");
+    fireEvent.keyDown(window, { key: "f" });
+    expect(shell?.getAttribute("data-focus")).toBe("true");
   });
 
   it("当前路由有 aria-current，且同步 document.title", () => {

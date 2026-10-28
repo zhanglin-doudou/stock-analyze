@@ -1,6 +1,7 @@
-import { Suspense, useEffect } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { clearSession } from "../store/session";
+import { CommandPalette } from "../ui/CommandPalette";
 import { Icon } from "../ui/icons";
 import { NAV_GROUPS, SETTINGS_ITEM, pageMeta, type NavItem } from "./navigation";
 import "./app-shell.css";
@@ -33,13 +34,39 @@ export function AppShell() {
   const location = useLocation();
   const navigate = useNavigate();
   const meta = pageMeta(location.pathname);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [focusMode, setFocusMode] = useState(false);
 
   useEffect(() => {
     document.title = `${meta.title} · 交易复盘`;
   }, [meta.title]);
 
+  // Phase 4b 键盘地图：⌘K/Ctrl+K 命令面板；F 切换专注模式（输入框内不触发）。
+  useEffect(() => {
+    function onKeyDown(event: globalThis.KeyboardEvent): void {
+      const target = event.target as HTMLElement | null;
+      const typing =
+        target?.tagName === "INPUT" ||
+        target?.tagName === "TEXTAREA" ||
+        target?.tagName === "SELECT" ||
+        target?.isContentEditable === true;
+      if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setPaletteOpen((open) => !open);
+        return;
+      }
+      if (paletteOpen || typing) return;
+      if (event.key === "f" || event.key === "F") {
+        event.preventDefault();
+        setFocusMode((enabled) => !enabled);
+      }
+    }
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [paletteOpen]);
+
   return (
-    <div className="app-shell">
+    <div className="app-shell" data-focus={focusMode ? "true" : "false"}>
       <aside className="shell-rail">
         <div className="shell-brand" aria-label="交易复盘">
           <span className="shell-brand-mark" aria-hidden="true">
@@ -90,14 +117,24 @@ export function AppShell() {
           <button
             type="button"
             className="shell-command"
-            title="命令面板（Phase 4 开放）"
-            aria-label="搜索或跳转（Phase 4 开放）"
-            disabled
+            title="命令面板（⌘K / Ctrl+K）"
+            aria-label="搜索或跳转"
+            aria-keyshortcuts="Meta+K Control+K"
+            onClick={() => setPaletteOpen(true)}
           >
             <Icon name="search" size={15} />
             <span className="shell-command-text">搜索或跳转</span>
             <kbd>⌘K</kbd>
-            <span className="shell-tag">Phase 4</span>
+          </button>
+          <button
+            type="button"
+            className="shell-iconbtn"
+            aria-label={focusMode ? "退出专注模式" : "进入专注模式"}
+            aria-pressed={focusMode}
+            title="专注模式（F）"
+            onClick={() => setFocusMode((enabled) => !enabled)}
+          >
+            <Icon name="focus" size={16} />
           </button>
           <span className="shell-status">
             <i className="shell-status-dot" aria-hidden="true" />
@@ -105,6 +142,7 @@ export function AppShell() {
           </span>
         </header>
 
+        <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />
         <main className="shell-content">
           <Suspense fallback={<p className="shell-loading">加载中…</p>}>
             <Outlet />
