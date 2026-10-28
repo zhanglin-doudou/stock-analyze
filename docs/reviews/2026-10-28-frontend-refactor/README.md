@@ -719,4 +719,11 @@ cd docs/reviews/2026-10-28-frontend-refactor
 | Phase 0 | ✅ 已完成 | `d1108b0` | tokens/主题骨架 + 文档漂移修正 + 基线红灯修复 |
 | Phase 1a | ✅ 已完成 | `80608b6` | TanStack Query Provider、status 两轴、geometry 白名单、零口径全量门禁 |
 | Phase 1b | ✅ 已完成 | `ee0a1e5` | AppShell + 导航 5 组 + 路由懒加载 + 页面标题 |
-| Phase 1c | ✅ 已完成 | 本提交 | Dashboard 重做（TanStack Query + /assets 日线 + tokens 样式 + 1600/1024/768 走查） |
+| Phase 1c | ✅ 已完成 | `42585c0` | Dashboard 重做（TanStack Query + /assets 日线 + tokens 样式 + 1600/1024/768 走查） |
+| Phase 2a | ✅ 已完成 | `acb3559` | DataTable（粘性表头/列优先级/键盘行）+ 回合页迁移 |
+| Phase 2b | ✅ 已完成 | `7420b8c` | 全部表格迁移 DataTable；旧 Table.tsx 移除；涨跌色统一 tokens |
+| Phase 2c | ✅ 已完成 | `5302f78` | 后端 API-085 `GET /assets/chart` + Dashboard 切换 |
+| Phase 3a | ✅ 已完成 | `dc50cb3` | Settings 外观偏好 + 后端 display 字段 + Register/UTC 月份修复 |
+| Phase 3b | ✅ 已完成 | `b524d50` | MetricDetail/RoundDetail/Import tokens 化 + 导入列映射 DataTable |
+| Phase 4a | ✅ 已完成 | 本提交 | ESLint + 零口径 no-restricted-syntax + 前端 CI（lint/typecheck/test/build） |
+| Phase 4b | ⏳ 待开始 | — | 命令面板/键盘/专注模式 + a11y/性能走查 |

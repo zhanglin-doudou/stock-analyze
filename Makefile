@@ -28,7 +28,7 @@ help:
 	@echo "  make seed-tenants   造体验账号(1234@dev.com)+A/B/admin 与账单"
 	@echo "  make seed-demo      造体验账号 + 演示数据（含行情回放）"
 	@echo "── 质量 ──────────────────────────────────────────────"
-	@echo "  make lint           ruff + frontend tsc（Phase 4 起加 eslint）"
+	@echo "  make lint           ruff + eslint + frontend tsc"
 	@echo "  make typecheck      mypy + tsc + import-linter"
 	@echo "  make test           快速单测（无外部依赖）"
 	@echo "  make test-core      core 内核单测 + 覆盖门禁"

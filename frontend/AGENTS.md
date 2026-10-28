@@ -31,7 +31,7 @@ const total = trades.reduce((s, t) => s + Number(t.amount), 0);   // 绝对禁�
 
 // 一期前端不做计算——展示层只 sort / filter；二期收益计算走后端 metrics API
 ```
-**零口径 ESLint 规则**：Phase 4 启用（重构路线图 D6）；在此之前由 `?raw` 源码断言兜底，Phase 1 起把扫描范围扩到 `src/**`。任何业务页面禁止 `parseFloat` / `parseInt` / `Number(` / `toFixed`。
+**零口径 ESLint 规则**：Phase 4 已启用（`apps/web/eslint.config.js` 的 `no-restricted-syntax`），并由 `src/charts/zero-caliber.test.ts` 在 vitest 中兜底。任何业务页面禁止 `parseFloat` / `parseInt` / `Number(` / `toFixed`。
 
 > 图表几何是唯一例外：只允许 `apps/web/src/charts/geometry.ts` 做 domain→pixel 投影（Phase 1 落地），业务页面仍不得解析/计算业务数值；后端 `views/*`（Phase 2）是主路径。
 
@@ -140,6 +140,8 @@ export default defineConfig({
 | `apps/web/src/pages/settings.css` | Phase 3a 设置页样式（外观偏好 + PAT，tokens-only） |
 | `apps/web/src/pages/detail.css` | Phase 3b 详情/导入页共享样式（tokens-only） |
 | `apps/web/src/lib/date.ts` | Phase 3a 本地月份工具（修正 UTC 月份 bug） |
+| `apps/web/eslint.config.js` | Phase 4 ESLint flat config + 零口径 no-restricted-syntax |
+| `.github/workflows/frontend.yml` | Phase 4 前端 CI（lint/typecheck/test/build） |
 | `apps/web/src/ui/DataTable.tsx` | Phase 2 统一数据表（粘性表头/列优先级/键盘行/空加载态） |
 | `apps/web/src/charts/zero-caliber.test.ts` | 全 src 零口径门禁（geometry 白名单除外） |
 | `apps/web/src/styles/tokens.css` | Phase 0 设计 tokens（颜色/字体/间距/圆角/状态/图表/密度），组件只消费语义变量 |
@@ -148,7 +150,7 @@ export default defineConfig({
 ## 门禁命令
 
 ```bash
-cd frontend && pnpm -r lint       # 当前 = tsc；Phase 4 起接入 eslint
+cd frontend && pnpm -r lint       # eslint（含零口径规则）+ tsc
 cd frontend && pnpm -r typecheck   # tsc --noEmit 全量（含 api-client + web + api）
 cd frontend && pnpm -r test        # vitest
 cd frontend && pnpm -r build       # tsc + vite build
