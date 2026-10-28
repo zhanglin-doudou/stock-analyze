@@ -5,6 +5,7 @@ import { api } from "../client";
 import { currentMonth } from "../lib/date";
 import { ProblemView } from "../ui/Problem";
 import { DataTable, type DataTableColumn } from "../ui/DataTable";
+import "./detail.css";
 import { UNIT_LABELS, domainLabel, metricStatusLabel } from "./Metrics";
 
 const SAMPLE_STATUS_LABELS: Record<string, string> = {
@@ -94,16 +95,19 @@ export function MetricDetail() {
   ];
 
   return (
-    <div>
-      <p className="muted">
-        <Link to={`/metrics?period=${period}`}>← 返回指标列表</Link>
-      </p>
-      <h1>{metricId}</h1>
-      <p className="muted">
-        {explain ? `${domainLabel(explain.domain)} · ` : ""}期间 {period}
-      </p>
+    <div className="detail-page">
+      <header className="detail-head">
+        <Link className="detail-back" to={`/metrics?period=${period}`}>
+          ← 返回指标列表
+        </Link>
+        <div className="detail-eyebrow">
+          {explain ? `${domainLabel(explain.domain)} · ` : ""}期间 {period}
+        </div>
+        <h1 className="detail-title">{metricId}</h1>
+        <p className="detail-sub">指标详情 · 含义 / 计算方式 / 样本与下钻</p>
+      </header>
 
-      <div className="card filters">
+      <div className="detail-toolbar">
         <div className="row-actions">
           <label>
             月份{" "}
@@ -128,22 +132,20 @@ export function MetricDetail() {
 
       {explain ? (
         <>
-          <div className="card" data-testid="metric-status">
-            <p>
-              <span className="muted">状态：</span>
+          <div className="detail-card detail-status" data-testid="metric-status">
+            <div className="detail-status-line">
+              <span>状态</span>
               <span className={`badge badge-${explain.status}`}>
                 {metricStatusLabel(explain.status)}
               </span>
-              <span className="muted">　数据截至：</span>
-              {explain.data_as_of}
-              <span className="muted">　口径版本：</span>
-              {explain.definition_version}
-            </p>
+              <span>数据截至 {explain.data_as_of}</span>
+              <span>口径版本 {explain.definition_version}</span>
+            </div>
             {explain.reason ? <p className="muted">原因：{explain.reason}</p> : null}
             {explain.what_to_do ? <p>{explain.what_to_do}</p> : null}
           </div>
 
-          <div className="card" data-testid="metric-meaning">
+          <div className="detail-card" data-testid="metric-meaning">
             <h2>意义</h2>
             <p>{explain.meaning}</p>
             {explain.conclusion && explain.conclusion !== explain.meaning ? (
@@ -154,12 +156,12 @@ export function MetricDetail() {
             ) : null}
           </div>
 
-          <div className="card" data-testid="metric-method">
+          <div className="detail-card" data-testid="metric-method">
             <h2>计算方式</h2>
             <p>{explain.method}</p>
           </div>
 
-          <div className="card" data-testid="metric-sample">
+          <div className="detail-card" data-testid="metric-sample">
             <h2>样本</h2>
             <p>
               <span className="muted">样本量：</span>

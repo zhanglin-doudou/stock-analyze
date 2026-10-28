@@ -4,6 +4,7 @@ import type { Round, RoundFill, RoundFillPage } from "@sa/api-client";
 import { api } from "../client";
 import { ProblemView } from "../ui/Problem";
 import { DataTable, type DataTableColumn } from "../ui/DataTable";
+import "./detail.css";
 import { roundStatusLabel } from "./Rounds";
 
 function signedClass(value: string): string {
@@ -52,26 +53,36 @@ export function RoundDetail() {
   ];
 
   return (
-    <div>
-      <p>
-        <Link to="/rounds">← 返回回合列表</Link>
-      </p>
+    <div className="detail-page">
+      <header className="detail-head">
+        <Link className="detail-back" to="/rounds">
+          ← 返回回合列表
+        </Link>
+        <div className="detail-eyebrow">交易 · 回合详情</div>
+        {round ? (
+          <h1 className="detail-title">
+            {round.security_code} {round.security_name}
+          </h1>
+        ) : (
+          <h1 className="detail-title">回合详情</h1>
+        )}
+        {round ? (
+          <p className="detail-sub">
+            回合 {round.round_id} · 开仓 {round.open_date}
+            {round.close_date ? ` · 平仓 ${round.close_date}` : " · 尚未平仓"}
+            {` · 持有 ${round.holding_days} 个交易日 · 配对 ${round.fills_count} 笔`}
+          </p>
+        ) : null}
+      </header>
 
       {loading ? <p className="muted">加载中…</p> : null}
       <ProblemView error={error} onRetry={() => void load()} />
 
       {round ? (
         <>
-          <h1>
-            {round.security_code} {round.security_name}
-            <span className={`badge badge-${round.status}`} style={{ marginLeft: 8 }}>
-              {roundStatusLabel(round.status)}
-            </span>
-          </h1>
-          <p className="muted">
-            回合 <code>{round.round_id}</code> · 开仓 {round.open_date}
-            {round.close_date ? ` · 平仓 ${round.close_date}` : " · 尚未平仓"}
-            {` · 持有 ${round.holding_days} 个交易日 · 配对 ${round.fills_count} 笔`}
+          <p className="detail-status-line">
+            状态 <span className={`badge badge-${round.status}`}>{roundStatusLabel(round.status)}</span>
+            <span>数量 {round.quantity}</span>
           </p>
 
           {round.data_error ? (
@@ -81,9 +92,9 @@ export function RoundDetail() {
             </div>
           ) : null}
 
-          <div className="card">
+          <div className="detail-card">
             <h2>回合口径</h2>
-            <table className="table">
+            <table className="detail-stats">
               <tbody>
                 <tr>
                   <th>数量</th>
@@ -119,7 +130,7 @@ export function RoundDetail() {
             </p>
           </div>
 
-          <h2>FIFO 配对明细</h2>
+          <h2 className="detail-section-title">FIFO 配对明细</h2>
           <DataTable
             caption="回合配对明细"
             columns={columns}
@@ -129,9 +140,11 @@ export function RoundDetail() {
               round.status === "open" ? "持仓中回合尚无卖出配对明细（卖出后才产生 fills）。" : "没有配对明细。"
             }
           />
-          {fills ? <p className="muted">共 {fills.total} 笔配对；买卖流水 ID 可在「交易流水」核对。</p> : null}
+          {fills ? (
+            <p className="detail-note">共 {fills.total} 笔配对；买卖流水 ID 可在「交易流水」核对。</p>
+          ) : null}
 
-          <p className="muted">
+          <p className="detail-note">
             数据重建时间：{round.rebuilt_at} · 去 <Link to="/trades">交易流水</Link> 核对原始行。
           </p>
         </>

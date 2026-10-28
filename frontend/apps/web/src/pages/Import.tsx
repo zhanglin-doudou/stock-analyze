@@ -4,6 +4,8 @@ import { newIdempotencyKey, type ImportBatch, type JobAccepted, type JobStatus, 
 import { api } from "../client";
 import { JobProgress } from "../ui/JobProgress";
 import { ProblemView } from "../ui/Problem";
+import { DataTable, type DataTableColumn } from "../ui/DataTable";
+import "./detail.css";
 import { RevokeBatchButton } from "../ui/RevokeBatch";
 import { Uploader } from "../ui/Uploader";
 
@@ -86,42 +88,44 @@ export function Import() {
     [loadBatch],
   );
 
+  const mappingColumns: Array<DataTableColumn<Preview["columns"][number]>> = [
+    { key: "index", header: "#", render: (row) => row.index },
+    { key: "name", header: "列名", render: (row) => row.name },
+    { key: "field", header: "建议字段", render: (row) => row.suggested_field ?? "（未识别）" },
+    { key: "confidence", header: "置信度", align: "right", render: (row) => row.confidence },
+    {
+      key: "sample",
+      header: "样例",
+      priority: 2,
+      render: (row) => <span className="muted">{(row.sample ?? []).join(" / ")}</span>,
+    },
+  ];
+
   return (
-    <div>
-      <h1>导入账单</h1>
+    <div className="detail-page">
+      <header className="detail-head">
+        <div className="detail-eyebrow">数据 · 导入账单</div>
+        <h1 className="detail-title">导入账单</h1>
+        <p className="detail-sub">上传 → 预览列映射 → 确认导入 → 进度 → 批次结果；重复提交带幂等键。</p>
+      </header>
+
       <Uploader disabled={busy} onFile={(file) => void onFile(file)} />
       <ProblemView error={error} onRetry={preview ? () => void commit() : undefined} />
 
       {preview ? (
-        <div className="card">
+        <div className="import-card">
           <h2>需求确认单</h2>
           <p className="muted">
             文件：{preview.file.name}（{preview.file.bytes} 字节）· 可提交：{preview.can_commit ? "是" : "否"} · 资金余额列：
             {preview.cash_balance_available ? "有" : "缺（暂无法对账）"}
           </p>
           <h3>列映射建议</h3>
-          <table className="table">
-            <thead>
-              <tr>
-                <th>#</th>
-                <th>列名</th>
-                <th>建议字段</th>
-                <th>置信度</th>
-                <th>样例</th>
-              </tr>
-            </thead>
-            <tbody>
-              {preview.columns.map((column) => (
-                <tr key={column.index}>
-                  <td>{column.index}</td>
-                  <td>{column.name}</td>
-                  <td>{column.suggested_field ?? "（未识别）"}</td>
-                  <td>{column.confidence}</td>
-                  <td className="muted">{(column.sample ?? []).join(" / ")}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <DataTable
+            caption="列映射建议"
+            columns={mappingColumns}
+            rows={preview.columns}
+            rowKey={(row) => String(row.index)}
+          />
 
           <h3>预检计数</h3>
           <p>
@@ -149,7 +153,7 @@ export function Import() {
       ) : null}
 
       {job ? (
-        <div className="card">
+        <div className="import-card">
           <h2>导入进度</h2>
           <JobProgress jobId={job.job_id} onDone={onJobDone} />
           {done ? <p className="notice">{done}</p> : null}
@@ -175,7 +179,7 @@ export function Import() {
                   <p className="muted">补差流水以 side=missing 标记，可在交易流水核对；撤销本次导入会一并删除。</p>
                 </div>
               ) : null}
-              <div className="row-actions">
+              <div className="import-actions">
                 <Link className="btn btn-ghost" to={`/imports?batch=${batch.batch_id}`}>
                   查看批次
                 </Link>

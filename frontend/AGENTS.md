@@ -138,6 +138,7 @@ export default defineConfig({
 | `apps/web/src/charts/TrendChart.tsx` | Phase 1c 总资产趋势图（自研 SVG，数据来自 /assets） |
 | `apps/web/src/pages/dashboard.css` | Phase 1c Dashboard 样式（tokens-only） |
 | `apps/web/src/pages/settings.css` | Phase 3a 设置页样式（外观偏好 + PAT，tokens-only） |
+| `apps/web/src/pages/detail.css` | Phase 3b 详情/导入页共享样式（tokens-only） |
 | `apps/web/src/lib/date.ts` | Phase 3a 本地月份工具（修正 UTC 月份 bug） |
 | `apps/web/src/ui/DataTable.tsx` | Phase 2 统一数据表（粘性表头/列优先级/键盘行/空加载态） |
 | `apps/web/src/charts/zero-caliber.test.ts` | 全 src 零口径门禁（geometry 白名单除外） |
