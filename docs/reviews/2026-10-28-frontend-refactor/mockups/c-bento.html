@@ -1,0 +1,1188 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>看板 · 方案 C Bento 现代产品风（高保真预览）</title>
+<style>
+/* ============ tokens ============ */
+:root{
+  --bg:#f5f6fa;
+  --card:#ffffff;
+  --line:#e9ecf3;
+  --line-2:#f1f3f8;
+  --ink:#121826;
+  --ink-2:#4d5769;
+  --ink-3:#8a94a8;
+  --ink-4:#aab2c2;
+  --indigo:#4f46e5;
+  --indigo-2:#6366f1;
+  --cyan:#0e9bb5;
+  --grad:linear-gradient(135deg,#4f46e5 0%,#0e9bb5 100%);
+  --pos:#0b8a54; --pos-bg:#e9f8f0;
+  --neg:#d13b3b; --neg-bg:#fdeeee;
+  --warn:#a35a06; --warn-bg:#fff6e8;
+  --info:#3b45c4; --info-bg:#eef1fe;
+  --radius:16px;
+  --shadow:0 1px 2px rgba(18,24,38,.04), 0 14px 34px -20px rgba(18,24,38,.20);
+  --card-pad:19px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  min-width:100%;
+  background:
+    radial-gradient(820px 360px at 82% -10%, #e9edff 0%, rgba(233,237,255,0) 62%),
+    radial-gradient(640px 300px at 4% -12%, #e4f5f9 0%, rgba(228,245,249,0) 60%),
+    var(--bg);
+  color:var(--ink);
+  font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Hiragino Sans GB","Microsoft YaHei","Noto Sans SC",sans-serif;
+  font-size:13.5px;
+  line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+}
+h1,h2,h3,p{margin:0}
+a{color:inherit;text-decoration:none}
+ul{margin:0;padding:0;list-style:none}
+.num{font-variant-numeric:tabular-nums;font-feature-settings:"tnum" 1;letter-spacing:-.01em}
+.mono{font-family:"SF Mono",ui-monospace,Menlo,Consolas,monospace;font-variant-numeric:tabular-nums}
+.muted{color:var(--ink-3)}
+.pos-txt{color:var(--pos)}
+.neg-txt{color:var(--neg)}
+.sprite{position:absolute;width:0;height:0;overflow:hidden}
+.ico{width:18px;height:18px;flex:0 0 auto;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;display:block}
+.ico-sm{width:14px;height:14px}
+
+/* ============ shell ============ */
+.app{display:flex;flex-direction:column;min-height:100vh}
+.topbar{
+  flex:0 0 auto;height:68px;display:flex;align-items:center;gap:18px;
+  padding:0 22px;background:rgba(255,255,255,.9);
+  border-bottom:1px solid var(--line);position:sticky;top:0;z-index:30;
+  backdrop-filter:saturate(1.4) blur(10px);
+}
+.brand{width:248px;margin-left:-22px;padding-left:22px;display:flex;align-items:center;gap:11px;flex:0 0 auto}
+.mark{width:32px;height:32px;border-radius:10px;background:var(--grad);display:grid;place-items:center;box-shadow:0 6px 14px -6px rgba(79,70,229,.6);flex:0 0 auto}
+.mark svg{width:19px;height:19px;fill:none;stroke:#fff;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.brand-name{font-size:14.5px;font-weight:650;letter-spacing:.01em;white-space:nowrap}
+.brand-sub{font-size:10.5px;color:var(--ink-3);white-space:nowrap;margin-top:-2px}
+.brand-txt{display:flex;flex-direction:column;gap:0}
+.collapse-btn{margin-left:auto;width:30px;height:30px;border-radius:9px;border:1px solid var(--line);background:#fff;color:#7b8698;display:grid;place-items:center;cursor:pointer}
+.cmd{display:flex;align-items:center;gap:9px;width:352px;height:38px;padding:0 11px;background:#f5f6fb;border:1px solid #e7eaf2;border-radius:11px;color:var(--ink-3);font-size:12.5px;flex:0 1 auto}
+.cmd .kbd{margin-left:auto;font-size:10.5px;color:#8d97aa;background:#fff;border:1px solid #e7eaf2;border-radius:6px;padding:1px 6px;letter-spacing:.04em;font-family:inherit}
+.topright{margin-left:auto;display:flex;align-items:center;gap:9px;flex:0 0 auto}
+.chip{display:inline-flex;align-items:center;gap:5px;height:22px;padding:0 8px;border-radius:7px;font-size:11.5px;font-weight:550;white-space:nowrap;line-height:1}
+.chip .dot{width:6px;height:6px;border-radius:50%;background:currentColor;opacity:.85;flex:0 0 auto}
+.chip-ok{background:var(--pos-bg);color:var(--pos)}
+.chip-warn{background:var(--warn-bg);color:var(--warn)}
+.chip-bad{background:var(--neg-bg);color:var(--neg)}
+.chip-info{background:var(--info-bg);color:var(--info)}
+.chip-ghost{background:#f3f5f9;color:#65708a;border:1px solid #e8ecf3}
+.seg{display:flex;align-items:center;gap:2px;padding:3px;background:#f1f3f9;border:1px solid #e9ecf4;border-radius:11px}
+.seg-item{height:30px;padding:0 13px;display:inline-flex;align-items:center;gap:6px;border-radius:8px;font-size:12.5px;color:#5d687c;font-weight:500;cursor:pointer;white-space:nowrap}
+.seg-item.on{background:#fff;color:#3f38cf;font-weight:650;box-shadow:0 1px 2px rgba(18,24,38,.07)}
+.avatar{width:34px;height:34px;border-radius:50%;background:linear-gradient(135deg,#312e81,#0e7490);color:#fff;display:grid;place-items:center;font-size:12.5px;font-weight:600;letter-spacing:.02em;box-shadow:0 4px 10px -4px rgba(30,41,59,.5);flex:0 0 auto}
+
+.body{display:flex;align-items:stretch;flex:1 1 auto}
+.sidebar{width:248px;flex:0 0 248px;background:#fff;border-right:1px solid var(--line);padding:16px 14px 14px;display:flex;flex-direction:column;gap:2px}
+.nav-label{font-size:11px;font-weight:600;letter-spacing:.06em;color:#9aa4b8;padding:14px 10px 6px}
+.nav-item{display:flex;align-items:center;gap:10px;height:40px;padding:0 10px;border-radius:10px;color:#48536a;font-size:13px;position:relative;cursor:pointer}
+.nav-item .ico{color:#818da2}
+.nav-item:hover{background:#f6f8fc}
+.nav-item.active{background:linear-gradient(90deg,rgba(79,70,229,.12),rgba(14,155,181,.055));color:#3f38cf;font-weight:600}
+.nav-item.active::before{content:"";position:absolute;left:-14px;top:9px;bottom:9px;width:3px;border-radius:0 3px 3px 0;background:var(--grad)}
+.nav-item.active .ico{color:#4f46e5}
+.nav-item.placeholder{color:#a6b0c1}
+.nav-item.placeholder .ico{color:#bcc4d2}
+.nav-tag{margin-left:auto;font-size:10px;color:#a8b2c3;border:1px solid #e6eaf2;border-radius:6px;padding:1px 5px;background:#fbfcfe}
+.nav-item.on .nav-tag{border-color:#dcd9f7;color:#7b76c9;background:#f6f5fe}
+.side-foot{margin-top:auto;padding-top:12px;display:flex;flex-direction:column;gap:2px;border-top:1px solid var(--line-2)}
+.side-hint{display:flex;align-items:center;gap:8px;height:32px;padding:0 10px;color:var(--ink-3);font-size:11.5px}
+.side-ver{padding:6px 10px 0;font-size:10.5px;color:#b3bdcc;letter-spacing:.02em}
+
+.main{flex:1 1 auto;min-width:0;padding:20px 32px 18px}
+.wrap{max-width:1400px;margin:0 auto}
+
+/* ============ page head ============ */
+.pagehead{display:flex;align-items:flex-end;gap:16px;margin-bottom:18px}
+.crumb{display:flex;align-items:center;gap:6px;font-size:11.5px;color:var(--ink-3);margin-bottom:5px}
+.crumb .sep{color:#cbd3e0}
+h1.page-title{font-size:25px;line-height:1.14;font-weight:660;letter-spacing:-.015em}
+.page-sub{margin-top:6px;font-size:12.5px;color:var(--ink-2);display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.page-sub .divider{width:1px;height:12px;background:#dfe4ee}
+.head-right{margin-left:auto;display:flex;align-items:center;gap:10px;padding-bottom:2px}
+.btn{height:36px;border-radius:10px;border:1px solid var(--line);background:#fff;color:#3a4459;font-size:12.5px;font-weight:550;display:inline-flex;align-items:center;gap:7px;padding:0 13px;cursor:pointer;font-family:inherit;box-shadow:0 1px 1px rgba(18,24,38,.03)}
+.btn:hover{background:#f8f9fc;border-color:#dfe4ee}
+.btn-primary{border-color:transparent;background:var(--grad);color:#fff;box-shadow:0 6px 16px -8px rgba(79,70,229,.75)}
+.icon-btn{width:36px;height:36px;border-radius:10px;border:1px solid var(--line);background:#fff;color:#6b7689;display:grid;place-items:center;cursor:pointer}
+
+/* ============ bento ============ */
+.bento{
+  display:grid;grid-template-columns:repeat(12,minmax(0,1fr));gap:15px;
+  grid-template-areas:
+    "k1 k1 k1 k2 k2 k2 k3 k3 k3 k4 k4 k4"
+    "ch ch ch ch ch ch ch ch in in in in"
+    "ho ho ho ho ho ho ho hi hi hi hi hi"
+    "be be be be wo wo wo wo me me me me"
+    "ds ds ds ds ms ms ms ms qd qd qd qd";
+}
+#k1{grid-area:k1}#k2{grid-area:k2}#k3{grid-area:k3}#k4{grid-area:k4}
+#ch{grid-area:ch}#in{grid-area:in}#ho{grid-area:ho}#hi{grid-area:hi}
+#be{grid-area:be}#wo{grid-area:wo}#me{grid-area:me}
+#ds{grid-area:ds}#ms{grid-area:ms}#qd{grid-area:qd}
+
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--radius);box-shadow:var(--shadow);padding:var(--card-pad);min-width:0}
+.card-h{display:flex;align-items:flex-start;gap:10px;margin-bottom:11px}
+.card-h .ttl{min-width:0}
+.card-t{font-size:14.5px;font-weight:650;letter-spacing:.005em;display:flex;align-items:center;gap:8px;white-space:nowrap}
+.card-s{font-size:11.5px;color:var(--ink-3);margin-top:3px}
+.card-a{margin-left:auto;display:flex;align-items:center;gap:8px;flex:0 0 auto}
+.link{display:inline-flex;align-items:center;gap:4px;font-size:12.5px;font-weight:550;color:var(--indigo);cursor:pointer;white-space:nowrap}
+.link:hover{text-decoration:underline;text-underline-offset:3px}
+.link.muted-link{color:var(--ink-3)}
+.card-foot{display:flex;align-items:center;gap:14px;margin-top:10px;padding-top:9px;border-top:1px solid var(--line-2);font-size:12px}
+.foot-hint{margin-left:auto;color:var(--ink-3);font-size:11.5px;white-space:nowrap}
+
+/* ============ KPI ============ */
+.kpi{display:flex;flex-direction:column;gap:0;position:relative;overflow:hidden;padding:17px var(--card-pad) 14px}
+.kpi-head{display:flex;align-items:center;gap:8px;height:18px}
+.kpi-label{font-size:12.5px;font-weight:550;color:var(--ink-2)}
+.kpi-head .chip{margin-left:auto;height:20px;font-size:11px}
+.kpi-val{font-size:27px;font-weight:660;line-height:1.12;margin-top:9px;letter-spacing:-.025em}
+.kpi-sub{font-size:11.5px;color:var(--ink-3);margin-top:7px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kpi-foot{margin-top:auto;padding-top:11px;display:flex;align-items:flex-end;gap:10px}
+.kpi-cap{font-size:11px;color:var(--ink-3);padding-bottom:2px;white-space:nowrap}
+.spark{width:132px;height:46px;margin-left:auto;display:block;overflow:visible}
+.sp-area{fill:rgba(79,70,229,.11);stroke:none}
+.sp-line{fill:none;stroke:#5b52e0;stroke-width:1.9;stroke-linecap:round;stroke-linejoin:round}
+.sp-dot{fill:#fff;stroke:#5b52e0;stroke-width:1.8}
+.spark.green .sp-area{fill:rgba(11,138,84,.11)}
+.spark.green .sp-line{stroke:#0b8a54}
+.spark.green .sp-dot{fill:#fff;stroke:#0b8a54}
+.meter{flex:0 0 auto;width:100%;height:12px;border-radius:99px;background:#eef1f7;overflow:hidden;position:relative}
+.meter i{box-shadow:0 1px 2px rgba(79,70,229,.25)}
+.meter i{display:block;height:100%;border-radius:99px;background:var(--grad)}
+.meter-wrap{flex:1 1 auto;display:flex;flex-direction:column;min-width:0;height:46px;justify-content:center}
+.meter-lab{display:none}
+.kpi-knob{position:absolute;right:-4px;top:-2px;width:12px;height:12px;border-radius:50%;background:#fff;border:2.5px solid #0e9bb5;box-shadow:0 1px 3px rgba(18,24,38,.16)}
+.kpi-meter-line{position:relative;height:8px;margin-top:0}
+
+/* ============ chart card ============ */
+.chart{display:flex;flex-direction:column}
+.tabs{display:flex;align-items:center;gap:2px;padding:3px;background:#f4f6fa;border-radius:9px}
+.tab{height:26px;padding:0 10px;border-radius:7px;font-size:12px;color:#6b7689;font-weight:500;display:inline-flex;align-items:center;cursor:pointer}
+.tab.on{background:#fff;color:#3f38cf;font-weight:650;box-shadow:0 1px 2px rgba(18,24,38,.07)}
+.chart-body{flex:1 1 auto;display:flex;align-items:center;margin:2px 0 0}
+.chart-svg{width:100%;height:auto;display:block;overflow:visible}
+.chart-pad{display:none}
+.chart-pad .area{fill:url(#cAreaP)}
+.chart-pad .line{stroke:url(#cLineP)}
+.gline{stroke:#eef1f7;stroke-width:1}
+.ytick{fill:#9aa4b6;font-size:11px;font-variant-numeric:tabular-nums}
+.xtick{fill:#9aa4b6;font-size:10.5px;font-variant-numeric:tabular-nums}
+.band-decline{fill:rgba(209,59,59,.075)}
+.band-recovery{fill:rgba(14,155,181,.05)}
+.area{fill:url(#cArea)}
+.line{fill:none;stroke:url(#cLine);stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round}
+.mk-peak{fill:#fff;stroke:#4f46e5;stroke-width:2.2}
+.mk-valley{fill:#fff;stroke:#d13b3b;stroke-width:2.2}
+.mk-lab{fill:#7c879b;font-size:10.5px}
+.band-t1{fill:#b4453f;font-size:11px;font-weight:600}
+.band-t2{fill:#b1875f;font-size:10px}
+.xref{stroke:#b9c0cf;stroke-width:1;stroke-dasharray:3 4}
+.mk-hover{fill:rgba(79,70,229,.14);stroke:#4f46e5;stroke-width:2}
+.tip rect{fill:#fff;stroke:#e6e9f2}
+.tip-k{fill:#8a94a8;font-size:10.5px}
+.tip-v{fill:#121826;font-size:15px;font-weight:650;font-variant-numeric:tabular-nums}
+.tip-s{fill:#8a94a8;font-size:9.5px}
+.chart-foot{display:flex;align-items:center;gap:16px;margin-top:9px;padding-top:11px;border-top:1px solid var(--line-2);font-size:11.5px;color:var(--ink-3)}
+.legend{display:flex;align-items:center;gap:16px;flex-wrap:wrap}
+.legend span{display:inline-flex;align-items:center;gap:7px;white-space:nowrap}
+.lg{width:14px;height:8px;border-radius:2px;display:inline-block}
+.lg-line{height:3px;border-radius:2px;background:linear-gradient(90deg,#4f46e5,#0e9bb5)}
+.lg-band{background:rgba(209,59,59,.14);border:1px solid rgba(209,59,59,.18)}
+.lg-dot{width:8px;height:8px;border-radius:50%;border:2px solid #4f46e5;background:#fff}
+.chart-note{margin-left:auto;white-space:nowrap}
+
+/* ============ insights ============ */
+.ins-list{display:flex;flex-direction:column;gap:9px;margin-top:2px}
+.ins{display:flex;gap:11px}
+.ins-ico{width:28px;height:28px;border-radius:9px;display:grid;place-items:center;flex:0 0 auto;margin-top:1px}
+.ins-ico .ico{width:15px;height:15px;stroke-width:1.8}
+.ins-ico.warn{background:var(--warn-bg);color:var(--warn)}
+.ins-ico.bad{background:var(--neg-bg);color:var(--neg)}
+.ins-ico.info{background:var(--info-bg);color:var(--info)}
+.ins-body{min-width:0;display:flex;flex-direction:column;gap:6px}
+.ins-meta{display:flex;align-items:center;gap:7px}
+.ins-meta .chip{height:19px;font-size:10.5px;padding:0 7px}
+.ins-tag{font-size:11px;color:var(--ink-3)}
+.ins-body p{font-size:12.5px;line-height:1.62;color:#333c4d}
+.ins-link{font-size:11.5px;font-weight:550;color:var(--indigo);display:inline-flex;align-items:center;gap:3px;cursor:pointer;align-self:flex-start}
+.note{display:flex;align-items:center;gap:9px;margin-top:11px;padding:10px 11px;border:1px dashed #d9dfea;border-radius:11px;background:#fafbfe;color:#98a3b5;font-size:12px}
+.note .ico{width:15px;height:15px;color:#a5b0c2}
+.note-ph{flex:1 1 auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.btn-mini{height:28px;padding:0 11px;border-radius:8px;font-size:11.5px;font-weight:600;border:1px solid #e2e7f0;background:#fff;color:#5b6578;cursor:pointer;font-family:inherit;flex:0 0 auto}
+
+/* ============ holdings table ============ */
+.tbl{width:100%;border-collapse:separate;border-spacing:0;font-size:12.5px}
+.tbl thead th{font-size:11px;font-weight:550;color:#98a2b4;text-align:right;padding:0 9px 10px;border-bottom:1px solid #edf0f6;letter-spacing:.02em;white-space:nowrap}
+.tbl thead th.l{text-align:left}
+.tbl thead th.l{padding-left:2px}
+.tbl thead th.c{text-align:center}
+.tbl tbody td{padding:9px 9px;border-bottom:1px solid var(--line-2);text-align:right;vertical-align:middle;white-space:nowrap;color:#2b3345}
+.tbl tbody tr:last-child td{border-bottom:none}
+.tbl tbody td.l{text-align:left;padding-left:2px}
+.tbl tbody tr{cursor:pointer}
+.tbl tbody tr:hover td{background:#f8faff}
+.tbl tbody tr.is-hover td{background:linear-gradient(90deg,#f5f7ff,#f7fbff)}
+.tbl tbody tr.is-hover td:first-child{box-shadow:inset 2px 0 0 #6366f1}
+.tbl tbody tr.is-hover td:last-child{box-shadow:inset -2px 0 0 #6366f1}
+.code{font-size:11.5px;color:#8892a6;letter-spacing:.01em;padding-right:12px}
+.nm{font-size:13px;font-weight:550;color:#20293a}
+.sec{display:flex;align-items:baseline;gap:0}
+.wt{display:flex;align-items:center;gap:8px;justify-content:flex-end}
+.wt-track{width:52px;height:6px;border-radius:3px;background:#eef1f7;overflow:hidden;flex:0 0 auto}
+.wt-track i{display:block;height:100%;border-radius:3px;background:linear-gradient(90deg,#6366f1,#0e9bb5)}
+.wt-pct{width:47px;text-align:right;color:#3b465a}
+.chev{width:14px;height:14px;color:#c3cbdb;margin-left:2px}
+.tbl tbody tr.is-hover .chev{color:#6366f1}
+.chev-cell{width:18px;padding-right:0!important}
+
+/* ============ history ============ */
+.stat2{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:9px}
+.stat{background:#fafbfd;border:1px solid #eef1f7;border-radius:11px;padding:8px 10px}
+.stat-l{font-size:11px;color:var(--ink-3);display:block}
+.stat-v{font-size:21px;font-weight:650;letter-spacing:-.02em;line-height:1.25;margin-top:2px;display:block}
+.stat-v small{font-size:11px;font-weight:500;color:var(--ink-3);margin-left:3px;letter-spacing:0}
+.winbar{margin-bottom:9px}
+.wb{display:flex;height:10px;border-radius:99px;overflow:hidden;background:#eef1f7}
+.wb i{display:block;height:100%}
+.wb-win{background:linear-gradient(90deg,#0f9d63,#34c98e)}
+.wb-loss{background:linear-gradient(90deg,#e05a5a,#d13b3b)}
+.wb-flat{background:#cfd6e2}
+.wb-legend{display:flex;gap:14px;margin-top:9px;flex-wrap:wrap;font-size:11.5px;color:var(--ink-2)}
+.wb-legend span{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.wb-legend b{font-weight:600;color:#2b3345}
+.d{width:8px;height:8px;border-radius:2px;display:inline-block}
+.d-win{background:#0f9d63}.d-loss{background:#d13b3b}.d-flat{background:#cfd6e2}
+.mdd{border:1px solid #f0e3e3;background:linear-gradient(180deg,#fffafa,#fff);border-radius:11px;padding:9px 10px 8px;margin-bottom:9px}
+.mdd-top{display:flex;align-items:center;gap:8px}
+.mdd-l{font-size:11.5px;color:var(--ink-2);font-weight:550}
+.mdd-top .chip{margin-left:auto}
+.mdd-v{font-size:22px;font-weight:660;color:#c93b3b;letter-spacing:-.025em;line-height:1.2;margin-top:4px}
+.mdd-meta{font-size:11px;color:#8b7d80;margin-top:4px;line-height:1.55}
+.tl{display:flex;gap:3px;margin-top:11px;height:15px}
+.tl-seg{border-radius:4px;display:flex;align-items:center;justify-content:center;font-size:10px;color:#fff;font-weight:600;letter-spacing:.02em;white-space:nowrap;overflow:hidden}
+.tl-decl{flex:0 0 40.6%;background:linear-gradient(90deg,#e05a5a,#cf4b4b)}
+.tl-rec{flex:1 1 auto;background:linear-gradient(90deg,#f0b37e,#e9a15e)}
+.tl-axis{display:flex;justify-content:space-between;font-size:10px;color:#a99ba0;margin-top:6px;font-variant-numeric:tabular-nums}
+.hstat-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding-top:4px}
+.hstat{min-width:0}
+.hstat .stat-l{margin-bottom:3px}
+.hstat-v{font-size:14.5px;font-weight:650;letter-spacing:-.01em;white-space:nowrap}
+.hstat-v small{font-size:12px;font-weight:500;color:var(--ink-3);margin-left:4px;letter-spacing:0}
+
+/* ============ rounds lists ============ */
+.rlist{display:flex;flex-direction:column;margin-top:-2px}
+#be,#wo{display:flex;flex-direction:column}
+#be .card-foot,#wo .card-foot{margin-top:auto}
+#me{display:flex;flex-direction:column}
+#me .card-foot{margin-top:auto}
+.ritem{display:grid;grid-template-columns:20px minmax(0,1fr) 94px 76px 12px;align-items:center;gap:8px;padding:7px 2px;border-bottom:1px solid var(--line-2);cursor:pointer}
+.ritem:last-child{border-bottom:none}
+.ritem:hover{background:#f8faff}
+.rank{width:20px;height:20px;border-radius:6px;display:grid;place-items:center;font-size:10.5px;font-weight:650;background:#f3f5fa;color:#7c879b}
+.ritem.top .rank{background:var(--pos-bg);color:var(--pos)}
+.ritem.bottom .rank{background:var(--neg-bg);color:var(--neg)}
+.rmain{min-width:0}
+.rname{font-size:12.5px;font-weight:550;color:#20293a;display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rcode{font-size:10.5px;color:#98a2b4;letter-spacing:.02em}
+.rval{text-align:right}
+.rval b{display:block;font-size:12.5px;font-weight:650;letter-spacing:-.01em}
+.rval span{display:block;font-size:10.5px;font-weight:600}
+.rmeta{text-align:right;font-size:10.5px;color:#8d97aa;line-height:1.55;font-variant-numeric:tabular-nums}
+
+/* ============ metrics ============ */
+.mgroup{margin-bottom:7px}
+.mgroup-h{display:flex;align-items:center;gap:8px;margin-bottom:8px}
+.mgroup-t{font-size:12px;font-weight:550;color:var(--ink-2)}
+.mgroup-n{margin-left:auto;font-size:11px;color:var(--ink-3)}
+.pills{display:flex;flex-wrap:wrap;gap:6px}
+.mchip{display:inline-flex;align-items:center;gap:4px;height:22px;padding:0 7px;border-radius:6px;font-size:10.5px;color:#6b7689;background:#f7f9fc;border:1px solid #eceff6;letter-spacing:.01em}
+.mchip.mono{font-size:10px;color:#5f6a7e}
+.metric-total{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+.mt-num{font-size:26px;font-weight:660;letter-spacing:-.02em;line-height:1.1}
+.mt-txt{font-size:11px;color:var(--ink-3);line-height:1.5}
+
+/* ============ footer ============ */
+.pagefoot{margin-top:14px;padding-top:11px;border-top:1px solid #e6eaf2;display:flex;align-items:center;gap:14px;font-size:11.5px;color:var(--ink-3)}
+.pagefoot .right{margin-left:auto;white-space:nowrap}
+
+
+/* ============ data source / digest / quick links ============ */
+.kv{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:4px 0;border-bottom:1px dashed #eef1f7;font-size:12px}
+.kv:last-of-type{border-bottom:none}
+.kv-k{color:var(--ink-3);white-space:nowrap}
+.kv-v{font-weight:600;color:#2b3345;white-space:nowrap}
+.kv-v .chip{height:20px;font-size:10.5px}
+.dgrid{display:grid;grid-template-columns:1fr 1fr;gap:7px;margin-top:1px}
+.dcell{background:#fafbfd;border:1px solid #eef1f7;border-radius:9px;padding:6px 9px;min-width:0}
+.dcell .stat-l{font-size:10.5px}
+.dcell b{display:block;font-size:15px;font-weight:650;letter-spacing:-.015em;margin-top:1px;white-space:nowrap}
+.dcell b small{font-size:10.5px;font-weight:500;color:var(--ink-3);margin-left:2px;letter-spacing:0}
+.dcell.span2{grid-column:1 / -1;background:linear-gradient(180deg,#fffafa,#fff);border-color:#f2e6e6}
+.ql{display:grid;grid-template-columns:1fr 1fr;gap:5px 8px;margin-top:1px}
+.ql a{display:flex;align-items:center;gap:7px;height:24px;padding:0 8px;border-radius:8px;font-size:11.5px;color:#3d4759;border:1px solid transparent;white-space:nowrap}
+.ql a:hover{background:#f7f9fd;border-color:#edf0f6}
+.ql a .ico{width:14px;height:14px;color:#8b96aa}
+.ql a .chev{margin-left:auto;width:12px;height:12px;color:#c7cfdd}
+.ql a.ph{color:#a9b3c4}
+.ql a.ph .ico{color:#c2cad8}
+.ql .tag{font-size:9px;color:#a9b3c4;border:1px solid #e7ebf3;border-radius:5px;padding:0 4px;margin-left:auto}
+
+/* ============ tablet : 768–1279 ============ */
+@media (max-width:1279px){
+  :root{--card-pad:16px;--radius:14px}
+  .topbar{height:58px;padding:0 16px;gap:12px}
+  .brand{width:72px;margin-left:-16px;padding-left:16px;gap:0}
+  .brand-txt,.collapse-btn{display:none}
+  .mark{width:30px;height:30px;border-radius:9px}
+  .cmd{width:auto;flex:1 1 auto;max-width:320px;height:34px;font-size:12px}
+  .topright{gap:7px}
+  .topright .chip{font-size:10.5px;height:21px;padding:0 7px}
+  .seg-item{height:27px;padding:0 10px;font-size:11.5px}
+  .avatar{width:30px;height:30px;font-size:11.5px}
+  .sidebar{width:72px;flex:0 0 72px;padding:10px 10px 10px;align-items:center}
+  .nav-label{display:none}
+  .nav-item{width:52px;height:42px;padding:0;justify-content:center;border-radius:11px}
+  .nav-item .txt,.nav-tag{display:none}
+  .nav-item.active::before{left:-10px;top:10px;bottom:10px}
+  .nav-group{margin-top:6px}
+  .side-foot{align-items:center}
+  .side-hint,.side-ver{display:none}
+  .main{padding:16px 20px 18px}
+  .pagehead{margin-bottom:14px;gap:12px}
+  h1.page-title{font-size:23px}
+  .page-sub{margin-top:6px;font-size:11.5px;gap:8px}
+  .crumb{display:none}
+  .head-right{gap:8px}
+  .btn{height:32px;font-size:12px;padding:0 11px}
+  .icon-btn{width:32px;height:32px}
+  .bento{gap:14px;grid-template-areas:
+    "k1 k1 k1 k1 k1 k1 k2 k2 k2 k2 k2 k2"
+    "k3 k3 k3 k3 k3 k3 k4 k4 k4 k4 k4 k4"
+    "ch ch ch ch ch ch ch ch ch ch ch ch"
+    "ho ho ho ho ho ho in in in in in in"
+    "hi hi hi hi hi hi me me me me me me"
+    "be be be be be be wo wo wo wo wo wo";}
+
+  .card{padding:var(--card-pad)}
+  .card-h{margin-bottom:11px}
+  .card-t{font-size:13.5px}
+  .card-s{font-size:11px}
+  .kpi{padding:13px 15px 12px}
+  .kpi-val{font-size:23px;margin-top:9px}
+  .kpi-sub{font-size:11px;margin-top:4px}
+  .kpi-foot{padding-top:10px}
+  .kpi-cap{font-size:10.5px}
+  .spark{width:104px;height:34px}
+  .kpi-head{height:17px}
+  .chart-pc{display:none}
+  .chart-pad{display:block}
+  .chart-foot{margin-top:8px;padding-top:9px;font-size:11px;gap:10px}
+  .legend{gap:12px}
+  .chart-note{display:none}
+  .ins-list{gap:12px}
+  .ins-body p{font-size:12px;line-height:1.58}
+  .note{margin-top:12px;padding:8px 10px;font-size:11.5px}
+  .tbl{font-size:12px}
+  .tbl thead th{padding:0 8px 8px}
+  .tbl tbody td{padding:9px 8px}
+  .code{font-size:11px;padding-right:10px}
+  .nm{font-size:12.5px}
+  .wt-track{width:44px}
+  .wt-pct{width:44px}
+  .stat2{gap:8px;margin-bottom:12px}
+  .stat{padding:9px 10px}
+  .stat-v{font-size:19px}
+  .winbar{margin-bottom:12px}
+  .wb-legend{gap:10px;margin-top:7px;font-size:11px}
+  .mdd{padding:11px;margin-bottom:11px}
+  .mdd-v{font-size:22px}
+  .mdd-meta{font-size:10.5px}
+  .hstat-v{font-size:13px}
+  .ritem{padding:9px 2px;grid-template-columns:18px minmax(0,1fr) 88px 66px 12px}
+  .mchip{height:21px;font-size:10px}
+  .metric-total{margin-bottom:11px}
+  .mt-num{font-size:23px}
+  .pagefoot{margin-top:14px;padding-top:11px;font-size:11px;gap:10px}
+  .pagefoot .right{display:none}
+  .main{padding:14px 18px 14px}
+  h1.page-title{font-size:20px}
+  .page-sub{margin-top:5px;font-size:10.5px;gap:6px}
+  .head-right{gap:6px}
+  .head-right .chip{display:none}
+  .btn{height:30px;font-size:11.5px;padding:0 10px;gap:5px}
+  .icon-btn{width:30px;height:30px;border-radius:9px}
+  .card{padding:12px}
+  .card-h{margin-bottom:10px}
+  .card-t{font-size:12.5px;gap:6px}
+  .card-t .chip{height:18px;font-size:9.5px;padding:0 6px}
+  .card-s{font-size:10px;margin-top:2px}
+  .card-foot{margin-top:9px;padding-top:8px;font-size:10.5px;gap:10px}
+  .foot-hint{display:none}
+  .kpi{padding:10px 12px 9px}
+  .kpi-head{height:16px}
+  .kpi-label{font-size:11px}
+  .kpi-val{font-size:20px;margin-top:7px;letter-spacing:-.02em}
+  .kpi-sub{font-size:9.5px;margin-top:3px}
+  .kpi-foot{padding-top:8px}
+  .kpi-cap{font-size:10px}
+  .kpi-head .chip{display:none}
+  .spark{width:88px;height:28px}
+  .meter-wrap{height:28px}
+  .meter{height:8px}
+  .ins-list{gap:9px}
+  .ins-ico{width:22px;height:22px;border-radius:7px}
+  .ins-ico .ico{width:13px;height:13px}
+  .ins-body{gap:4px}
+  .ins-body p{font-size:11px;line-height:1.5}
+  .ins-link{font-size:10.5px}
+  .ins-meta{gap:5px}
+  .ins-meta .chip{height:17px;font-size:9.5px;padding:0 6px}
+  .ins-tag{font-size:9.5px}
+  .note{margin-top:9px;padding:7px 9px;font-size:10.5px;border-radius:9px}
+  .btn-mini{height:24px;padding:0 8px;font-size:10.5px}
+  .tbl{font-size:11.5px}
+  .tbl thead th{font-size:10px;padding:0 6px 6px}
+  .tbl tbody td{padding:4px 6px}
+  .code{font-size:10.5px;padding-right:8px}
+  .nm{font-size:11.5px}
+  .wt-track{width:38px;height:5px}
+  .wt-pct{width:40px}
+  .stat2{margin-bottom:8px;gap:7px}
+  .stat{padding:7px 9px;border-radius:10px}
+  .stat-l{font-size:10px}
+  .stat-v{font-size:17px;margin-top:1px}
+  .winbar{margin-bottom:8px}
+  .wb{height:8px}
+  .wb-legend{gap:8px;margin-top:5px;font-size:10px}
+  .mdd{padding:8px 10px 7px;margin-bottom:8px;border-radius:10px}
+  .mdd-top .chip{height:17px;font-size:9.5px;padding:0 6px}
+  .mdd-l{font-size:10.5px}
+  .mdd-v{font-size:19px}
+  .mdd-meta{font-size:9.5px;line-height:1.5}
+  .tl{height:12px;margin-top:7px}
+  .tl-seg{font-size:8px}
+  .tl-axis{font-size:8.5px;margin-top:4px}
+  .hstat-row{display:none}
+  .ritem{padding:5px 1px;grid-template-columns:16px minmax(0,1fr) 82px 58px 10px;gap:6px}
+  .rank{width:16px;height:16px;font-size:9.5px;border-radius:5px}
+  .rname{font-size:11.5px}
+  .rcode{font-size:9.5px}
+  .rval b{font-size:11.5px}
+  .rval span{font-size:9.5px}
+  .rmeta{font-size:9px;line-height:1.45}
+  .mgroup{margin-bottom:8px}
+  .mgroup-h{margin-bottom:6px}
+  .mgroup-t{font-size:11px}
+  .mgroup-n{font-size:10px}
+  .mchip{height:19px;font-size:9px;padding:0 6px}
+  .chart-body{margin:2px 0 4px}
+  .chart-foot{margin-top:5px;padding-top:6px}
+  .pagefoot{margin-top:12px;padding-top:10px;font-size:10.5px;gap:8px}
+  .pagefoot .right{display:none}
+  .note-ph{font-size:10.5px}
+  .bento{gap:10px}
+  .main{padding:13px 18px 8px}
+  .pagehead{margin-bottom:7px}
+  .pagefoot{margin-top:7px}
+  .kpi-val{font-size:19px}
+  .kpi-foot{padding-top:5px}
+  .spark{width:84px;height:26px}
+  .meter-wrap{height:26px}
+  .note{display:none}
+  #me .mgroup:nth-of-type(4){display:none}
+  #ds,#ms,#qd{display:none}
+  .kpi-val{font-size:18px}
+  .ins-list{gap:8px}
+  .ins-body p{font-size:10.5px;line-height:1.45}
+  .ins-link{font-size:10px}
+  .ins-meta .chip{height:16px;font-size:9px;padding:0 5px}
+  .mdd{padding:8px 9px 7px}
+  .mdd-v{font-size:18px}
+  .mdd-meta{font-size:9px}
+  .tl{height:10px;margin-top:6px;gap:2px}
+  .tl-seg{font-size:7.5px}
+  .tl-axis{font-size:8px;margin-top:3px}
+}
+</style>
+</head>
+<body>
+
+<svg class="sprite" aria-hidden="true" focusable="false"><defs>
+<symbol id="i-grid" viewBox="0 0 24 24"><rect x="3.6" y="3.6" width="7" height="7" rx="2"/><rect x="13.4" y="3.6" width="7" height="7" rx="2"/><rect x="3.6" y="13.4" width="7" height="7" rx="2"/><rect x="13.4" y="13.4" width="7" height="7" rx="2"/></symbol>
+<symbol id="i-list" viewBox="0 0 24 24"><path d="M8 6h12M8 12h12M8 18h12"/><circle cx="4" cy="6" r="1"/><circle cx="4" cy="12" r="1"/><circle cx="4" cy="18" r="1"/></symbol>
+<symbol id="i-cycle" viewBox="0 0 24 24"><path d="M20 11a8 8 0 0 0-14.6-4.4"/><path d="M4 5v4.2h4.2"/><path d="M4 13a8 8 0 0 0 14.6 4.4"/><path d="M20 19v-4.2h-4.2"/></symbol>
+<symbol id="i-chart" viewBox="0 0 24 24"><path d="M4 19V5"/><path d="M4 19h16"/><path d="M7.6 15.4l3.6-4.2 3 2.6 4.4-6"/></symbol>
+<symbol id="i-wallet" viewBox="0 0 24 24"><rect x="3.5" y="6.5" width="17" height="12.5" rx="3"/><path d="M3.5 10.5h17"/><circle cx="16.4" cy="14.6" r="1.1"/></symbol>
+<symbol id="i-gauge" viewBox="0 0 24 24"><path d="M4.4 18a8.6 8.6 0 1 1 15.2 0"/><path d="M12 18l4.1-5.6"/><circle cx="12" cy="18" r="1.3"/></symbol>
+<symbol id="i-upload" viewBox="0 0 24 24"><path d="M12 16.5V5"/><path d="M7.6 9.4 12 5l4.4 4.4"/><path d="M4.5 15v2.6a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V15"/></symbol>
+<symbol id="i-history" viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.6-5.9"/><path d="M4.3 4.6v4h4"/><path d="M12 8.4V12l2.6 1.8"/></symbol>
+<symbol id="i-gear" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3.5v2.2M12 18.3v2.2M4.9 7.6l1.9 1.1M17.2 15.3l1.9 1.1M4.9 16.4l1.9-1.1M17.2 8.7l1.9-1.1"/></symbol>
+<symbol id="i-doc" viewBox="0 0 24 24"><path d="M14 3.6H7a2 2 0 0 0-2 2v12.8a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8.6z"/><path d="M14 3.6v5h5"/><path d="M9 13.2h6M9 16.4h4"/></symbol>
+<symbol id="i-download" viewBox="0 0 24 24"><path d="M12 4v11"/><path d="M7.6 10.6 12 15l4.4-4.4"/><path d="M4.5 16.8v1.4a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2v-1.4"/></symbol>
+<symbol id="i-pie" viewBox="0 0 24 24"><path d="M12 12V3.6a8.4 8.4 0 1 0 8.4 8.4z"/><path d="M14.6 4a8.4 8.4 0 0 1 5.4 5.4h-5.4z"/></symbol>
+<symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.6"/><path d="M16 16l4.4 4.4"/></symbol>
+<symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 11.5a8 8 0 0 0-14.7-4.2"/><path d="M4 4.6v4.4h4.4"/><path d="M4 12.5a8 8 0 0 0 14.7 4.2"/><path d="M20 19.4v-4.4h-4.4"/></symbol>
+<symbol id="i-panel" viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="15" rx="3"/><path d="M9.6 4.6v14.8"/></symbol>
+<symbol id="i-chev" viewBox="0 0 24 24"><path d="M9.5 6l6 6-6 6"/></symbol>
+<symbol id="i-arrow" viewBox="0 0 24 24"><path d="M4.6 12h14.2"/><path d="M13.4 6.6 18.8 12l-5.4 5.4"/></symbol>
+<symbol id="i-spark" viewBox="0 0 24 24"><path d="M12 3.8l1.9 5.4 5.4 1.9-5.4 1.9L12 18.4l-1.9-5.4L4.7 11.1l5.4-1.9z"/></symbol>
+<symbol id="i-alert" viewBox="0 0 24 24"><path d="M12 4.4 3.8 18.6h16.4z"/><path d="M12 9.6v3.8"/><circle cx="12" cy="16.4" r=".85" fill="currentColor" stroke="none"/></symbol>
+<symbol id="i-flag" viewBox="0 0 24 24"><path d="M5.6 21V3.8"/><path d="M5.6 4.6h8.8l-1.4 3.3 1.4 3.3H5.6"/></symbol>
+<symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5.2v13.6M5.2 12h13.6"/></symbol>
+<symbol id="i-note" viewBox="0 0 24 24"><path d="M4.6 19.4 8 18.9l9.4-9.4a2 2 0 0 0-2.8-2.8L5.2 16.1z"/><path d="M13.4 8.2l2.4 2.4"/></symbol>
+<symbol id="i-up" viewBox="0 0 24 24"><path d="M4 17l5-5 3.2 3.2L20 7.2"/><path d="M20 12.4V7.2h-5.2"/></symbol>
+<symbol id="i-calendar" viewBox="0 0 24 24"><rect x="3.6" y="5.2" width="16.8" height="15.2" rx="3"/><path d="M3.6 9.6h16.8M8 3.4v3.6M16 3.4v3.6"/></symbol>
+<symbol id="i-check" viewBox="0 0 24 24"><path d="M5 12.6 9.6 17.2 19 7.4"/></symbol>
+<symbol id="i-more" viewBox="0 0 24 24"><circle cx="6" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.2" fill="currentColor" stroke="none"/><circle cx="18" cy="12" r="1.2" fill="currentColor" stroke="none"/></symbol>
+</defs></svg>
+
+<div class="app">
+
+  <!-- ============ topbar ============ -->
+  <header class="topbar">
+    <div class="brand">
+      <div class="mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24"><path d="M4.5 15.6l4.4-4.8 3.4 2.9 4.1-6.3 3.1 3.2"/><path d="M4.5 19.4h15"/></svg>
+      </div>
+      <div class="brand-txt">
+        <span class="brand-name">交易复盘</span>
+        <span class="brand-sub">个人复盘工作台</span>
+      </div>
+      <button class="collapse-btn" type="button" title="收起侧栏 ⌘B" aria-label="收起侧栏">
+        <svg class="ico ico-sm" aria-hidden="true"><use href="#i-panel"/></svg>
+      </button>
+    </div>
+
+    <div class="cmd" role="search">
+      <svg class="ico ico-sm" aria-hidden="true"><use href="#i-search"/></svg>
+      <span>搜索股票 / 页面 / 命令</span>
+      <span class="kbd">⌘ K</span>
+    </div>
+
+    <div class="topright">
+      <span class="chip chip-ok"><i class="dot"></i>构建 最新</span>
+      <span class="chip chip-ok"><i class="dot"></i>页面 正常</span>
+      <div class="seg" role="tablist" aria-label="时间范围">
+        <span class="seg-item on" role="tab" aria-selected="true">全历史</span>
+        <span class="seg-item" role="tab" aria-selected="false">本月</span>
+      </div>
+      <div class="avatar" title="本地账号">复</div>
+    </div>
+  </header>
+
+  <div class="body">
+
+    <!-- ============ sidebar ============ -->
+    <aside class="sidebar">
+      <div class="nav-group">
+        <div class="nav-label">概览</div>
+        <a class="nav-item active" href="#"><svg class="ico" aria-hidden="true"><use href="#i-grid"/></svg><span class="txt">看板</span></a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-label">交易</div>
+        <a class="nav-item" href="#"><svg class="ico" aria-hidden="true"><use href="#i-list"/></svg><span class="txt">交易流水</span></a>
+        <a class="nav-item" href="#"><svg class="ico" aria-hidden="true"><use href="#i-cycle"/></svg><span class="txt">回合</span></a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-label">分析</div>
+        <a class="nav-item" href="#"><svg class="ico" aria-hidden="true"><use href="#i-chart"/></svg><span class="txt">净值与收益</span></a>
+        <a class="nav-item" href="#"><svg class="ico" aria-hidden="true"><use href="#i-gauge"/></svg><span class="txt">指标</span></a>
+        <a class="nav-item placeholder" href="#"><svg class="ico" aria-hidden="true"><use href="#i-pie"/></svg><span class="txt">归因</span><span class="nav-tag">占位</span></a>
+      </div>
+      <div class="nav-group">
+        <div class="nav-label">数据</div>
+        <a class="nav-item" href="#"><svg class="ico" aria-hidden="true"><use href="#i-wallet"/></svg><span class="txt">资产</span></a>
+        <a class="nav-item" href="#"><svg class="ico" aria-hidden="true"><use href="#i-upload"/></svg><span class="txt">导入</span></a>
+        <a class="nav-item" href="#"><svg class="ico" aria-hidden="true"><use href="#i-history"/></svg><span class="txt">导入记录</span></a>
+        <a class="nav-item placeholder" href="#"><svg class="ico" aria-hidden="true"><use href="#i-doc"/></svg><span class="txt">月报</span><span class="nav-tag">占位</span></a>
+        <a class="nav-item placeholder" href="#"><svg class="ico" aria-hidden="true"><use href="#i-download"/></svg><span class="txt">导出</span><span class="nav-tag">占位</span></a>
+      </div>
+      <div class="side-foot">
+        <a class="nav-item" href="#"><svg class="ico" aria-hidden="true"><use href="#i-gear"/></svg><span class="txt">设置</span></a>
+        <div class="side-hint"><svg class="ico ico-sm" aria-hidden="true"><use href="#i-panel"/></svg>⌘B 收起侧栏</div>
+        <div class="side-ver">v2 · 本地实例</div>
+      </div>
+    </aside>
+
+    <!-- ============ main ============ -->
+    <main class="main">
+      <div class="wrap">
+
+        <!-- page head -->
+        <div class="pagehead">
+          <div>
+            <div class="crumb">概览<span class="sep">/</span>看板</div>
+            <h1 class="page-title">看板</h1>
+            <div class="page-sub">
+              <span>资产概览为最新资产日快照（2026-10-27）</span>
+              <span class="divider"></span>
+              <span>历史概览为全历史</span>
+              <span class="divider"></span>
+              <span>旧五卡为月度口径（2026-06）</span>
+            </div>
+          </div>
+          <div class="head-right">
+            <span class="chip chip-ghost"><svg class="ico ico-sm" aria-hidden="true" style="color:#8a94a8"><use href="#i-calendar"/></svg>数据截至 2026-10-27</span>
+            <button class="btn" type="button"><svg class="ico ico-sm" aria-hidden="true"><use href="#i-refresh"/></svg>刷新</button>
+            <button class="icon-btn" type="button" aria-label="更多操作"><svg class="ico ico-sm" aria-hidden="true"><use href="#i-more"/></svg></button>
+          </div>
+        </div>
+
+        <!-- bento -->
+        <div class="bento">
+
+          <!-- KPI 1 总资产 -->
+          <article class="card kpi" id="k1">
+            <div class="kpi-head">
+              <span class="kpi-label">总资产</span>
+              <span class="chip chip-ghost">全历史</span>
+            </div>
+            <div class="kpi-val num">¥1,284,360.00</div>
+            <div class="kpi-sub">数据截至 2026-10-27</div>
+            <div class="kpi-foot">
+              <span class="kpi-cap">近 12 个月</span>
+              <svg class="spark" viewBox="0 0 128 42" aria-hidden="true"><path class="sp-area" d="M 4.00 34.00 L 4.00 34.00 C 7.17 32.97 10.33 31.90 13.50 30.92 C 16.67 29.94 19.83 29.35 23.00 28.13 C 26.17 26.91 29.33 24.92 32.50 23.61 C 35.67 22.29 38.83 20.24 42.00 20.24 C 45.17 20.24 48.33 23.11 51.50 24.76 C 54.67 26.41 57.83 30.15 61.00 30.15 C 64.17 30.15 67.33 24.20 70.50 21.68 C 73.67 19.17 76.83 16.76 80.00 15.04 C 83.17 13.33 86.33 12.90 89.50 11.39 C 92.67 9.88 95.83 6.00 99.00 6.00 C 102.17 6.00 105.33 8.21 108.50 8.21 C 111.67 8.21 114.83 7.19 118.00 6.67 L 118.00 34.00 Z"/><path class="sp-line" d="M 4.00 34.00 C 7.17 32.97 10.33 31.90 13.50 30.92 C 16.67 29.94 19.83 29.35 23.00 28.13 C 26.17 26.91 29.33 24.92 32.50 23.61 C 35.67 22.29 38.83 20.24 42.00 20.24 C 45.17 20.24 48.33 23.11 51.50 24.76 C 54.67 26.41 57.83 30.15 61.00 30.15 C 64.17 30.15 67.33 24.20 70.50 21.68 C 73.67 19.17 76.83 16.76 80.00 15.04 C 83.17 13.33 86.33 12.90 89.50 11.39 C 92.67 9.88 95.83 6.00 99.00 6.00 C 102.17 6.00 105.33 8.21 108.50 8.21 C 111.67 8.21 114.83 7.19 118.00 6.67"/><circle class="sp-dot" cx="118.00" cy="6.67" r="2.8"/></svg>
+            </div>
+          </article>
+
+          <!-- KPI 2 总收益 -->
+          <article class="card kpi" id="k2">
+            <div class="kpi-head">
+              <span class="kpi-label">总收益（全历史）</span>
+              <span class="chip chip-ok"><i class="dot"></i>正向</span>
+            </div>
+            <div class="kpi-val num pos-txt">+¥236,180.00</div>
+            <div class="kpi-sub">总费用消耗 ¥3,842.60</div>
+            <div class="kpi-foot">
+              <span class="kpi-cap">近 6 个月</span>
+              <svg class="spark green" viewBox="0 0 128 42" aria-hidden="true"><path class="sp-area" d="M 4.00 34.00 L 4.00 34.00 C 10.33 30.73 16.67 27.10 23.00 24.18 C 29.33 21.26 35.67 18.48 42.00 16.49 C 48.33 14.50 54.67 13.99 61.00 12.25 C 67.33 10.50 73.67 6.00 80.00 6.00 C 86.33 6.00 92.67 8.57 99.00 8.57 C 105.33 8.57 111.67 7.38 118.00 6.78 L 118.00 34.00 Z"/><path class="sp-line" d="M 4.00 34.00 C 10.33 30.73 16.67 27.10 23.00 24.18 C 29.33 21.26 35.67 18.48 42.00 16.49 C 48.33 14.50 54.67 13.99 61.00 12.25 C 67.33 10.50 73.67 6.00 80.00 6.00 C 86.33 6.00 92.67 8.57 99.00 8.57 C 105.33 8.57 111.67 7.38 118.00 6.78"/><circle class="sp-dot" cx="118.00" cy="6.78" r="2.8"/></svg>
+            </div>
+          </article>
+
+          <!-- KPI 3 峰值成本收益率 -->
+          <article class="card kpi" id="k3">
+            <div class="kpi-head">
+              <span class="kpi-label">峰值成本收益率</span>
+            </div>
+            <div class="kpi-val num pos-txt">+21.43%</div>
+            <div class="kpi-sub">历史峰值持仓成本 ¥1,102,000.00</div>
+            <div class="kpi-foot">
+              <span class="kpi-cap">相对峰值成本</span>
+              <div class="meter-wrap">
+                <div class="meter"><i style="width:21.43%"></i></div>
+              </div>
+            </div>
+          </article>
+
+          <!-- KPI 4 仓位 -->
+          <article class="card kpi" id="k4">
+            <div class="kpi-head">
+              <span class="kpi-label">仓位</span>
+              <span class="chip chip-info"><i class="dot"></i>持仓 / 总资产</span>
+            </div>
+            <div class="kpi-val num">65.6%</div>
+            <div class="kpi-sub">持仓市值 ¥842,100.00 · 现金 ¥442,260.00</div>
+            <div class="kpi-foot">
+              <div class="meter-wrap">
+                <div class="meter"><i style="width:65.6%"></i></div>
+              </div>
+            </div>
+          </article>
+
+          <!-- 净值曲线 -->
+          <article class="card chart" id="ch">
+            <div class="card-h">
+              <div class="ttl">
+                <h2 class="card-t">净值曲线</h2>
+                <p class="card-s">归一化净值 · 2025-10-31 起点 1.000 · 月度采样 13 点</p>
+              </div>
+              <div class="card-a">
+                <div class="tabs" role="tablist" aria-label="图表口径">
+                  <span class="tab on" role="tab" aria-selected="true">净值</span>
+                  <span class="tab" role="tab" aria-selected="false">总资产</span>
+                </div>
+                <a class="link" href="#">净值与收益<svg class="ico ico-sm" aria-hidden="true"><use href="#i-chev"/></svg></a>
+              </div>
+            </div>
+            <div class="chart-body">
+              <svg class="chart-svg chart-pc" viewBox="0 0 940 370" role="img" aria-label="归一化净值曲线，含 2026-03 至 2026-06 回撤区间标注">
+                <defs>
+                  <linearGradient id="cArea" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0" stop-color="#4f46e5" stop-opacity=".17"/>
+                    <stop offset=".55" stop-color="#4f46e5" stop-opacity=".045"/>
+                    <stop offset="1" stop-color="#0e9bb5" stop-opacity="0"/>
+                  </linearGradient>
+                  <linearGradient id="cLine" x1="0" y1="0" x2="1" y2="0">
+                    <stop offset="0" stop-color="#4f46e5"/>
+                    <stop offset=".55" stop-color="#4f46e5"/>
+                    <stop offset="1" stop-color="#0e9bb5"/>
+                  </linearGradient>
+                </defs>
+                <line class="gline" x1="54" y1="322.34" x2="924.00" y2="322.34"/>
+<text class="ytick" x="42" y="326.34" text-anchor="end">1.00</text>
+<line class="gline" x1="54" y1="225.72" x2="924.00" y2="225.72"/>
+<text class="ytick" x="42" y="229.72" text-anchor="end">1.10</text>
+<line class="gline" x1="54" y1="129.11" x2="924.00" y2="129.11"/>
+<text class="ytick" x="42" y="133.11" text-anchor="end">1.20</text>
+<line class="gline" x1="54" y1="32.49" x2="924.00" y2="32.49"/>
+<text class="ytick" x="42" y="36.49" text-anchor="end">1.30</text>
+<text class="xtick" x="54.00" y="352" text-anchor="start">2025-10</text>
+<text class="xtick" x="199.00" y="352" text-anchor="middle">2025-12</text>
+<text class="xtick" x="344.00" y="352" text-anchor="middle">2026-02</text>
+<text class="xtick" x="489.00" y="352" text-anchor="middle">2026-04</text>
+<text class="xtick" x="634.00" y="352" text-anchor="middle">2026-06</text>
+<text class="xtick" x="779.00" y="352" text-anchor="middle">2026-08</text>
+<text class="xtick" x="924.00" y="352" text-anchor="end">2026-10</text>
+<path class="area" d="M 54.00 332.00 L 54.00 322.34 C 78.17 312.03 102.33 301.24 126.50 291.42 C 150.67 281.60 174.83 275.64 199.00 263.40 C 223.17 251.17 247.33 231.20 271.50 217.99 C 295.67 204.79 319.83 184.18 344.00 184.18 C 368.17 184.18 392.33 213.00 416.50 229.59 C 440.67 246.17 464.83 283.69 489.00 283.69 C 513.17 283.69 537.33 223.95 561.50 198.67 C 585.67 173.39 609.83 149.24 634.00 132.01 C 658.17 114.78 682.33 110.43 706.50 95.29 C 730.67 80.16 754.83 41.19 779.00 41.19 C 803.17 41.19 827.33 63.41 851.50 63.41 C 875.67 63.41 899.83 53.10 924.00 47.95 L 924.00 332.00 Z"/>
+<rect class="band-decline" x="416.50" y="18" width="72.50" height="314.00"/>
+<rect class="band-recovery" x="489.00" y="18" width="145.00" height="314.00"/>
+<path class="line" d="M 54.00 322.34 C 78.17 312.03 102.33 301.24 126.50 291.42 C 150.67 281.60 174.83 275.64 199.00 263.40 C 223.17 251.17 247.33 231.20 271.50 217.99 C 295.67 204.79 319.83 184.18 344.00 184.18 C 368.17 184.18 392.33 213.00 416.50 229.59 C 440.67 246.17 464.83 283.69 489.00 283.69 C 513.17 283.69 537.33 223.95 561.50 198.67 C 585.67 173.39 609.83 149.24 634.00 132.01 C 658.17 114.78 682.33 110.43 706.50 95.29 C 730.67 80.16 754.83 41.19 779.00 41.19 C 803.17 41.19 827.33 63.41 851.50 63.41 C 875.67 63.41 899.83 53.10 924.00 47.95"/>
+<circle class="mk-peak" cx="344.00" cy="184.18" r="3.4"/>
+<circle class="mk-valley" cx="489.00" cy="283.69" r="3.4"/>
+<text class="band-t1" x="525.25" y="33" text-anchor="middle">回撤区间 -12.80%</text>
+<text class="band-t2" x="525.25" y="49" text-anchor="middle">2026-03-14 → 04-22 · 39 天</text>
+<text class="mk-lab" x="352.00" y="174.18">峰值 1.143</text>
+<text class="mk-lab" x="498.00" y="300.69">谷底 1.040</text>
+<line class="xref" x1="779.00" y1="41.19" x2="779.00" y2="332.00"/>
+<circle class="mk-hover" cx="779.00" cy="41.19" r="6.5"/>
+<g class="tip"><rect x="575.00" y="63.19" width="186" height="78" rx="11"/>
+<text class="tip-k" x="588.00" y="83.19">2026-08 · 月末净值</text>
+<text class="tip-v" x="588.00" y="106.19">¥1,291,000.00</text>
+<text class="tip-s" x="588.00" y="125.19">归一化 1.291 · 历史新高</text></g>
+              </svg>
+              <svg class="chart-svg chart-pad" viewBox="0 0 940 166" role="img" aria-label="归一化净值曲线，含回撤区间标注">
+                <defs>
+                  <linearGradient id="cAreaP" x1="0" y1="0" x2="0" y2="1">
+                    <stop offset="0" stop-color="#4f46e5" stop-opacity=".17"/>
+                    <stop offset=".55" stop-color="#4f46e5" stop-opacity=".045"/>
+                    <stop offset="1" stop-color="#0e9bb5" stop-opacity="0"/>
+                  </linearGradient>
+                  <linearGradient id="cLineP" x1="0" y1="0" x2="1" y2="0">
+                    <stop offset="0" stop-color="#4f46e5"/>
+                    <stop offset=".55" stop-color="#4f46e5"/>
+                    <stop offset="1" stop-color="#0e9bb5"/>
+                  </linearGradient>
+                </defs>
+                <line class="gline" x1="54" y1="134.12" x2="924.00" y2="134.12"/>
+<text class="ytick" x="42" y="138.12" text-anchor="end">1.00</text>
+<line class="gline" x1="54" y1="95.35" x2="924.00" y2="95.35"/>
+<text class="ytick" x="42" y="99.35" text-anchor="end">1.10</text>
+<line class="gline" x1="54" y1="56.58" x2="924.00" y2="56.58"/>
+<text class="ytick" x="42" y="60.58" text-anchor="end">1.20</text>
+<line class="gline" x1="54" y1="17.82" x2="924.00" y2="17.82"/>
+<text class="ytick" x="42" y="21.82" text-anchor="end">1.30</text>
+<text class="xtick" x="54.00" y="158" text-anchor="start">2025-10</text>
+<text class="xtick" x="199.00" y="158" text-anchor="middle">2025-12</text>
+<text class="xtick" x="344.00" y="158" text-anchor="middle">2026-02</text>
+<text class="xtick" x="489.00" y="158" text-anchor="middle">2026-04</text>
+<text class="xtick" x="634.00" y="158" text-anchor="middle">2026-06</text>
+<text class="xtick" x="779.00" y="158" text-anchor="middle">2026-08</text>
+<text class="xtick" x="924.00" y="158" text-anchor="end">2026-10</text>
+<path class="area" d="M 54.00 138.00 L 54.00 134.12 C 78.17 129.99 102.33 125.66 126.50 121.72 C 150.67 117.78 174.83 115.38 199.00 110.47 C 223.17 105.56 247.33 97.55 271.50 92.25 C 295.67 86.95 319.83 78.68 344.00 78.68 C 368.17 78.68 392.33 90.25 416.50 96.90 C 440.67 103.56 464.83 118.62 489.00 118.62 C 513.17 118.62 537.33 94.64 561.50 84.50 C 585.67 74.35 609.83 64.66 634.00 57.75 C 658.17 50.83 682.33 49.09 706.50 43.02 C 730.67 36.94 754.83 21.30 779.00 21.30 C 803.17 21.30 827.33 30.22 851.50 30.22 C 875.67 30.22 899.83 26.09 924.00 24.02 L 924.00 138.00 Z"/>
+<rect class="band-decline" x="416.50" y="12" width="72.50" height="126.00"/>
+<rect class="band-recovery" x="489.00" y="12" width="145.00" height="126.00"/>
+<path class="line" d="M 54.00 134.12 C 78.17 129.99 102.33 125.66 126.50 121.72 C 150.67 117.78 174.83 115.38 199.00 110.47 C 223.17 105.56 247.33 97.55 271.50 92.25 C 295.67 86.95 319.83 78.68 344.00 78.68 C 368.17 78.68 392.33 90.25 416.50 96.90 C 440.67 103.56 464.83 118.62 489.00 118.62 C 513.17 118.62 537.33 94.64 561.50 84.50 C 585.67 74.35 609.83 64.66 634.00 57.75 C 658.17 50.83 682.33 49.09 706.50 43.02 C 730.67 36.94 754.83 21.30 779.00 21.30 C 803.17 21.30 827.33 30.22 851.50 30.22 C 875.67 30.22 899.83 26.09 924.00 24.02"/>
+<circle class="mk-peak" cx="344.00" cy="78.68" r="3.4"/>
+<circle class="mk-valley" cx="489.00" cy="118.62" r="3.4"/>
+<text class="band-t1" x="525.25" y="27" text-anchor="middle">回撤区间 -12.80%</text>
+<text class="band-t2" x="525.25" y="43" text-anchor="middle">2026-03-14 → 04-22 · 39 天</text>
+<text class="mk-lab" x="352.00" y="68.68">峰值 1.143</text>
+<text class="mk-lab" x="498.00" y="135.62">谷底 1.040</text>
+<line class="xref" x1="779.00" y1="21.30" x2="779.00" y2="138.00"/>
+<circle class="mk-hover" cx="779.00" cy="21.30" r="6.5"/>
+<g class="tip"><rect x="589.00" y="43.30" width="172" height="72" rx="11"/>
+<text class="tip-k" x="602.00" y="63.30">2026-08 · 月末净值</text>
+<text class="tip-v" x="602.00" y="86.30">¥1,291,000.00</text>
+<text class="tip-s" x="602.00" y="105.30">归一化 1.291 · 历史新高</text></g>
+              </svg>
+            </div>
+            <div class="chart-foot">
+              <div class="legend">
+                <span><i class="lg lg-line"></i>归一化净值</span>
+                <span><i class="lg lg-band"></i>回撤区间</span>
+                <span><i class="lg lg-dot"></i>峰值 / 谷底</span>
+              </div>
+              <span class="chart-note">数据截至 2026-10-27 · 数值由后端计算</span>
+            </div>
+          </article>
+
+          <!-- 洞察与待办 -->
+          <article class="card" id="in">
+            <div class="card-h">
+              <div class="ttl">
+                <h2 class="card-t">洞察与待办<span class="chip chip-info">3</span></h2>
+                <p class="card-s">来自回撤、指标与换手</p>
+              </div>
+              <div class="card-a"><a class="link" href="#">全部<svg class="ico ico-sm" aria-hidden="true"><use href="#i-chev"/></svg></a></div>
+            </div>
+            <ul class="ins-list">
+              <li class="ins">
+                <span class="ins-ico warn"><svg class="ico" aria-hidden="true"><use href="#i-alert"/></svg></span>
+                <div class="ins-body">
+                  <div class="ins-meta"><span class="chip chip-warn">风险</span><span class="ins-tag">回撤复盘</span></div>
+                  <p>「3 月回撤主要来自 Top3 集中持仓（75.6%）与 2 笔追涨买入，回撤 -12.8%，57 天后收复。」</p>
+                  <a class="ins-link" href="#">查看归因（占位）<svg class="ico ico-sm" aria-hidden="true"><use href="#i-chev"/></svg></a>
+                </div>
+              </li>
+              <li class="ins">
+                <span class="ins-ico bad"><svg class="ico" aria-hidden="true"><use href="#i-flag"/></svg></span>
+                <div class="ins-body">
+                  <div class="ins-meta"><span class="chip chip-bad">阻断</span><span class="ins-tag">指标配置</span></div>
+                  <p>「timing 域 2 个指标因未设置基准而阻断，去『设置 → 基准』可解锁 β/α/追涨。」</p>
+                  <a class="ins-link" href="#">去设置基准<svg class="ico ico-sm" aria-hidden="true"><use href="#i-chev"/></svg></a>
+                </div>
+              </li>
+              <li class="ins">
+                <span class="ins-ico info"><svg class="ico" aria-hidden="true"><use href="#i-spark"/></svg></span>
+                <div class="ins-body">
+                  <div class="ins-meta"><span class="chip chip-info">提示</span><span class="ins-tag">换手与费用</span></div>
+                  <p>「本月换手 18.2%，高于近 12 月中位数 11.4%；费用占成交额 0.031%。」</p>
+                  <a class="ins-link" href="#">查看指标详情<svg class="ico ico-sm" aria-hidden="true"><use href="#i-chev"/></svg></a>
+                </div>
+              </li>
+            </ul>
+            <div class="note">
+              <svg class="ico" aria-hidden="true"><use href="#i-note"/></svg>
+              <span class="note-ph">写一条复盘笔记，或记录本次判断…</span>
+              <button class="btn-mini" type="button">记录</button>
+            </div>
+          </article>
+
+          <!-- 当前持仓 -->
+          <article class="card" id="ho">
+            <div class="card-h">
+              <div class="ttl">
+                <h2 class="card-t">当前持仓<span class="chip chip-ghost">7 只</span><span class="chip chip-warn"><i class="dot"></i>Top3 集中度 75.63%</span></h2>
+                <p class="card-s">权重合计 100% · 数据截至 2026-10-27</p>
+              </div>
+              <div class="card-a"><a class="link" href="#">资产明细<svg class="ico ico-sm" aria-hidden="true"><use href="#i-arrow"/></svg></a></div>
+            </div>
+            <table class="tbl">
+              <thead>
+                <tr>
+                  <th class="l">代码</th>
+                  <th class="l">名称</th>
+                  <th>数量</th>
+                  <th>成本</th>
+                  <th>市值</th>
+                  <th>权重</th>
+                  <th class="c"></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr class="is-hover">
+                  <td class="l"><span class="code num">600519</span></td>
+                  <td class="l"><span class="nm">贵州茅台</span></td>
+                  <td class="num">200</td>
+                  <td class="num">¥301,840.00</td>
+                  <td class="num">¥312,000.00</td>
+                  <td><div class="wt"><span class="wt-track"><i style="width:37.05%"></i></span><span class="wt-pct num">37.05%</span></div></td>
+                  <td class="chev-cell"><svg class="ico chev" aria-hidden="true"><use href="#i-chev"/></svg></td>
+                </tr>
+                <tr>
+                  <td class="l"><span class="code num">300750</span></td>
+                  <td class="l"><span class="nm">宁德时代</span></td>
+                  <td class="num">500</td>
+                  <td class="num">¥173,600.00</td>
+                  <td class="num">¥198,500.00</td>
+                  <td><div class="wt"><span class="wt-track"><i style="width:23.57%"></i></span><span class="wt-pct num">23.57%</span></div></td>
+                  <td class="chev-cell"><svg class="ico chev" aria-hidden="true"><use href="#i-chev"/></svg></td>
+                </tr>
+                <tr>
+                  <td class="l"><span class="code num">000858</span></td>
+                  <td class="l"><span class="nm">五粮液</span></td>
+                  <td class="num">800</td>
+                  <td class="num">¥129,920.00</td>
+                  <td class="num">¥126,400.00</td>
+                  <td><div class="wt"><span class="wt-track"><i style="width:15.01%"></i></span><span class="wt-pct num">15.01%</span></div></td>
+                  <td class="chev-cell"><svg class="ico chev" aria-hidden="true"><use href="#i-chev"/></svg></td>
+                </tr>
+                <tr>
+                  <td class="l"><span class="code num">601318</span></td>
+                  <td class="l"><span class="nm">中国平安</span></td>
+                  <td class="num">1,200</td>
+                  <td class="num">¥104,400.00</td>
+                  <td class="num">¥96,000.00</td>
+                  <td><div class="wt"><span class="wt-track"><i style="width:11.40%"></i></span><span class="wt-pct num">11.40%</span></div></td>
+                  <td class="chev-cell"><svg class="ico chev" aria-hidden="true"><use href="#i-chev"/></svg></td>
+                </tr>
+                <tr>
+                  <td class="l"><span class="code num">000001</span></td>
+                  <td class="l"><span class="nm">平安银行</span></td>
+                  <td class="num">2,000</td>
+                  <td class="num">¥48,600.00</td>
+                  <td class="num">¥52,600.00</td>
+                  <td><div class="wt"><span class="wt-track"><i style="width:6.25%"></i></span><span class="wt-pct num">6.25%</span></div></td>
+                  <td class="chev-cell"><svg class="ico chev" aria-hidden="true"><use href="#i-chev"/></svg></td>
+                </tr>
+                <tr>
+                  <td class="l"><span class="code num">002594</span></td>
+                  <td class="l"><span class="nm">比亚迪</span></td>
+                  <td class="num">100</td>
+                  <td class="num">¥27,800.00</td>
+                  <td class="num">¥30,600.00</td>
+                  <td><div class="wt"><span class="wt-track"><i style="width:3.63%"></i></span><span class="wt-pct num">3.63%</span></div></td>
+                  <td class="chev-cell"><svg class="ico chev" aria-hidden="true"><use href="#i-chev"/></svg></td>
+                </tr>
+                <tr>
+                  <td class="l"><span class="code num">600036</span></td>
+                  <td class="l"><span class="nm">招商银行</span></td>
+                  <td class="num">1,000</td>
+                  <td class="num">¥27,400.00</td>
+                  <td class="num">¥26,000.00</td>
+                  <td><div class="wt"><span class="wt-track"><i style="width:3.09%"></i></span><span class="wt-pct num">3.09%</span></div></td>
+                  <td class="chev-cell"><svg class="ico chev" aria-hidden="true"><use href="#i-chev"/></svg></td>
+                </tr>
+              </tbody>
+            </table>
+            <div class="card-foot">
+              <a class="link" href="#">资产明细</a>
+              <a class="link muted-link" href="#">导出（占位）</a>
+              <a class="link muted-link" href="#">月报（占位）</a>
+              <span class="foot-hint">点击任意行查看持仓明细</span>
+            </div>
+          </article>
+
+          <!-- 历史概览 -->
+          <article class="card" id="hi">
+            <div class="card-h">
+              <div class="ttl">
+                <h2 class="card-t">历史概览</h2>
+                <p class="card-s">全历史 · 已平仓口径</p>
+              </div>
+              <div class="card-a"><a class="link" href="#">回合详情<svg class="ico ico-sm" aria-hidden="true"><use href="#i-chev"/></svg></a></div>
+            </div>
+            <div class="stat2">
+              <div class="stat"><span class="stat-l">已平仓股票数</span><span class="stat-v num">14<small>只</small></span></div>
+              <div class="stat"><span class="stat-l">已平仓笔数</span><span class="stat-v num">23<small>笔</small></span></div>
+            </div>
+            <div class="winbar">
+              <div class="wb"><i class="wb-win" style="width:65.2%"></i><i class="wb-loss" style="width:30.4%"></i><i class="wb-flat" style="width:4.3%"></i></div>
+              <div class="wb-legend">
+                <span><i class="d d-win"></i>盈利 15 笔 <b class="num">65.2%</b></span>
+                <span><i class="d d-loss"></i>亏损 7 笔 <b class="num">30.4%</b></span>
+                <span><i class="d d-flat"></i>持平 1 笔 <b class="num">4.3%</b></span>
+              </div>
+            </div>
+            <div class="mdd">
+              <div class="mdd-top">
+                <span class="mdd-l">最大回撤</span>
+                <span class="chip chip-bad"><i class="dot"></i>有效观测 132 天 · 可信</span>
+              </div>
+              <div class="mdd-v num">-12.80%</div>
+              <div class="mdd-meta">2026-03-14 → 2026-04-22 · 持续 39 天 · 恢复 57 天（2026-06-18 收复）</div>
+              <div class="tl"><div class="tl-seg tl-decl">39 天回撤</div><div class="tl-seg tl-rec">57 天恢复</div></div>
+              <div class="tl-axis"><span>2026-03-14</span><span>2026-04-22</span><span>2026-06-18</span></div>
+            </div>
+            <div class="hstat-row">
+              <div class="hstat">
+                <span class="stat-l">历史最大单笔收益</span>
+                <div class="hstat-v num pos-txt">+¥38,420.00</div>
+              </div>
+              <div class="hstat">
+                <span class="stat-l">最大收益 / 峰值成本</span>
+                <div class="hstat-v num">3.49%</div>
+              </div>
+            </div>
+            <div class="card-foot">
+              <a class="link" href="#">回合详情</a>
+              <a class="link muted-link" href="#">月报（占位）</a>
+              <span class="foot-hint">指标明细见指标页</span>
+            </div>
+          </article>
+
+          <!-- 最赚 3 笔 -->
+          <article class="card" id="be">
+            <div class="card-h">
+              <div class="ttl">
+                <h2 class="card-t">最赚 3 笔</h2>
+                <p class="card-s">按收益额 · 已平仓</p>
+              </div>
+              <div class="card-a"><a class="link" href="#">全部回合<svg class="ico ico-sm" aria-hidden="true"><use href="#i-arrow"/></svg></a></div>
+            </div>
+            <ul class="rlist">
+              <li class="ritem top">
+                <span class="rank num">1</span>
+                <div class="rmain"><span class="rname">宁德时代</span><span class="rcode num">300750</span></div>
+                <div class="rval"><b class="num pos-txt">+¥38,420.00</b><span class="num pos-txt">+22.13%</span></div>
+                <div class="rmeta"><div>2026-08-12</div><div>持有 30 天</div></div>
+                <svg class="ico chev" aria-hidden="true"><use href="#i-chev"/></svg>
+              </li>
+              <li class="ritem top">
+                <span class="rank num">2</span>
+                <div class="rmain"><span class="rname">贵州茅台</span><span class="rcode num">600519</span></div>
+                <div class="rval"><b class="num pos-txt">+¥31,200.00</b><span class="num pos-txt">+10.34%</span></div>
+                <div class="rmeta"><div>2026-05-21</div><div>持有 86 天</div></div>
+                <svg class="ico chev" aria-hidden="true"><use href="#i-chev"/></svg>
+              </li>
+              <li class="ritem top">
+                <span class="rank num">3</span>
+                <div class="rmain"><span class="rname">比亚迪</span><span class="rcode num">002594</span></div>
+                <div class="rval"><b class="num pos-txt">+¥18,750.00</b><span class="num pos-txt">+67.40%</span></div>
+                <div class="rmeta"><div>2026-09-03</div><div>持有 12 天</div></div>
+                <svg class="ico chev" aria-hidden="true"><use href="#i-chev"/></svg>
+              </li>
+            </ul>
+            <div class="card-foot"><a class="link" href="#">回合详情</a><a class="link muted-link" href="#">月报（占位）</a><span class="foot-hint">按平仓日排序</span></div>
+          </article>
+
+          <!-- 最亏 3 笔 -->
+          <article class="card" id="wo">
+            <div class="card-h">
+              <div class="ttl">
+                <h2 class="card-t">最亏 3 笔</h2>
+                <p class="card-s">按收益额 · 已平仓</p>
+              </div>
+              <div class="card-a"><a class="link" href="#">全部回合<svg class="ico ico-sm" aria-hidden="true"><use href="#i-arrow"/></svg></a></div>
+            </div>
+            <ul class="rlist">
+              <li class="ritem bottom">
+                <span class="rank num">1</span>
+                <div class="rmain"><span class="rname">中国平安</span><span class="rcode num">601318</span></div>
+                <div class="rval"><b class="num neg-txt">-¥9,840.00</b><span class="num neg-txt">-8.61%</span></div>
+                <div class="rmeta"><div>2026-04-17</div><div>持有 41 天</div></div>
+                <svg class="ico chev" aria-hidden="true"><use href="#i-chev"/></svg>
+              </li>
+              <li class="ritem bottom">
+                <span class="rank num">2</span>
+                <div class="rmain"><span class="rname">五粮液</span><span class="rcode num">000858</span></div>
+                <div class="rval"><b class="num neg-txt">-¥7,320.00</b><span class="num neg-txt">-5.63%</span></div>
+                <div class="rmeta"><div>2026-02-09</div><div>持有 27 天</div></div>
+                <svg class="ico chev" aria-hidden="true"><use href="#i-chev"/></svg>
+              </li>
+              <li class="ritem bottom">
+                <span class="rank num">3</span>
+                <div class="rmain"><span class="rname">招商银行</span><span class="rcode num">600036</span></div>
+                <div class="rval"><b class="num neg-txt">-¥2,150.00</b><span class="num neg-txt">-2.05%</span></div>
+                <div class="rmeta"><div>2026-07-30</div><div>持有 55 天</div></div>
+                <svg class="ico chev" aria-hidden="true"><use href="#i-chev"/></svg>
+              </li>
+            </ul>
+            <div class="card-foot"><a class="link" href="#">回合详情</a><a class="link muted-link" href="#">导出（占位）</a><span class="foot-hint">按平仓日排序</span></div>
+          </article>
+
+          <!-- 指标健康度 -->
+          <article class="card" id="me">
+            <div class="card-h">
+              <div class="ttl">
+                <h2 class="card-t">指标健康度</h2>
+                <p class="card-s">18 指标口径 · 摘要</p>
+              </div>
+              <div class="card-a"><a class="link" href="#">指标详情<svg class="ico ico-sm" aria-hidden="true"><use href="#i-chev"/></svg></a></div>
+            </div>
+            <div class="mgroup">
+              <div class="mgroup-h"><span class="mgroup-t">核心指标</span><span class="mgroup-n num">10 项</span></div>
+              <div class="pills">
+                <span class="chip chip-ok"><i class="dot"></i>正常 6</span>
+                <span class="chip chip-warn"><i class="dot"></i>样本不足 2</span>
+                <span class="chip chip-bad"><i class="dot"></i>阻断 2</span>
+              </div>
+            </div>
+            <div class="mgroup">
+              <div class="mgroup-h"><span class="mgroup-t">探索指标</span><span class="mgroup-n num">8 项</span></div>
+              <div class="pills">
+                <span class="chip chip-ok"><i class="dot"></i>正常 3</span>
+                <span class="chip chip-warn"><i class="dot"></i>不可信 2</span>
+                <span class="chip chip-ghost">待窗口 1</span>
+                <span class="chip chip-bad"><i class="dot"></i>阻断 2</span>
+              </div>
+            </div>
+            <div class="mgroup">
+              <div class="mgroup-h"><span class="mgroup-t">阻断项</span><span class="mgroup-n">缺基准</span></div>
+              <div class="pills">
+                <span class="mchip mono">timing.chase</span>
+                <span class="mchip mono">timing.beta</span>
+                <span class="mchip mono">selection.bhar_20</span>
+                <span class="mchip mono">behavior.averaging_down</span>
+              </div>
+            </div>
+            <div class="card-foot">
+              <a class="link" href="#">指标详情</a>
+              <span class="foot-hint">设置 → 基准 解锁 timing 域</span>
+            </div>
+          </article>
+
+
+          <!-- 数据源与构建 -->
+          <article class="card" id="ds">
+            <div class="card-h">
+              <div class="ttl">
+                <h2 class="card-t">数据源与构建</h2>
+                <p class="card-s">快照与口径状态</p>
+              </div>
+              <div class="card-a"><span class="chip chip-ok"><i class="dot"></i>最新</span></div>
+            </div>
+            <div class="kv"><span class="kv-k">数据截至</span><span class="kv-v num">2026-10-27</span></div>
+            <div class="kv"><span class="kv-k">构建状态</span><span class="kv-v"><span class="chip chip-ok"><i class="dot"></i>最新</span></span></div>
+            <div class="kv"><span class="kv-k">页面状态</span><span class="kv-v"><span class="chip chip-ok"><i class="dot"></i>正常</span></span></div>
+            <div class="kv"><span class="kv-k">指标口径</span><span class="kv-v num">18 项 · 核心 10 / 探索 8</span></div>
+            <div class="kv"><span class="kv-k">月度口径</span><span class="kv-v num">2026-06</span></div>
+            <div class="card-foot"><a class="link" href="#">资产页构建<svg class="ico ico-sm" aria-hidden="true"><use href="#i-arrow"/></svg></a><span class="foot-hint">快照来自资产表</span></div>
+          </article>
+
+          <!-- 月度复盘摘要 -->
+          <article class="card" id="ms">
+            <div class="card-h">
+              <div class="ttl">
+                <h2 class="card-t">月度复盘摘要<span class="chip chip-ghost">2026-06</span></h2>
+                <p class="card-s">旧五卡月度口径</p>
+              </div>
+              <div class="card-a"><a class="link" href="#">月报（占位）<svg class="ico ico-sm" aria-hidden="true"><use href="#i-chev"/></svg></a></div>
+            </div>
+            <div class="dgrid">
+              <div class="dcell"><span class="stat-l">已平仓</span><b class="num">23<small>笔</small></b></div>
+              <div class="dcell"><span class="stat-l">盈利率</span><b class="num pos-txt">65.2<small>%</small></b></div>
+              <div class="dcell"><span class="stat-l">换手率</span><b class="num">18.2<small>%</small></b></div>
+              <div class="dcell"><span class="stat-l">费用占成交额</span><b class="num">0.031<small>%</small></b></div>
+              <div class="dcell span2"><span class="stat-l">最大回撤</span><b class="num neg-txt">-12.80<small>%</small></b></div>
+            </div>
+            <div class="card-foot"><a class="link" href="#">月度指标<svg class="ico ico-sm" aria-hidden="true"><use href="#i-arrow"/></svg></a><span class="foot-hint">换手高于近 12 月中位数 11.4%</span></div>
+          </article>
+
+          <!-- 快捷下钻 -->
+          <article class="card" id="qd">
+            <div class="card-h">
+              <div class="ttl">
+                <h2 class="card-t">快捷下钻</h2>
+                <p class="card-s">常用入口 · 占位项已弱化</p>
+              </div>
+              <div class="card-a"><a class="link" href="#">全部页面<svg class="ico ico-sm" aria-hidden="true"><use href="#i-chev"/></svg></a></div>
+            </div>
+            <div class="ql">
+              <a href="#"><svg class="ico" aria-hidden="true"><use href="#i-gauge"/></svg>月度指标<svg class="ico chev" aria-hidden="true"><use href="#i-chev"/></svg></a>
+              <a href="#"><svg class="ico" aria-hidden="true"><use href="#i-cycle"/></svg>回合<svg class="ico chev" aria-hidden="true"><use href="#i-chev"/></svg></a>
+              <a href="#"><svg class="ico" aria-hidden="true"><use href="#i-chart"/></svg>净值与收益<svg class="ico chev" aria-hidden="true"><use href="#i-chev"/></svg></a>
+              <a href="#"><svg class="ico" aria-hidden="true"><use href="#i-wallet"/></svg>资产<svg class="ico chev" aria-hidden="true"><use href="#i-chev"/></svg></a>
+              <a class="ph" href="#"><svg class="ico" aria-hidden="true"><use href="#i-doc"/></svg>月报<span class="tag">占位</span></a>
+              <a class="ph" href="#"><svg class="ico" aria-hidden="true"><use href="#i-download"/></svg>导出<span class="tag">占位</span></a>
+              <a class="ph" href="#"><svg class="ico" aria-hidden="true"><use href="#i-pie"/></svg>归因<span class="tag">占位</span></a>
+            </div>
+            <div class="card-foot"><a class="link" href="#">指标详情<svg class="ico ico-sm" aria-hidden="true"><use href="#i-arrow"/></svg></a><span class="foot-hint">⌘K 直接跳转</span></div>
+          </article>
+
+        </div>
+
+        <footer class="pagefoot">
+          <span>数据截至 2026-10-27 · 构建状态 最新 · 页面状态 正常</span>
+          <span class="right">金额 / 比率由后端格式化返回，本页只展示（前端零口径）</span>
+        </footer>
+
+      </div>
+    </main>
+  </div>
+</div>
+</body>
+</html>
