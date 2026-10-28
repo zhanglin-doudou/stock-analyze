@@ -13,7 +13,7 @@ import { api } from "../client";
 import { Cursor } from "../ui/Cursor";
 import { JobProgress } from "../ui/JobProgress";
 import { ProblemView } from "../ui/Problem";
-import { Table, type Column } from "../ui/Table";
+import { DataTable, type DataTableColumn } from "../ui/DataTable";
 
 const PAGE_LIMIT = 50;
 
@@ -296,22 +296,54 @@ export function Assets() {
       ? "构建资产表"
       : "更新资产表";
 
-  const columns: Array<Column<AssetPoint>> = [
-    { key: "date", header: "日期", render: (row) => row.date },
+  const columns: Array<DataTableColumn<AssetPoint>> = [
+    { key: "date", header: "日期", priority: 1, render: (row) => row.date },
     {
       key: "total_assets",
       header: "总资产",
+      priority: 1,
+      align: "right",
       render: (row) =>
-        row.total_assets == null ? <span className="muted">—</span> : <strong>{row.total_assets}</strong>,
+        row.total_assets == null ? (
+          <span className="muted">—</span>
+        ) : (
+          <strong>{row.total_assets}</strong>
+        ),
     },
-    { key: "cash", header: "现金", render: (row) => moneyCell(row.cash) },
-    { key: "market_value", header: "持仓市值", render: (row) => moneyCell(row.market_value) },
-    { key: "holding_cost", header: "持仓成本", render: (row) => moneyCell(row.holding_cost) },
-    { key: "unrealized_pnl", header: "浮动盈亏", render: (row) => moneyCell(row.unrealized_pnl) },
-    { key: "daily_pnl", header: "日收益额", render: (row) => moneyCell(row.daily_pnl) },
+    { key: "cash", header: "现金", priority: 2, align: "right", render: (row) => moneyCell(row.cash) },
+    {
+      key: "market_value",
+      header: "持仓市值",
+      priority: 1,
+      align: "right",
+      render: (row) => moneyCell(row.market_value),
+    },
+    {
+      key: "holding_cost",
+      header: "持仓成本",
+      priority: 3,
+      align: "right",
+      render: (row) => moneyCell(row.holding_cost),
+    },
+    {
+      key: "unrealized_pnl",
+      header: "浮动盈亏",
+      priority: 2,
+      align: "right",
+      render: (row) => moneyCell(row.unrealized_pnl),
+    },
+    {
+      key: "daily_pnl",
+      header: "日收益额",
+      priority: 3,
+      align: "right",
+      render: (row) => moneyCell(row.daily_pnl),
+    },
     {
       key: "daily_return_pct",
       header: "日收益率",
+      priority: 2,
+      align: "right",
       render: (row) =>
         row.daily_return_pct == null ? (
           <span className="muted">—</span>
@@ -319,15 +351,24 @@ export function Assets() {
           <span className={signedClass(row.daily_return_pct)}>{row.daily_return_pct}</span>
         ),
     },
-    { key: "cashflow", header: "外部现金流", render: (row) => moneyCell(row.cashflow) },
+    {
+      key: "cashflow",
+      header: "外部现金流",
+      priority: 3,
+      align: "right",
+      render: (row) => moneyCell(row.cashflow),
+    },
     {
       key: "holding_count",
       header: "持仓数",
+      priority: 3,
+      align: "right",
       render: (row) => (row.status === "blocked" ? <span className="muted">—</span> : row.holding_count),
     },
     {
       key: "status",
       header: "状态",
+      priority: 1,
       render: (row) => (
         <span className={`badge badge-${row.status}`} title={row.status_reason ?? undefined}>
           {assetStatusLabel(row.status)}
@@ -388,10 +429,12 @@ export function Assets() {
       {page ? (
         <>
           <BuildSummary page={page} />
-          <Table
+          <DataTable
+            caption="每日资产快照"
             columns={columns}
             rows={page.items}
             rowKey={(row) => row.date}
+            loading={loading && page.items.length === 0}
             emptyText={emptyText}
           />
           <Cursor

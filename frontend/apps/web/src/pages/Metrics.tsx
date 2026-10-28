@@ -10,7 +10,7 @@ import {
 import { api } from "../client";
 import { JobProgress } from "../ui/JobProgress";
 import { ProblemView } from "../ui/Problem";
-import { Table, type Column } from "../ui/Table";
+import { DataTable, type DataTableColumn } from "../ui/DataTable";
 
 const TERMINAL: ReadonlySet<JobStatus> = new Set<JobStatus>(["succeeded", "failed", "cancelled"]);
 
@@ -211,7 +211,7 @@ export function Metrics() {
 
   const executing = activeJobId !== null || submitting;
 
-  const columns: Array<Column<MetricItem>> = [
+  const columns: Array<DataTableColumn<MetricItem>> = [
     {
       key: "metric_id",
       header: "指标",
@@ -337,10 +337,12 @@ export function Metrics() {
               {batch.items.length}
             </p>
           </div>
-          <Table
+          <DataTable
+            caption="月度指标列表"
             columns={columns}
             rows={batch.items}
             rowKey={(row) => row.metric_id}
+            loading={loading && batch.items.length === 0}
             emptyText={emptyText}
           />
           <p className="muted">

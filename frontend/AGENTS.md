@@ -129,7 +129,7 @@ export default defineConfig({
 | `apps/web/src/pages/` | 页面（Import.tsx 上传预览、Trades.tsx 流水、Settings.tsx PAT） |
 | `apps/web/src/layout/` | Phase 1b AppShell（76/64px 图标栏、面包屑、5 组导航）、navigation 配置、页面标题映射 |
 | `apps/web/src/ui/icons.tsx` | Phase 1b 自研线性图标集（不引图标库） |
-| `apps/web/src/ui/` | 通用组件（Cursor.tsx 游标、Problem.tsx 错误态、Table.tsx 表格） |
+| `apps/web/src/ui/` | 通用组件（Cursor 游标、Problem 错误态、DataTable 表格；旧 Table.tsx 已移除） |
 | `apps/web/src/theme/theme.test.ts` | 偏好回落/持久化/根属性测试 |
 | `apps/web/src/data/queryClient.ts` | Phase 1 TanStack Query Client 与 queryKeys 约定 |
 | `apps/web/src/charts/geometry.ts` | Phase 1 图表像素投影（零口径唯一白名单） |

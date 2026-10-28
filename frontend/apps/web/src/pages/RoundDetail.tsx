@@ -3,7 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import type { Round, RoundFill, RoundFillPage } from "@sa/api-client";
 import { api } from "../client";
 import { ProblemView } from "../ui/Problem";
-import { Table, type Column } from "../ui/Table";
+import { DataTable, type DataTableColumn } from "../ui/DataTable";
 import { roundStatusLabel } from "./Rounds";
 
 function signedClass(value: string): string {
@@ -41,7 +41,7 @@ export function RoundDetail() {
     void load();
   }, [load]);
 
-  const columns: Array<Column<RoundFill>> = [
+  const columns: Array<DataTableColumn<RoundFill>> = [
     { key: "seq", header: "#", render: (row) => row.sequence },
     { key: "buy", header: "买入流水", render: (row) => <code title={row.buy_trade_id}>{row.buy_trade_id}</code> },
     { key: "sell", header: "卖出流水", render: (row) => <code title={row.sell_trade_id}>{row.sell_trade_id}</code> },
@@ -120,7 +120,8 @@ export function RoundDetail() {
           </div>
 
           <h2>FIFO 配对明细</h2>
-          <Table
+          <DataTable
+            caption="回合配对明细"
             columns={columns}
             rows={fills?.items ?? []}
             rowKey={(row) => String(row.fill_id)}

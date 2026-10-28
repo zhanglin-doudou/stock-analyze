@@ -3,7 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import type { Nav, NavPoint, NavStatus } from "@sa/api-client";
 import { api } from "../client";
 import { ProblemView } from "../ui/Problem";
-import { Table, type Column } from "../ui/Table";
+import { DataTable, type DataTableColumn } from "../ui/DataTable";
 
 const STATUS_LABELS: Record<NavStatus, string> = {
   ok: "正常",
@@ -89,7 +89,7 @@ export function Nav() {
     }
   }, [period]);
 
-  const columns: Array<Column<NavPoint>> = [
+  const columns: Array<DataTableColumn<NavPoint>> = [
     { key: "date", header: "日期", render: (row) => row.date },
     {
       key: "total_assets",
@@ -156,7 +156,7 @@ export function Nav() {
     [result, selectedDate],
   );
 
-  const holdingColumns: Array<Column<NonNullable<NavPoint["holdings"]>[number]>> = [
+  const holdingColumns: Array<DataTableColumn<NonNullable<NavPoint["holdings"]>[number]>> = [
     { key: "security_code", header: "代码", render: (row) => row.security_code },
     { key: "security_name", header: "名称", render: (row) => row.security_name },
     { key: "quantity", header: "持有份额", render: (row) => row.quantity },
@@ -256,7 +256,8 @@ export function Nav() {
             </div>
           ) : null}
 
-          <Table
+          <DataTable
+            caption="每日净值表"
             columns={columns}
             rows={result.points}
             rowKey={(row) => row.date}
@@ -296,7 +297,8 @@ export function Nav() {
                       <span className="muted">　总资产：</span>
                       <span className="money">{selectedPoint.total_assets}</span>
                     </p>
-                    <Table
+                    <DataTable
+                      caption="每日持仓明细"
                       columns={holdingColumns}
                       rows={selectedPoint.holdings ?? []}
                       rowKey={(row) => row.security_code}

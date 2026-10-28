@@ -333,11 +333,12 @@ input[type="checkbox"] {
   background: #fff4e5;
   color: #8a5300;
 }
+/* A 股涨跌语义：红涨绿跌（D2）；颜色只作辅助，符号由后端字符串给出 */
 .money-pos {
-  color: #0a7d32;
+  color: var(--up);
 }
 .money-neg {
-  color: var(--danger);
+  color: var(--down);
 }
 .filters {
   display: grid;

@@ -3,7 +3,7 @@ import { Link, useParams, useSearchParams } from "react-router-dom";
 import type { MetricDrilldown, MetricDrilldownItem, MetricExplain } from "@sa/api-client";
 import { api } from "../client";
 import { ProblemView } from "../ui/Problem";
-import { Table, type Column } from "../ui/Table";
+import { DataTable, type DataTableColumn } from "../ui/DataTable";
 import { UNIT_LABELS, domainLabel, metricStatusLabel } from "./Metrics";
 
 const SAMPLE_STATUS_LABELS: Record<string, string> = {
@@ -67,7 +67,7 @@ export function MetricDetail() {
     void load(period);
   }, [load, period]);
 
-  const columns: Array<Column<MetricDrilldownItem>> = [
+  const columns: Array<DataTableColumn<MetricDrilldownItem>> = [
     { key: "label", header: "样本", render: (row) => row.label },
     { key: "value", header: "值", render: (row) => <strong>{drilldownValue(row)}</strong> },
     {
@@ -178,7 +178,8 @@ export function MetricDetail() {
             {drilldownError ? (
               <ProblemView error={drilldownError} onRetry={() => void load(period)} />
             ) : null}
-            <Table
+            <DataTable
+              caption="指标下钻明细"
               columns={columns}
               rows={drilldown?.items ?? []}
               rowKey={(row) => row.key}
