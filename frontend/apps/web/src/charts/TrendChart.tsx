@@ -4,7 +4,10 @@ import { buildNavChart } from "./geometry";
 
 export interface TrendSeriesPoint {
   label: string;
+  /** 几何值（API-085 的归一化 v，或总资产展示串） */
   value: string;
+  /** 展示用金额/标签（可选；缺省用 value） */
+  display?: string;
 }
 
 export interface TrendChartProps {
@@ -48,7 +51,7 @@ export function TrendChart({
         viewBox={`0 0 ${VIEW_WIDTH} ${VIEW_HEIGHT}`}
         preserveAspectRatio="none"
         role="img"
-        aria-label={`${title}：${series.length} 个交易日，最新 ${last?.value ?? "—"}`}
+        aria-label={`${title}：${series.length} 个交易日，最新 ${last?.display ?? last?.value ?? "—"}`}
       >
         <defs>
           <linearGradient id={gradientId} x1="0" y1="0" x2="0" y2="1">

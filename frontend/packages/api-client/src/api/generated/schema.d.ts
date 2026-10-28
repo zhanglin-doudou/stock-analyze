@@ -64,6 +64,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/assets/chart": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Assets Chart Endpoint
+         * @description API-085：资产日线 chart-ready 视图（只读；blocked 行不进入序列）。
+         */
+        get: operations["getAssetsChart"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/login": {
         parameters: {
             query?: never;
@@ -1010,6 +1030,42 @@ export interface components {
             state: "missing" | "current" | "stale" | "blocked";
             /** Status Reason */
             status_reason?: string | null;
+        };
+        /**
+         * AssetChartOut
+         * @description API-085：资产日线 chart-ready 视图（只读；前端零解析）。
+         */
+        AssetChartOut: {
+            /**
+             * Build State
+             * @enum {string}
+             */
+            build_state: "missing" | "current" | "stale" | "blocked";
+            /** Data As Of */
+            data_as_of?: string | null;
+            /** Definition Version */
+            definition_version: string;
+            /** N Points */
+            n_points: number;
+            /** Points */
+            points: components["schemas"]["AssetChartPointOut"][];
+        };
+        /**
+         * AssetChartPointOut
+         * @description API-085：图表点（v 为后端归一化无量纲字符串，前端只做几何投影）。
+         */
+        AssetChartPointOut: {
+            /** Amount Label */
+            amount_label: string;
+            /**
+             * Date
+             * Format: date
+             */
+            date: string;
+            /** Label */
+            label: string;
+            /** V */
+            v: string;
         };
         /**
          * AssetPageOut
@@ -2945,6 +3001,69 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getAssetsChart: {
+        parameters: {
+            query?: {
+                /** @description 最近 N 个资产日（1~500） */
+                limit?: number;
+            };
+            header?: {
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssetChartOut"];
+                };
+            };
+            /** @description 请求参数错误 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                     "application/problem+json": components["schemas"]["Error"];
                 };
             };

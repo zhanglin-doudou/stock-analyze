@@ -176,9 +176,9 @@ export function Dashboard(): ReactElement {
     queryKey: ["dashboard", "all"],
     queryFn: () => api.dashboard.get(),
   });
-  const assetsQuery = useQuery({
-    queryKey: ["assets", "dashboard-series"],
-    queryFn: () => api.assets.list({ limit: 200, sort: "trade_date" }),
+  const chartQuery = useQuery({
+    queryKey: ["assets", "chart"],
+    queryFn: () => api.assets.chart(200),
     staleTime: 60_000,
   });
 
@@ -220,9 +220,13 @@ export function Dashboard(): ReactElement {
   const drawdown = history.max_drawdown;
   const drawdownValue = drawdown.mdd_pct ?? (drawdown.sample_status === "blocked" ? "阻断" : "—");
 
-  const chartSeries = (assetsQuery.data?.items ?? [])
-    .filter((row) => row.total_assets != null)
-    .map((row) => ({ label: row.date.slice(5), value: row.total_assets as string }));
+  // API-085：后端已归一化 v∈[0,1] + 展示标签；前端只做几何投影（零口径）。
+  const chart = chartQuery.data;
+  const chartSeries = (chart?.points ?? []).map((point) => ({
+    label: point.label,
+    value: point.v,
+    display: point.amount_label,
+  }));
 
   return (
     <div className="dash">
@@ -333,15 +337,22 @@ export function Dashboard(): ReactElement {
             资产明细
           </Link>
         </div>
-        {assetsQuery.isLoading ? (
+        {chartQuery.isLoading ? (
           <p className="dash-chart-empty">加载日线…</p>
-        ) : assetsQuery.error != null ? (
+        ) : chartQuery.error != null ? (
           <p className="dash-chart-empty">日线加载失败，资产概览不受影响。</p>
+        ) : chartSeries.length === 0 ? (
+          <p className="dash-chart-empty">暂无日线数据（先到资产页构建资产表）。</p>
         ) : (
           <TrendChart series={chartSeries} title="总资产曲线" />
         )}
         <div className="dash-chart-foot">
-          <span>最新 {chartSeries.length > 0 ? chartSeries[chartSeries.length - 1].value : "—"}</span>
+          <span>
+            最新{" "}
+            {chartSeries.length > 0
+              ? (chartSeries[chartSeries.length - 1].display ?? "—")
+              : "—"}
+          </span>
           <span>回撤 {drawdownValue}</span>
           <span>有效观测 {drawdown.n_obs} 天</span>
         </div>

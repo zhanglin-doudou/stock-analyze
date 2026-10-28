@@ -663,6 +663,26 @@ class AssetBuildAccepted(StrictModel):
     links: JobLinks
 
 
+class AssetChartPointOut(StrictModel):
+    """API-085：图表点（v 为后端归一化无量纲字符串，前端只做几何投影）。"""
+
+    date: date
+    # 归一化 [0,1]，4 位定点字符串（如 "0.4000"）；不是金额/业务比率。
+    v: str
+    label: str
+    amount_label: str
+
+
+class AssetChartOut(StrictModel):
+    """API-085：资产日线 chart-ready 视图（只读；前端零解析）。"""
+
+    points: list[AssetChartPointOut]
+    n_points: int
+    build_state: Literal["missing", "current", "stale", "blocked"]
+    definition_version: str
+    data_as_of: date | None = None
+
+
 # ── Dashboard（API-084，Period2-12）─────────────────────────
 DashboardStatus = Literal["ok", "degraded", "stale", "blocked", "missing", "insufficient"]
 DashboardMissingCode = Literal[

@@ -32,6 +32,8 @@ from stock_api.schemas import (
     AssetBuildAccepted,
     AssetBuildIn,
     AssetBuildStateOut,
+    AssetChartOut,
+    AssetChartPointOut,
     AssetPageOut,
     AssetPointOut,
     JobLinks,
@@ -150,6 +152,65 @@ async def list_assets_endpoint(
         # 顶层口径版本与 build 块同源（state.definition_version 无 state 时为当前常量）。
         definition_version=build_out.definition_version,
         # 构建血缘：本次构建读取的 market_data.as_of（未构建为 null）。
+        data_as_of=build.data_as_of,
+    )
+
+
+def _chart_point_out(point: Any, *, lo: int, hi: int) -> AssetChartPointOut:
+    """AssetPoint（标度整数）→ 图表点；归一化只用整数运算，避免 float 业务值。"""
+    span = hi - lo
+    # 四舍五入到 1bp：((value-lo)*10000 + span/2) // span
+    v_bp = 5000 if span <= 0 else ((point.total_assets_units - lo) * 10000 + span // 2) // span
+    v = f"{v_bp // 10000}.{v_bp % 10000:04d}"
+    return AssetChartPointOut(
+        date=point.trade_date,
+        v=v,
+        label=point.trade_date.strftime("%m-%d"),
+        amount_label=str(Money(point.total_assets_units)),
+    )
+
+
+@router.get("/assets/chart", response_model=AssetChartOut, operation_id="getAssetsChart")
+async def get_assets_chart_endpoint(
+    request: Request,
+    ctx: Annotated[TenantContext, Depends(get_tenant)],
+    limit: Annotated[int, Query(ge=1, le=500, description="最近 N 个资产日（1~500）")] = 200,
+) -> AssetChartOut:
+    """API-085：资产日线 chart-ready 视图（只读；blocked 行不进入序列）。"""
+    ctx.forbid_admin_trades()
+    user_id = ctx.require_user()
+    state = get_state(request)
+    market_data = get_market_data(request)
+
+    from stock_review.application.assets import list_assets
+
+    async with state.db.session(user_id=user_id, begin=True) as session:
+        points, _next_cursor, build = await list_assets(
+            session,
+            user_id=user_id,
+            clock=state.clock,
+            market_data=market_data,
+            limit=limit,
+            cursor=None,
+            date_from=None,
+            date_to=None,
+            status=None,
+            sort="-trade_date",
+        )
+
+    # 取最近 N 行后反转为时间升序；blocked 行（数值列不可用）不进入序列。
+    usable = [point for point in points if point.status != "blocked"]
+    usable.reverse()
+    if usable:
+        values = [point.total_assets_units for point in usable]
+        lo, hi = min(values), max(values)
+    else:
+        lo = hi = 0
+    return AssetChartOut(
+        points=[_chart_point_out(point, lo=lo, hi=hi) for point in usable],
+        n_points=len(usable),
+        build_state=build.state,
+        definition_version=build.definition_version,
         data_as_of=build.data_as_of,
     )
 

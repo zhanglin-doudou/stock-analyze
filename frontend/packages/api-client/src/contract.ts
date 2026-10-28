@@ -110,6 +110,9 @@ export type AssetPageOut = ApiSchemas["AssetPageOut"];
 export type AssetBuildStateOut = ApiSchemas["AssetBuildStateOut"];
 export type AssetBuildIn = ApiSchemas["AssetBuildIn"];
 export type AssetBuildAccepted = ApiSchemas["AssetBuildAccepted"];
+// 2026-10-28：资产日线 chart-ready 视图（API-085）
+export type AssetChartPointOut = ApiSchemas["AssetChartPointOut"];
+export type AssetChartOut = ApiSchemas["AssetChartOut"];
 
 // Period2-12：Dashboard 两板块聚合（API-084）
 export type DashboardOut = ApiSchemas["DashboardOut"];
@@ -226,6 +229,10 @@ export type AssetPoint = AssetPointOut;
 export type AssetRowStatus = AssetPoint["status"];
 /** 资产表分页响应（`items` + `build` 构建摘要）。 */
 export type AssetPage = AssetPageOut;
+/** API-085 图表点：`v` 为后端归一化 [0,1] 定点串，前端只做几何投影。 */
+export type AssetChartPoint = AssetChartPointOut;
+/** API-085 资产日线 chart-ready 视图。 */
+export type AssetChart = AssetChartOut;
 /** 构建摘要块（`build`）：无 state 时 `last_*`/`assumption` 等全部为 null。 */
 export type AssetBuildState = AssetBuildStateOut;
 /** 构建状态机：`missing | current | stale | blocked`。 */

@@ -3,7 +3,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import {
-  type AssetPage,
+  type AssetChart,
   type DashboardOut,
   type DashboardRoundOut,
   type MetricBatch,
@@ -16,13 +16,13 @@ vi.mock("../client", () => ({
   api: {
     dashboard: { get: vi.fn() },
     metrics: { batch: vi.fn() },
-    assets: { list: vi.fn() },
+    assets: { chart: vi.fn() },
   },
 }));
 
 const getDashboard = vi.mocked(api.dashboard.get);
 const batchMetrics = vi.mocked(api.metrics.batch);
-const listAssets = vi.mocked(api.assets.list);
+const getAssetChart = vi.mocked(api.assets.chart);
 
 function makeRound(overrides: Partial<DashboardRoundOut> = {}): DashboardRoundOut {
   return {
@@ -208,60 +208,26 @@ function makeMetricBatch(): MetricBatch {
   };
 }
 
-function makeAssetPage(): AssetPage {
+function makeAssetChart(): AssetChart {
   return {
-    build: {
-      state: "current",
-      last_status: "ok",
-      last_built_at: "2026-07-01T10:00:00Z",
-      last_built_through: "2026-07-01",
-      last_mode: "incremental",
-      last_rebuild_from: null,
-      last_rows_written: 2,
-      rows_count: 2,
-      assumption: null,
-      status_reason: null,
-      has_new_market_data: false,
-      definition_version: "1.0",
-    },
-    data_as_of: "2026-09-30",
-    definition_version: "1.0",
-    has_more: false,
-    next_cursor: null,
-    items: [
+    points: [
       {
         date: "2026-06-29",
-        total_assets: "100000.00",
-        cash: "-70000.00",
-        market_value: "170000.00",
-        holding_cost: "170000.00",
-        unrealized_pnl: "0.00",
-        holding_count: 1,
-        cashflow: "0.00",
-        prev_total_assets: null,
-        daily_pnl: null,
-        daily_return: null,
-        daily_return_pct: null,
-        status: "ok",
-        status_reason: null,
+        v: "0.0000",
+        label: "06-29",
+        amount_label: "100000.00",
       },
       {
         date: "2026-06-30",
-        total_assets: "100620.00",
-        cash: "-70000.00",
-        market_value: "170620.00",
-        holding_cost: "170000.00",
-        unrealized_pnl: "620.00",
-        holding_count: 1,
-        cashflow: "0.00",
-        prev_total_assets: "100000.00",
-        daily_pnl: "620.00",
-        daily_return: "0.00620000",
-        daily_return_pct: "0.62%",
-        status: "ok",
-        status_reason: null,
+        v: "1.0000",
+        label: "06-30",
+        amount_label: "100620.00",
       },
     ],
+    n_points: 2,
+    build_state: "current",
+    definition_version: "1.0",
+    data_as_of: "2026-09-30",
   };
 }
 
@@ -282,7 +248,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   getDashboard.mockResolvedValue(makeDashboard());
   batchMetrics.mockResolvedValue(makeMetricBatch());
-  listAssets.mockResolvedValue(makeAssetPage());
+  getAssetChart.mockResolvedValue(makeAssetChart());
 });
 
 afterEach(cleanup);
