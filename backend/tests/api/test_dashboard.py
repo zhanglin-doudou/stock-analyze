@@ -185,6 +185,82 @@ async def _seed_short_chain(engine: AsyncEngine, *, user_id: uuid.UUID) -> None:
     )
 
 
+async def _seed_anchor_null_return_chain(engine: AsyncEngine, *, user_id: uuid.UUID) -> None:
+    """首日转入（balance == amount）→ 期初现金 0，首日 prev_total=0，日收益必然为 NULL。
+
+    这正是真实数据（1234@dev.com）的形态：首日锚点行无法计算日收益，但它不是缺口，
+    不应触发 ``DASHBOARD_MDD_GAPS``。
+    """
+    await _seed_trade(
+        engine,
+        user_id=user_id,
+        trade_date=date(2026, 4, 1),
+        amount_units=100_000_00,
+        cash_balance_units=100_000_00,
+        category="transfer",
+        security_code="",
+        summary="银行转证券",
+    )
+    await _seed_trade(
+        engine,
+        user_id=user_id,
+        trade_date=date(2026, 6, 30),
+        quantity_units=100_0000,
+        price_units=1700_000000,
+        amount_units=-170_000_00,
+        cash_balance_units=-70_000_00,
+        category="buy",
+    )
+
+
+async def _seed_interior_gap_chain(engine: AsyncEngine, *, user_id: uuid.UUID) -> None:
+    """04-01 转入 → 05-15 全额转出（余额 0）→ 06-01 重新转入 → 06-30 买入。
+
+    05-16 ~ 06-01 的 prev_total=0，日收益 NULL，构成*中途*断链（应报
+    ``DASHBOARD_MDD_GAPS``），与首日锚点行区分。
+    """
+    await _seed_trade(
+        engine,
+        user_id=user_id,
+        trade_date=date(2026, 4, 1),
+        amount_units=100_000_00,
+        cash_balance_units=100_000_00,
+        category="transfer",
+        security_code="",
+        summary="银行转证券",
+    )
+    await _seed_trade(
+        engine,
+        user_id=user_id,
+        trade_date=date(2026, 5, 15),
+        amount_units=-100_000_00,
+        cash_balance_units=0,
+        category="transfer",
+        security_code="",
+        summary="证券转银行",
+    )
+    await _seed_trade(
+        engine,
+        user_id=user_id,
+        trade_date=date(2026, 6, 1),
+        amount_units=100_000_00,
+        cash_balance_units=100_000_00,
+        category="transfer",
+        security_code="",
+        summary="银行转证券",
+    )
+    await _seed_trade(
+        engine,
+        user_id=user_id,
+        trade_date=date(2026, 6, 30),
+        quantity_units=100_0000,
+        price_units=1700_000000,
+        amount_units=-170_000_00,
+        cash_balance_units=-70_000_00,
+        category="buy",
+    )
+
+
 async def _seed_no_anchor(engine: AsyncEngine, *, user_id: uuid.UUID) -> None:
     """全部 cash_balance 为 NULL → 全局 blocked。"""
     await _seed_trade(
@@ -441,6 +517,64 @@ async def test_api_084_insufficient_mdd(
     assert drawdown["from_date"] is None
     assert drawdown["n_obs"] < 60
     assert _find(body["missing"], "DASHBOARD_MDD_INSUFFICIENT") is not None
+
+
+async def test_api_084_leading_anchor_null_return_is_not_a_gap(
+    dashboard_client: Any,
+    account_factory: Any,
+    owner_engine: AsyncEngine,
+    settings: Any,
+    frozen_clock: FrozenClock,
+) -> None:
+    """首日锚点行 daily_return=NULL 不是缺口：不得报 DASHBOARD_MDD_GAPS（回归）。"""
+    acc = await account_factory()
+    await _seed_anchor_null_return_chain(owner_engine, user_id=acc.user_id)
+    await _seed_rounds(owner_engine, user_id=acc.user_id)
+    await _build_assets(dashboard_client, settings, acc.headers, frozen_clock, owner_engine)
+
+    resp = await dashboard_client.get("/api/v1/dashboard", headers=acc.headers)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+
+    assert _find(body["missing"], "DASHBOARD_MDD_GAPS") is None
+    assert body["status"] == "ok"
+    assert body["history_overview"]["status"] == "ok"
+    assert body["missing"] == []
+
+    drawdown = body["history_overview"]["max_drawdown"]
+    assert drawdown["sample_status"] == "ok"
+    assert drawdown["mdd_pct"] == "0.00%"
+    # 92 个自然日 − 首日锚点 1 天 = 91 个有效观测
+    assert drawdown["n_obs"] == 91
+
+
+async def test_api_084_interior_null_return_still_reports_gaps(
+    dashboard_client: Any,
+    account_factory: Any,
+    owner_engine: AsyncEngine,
+    settings: Any,
+    frozen_clock: FrozenClock,
+) -> None:
+    """中途 prev_total=0（清仓后空档）仍必须断链并报 DASHBOARD_MDD_GAPS。"""
+    acc = await account_factory()
+    await _seed_interior_gap_chain(owner_engine, user_id=acc.user_id)
+    await _seed_rounds(owner_engine, user_id=acc.user_id)
+    await _build_assets(dashboard_client, settings, acc.headers, frozen_clock, owner_engine)
+
+    resp = await dashboard_client.get("/api/v1/dashboard", headers=acc.headers)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+
+    assert _find(body["missing"], "DASHBOARD_MDD_GAPS") is not None
+    assert body["asset_overview"]["status"] == "ok"
+    assert body["history_overview"]["status"] == "degraded"
+    assert body["status"] == "degraded"
+
+    drawdown = body["history_overview"]["max_drawdown"]
+    assert drawdown["sample_status"] == "ok"
+    assert drawdown["mdd_pct"] == "0.00%"
+    # 92 天 − 首日锚点 1 天 − 中途空档 17 天 = 74 个有效观测
+    assert drawdown["n_obs"] == 74
 
 
 # ── 隔离 / admin / 未认证 ───────────────────────────────────

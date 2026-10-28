@@ -325,6 +325,10 @@ def _drawdown_segments(
 
     只接受 ``status=ok`` 且 ``daily_return`` 非 NULL；blocked/degraded/NULL 行以及
     日期不连续（缺一天）都会断链，绝不跨断链拼接。
+
+    序列**开头**的不可用行不算断链：首日 `prev_total=0`，日收益在数学上无法定义
+    （锚点行），它是回撤序列的起点而非缺口。只有出现过有效观测之后的中途不可用行
+    才记 ``has_gaps``，避免把正常锚点误报成 ``DASHBOARD_MDD_GAPS``。
     """
     segments: list[tuple[list[date], list[int]]] = []
     dates: list[date] = []
@@ -336,10 +340,12 @@ def _drawdown_segments(
     for row in series:
         usable = row.status == "ok" and row.daily_return_units is not None
         if not usable:
-            has_gaps = True
-            if dates:
-                segments.append((dates, returns))
-                dates, returns = [], []
+            # 已开始观测后出现不可用行 → 断链；序列开头的锚点行按起点处理。
+            if valid_obs:
+                has_gaps = True
+                if dates:
+                    segments.append((dates, returns))
+                    dates, returns = [], []
             previous = None
             continue
         if previous is not None and row.trade_date != previous + timedelta(days=1):
