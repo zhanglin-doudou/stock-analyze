@@ -8,6 +8,7 @@ import {
   type Problem,
 } from "@sa/api-client";
 import { api } from "../client";
+import { currentMonth } from "../lib/date";
 import { JobProgress } from "../ui/JobProgress";
 import { ProblemView } from "../ui/Problem";
 import { DataTable, type DataTableColumn } from "../ui/DataTable";
@@ -82,7 +83,7 @@ function jobFailureProblem(status: JobStatus): Problem {
 /** 指标页（/metrics）：按月一键构建复盘数据（rounds → 资产 → 净值 → 指标）+ 结果展示。 */
 export function Metrics() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const period = searchParams.get('period') || new Date().toISOString().slice(0, 7);
+  const period = searchParams.get('period') || currentMonth();
   const [includeExploratory, setIncludeExploratory] = useState(false);
   const [batch, setBatch] = useState<MetricBatch | null>(null);
   const [loading, setLoading] = useState(false);

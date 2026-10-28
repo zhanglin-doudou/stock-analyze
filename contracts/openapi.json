@@ -976,6 +976,17 @@
             ],
             "title": "Cash"
           },
+          "cash_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cash Display"
+          },
           "holdings": {
             "items": {
               "$ref": "#/components/schemas/DashboardHoldingOut"
@@ -993,6 +1004,17 @@
               }
             ],
             "title": "Market Value"
+          },
+          "market_value_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Value Display"
           },
           "max_cost_return_pct": {
             "anyOf": [
@@ -1015,6 +1037,17 @@
               }
             ],
             "title": "Max Invested Cost"
+          },
+          "max_invested_cost_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Invested Cost Display"
           },
           "position_pct": {
             "anyOf": [
@@ -1050,6 +1083,17 @@
             ],
             "title": "Total Assets"
           },
+          "total_assets_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Assets Display"
+          },
           "total_fees": {
             "anyOf": [
               {
@@ -1061,6 +1105,17 @@
             ],
             "title": "Total Fees"
           },
+          "total_fees_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Fees Display"
+          },
           "total_profit": {
             "anyOf": [
               {
@@ -1071,6 +1126,17 @@
               }
             ],
             "title": "Total Profit"
+          },
+          "total_profit_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Profit Display"
           }
         },
         "required": [
@@ -1154,6 +1220,17 @@
             ],
             "title": "Max Profit Cost Pct"
           },
+          "max_profit_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Profit Display"
+          },
           "max_profit_round": {
             "anyOf": [
               {
@@ -1221,6 +1298,17 @@
             "title": "Cost",
             "type": "string"
           },
+          "cost_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Display"
+          },
           "market_value": {
             "anyOf": [
               {
@@ -1231,6 +1319,17 @@
               }
             ],
             "title": "Market Value"
+          },
+          "market_value_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Value Display"
           },
           "quantity": {
             "title": "Quantity",
@@ -1243,6 +1342,17 @@
           "security_name": {
             "title": "Security Name",
             "type": "string"
+          },
+          "weight_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weight Display"
           },
           "weight_pct": {
             "anyOf": [
@@ -1570,6 +1680,17 @@
           "pnl": {
             "title": "Pnl",
             "type": "string"
+          },
+          "pnl_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pnl Display"
           },
           "return_rate": {
             "title": "Return Rate",
@@ -6502,10 +6623,13 @@
                     "holdings": [
                       {
                         "cost": "150000.00",
+                        "cost_display": "150,000.00",
                         "market_value": "160000.00",
+                        "market_value_display": "160,000.00",
                         "quantity": "100.0000",
                         "security_code": "600519",
                         "security_name": "贵州茅台",
+                        "weight_display": "100.00%",
                         "weight_pct": "1.00000000"
                       }
                     ],
@@ -6549,10 +6673,12 @@
                     },
                     "max_profit": "12000.00",
                     "max_profit_cost_pct": "7.06%",
+                    "max_profit_display": "12,000.00",
                     "max_profit_round": {
                       "close_date": "2026-06-18",
                       "holding_days": 21,
                       "pnl": "12000.00",
+                      "pnl_display": "12,000.00",
                       "return_rate": "0.08000000",
                       "return_rate_pct": "8.00%",
                       "round_id": "rnd_01J9Z6ABCDEFGHJKMNPQRSTVWX",

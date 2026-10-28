@@ -2,6 +2,7 @@ import { useCallback, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import type { Nav, NavPoint, NavStatus } from "@sa/api-client";
 import { api } from "../client";
+import { currentMonth } from "../lib/date";
 import { ProblemView } from "../ui/Problem";
 import { DataTable, type DataTableColumn } from "../ui/DataTable";
 
@@ -21,13 +22,6 @@ function signedClass(value: string): string {
   if (value.startsWith("-")) return "money money-neg";
   if (/^0(\.0+)?$/.test(value)) return "money";
   return "money money-pos";
-}
-
-/** 当前月份（YYYY-MM）。仅取系统日历做输入框默认值，不参与任何收益计算。 */
-function currentMonth(): string {
-  const now = new Date();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  return `${now.getFullYear()}-${month}`;
 }
 
 const PERIOD_RE = /^\d{4}-\d{2}$/;

@@ -1371,6 +1371,9 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
                         "cost": "150000.00",
                         "market_value": "160000.00",
                         "weight_pct": "1.00000000",
+                        "cost_display": "150,000.00",
+                        "market_value_display": "160,000.00",
+                        "weight_display": "100.00%",
                     }
                 ],
                 "market_value": "160000.00",
@@ -1393,6 +1396,7 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
                 "loss_pct": "33.33%",
                 "flat_pct": "0.00%",
                 "max_profit": "12000.00",
+                "max_profit_display": "12,000.00",
                 "max_profit_round": {
                     "round_id": "rnd_" + _ID_SUFFIX,
                     "security_code": "600519",
@@ -1402,6 +1406,7 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
                     "return_rate": "0.08000000",
                     "return_rate_pct": "8.00%",
                     "holding_days": 21,
+                    "pnl_display": "12,000.00",
                 },
                 "max_profit_cost_pct": "7.06%",
                 "top_rounds": [],

@@ -23,6 +23,10 @@ const UNIT_LABELS: Record<string, string> = {
   z: "z",
 };
 
+function shown(display: string | null | undefined, raw: string | null | undefined): string | null | undefined {
+  return display ?? raw;
+}
+
 function tone(value: string | null | undefined): string {
   const sign = signTone(value);
   return sign === "none" || sign === "flat" ? "num" : `num is-${sign}`;
@@ -76,7 +80,7 @@ function RoundRow({ round, testPrefix }: { round: DashboardRoundOut; testPrefix:
           {round.security_name}（{round.security_code}）
         </Link>
       </span>
-      <span className={tone(round.pnl)}>{round.pnl}</span>
+      <span className={tone(round.pnl_display ?? round.pnl)}>{round.pnl_display ?? round.pnl}</span>
       <span className="dash-round-meta">
         {round.return_rate_pct} · {round.close_date} · 持有 {round.holding_days} 天
       </span>
@@ -285,24 +289,31 @@ export function Dashboard(): ReactElement {
           <div className="dash-eyebrow">总资产 · 含现金与市值</div>
           <div className="dash-hero-value">
             <span className="dash-cny">¥</span>
-            <span data-testid="kpi-total-assets">{displayValue(asset.total_assets)}</span>
+            <span data-testid="kpi-total-assets">
+              {displayValue(shown(asset.total_assets_display, asset.total_assets))}
+            </span>
           </div>
           <div className="dash-hero-delta">
             <span className={tone(asset.total_profit)}>
-              总收益 {displayValue(asset.total_profit)}
+              总收益 {displayValue(shown(asset.total_profit_display, asset.total_profit))}
             </span>
             <span className={tone(asset.max_cost_return_pct)}>
               峰值成本收益率 {displayValue(asset.max_cost_return_pct)}
             </span>
           </div>
           <p className="dash-hero-note">
-            历史峰值持仓成本 {displayValue(asset.max_invested_cost)} · 总费用{" "}
-            {displayValue(asset.total_fees)}
+            历史峰值持仓成本{" "}
+            {displayValue(shown(asset.max_invested_cost_display, asset.max_invested_cost))} · 总费用{" "}
+            {displayValue(shown(asset.total_fees_display, asset.total_fees))}
           </p>
         </div>
         <div className="dash-mini">
-          <Kpi label="持仓市值" value={asset.market_value} testId="kpi-market-value" />
-          <Kpi label="现金余额" value={asset.cash} testId="kpi-cash" />
+          <Kpi
+            label="持仓市值"
+            value={shown(asset.market_value_display, asset.market_value)}
+            testId="kpi-market-value"
+          />
+          <Kpi label="现金余额" value={shown(asset.cash_display, asset.cash)} testId="kpi-cash" />
           <div className="dash-kpi" data-testid="kpi-position">
             <span className="dash-kpi-label">仓位</span>
             <strong className="num">{displayValue(asset.position_pct)}</strong>
@@ -312,16 +323,24 @@ export function Dashboard(): ReactElement {
           </div>
           <Kpi
             label="历史峰值持仓成本"
-            value={asset.max_invested_cost}
+            value={shown(asset.max_invested_cost_display, asset.max_invested_cost)}
             testId="kpi-max-invested-cost"
           />
-          <Kpi label="总收益（全历史）" value={asset.total_profit} testId="kpi-total-profit" />
+          <Kpi
+            label="总收益（全历史）"
+            value={shown(asset.total_profit_display, asset.total_profit)}
+            testId="kpi-total-profit"
+          />
           <Kpi
             label="峰值成本收益率"
             value={asset.max_cost_return_pct}
             testId="kpi-max-cost-return"
           />
-          <Kpi label="总费用消耗" value={asset.total_fees} testId="kpi-total-fees" />
+          <Kpi
+            label="总费用消耗"
+            value={shown(asset.total_fees_display, asset.total_fees)}
+            testId="kpi-total-fees"
+          />
         </div>
       </section>
 
@@ -347,12 +366,7 @@ export function Dashboard(): ReactElement {
           <TrendChart series={chartSeries} title="总资产曲线" />
         )}
         <div className="dash-chart-foot">
-          <span>
-            最新{" "}
-            {chartSeries.length > 0
-              ? (chartSeries[chartSeries.length - 1].display ?? "—")
-              : "—"}
-          </span>
+          <span>最新 {displayValue(shown(asset.total_assets_display, asset.total_assets))}</span>
           <span>回撤 {drawdownValue}</span>
           <span>有效观测 {drawdown.n_obs} 天</span>
         </div>
@@ -392,7 +406,11 @@ export function Dashboard(): ReactElement {
             <Kpi label="亏损笔数" value={String(history.loss_count)} testId="kpi-loss-count" />
             <Kpi label="盈利占比" value={history.win_pct} testId="kpi-win-pct" />
             <Kpi label="亏损占比" value={history.loss_pct} testId="kpi-loss-pct" />
-            <Kpi label="历史最大单笔收益" value={history.max_profit} testId="kpi-max-profit" />
+            <Kpi
+              label="历史最大单笔收益"
+              value={shown(history.max_profit_display, history.max_profit)}
+              testId="kpi-max-profit"
+            />
             <Kpi
               label="最大收益 / 峰值成本"
               value={history.max_profit_cost_pct}
@@ -461,11 +479,10 @@ export function Dashboard(): ReactElement {
                       </span>
                     </td>
                     <td className="num">{row.quantity}</td>
-                    <td className="num">{displayValue(row.market_value)}</td>
-                    <td title={row.weight_pct == null ? "权重 —" : `权重（比率）${row.weight_pct}`}>
+                    <td className="num">{displayValue(shown(row.market_value_display, row.market_value))}</td>
+                    <td>
                       <span className="dash-weight-cell">
-                        {/* weight_pct 是 8 位比率串；百分比展示需 Phase 2 后端补 display 字段 */}
-                        <span className="sr-only">权重 {displayValue(row.weight_pct)}</span>
+                        <span className="num">{displayValue(row.weight_display ?? row.weight_pct)}</span>
                         <span className="dash-weight-track" aria-hidden="true">
                           <i style={{ "--w": row.weight_pct ?? "0" } as CSSProperties} />
                         </span>

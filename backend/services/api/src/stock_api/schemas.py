@@ -719,6 +719,10 @@ class DashboardHoldingOut(StrictModel):
     cost: str
     market_value: str | None = None
     weight_pct: str | None = None
+    # 后端已格式化的展示串（千分位 / 百分比）；前端优先使用，保留 raw 兼容旧客户端。
+    cost_display: str | None = None
+    market_value_display: str | None = None
+    weight_display: str | None = None
 
 
 class DashboardRoundOut(StrictModel):
@@ -732,6 +736,8 @@ class DashboardRoundOut(StrictModel):
     return_rate: str
     return_rate_pct: str
     holding_days: int
+    # 千分位展示串（raw pnl 保留；前端优先 display）。
+    pnl_display: str | None = None
 
 
 class DashboardMaxDrawdownOut(StrictModel):
@@ -762,6 +768,13 @@ class DashboardAssetOverviewOut(StrictModel):
     max_invested_cost: str | None = None
     max_cost_return_pct: str | None = None
     total_fees: str | None = None
+    # 后端已格式化的展示串（千分位金额）；前端优先使用，raw 保留兼容。
+    market_value_display: str | None = None
+    cash_display: str | None = None
+    total_assets_display: str | None = None
+    total_profit_display: str | None = None
+    max_invested_cost_display: str | None = None
+    total_fees_display: str | None = None
 
 
 class DashboardHistoryOverviewOut(StrictModel):
@@ -777,6 +790,7 @@ class DashboardHistoryOverviewOut(StrictModel):
     loss_pct: str | None = None
     flat_pct: str | None = None
     max_profit: str | None = None
+    max_profit_display: str | None = None
     max_profit_round: DashboardRoundOut | None = None
     max_profit_cost_pct: str | None = None
     top_rounds: list[DashboardRoundOut]

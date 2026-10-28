@@ -31,6 +31,7 @@ function makeRound(overrides: Partial<DashboardRoundOut> = {}): DashboardRoundOu
     security_name: "贵州茅台",
     close_date: "2026-06-10",
     pnl: "2000.00",
+    pnl_display: "2,000.00",
     return_rate: "0.10000000",
     return_rate_pct: "10.00%",
     holding_days: 5,
@@ -56,6 +57,9 @@ function makeDashboard(overrides: Partial<DashboardOut> = {}): DashboardOut {
           cost: "170000.00",
           market_value: "170620.00",
           weight_pct: "1.00000000",
+          cost_display: "170,000.00",
+          market_value_display: "170,620.00",
+          weight_display: "100.00%",
         },
       ],
       market_value: "170620.00",
@@ -66,6 +70,12 @@ function makeDashboard(overrides: Partial<DashboardOut> = {}): DashboardOut {
       max_invested_cost: "170000.00",
       max_cost_return_pct: "0.36%",
       total_fees: "0.00",
+      market_value_display: "170,620.00",
+      cash_display: "-70,000.00",
+      total_assets_display: "100,620.00",
+      total_profit_display: "620.00",
+      max_invested_cost_display: "170,000.00",
+      total_fees_display: "0.00",
     },
     history_overview: {
       status: "ok",
@@ -78,6 +88,7 @@ function makeDashboard(overrides: Partial<DashboardOut> = {}): DashboardOut {
       loss_pct: "33.33%",
       flat_pct: null,
       max_profit: "2000.00",
+      max_profit_display: "2,000.00",
       max_profit_round: makeRound(),
       max_profit_cost_pct: "1.18%",
       top_rounds: [
@@ -281,14 +292,14 @@ describe("Dashboard 看板", () => {
       expect(screen.getByTestId(testId), testId).toBeTruthy();
     }
 
-    expect(screen.getByTestId("kpi-market-value").textContent).toContain("170620.00");
+    expect(screen.getByTestId("kpi-market-value").textContent).toContain("170,620.00");
     expect(screen.getByTestId("kpi-position").textContent).toContain("169.57%");
     expect(screen.getByTestId("kpi-total-profit").textContent).toContain("620.00");
     expect(screen.getByTestId("kpi-max-cost-return").textContent).toContain("0.36%");
     expect(screen.getByTestId("kpi-closed-securities").textContent).toContain("3");
     expect(screen.getByTestId("kpi-win-count").textContent).toContain("2");
     expect(screen.getByTestId("kpi-win-pct").textContent).toContain("66.67%");
-    expect(screen.getByTestId("kpi-max-profit").textContent).toContain("2000.00");
+    expect(screen.getByTestId("kpi-max-profit").textContent).toContain("2,000.00");
     expect(screen.getByTestId("kpi-max-profit-cost").textContent).toContain("1.18%");
     expect(screen.getByTestId("kpi-max-drawdown").textContent).toContain("0.00%");
     expect(screen.getByTestId("kpi-max-drawdown").textContent).toContain("92");

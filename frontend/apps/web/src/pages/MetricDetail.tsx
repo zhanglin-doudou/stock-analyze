@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import type { MetricDrilldown, MetricDrilldownItem, MetricExplain } from "@sa/api-client";
 import { api } from "../client";
+import { currentMonth } from "../lib/date";
 import { ProblemView } from "../ui/Problem";
 import { DataTable, type DataTableColumn } from "../ui/DataTable";
 import { UNIT_LABELS, domainLabel, metricStatusLabel } from "./Metrics";
@@ -30,7 +31,7 @@ function drilldownValue(item: MetricDrilldownItem): string {
 export function MetricDetail() {
   const { metricId = "" } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
-  const period = searchParams.get("period") ?? new Date().toISOString().slice(0, 7);
+  const period = searchParams.get("period") ?? currentMonth();
   const [explain, setExplain] = useState<MetricExplain | null>(null);
   const [drilldown, setDrilldown] = useState<MetricDrilldown | null>(null);
   const [loading, setLoading] = useState(false);

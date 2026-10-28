@@ -1332,14 +1332,20 @@ export interface components {
         DashboardAssetOverviewOut: {
             /** Cash */
             cash?: string | null;
+            /** Cash Display */
+            cash_display?: string | null;
             /** Holdings */
             holdings: components["schemas"]["DashboardHoldingOut"][];
             /** Market Value */
             market_value?: string | null;
+            /** Market Value Display */
+            market_value_display?: string | null;
             /** Max Cost Return Pct */
             max_cost_return_pct?: string | null;
             /** Max Invested Cost */
             max_invested_cost?: string | null;
+            /** Max Invested Cost Display */
+            max_invested_cost_display?: string | null;
             /** Position Pct */
             position_pct?: string | null;
             /**
@@ -1349,10 +1355,16 @@ export interface components {
             status: "ok" | "degraded" | "stale" | "blocked" | "missing" | "insufficient";
             /** Total Assets */
             total_assets?: string | null;
+            /** Total Assets Display */
+            total_assets_display?: string | null;
             /** Total Fees */
             total_fees?: string | null;
+            /** Total Fees Display */
+            total_fees_display?: string | null;
             /** Total Profit */
             total_profit?: string | null;
+            /** Total Profit Display */
+            total_profit_display?: string | null;
         };
         /**
          * DashboardHistoryOverviewOut
@@ -1378,6 +1390,8 @@ export interface components {
             max_profit?: string | null;
             /** Max Profit Cost Pct */
             max_profit_cost_pct?: string | null;
+            /** Max Profit Display */
+            max_profit_display?: string | null;
             max_profit_round?: components["schemas"]["DashboardRoundOut"] | null;
             /**
              * Status
@@ -1398,14 +1412,20 @@ export interface components {
         DashboardHoldingOut: {
             /** Cost */
             cost: string;
+            /** Cost Display */
+            cost_display?: string | null;
             /** Market Value */
             market_value?: string | null;
+            /** Market Value Display */
+            market_value_display?: string | null;
             /** Quantity */
             quantity: string;
             /** Security Code */
             security_code: string;
             /** Security Name */
             security_name: string;
+            /** Weight Display */
+            weight_display?: string | null;
             /** Weight Pct */
             weight_pct?: string | null;
         };
@@ -1528,6 +1548,8 @@ export interface components {
             holding_days: number;
             /** Pnl */
             pnl: string;
+            /** Pnl Display */
+            pnl_display?: string | null;
             /** Return Rate */
             return_rate: string;
             /** Return Rate Pct */
