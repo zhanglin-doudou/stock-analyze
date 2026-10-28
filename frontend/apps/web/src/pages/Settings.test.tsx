@@ -62,9 +62,9 @@ describe("Settings（Phase 3）", () => {
     expect(document.documentElement.dataset.trend).toBe("green-up");
     expect(window.localStorage.getItem("sa.trend")).toBe("green-up");
 
-    // 深色主题按 D5 暂不开放
-    const dark = screen.getByRole("button", { name: "深色（Phase 5）" }) as HTMLButtonElement;
-    expect(dark.disabled).toBe(true);
+    fireEvent.click(screen.getByRole("button", { name: "深色" }));
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    expect(window.localStorage.getItem("sa.theme")).toBe("dark");
   });
 
   it("渲染 PAT 列表并保留撤销入口", async () => {

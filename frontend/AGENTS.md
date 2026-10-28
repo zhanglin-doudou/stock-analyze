@@ -115,7 +115,7 @@ export default defineConfig({
 ### 8. 设计系统 / 主题 / 图表零口径（Phase 0 起）
 
 - **唯一视觉变量来源**：`apps/web/src/styles/tokens.css`。组件只消费语义 token（`--surface/--line/--accent/--up/--down/...`），禁止新增私有 hex；新增 token 需同步本文件与评审文档。
-- **主题**：`<html data-theme="light|dark" data-density="cozy|compact" data-trend="red-up|green-up">`；默认 `light + cozy + red-up`（A 股红涨绿跌），深色 Phase 5。
+- **主题**：`<html data-theme="light|dark" data-density="cozy|compact" data-trend="red-up|green-up">`；默认 `light + cozy + red-up`（A 股红涨绿跌），深色由同名 token 覆盖（Phase 5，Settings 可切）。
 - **数字排版**：金额/比率列右对齐 + `font-variant-numeric: tabular-nums`；格式（千分位/小数位/符号）一律来自后端字符串，前端不补零/不四舍五入。
 - **状态语义**：`build_state` 与 `data_status` 两轴共用一组 status token；禁止只用颜色表达状态（WCAG 2.2 1.4.1），必须带文案与形状。
 - **图表**：Phase 1 先自研 SVG，几何投影收敛到 `src/charts/geometry.ts`（唯一允许 `Number()` 的模块，配 golden `path d` 测试）；Phase 2 起后端 `GET /views/*` 返回归一化序列为主路径。

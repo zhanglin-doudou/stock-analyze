@@ -160,6 +160,66 @@
   --down-soft: rgba(168, 72, 58, 0.1);
 }
 
+/* Phase 5 · 深色主题：同名语义变量覆盖（组件无需改代码） */
+[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #0b0e12;
+  --surface: #10151b;
+  --surface-2: #151b23;
+  --surface-raised: #161d26;
+  --text: #d7e0ea;
+  --text-2: #aab7c7;
+  --muted: #8a97a8;
+  --faint: #647183;
+  --line: #1f2933;
+  --line-strong: #2e3a47;
+
+  --accent: #9fbfae;
+  --accent-soft: rgba(159, 191, 174, 0.14);
+  --accent-contrast: #0b0e12;
+
+  --up: #f0716f;
+  --up-soft: rgba(240, 113, 111, 0.14);
+  --down: #4ec9a0;
+  --down-soft: rgba(78, 201, 160, 0.14);
+  --flat: #8a97a8;
+
+  --status-ok: #4ec9a0;
+  --status-ok-soft: rgba(78, 201, 160, 0.14);
+  --status-degraded: #e3aa52;
+  --status-degraded-soft: rgba(227, 170, 82, 0.14);
+  --status-blocked: #f0716f;
+  --status-blocked-soft: rgba(240, 113, 111, 0.14);
+  --status-missing: #8a97a8;
+  --status-missing-soft: rgba(138, 151, 168, 0.16);
+  --status-insufficient: #e3aa52;
+  --status-insufficient-soft: rgba(227, 170, 82, 0.14);
+  --status-unreliable: #8a97a8;
+  --status-unreliable-soft: rgba(138, 151, 168, 0.16);
+  --warn: #e3aa52;
+  --warn-soft: rgba(227, 170, 82, 0.14);
+  --danger: #f0716f;
+  --danger-soft: rgba(240, 113, 111, 0.14);
+  --info: #9fbfae;
+  --info-soft: rgba(159, 191, 174, 0.14);
+
+  --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-2: 0 8px 24px rgba(0, 0, 0, 0.45);
+  --focus-ring: 0 0 0 3px rgba(159, 191, 174, 0.35);
+
+  --chart-1: #9fbfae;
+  --chart-2: #6f8f7f;
+  --chart-3: #e3aa52;
+  --chart-4: #7fb3e6;
+  --chart-5: #8a97a8;
+  --chart-grid: #1f2933;
+  --chart-grid-strong: #2e3a47;
+  --chart-band: rgba(240, 113, 111, 0.12);
+  --chart-band-line: rgba(240, 113, 111, 0.5);
+  --chart-area: rgba(159, 191, 174, 0.14);
+}
+
 /* 对比度偏好：提高边框/次级文字对比（WCAG 2.2 AA 兜底） */
 @media (prefers-contrast: more) {
   :root {

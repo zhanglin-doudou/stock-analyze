@@ -8,6 +8,7 @@ import {
   updatePreferences,
   type Density,
   type Preferences,
+  type Theme,
   type TrendColor,
 } from "../theme/theme";
 import "./settings.css";
@@ -15,6 +16,11 @@ import "./settings.css";
 const DENSITY_OPTIONS: Array<{ value: Density; label: string; hint: string }> = [
   { value: "cozy", label: "舒适", hint: "表头/行高更大，适合长时间阅读" },
   { value: "compact", label: "紧凑", hint: "一屏更多行，适合密集列表" },
+];
+
+const THEME_OPTIONS: Array<{ value: Theme; label: string; hint: string }> = [
+  { value: "light", label: "浅色", hint: "纸感浅色（默认）" },
+  { value: "dark", label: "深色", hint: "暗色高对比，适合夜间复盘" },
 ];
 
 const TREND_OPTIONS: Array<{ value: TrendColor; label: string; hint: string }> = [
@@ -167,15 +173,21 @@ export function Settings() {
         <div className="settings-row">
           <div>
             <div className="settings-label">主题</div>
-            <div className="settings-hint">深色主题按路线图 Phase 5 开放。</div>
+            <div className="settings-hint">深色主题使用同名 token 覆盖，切换后立即生效。</div>
           </div>
           <div className="settings-seg" role="group" aria-label="主题">
-            <button type="button" className="is-active" aria-pressed="true">
-              浅色
-            </button>
-            <button type="button" disabled title="Phase 5 开放">
-              深色（Phase 5）
-            </button>
+            {THEME_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                type="button"
+                className={preferences.theme === option.value ? "is-active" : ""}
+                aria-pressed={preferences.theme === option.value}
+                title={option.hint}
+                onClick={() => patchPreferences({ theme: option.value })}
+              >
+                {option.label}
+              </button>
+            ))}
           </div>
         </div>
       </section>
