@@ -54,4 +54,22 @@ async def test_fetch_real_daily_bars(live_source: MarketDataSource) -> None:
 
 async def test_fetch_unsupported_symbol_is_fail_closed(live_source: MarketDataSource) -> None:
     with pytest.raises(ApiError):
-        await live_source.get_daily_bars(["510300"], START, END)
+        await live_source.get_daily_bars(["113001"], START, END)  # 可转债不支持
+
+
+async def test_fetch_fund_daily_bars(live_source: MarketDataSource) -> None:
+    """场内基金（ETF 510300）：基金专用接口路由 + 中文/英文列解析。"""
+    bars = await live_source.get_daily_bars(["510300"], START, END)
+    assert len(bars) >= 15, f"2021-10 交易日应 >=15，实际 {len(bars)}"
+    assert all(bar.symbol == "510300" for bar in bars)
+    assert all(bar.close_units > 0 for bar in bars)
+    assert all(START <= bar.trade_date <= END for bar in bars)
+
+
+async def test_fetch_delisted_stock_daily_bars(live_source: MarketDataSource) -> None:
+    """退市股（000418 小天鹅A，2019-05 退市）：腾讯兜底保留退市前历史。"""
+    bars = await live_source.get_daily_bars(["000418"], date(2019, 4, 1), date(2019, 5, 31))
+    assert len(bars) > 0
+    assert all(bar.symbol == "000418" for bar in bars)
+    assert all(bar.close_units > 0 for bar in bars)
+    assert all(date(2019, 4, 1) <= bar.trade_date <= date(2019, 5, 31) for bar in bars)

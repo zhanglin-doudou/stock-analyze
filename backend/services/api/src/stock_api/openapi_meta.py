@@ -78,6 +78,11 @@ MONEY_FIELDS = frozenset(
         "cash",
         "holding_cost",
         "unrealized_pnl",
+        # Period2-12（API-084）：Dashboard 独有金额字段（与 nav/资产表无同名冲突）。
+        "total_profit",
+        "max_invested_cost",
+        "total_fees",
+        "max_profit",
     }
 )
 PRICE_FIELDS = frozenset({"price", "unit_nav"})
@@ -630,6 +635,19 @@ OPERATION_META: dict[str, dict[str, Any]] = {
             "ADMIN_CANNOT_READ_TRADES",
         ],
     },
+    "getDashboard": {
+        "api_id": "API-084",
+        "scope": "read",
+        "idempotent": False,
+        "async": False,
+        "error_codes": [
+            "TOKEN_EXPIRED",
+            "TOKEN_REVOKED",
+            "MULTIPLE_CREDENTIALS",
+            "ADMIN_CANNOT_READ_TRADES",
+            "UNKNOWN_QUERY_PARAM",
+        ],
+    },
     "listJobs": {
         "api_id": "API-061",
         "scope": "read",
@@ -867,6 +885,25 @@ OPERATION_META: dict[str, dict[str, Any]] = {
         "async": True,
         "error_codes": [
             "NOT_FOUND",
+            "IDEMPOTENCY_KEY_REUSED",
+            "IDEMPOTENCY_IN_PROGRESS",
+            "JOB_ALREADY_RUNNING",
+            "QUOTA_EXCEEDED",
+            "VALIDATION_ERROR",
+            "TOKEN_EXPIRED",
+            "TOKEN_REVOKED",
+            "MULTIPLE_CREDENTIALS",
+            "INSUFFICIENT_SCOPE",
+            "ADMIN_CANNOT_READ_TRADES",
+        ],
+    },
+    "rebuildPeriod": {
+        "api_id": "API-083",
+        "scope": "write",
+        "idempotent": True,
+        "async": True,
+        "error_codes": [
+            "INVALID_PERIOD",
             "IDEMPOTENCY_KEY_REUSED",
             "IDEMPOTENCY_IN_PROGRESS",
             "JOB_ALREADY_RUNNING",
@@ -1262,6 +1299,103 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
                 "self": f"/api/v1/jobs/job_{_ID_SUFFIX}",
                 "events": f"/api/v1/jobs/job_{_ID_SUFFIX}/events",
             },
+        }
+    },
+    # Period2-07（API-083）：202 专用响应（type 必须是 rebuild_period）。
+    "rebuildPeriod": {
+        "202": {
+            "job_id": "job_" + _ID_SUFFIX,
+            "type": "rebuild_period",
+            "status": "pending",
+            "links": {
+                "self": f"/api/v1/jobs/job_{_ID_SUFFIX}",
+                "events": f"/api/v1/jobs/job_{_ID_SUFFIX}/events",
+            },
+        }
+    },
+    # Period2-12（API-084）：两板块聚合；blocked/missing 字段显式 null（示例取全可用态）。
+    "getDashboard": {
+        "200": {
+            "as_of": "2026-06-30",
+            "data_as_of": _DATE,
+            "legacy_period": "2026-06",
+            "status": "ok",
+            "build_state": "current",
+            "definition_version": "1.0",
+            "asset_overview": {
+                "status": "ok",
+                "holdings": [
+                    {
+                        "security_code": "600519",
+                        "security_name": "贵州茅台",
+                        "quantity": "100.0000",
+                        "cost": "150000.00",
+                        "market_value": "160000.00",
+                        "weight_pct": "1.00000000",
+                    }
+                ],
+                "market_value": "160000.00",
+                "cash": "40000.00",
+                "total_assets": "200000.00",
+                "position_pct": "80.00%",
+                "total_profit": "25000.00",
+                "max_invested_cost": "170000.00",
+                "max_cost_return_pct": "14.71%",
+                "total_fees": "320.00",
+            },
+            "history_overview": {
+                "status": "ok",
+                "closed_security_count": 6,
+                "closed_round_count": 12,
+                "win_count": 8,
+                "loss_count": 4,
+                "flat_count": 0,
+                "win_pct": "66.67%",
+                "loss_pct": "33.33%",
+                "flat_pct": "0.00%",
+                "max_profit": "12000.00",
+                "max_profit_round": {
+                    "round_id": "rnd_" + _ID_SUFFIX,
+                    "security_code": "600519",
+                    "security_name": "贵州茅台",
+                    "close_date": "2026-06-18",
+                    "pnl": "12000.00",
+                    "return_rate": "0.08000000",
+                    "return_rate_pct": "8.00%",
+                    "holding_days": 21,
+                },
+                "max_profit_cost_pct": "7.06%",
+                "top_rounds": [],
+                "bottom_rounds": [],
+                "max_drawdown": {
+                    "from_date": "2026-05-12",
+                    "to_date": "2026-05-28",
+                    "duration_days": 16,
+                    "duration_obs": 16,
+                    "recovery_days": 9,
+                    "recovery_censored": False,
+                    "mdd_pct": "8.42%",
+                    "n_obs": 96,
+                    "sample_status": "ok",
+                    "reason": None,
+                },
+            },
+            "missing": [],
+            "links": {
+                "assets": "/assets",
+                "rounds": "/rounds",
+                "metrics": "/metrics?period=2026-06",
+                "reports": "/reports",
+                "exports": "/exports",
+                "attribution": "/attribution?period=2026-06",
+            },
+            "assumptions": {
+                "calendar": "weekday_proxy",
+                "cost_model": "moving_average",
+                "total_profit_basis": "full_history_bridge",
+                "mdd": "longest_valid_segment",
+            },
+            "inputs_hash": "0" * 64,
         }
     },
 }

@@ -33,6 +33,7 @@ from stock_api.openapi_meta import apply_contract_metadata
 from stock_api.routers import (
     assets,
     auth,
+    dashboard,
     imports,
     jobs,
     metrics,
@@ -131,6 +132,7 @@ def create_app(settings: Settings | None = None, *, clock: Clock | None = None) 
         nav,
         assets,
         metrics,
+        dashboard,
     ):
         app.include_router(module.router, prefix=API_PREFIX)
     # 探针/根路由按容器惯例不带前缀（/healthz、/readyz、/version、/metrics、/）

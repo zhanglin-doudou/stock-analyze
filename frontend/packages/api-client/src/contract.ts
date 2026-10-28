@@ -111,6 +111,23 @@ export type AssetBuildStateOut = ApiSchemas["AssetBuildStateOut"];
 export type AssetBuildIn = ApiSchemas["AssetBuildIn"];
 export type AssetBuildAccepted = ApiSchemas["AssetBuildAccepted"];
 
+// Period2-12：Dashboard 两板块聚合（API-084）
+export type DashboardOut = ApiSchemas["DashboardOut"];
+export type DashboardAssetOverviewOut = ApiSchemas["DashboardAssetOverviewOut"];
+export type DashboardHistoryOverviewOut = ApiSchemas["DashboardHistoryOverviewOut"];
+export type DashboardHoldingOut = ApiSchemas["DashboardHoldingOut"];
+export type DashboardRoundOut = ApiSchemas["DashboardRoundOut"];
+export type DashboardMaxDrawdownOut = ApiSchemas["DashboardMaxDrawdownOut"];
+export type DashboardMissingOut = ApiSchemas["DashboardMissingOut"];
+
+// Period2-05/07：三域指标（API-033/079）+ 按月一键编排（API-083）
+export type MetricItemOut = ApiSchemas["MetricItemOut"];
+export type MetricBatchOut = ApiSchemas["MetricBatchOut"];
+export type MetricScopeOut = ApiSchemas["MetricScopeOut"];
+export type RebuildPeriodIn = ApiSchemas["RebuildPeriodIn"];
+export type MetricExplainOut = ApiSchemas["MetricExplainOut"];
+export type MetricDrilldownOut = ApiSchemas["MetricDrilldownOut"];
+
 export type HealthOut = ApiSchemas["HealthOut"];
 export type ReadyOut = ApiSchemas["ReadyOut"];
 export type VersionOut = ApiSchemas["VersionOut"];
@@ -219,6 +236,51 @@ export type AssetBuildMode = NonNullable<AssetBuildState["last_mode"]>;
 export type AssetBuildLastStatus = NonNullable<AssetBuildState["last_status"]>;
 /** API-082 请求体：`{"mode": "auto" | "full"}`，默认 auto。 */
 export type AssetBuildBody = AssetBuildIn;
+
+/** Period2-05/07：指标批量查询响应（API-033）与单个指标结果。
+ * `value`/`ci_*` 为后端定点字符串，前端只展示不计算。
+ *
+ * 注意（C-31 的代价）：后端 `MetricItemOut` 用 wrap 序列化器在**运行时**按状态省略
+ * `value` 键（ok 且非 pending_window 才有 value），pydantic 因此把该模型的序列化
+ * schema 退化成 generic object——generated 里的 `MetricItemOut` 是
+ * `{ [key: string]: unknown }`，不能直接用。下面的 `MetricItem` 是按 API-Catalog §2
+ * API-033 字段表手工收窄的接口（后端 test_metrics.py + 契约 kit 钉住了这份形状）。
+ */
+export interface MetricItem {
+  metric_id: string;
+  definition_version: string;
+  domain: string;
+  period: string;
+  status: "ok" | "blocked" | "stale" | "unreliable";
+  sample_status: "ok" | "insufficient" | "pending_window" | "blocked";
+  reason?: string | null;
+  /** 非 ok / pending_window 时整键省略（C-31）。 */
+  value?: string | null;
+  unit: "CNY" | "ratio" | "days" | "count" | "z";
+  precision: number;
+  n: number;
+  n_pending: number;
+  ci_low?: string | null;
+  ci_high?: string | null;
+  data_as_of: string;
+}
+
+/** `MetricBatchOut.items` 的元素类型同上（generated 的 items 随 MetricItemOut 一起退化）。 */
+export interface MetricBatch extends Omit<MetricBatchOut, "items"> {
+  items: MetricItem[];
+}
+
+export type MetricStatus = MetricItem["status"];
+/** API-083 请求体：`{"period": "YYYY-MM", "include_exploratory"?: boolean}`。 */
+export type RebuildPeriodBody = RebuildPeriodIn;
+
+/** Period2-07：指标详情页（API-034 解释 + API-035 样本明细）。
+ * 两个模型都没有 wrap 序列化器，generated 的类型可直接使用。
+ */
+export type MetricExplain = MetricExplainOut;
+export type MetricExplainSampleInfo = MetricExplainOut["sample"];
+export type MetricDrilldown = MetricDrilldownOut;
+export type MetricDrilldownItem = NonNullable<MetricDrilldownOut["items"]>[number];
 
 // ── 编译期断言：后端契约变化必须在这里/typecheck 里炸出来 ─────────────────
 
@@ -349,6 +411,11 @@ export type AssertAssetBuildStateFields = Assert<
   >
 >;
 export type AssertAssetBuildAcceptedFields = Assert<FieldsPresent<AssetBuildAccepted, "job_id" | "type" | "status" | "links">>;
+/** 指标批量的 envelope 字段必须仍存在于契约（items 元素因 C-31 wrap 序列化器退化，
+ * 由手工接口 MetricItem 承载，见上方注释；后端 test_metrics.py 钉住元素形状）。 */
+export type AssertMetricBatchFields = Assert<
+  FieldsPresent<MetricBatchOut, "period" | "data_as_of" | "definition_version" | "assumptions" | "items">
+>;
 
 
 /** 客户端增强类型必须仍然覆盖契约响应（契约删字段 → 这里报错）。 */

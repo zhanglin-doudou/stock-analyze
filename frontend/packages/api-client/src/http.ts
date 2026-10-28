@@ -11,6 +11,7 @@ import type {
   BatchList,
   CommitImportBody,
   CreateTokenBody,
+  DashboardOut,
   ErrorCatalogOut,
   HealthOut,
   ImportBatch,
@@ -21,6 +22,9 @@ import type {
   LoginIn,
   LoginResponse,
   MeOut,
+  MetricBatch,
+  MetricDrilldown,
+  MetricExplain,
   Nav,
   PatCreateResponse,
   Preview,
@@ -29,6 +33,7 @@ import type {
   ProblemFieldError,
   QuarantinePage,
   ReadyOut,
+  RebuildPeriodBody,
   RebuildRoundsBody,
   RefreshIn,
   RefreshOut,
@@ -167,6 +172,31 @@ export interface ListAssetsQuery {
   to?: string;
   status?: string;
   sort?: string;
+}
+
+/** API-033 指标批量查询（period=YYYY-MM 或 from/to；ids 逗号分隔，与 domain 二选一）。 */
+export interface GetMetricsQuery {
+  ids?: string;
+  domain?: string;
+  period?: string;
+  benchmark?: string;
+  include_exploratory?: boolean;
+}
+
+/** API-034 指标解释（meaning / method / 样本门槛；period 必填）。 */
+export interface GetMetricExplainQuery {
+  period: string;
+  benchmark?: string;
+}
+
+/** API-035 指标下钻明细（样本行；游标分页）。 */
+export interface GetMetricDrilldownQuery {
+  period: string;
+  benchmark?: string;
+  round_id?: string;
+  security_code?: string;
+  limit?: number;
+  cursor?: string;
 }
 
 export interface CursorQuery {
@@ -421,6 +451,15 @@ export function createClient(options: ClientOptions) {
     cancel(jobId: string) {
       return send<Job>({ path: `/jobs/${jobId}/cancel`, method: "POST" }).then((r) => r.data);
     },
+    /** API-083：按月一键编排 rounds → assets → nav → metrics（202；同 period 单飞）。 */
+    rebuildPeriod(body: RebuildPeriodBody, idempotencyKey: string) {
+      return send<JobAccepted>({
+        path: "/jobs/rebuild-period",
+        method: "POST",
+        body,
+        idempotencyKey,
+      }).then((r) => r.data);
+    },
     /** SSE 进度流：支持 Last-Event-ID 断线续传（浏览器 EventSource 无法带 Bearer，故用 fetch 流）。 */
     async *events(
       jobId: string,
@@ -610,6 +649,50 @@ export function createClient(options: ClientOptions) {
     },
   };
 
+  const dashboard = {
+    /** API-084：Dashboard 两板块聚合（纯读；金额/比率全部后端格式化）。 */
+    get() {
+      return send<DashboardOut>({ path: "/dashboard" }).then((r) => r.data);
+    },
+  };
+
+  const metricsApi = {
+    /** API-033：指标批量查询（read-through；默认核心 10，`include_exploratory` 按需）。 */
+    batch(query: GetMetricsQuery = {}) {
+      return send<MetricBatch>({
+        path: "/metrics",
+        query: {
+          ids: query.ids,
+          domain: query.domain,
+          period: query.period,
+          benchmark: query.benchmark,
+          include_exploratory: query.include_exploratory,
+        },
+      }).then((r) => r.data);
+    },
+    /** API-034：三段式解释（meaning 恒非空；conclusion 仅样本可用时）。 */
+    explain(metricId: string, query: GetMetricExplainQuery) {
+      return send<MetricExplain>({
+        path: `/metrics/${metricId}/explain`,
+        query: { period: query.period, benchmark: query.benchmark },
+      }).then((r) => r.data);
+    },
+    /** API-035：指标下钻明细（详情页的「样本」表）。 */
+    drilldown(metricId: string, query: GetMetricDrilldownQuery) {
+      return send<MetricDrilldown>({
+        path: `/metrics/${metricId}/drilldown`,
+        query: {
+          period: query.period,
+          benchmark: query.benchmark,
+          round_id: query.round_id,
+          security_code: query.security_code,
+          limit: query.limit,
+          cursor: query.cursor,
+        },
+      }).then((r) => r.data);
+    },
+  };
+
   const ops = {
     healthz() {
       return send<HealthOut>({ path: "/healthz", root: true, omitAuth: true }).then((r) => r.data);
@@ -631,7 +714,7 @@ export function createClient(options: ClientOptions) {
     },
   };
 
-  return { auth, tokens, imports, jobs, trades, rounds, nav, assets, ops, request: send };
+  return { auth, tokens, imports, jobs, trades, rounds, nav, assets, dashboard, metrics: metricsApi, ops, request: send };
 }
 
 export type ApiClient = ReturnType<typeof createClient>;

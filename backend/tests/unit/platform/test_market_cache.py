@@ -333,7 +333,7 @@ async def test_unsupported_symbol_fails_before_network(
     stub = StubMarketDataSource({})
     cache = _cache(app_db, cache_settings, clock, stub)
     with pytest.raises(ApiError) as caught:
-        await cache.get_daily_bars(["510300"], date(2021, 10, 1), date(2021, 10, 31))
+        await cache.get_daily_bars(["113001"], date(2021, 10, 1), date(2021, 10, 31))  # 可转债
     assert caught.value.code is ErrorCode.NOT_FOUND
     assert stub.calls == []
 

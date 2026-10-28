@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import type { Nav, NavPoint, NavStatus } from "@sa/api-client";
 import { api } from "../client";
 import { ProblemView } from "../ui/Problem";
@@ -42,7 +42,8 @@ function lastUnblocked(points: NavPoint[]): NavPoint | undefined {
 
 /** 净值与收益（/nav）：按月构建份额法 TWR 与 XIRR/MWR 并展示每日净值 + 持仓。 */
 export function Nav() {
-  const [period, setPeriod] = useState(currentMonth);
+  const [searchParams, setSearchParams] = useSearchParams();
+  const period = searchParams.get('period') || currentMonth();
   const [result, setResult] = useState<Nav | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown>(null);
@@ -184,7 +185,7 @@ export function Nav() {
           <input
             type="month"
             value={period}
-            onChange={(e) => setPeriod(e.target.value)}
+            onChange={(e) => setSearchParams({ period: e.target.value })}
             aria-label="月份"
           />
         </label>

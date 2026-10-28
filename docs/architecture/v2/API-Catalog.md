@@ -133,9 +133,11 @@
 | API-080 | GET | `/trades/{trade_id}` | 流水详情（含血缘与版本） | L4/L8/D1 | read | — | 同步 | P0 | 200 |
 | API-081 | GET | `/assets` | 每日资产快照列表（现金/持仓市值/成本/浮盈/日收益） | D1 | read | — | 同步 | P0 | 200 |
 | API-082 | POST | `/assets/build` | 构建/增量更新资产表 | D1 | write | 必需 | 异步 | P0 | 202 |
+| API-083 | POST | `/jobs/rebuild-period` | 按月一键编排（rounds→assets→nav→metrics） | R2/D1 | write | 必需 | 异步 | P0 | 202 |
+| API-084 | GET | `/dashboard` | Dashboard 两板块聚合（资产概览 + 历史概览） | D1 | read | — | 同步 | P0 | 200 |
 
 ## §2 分域详细契约
-> 下列 32 个端点为**详细契约**；其余 50 个的请求/响应字段以 `openapi/openapi.json` 为准（§1 已登记、§6 已配验收用例）。断言均为可脚本执行：状态码 + 字段值 + 状态迁移 + 副作用。
+> 下列 32 个端点为**详细契约**；其余 52 个的请求/响应字段以 `openapi/openapi.json` 为准（§1 已登记、§6 已配验收用例）。断言均为可脚本执行：状态码 + 字段值 + 状态迁移 + 副作用。
 ### 2.1 认证、导入与流水
 #### API-001 POST /auth/register
 - 用途：注册账号；FR-L2；认证：公开；幂等：支持；同步。
@@ -306,6 +308,15 @@
 - Job：`kind=build_assets`、单飞 `scope_key={user_id}:assets`、`params={"mode":<解析默认值后的真实值>}`；handler 阶段 `recomputing → writing → finalizing`（progress 单调不减、粒度 ≥5）；结果写入 `platform.job.result`（键 `mode/rebuild_from/rows_written/rows_total/built_through/status/assumption/data_as_of`），**不扩 `GET /jobs` 响应**，对外摘要统一读 `GET /assets` 的 `build` 块。
 - 错误码：IDEMPOTENCY_KEY_REUSED(422)、IDEMPOTENCY_IN_PROGRESS(409)、JOB_ALREADY_RUNNING(409)、QUOTA_EXCEEDED(429)、VALIDATION_ERROR(422)、INSUFFICIENT_SCOPE(403)、ADMIN_CANNOT_READ_TRADES(403)。
 - 验收断言：① 202 + Location/Retry-After 且 `type=="build_assets"`；drain 后 `GET /assets` 行可见、`build.last_mode/last_rows_written/last_built_through` 齐全；② 同 key 同 body → 同一 `job_id` + `Idempotency-Replayed`，重复构建不产生重复行；缺省 body 与 `{"mode":"auto"}` 同 key 不 422；③ 不同 key 同参（首个待执行）→ 同一 `job_id` + `X-Job-Reused`；`auto` 运行中发 `full` → 409 `JOB_ALREADY_RUNNING`；④ read PAT → 403 `INSUFFICIENT_SCOPE`、admin → 403 `ADMIN_CANNOT_READ_TRADES`、无 token → 401、跨用户 job 不可见（404）；⑤ 缺 `Idempotency-Key`/`mode=bad` → 422 VALIDATION_ERROR、同 key 异体 → 422 IDEMPOTENCY_KEY_REUSED；⑥ 增量摘要：`build.last_mode=="incremental"`、`last_rows_written == end - last_rebuild_from + 1 < build.rows_count`，owner 直读 job.result 断言 `rows_written/rows_total`，结果与全量逐行相等；⑦ 无流水/无现金锚点 → 202→succeeded，`build.rows_count==0`，无锚点时 `build.last_status=="blocked"`；⑧ 进度事件 `stage ∈ {recomputing,writing,finalizing}` 且单调（平台 claim=parsing、finish=done 属既有行为）。
+#### API-083 POST /jobs/rebuild-period
+- 用途：按月一键构建编排——单 job 内顺序执行 rounds（脏窗口）→ assets（auto 增量）→ nav → metrics（默认核心 10 个，`include_exploratory=true` 含 M1 探索 8 个）；FR-R2/D1；认证：write；幂等：**必需**；异步。NAV 页面的“构建净值与收益”（API-032 链路）行为不变，本端点独立入口。
+- 请求：头 `Idempotency-Key`(必填 16~128)；body `period`(YYYY-MM，必填) / `include_exploratory`(默认 false)。`request_hash` 基于解析默认值后的规范 body。
+- 响应 202：`job_id` / `type:"rebuild_period"` / `status:"pending"` / `links{self,events}`；`Location: /api/v1/jobs/{job_id}`、`Retry-After: 1`；同参复用 `X-Job-Reused: true`；幂等重放 `Idempotency-Replayed: true`。
+- Job：`kind=rebuild_period`、单飞 `scope_key={user_id}:period:{period}`（与同 period 的 API-028 rebuild_rounds 不共享 scope_key）；阶段 `rounds(10) → assets(40) → nav(60) → metrics(85)`（progress 单调不减），阶段间检查取消标记（API-064 检查点语义）。整 job 单事务：任一阶段失败整体回滚，重跑即阶段级恢复（各阶段幂等：rounds 确定性 ID 删后重插、assets 指纹/水位线增量、nav UPSERT、metrics UPSERT）。
+- 一致性：metrics 阶段前置校验 `asset_build.state=="current"`（不 current → 指标按状态矩阵评估为 blocked/stale 落库，不硬算）；`data_as_of = min(clock.today, market.as_of, asset_build.data_as_of)`（与 `_build_context` 同口径）；交叉断言：job 内 nav 与 metrics 消费同一事务内的 asset_daily（同一资产口径）。
+- 结果：`job.result` 键 `{period, include_exploratory, rounds{rounds_rebuilt}, assets{mode,rows_written,status,data_as_of}, nav{status}, metrics{computed,persisted,statuses,data_as_of}}`；metrics 物化写 `metric_result`（**含 blocked/stale 状态行**，与读路径 E-01 只写 ok 不同——构建路径显式落状态供指标页展示；缓存读取仍按 `is_stale` 把非 ok 行视为过期）。
+- 错误码：IDEMPOTENCY_KEY_REUSED(422)、IDEMPOTENCY_IN_PROGRESS(409)、JOB_ALREADY_RUNNING(409)、QUOTA_EXCEEDED(429)、VALIDATION_ERROR(422)、INVALID_PERIOD(422)、INSUFFICIENT_SCOPE(403)、ADMIN_CANNOT_READ_TRADES(403)。
+- 验收断言：① 202 + Location/Retry-After 且 `type=="rebuild_period"`；② 同 key 同 body → 同 `job_id` + `Idempotency-Replayed`；不同 key 同参 → `X-Job-Reused`；运行中异参（改 include_exploratory 或 period 同月不同 body）→ 409 `JOB_ALREADY_RUNNING`；③ drain 后 `job.result` 四阶段键齐全、`metric_result` 该 period 恰含核心 10 行（`include_exploratory=false` 无 M1 行）；`include_exploratory=true` 含 18 行；④ 资产表非 current 时 metrics 状态行为 blocked/stale 而非硬算；⑤ 缺 `Idempotency-Key` → 422、`period` 非法/未来 → 422 INVALID_PERIOD、read PAT → 403、admin → 403、无 token → 401；⑥ 运行中 cancel → 阶段边界停止，终态 cancelled。
 ### 2.3 度量、诊断与报告
 #### API-033 GET /metrics
 - 用途：三域指标批量查询；FR-R5/R6/R8；认证：read；同步。
@@ -316,9 +327,9 @@
 #### API-034 GET /metrics/{metric_id}/explain
 - 用途：三段式（conclusion/method/drilldown）+ 人话术语；FR-D3；认证：read；同步。
 - 请求：path `metric_id`；query `period`(必填) / `benchmark`(可选)；头 Accept-Language。
-- 响应 200：`metric_id` / `definition_version` / `period` / `conclusion`(string|null) / `method` / `drilldown{endpoint,params,description}` / `status` / `reason?` / `what_to_do?` / `assumptions` / `data_as_of`。
+- 响应 200：`metric_id` / `definition_version` / `period` / `meaning`（指标含义，**恒非空**，含 status!="ok"）/ `conclusion`(string|null，本期结论，仅样本可用时) / `method` / `domain` / `unit` / `precision` / `sample{n,n_pending,sample_status,min_n,ci_min_n,ci}` / `drilldown{endpoint,params,description}` / `status` / `reason?` / `what_to_do?` / `assumptions` / `data_as_of`。
 - 错误码：METRIC_NOT_FOUND(404)、INVALID_PERIOD(422)、VALIDATION_ERROR(422)。
-- 验收断言：① conclusion 不含裸术语（DE/BHAR/PGR/PLR/TWR/MWR/FIFO/HHI 均不出现）；② status!="ok" 时 conclusion==null 且 reason/what_to_do 非空；③ drilldown.endpoint + params 直接调用 → 200 且 items 非空；④ Accept-Language=en-US 时文案变化但 code/数值不变。
+- 验收断言：① conclusion/meaning 不含裸术语（DE/BHAR/PGR/PLR/TWR/MWR/FIFO/HHI 均不出现）；② status!="ok" 时 conclusion==null 且 reason/what_to_do 非空，但 meaning 仍非空；③ drilldown.endpoint + params 直接调用 → 200 且 items 非空；④ Accept-Language=en-US 时文案变化但 code/数值不变；⑤ sample.min_n/ci_min_n/ci 与 def 的 sample_policy 一致，sample.n 与同 period GET /metrics 的 n 一致。
 #### API-035 GET /metrics/{metric_id}/drilldown
 - 用途：指标可追溯下钻明细；FR-D3；认证：read；同步；游标分页。
 - 请求：path `metric_id`；query `period`(必填) / `round_id?` / `security_code?` / `limit` / `cursor`。
@@ -607,6 +618,8 @@ data: {"job_id":"job_01J9Z6","status":"succeeded","result_ref":"/api/v1/reports/
 | API-080 | trades_detail_owner | 200 且字段与列表一致；跨用户 404 | fx_base | P0 |
 | API-081 | assets_daily_series | 200 日期倒序且 06-30 行金额==oracle（含 daily_return_pct）；未构建 items=[]+build.state=missing；blocked 行数值全 null；from/to 闭区间/status/sort/limit 校验；跨用户 0 条、admin 403 | fx_round30 | P0 |
 | API-082 | assets_build_incremental | 202+Location/Retry-After 且 type=build_assets；同 key 重放同一 job_id+Idempotency-Replayed；同参 X-Job-Reused、异参 409；drain 后 build.last_mode=incremental 且 last_rows_written==窗口天数<rows_count；无锚点 build.last_status=blocked | fx_round30 | P0 |
+| API-083 | rebuild_period_orchestration | 202+Location 且 type=rebuild_period；同 key 重放 Idempotency-Replayed、同参 X-Job-Reused、异参 409；drain 后 job.result 四阶段键齐全、metric_result 该 period 恰核心 10 行（include_exploratory=true 则 18 行含 M1）；阶段 rounds→assets→nav→metrics 顺序与 progress 单调；运行中异参 409、可 cancel；缺 key/坏 period 422、read PAT/admin 403 | fx_round30 | P0 |
+| API-084 | dashboard_two_sections | 200 且两板块字段齐全；最新资产日=headline、全历史=计数/最赚最亏/回撤；未构建 asset_overview 全 null+build_state=missing；blocked 快照不输出 0；跨用户 404、admin 403；无写副作用（不建 job/不写表） | fx_round30 | P0 |
 
 ### 6.1 端到端脚本（5 条，覆盖「注册登录 → PAT → preview → commit → 取指标 → 下载月报」）
 ```bash

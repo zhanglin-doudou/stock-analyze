@@ -367,3 +367,38 @@ input[type="date"] {
   border: 1px solid var(--border);
   border-radius: 6px;
 }
+
+/* dashboard（Period2-12：两板块 + 状态徽标） */
+.badge-stale,
+.badge-missing,
+.badge-insufficient,
+.badge-unreliable {
+  background: #fff4e5;
+  color: #8a5300;
+}
+.badge-current {
+  background: #e6f4ea;
+  color: #0a7d32;
+}
+.kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px 14px;
+  margin: 10px 0 14px;
+}
+.kpi {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fafafa;
+}
+.kpi-label {
+  font-size: 12px;
+  color: var(--muted);
+}
+.kpi-hint {
+  font-size: 12px;
+}

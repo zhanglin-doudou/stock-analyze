@@ -68,11 +68,14 @@ _SYMBOL_RE = re.compile(r"^\d{6}$")
 _ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _COMPACT_DATE_RE = re.compile(r"^\d{8}$")
 # A 股主板/科创板/创业板（沪 600/601/603/605/688/689，深 000/001/002/003/300/301）。
-# 其余（ETF/LOF/可转债/B 股/北交所/港美股）v1 不支持：akshare 的 market_code 只看
-# 首位是否为 6，深市非 A 股会静默返回对应品种数据，必须在这里拦截。
+# akshare 东财接口的 market_code 只看首位是否为 6，深市非 A 股会静默返回对应品种
+# 数据，必须在这里拦截后再按品种路由到专用接口。
 _A_SHARE_PREFIXES: frozenset[str] = frozenset(
     {"600", "601", "603", "605", "688", "689", "000", "001", "002", "003", "300", "301"}
 )
+# 场内基金：沪 5 开头（ETF/LOF/REITs 全系），深 15/16/18 开头（ETF 159、LOF 16x、
+# REITs 184）。注意深 11x/12x 是可转债、13x 是国债回购，不能按「1 开头」一刀切。
+# 其余品种（可转债/B 股/北交所/港美股）不支持。
 # akshare/requests 的瞬时故障（可重试）异常名与模块根；不 import requests 也能识别。
 _TRANSIENT_EXC_NAMES: frozenset[str] = frozenset(
     {
@@ -168,11 +171,26 @@ def _row_date(raw: object, *, where: str) -> date:
     raise _invalid_data(f"{where}: 非法日期 {raw!r}")
 
 
+def _classify_symbol(symbol: str) -> str | None:
+    """6 位代码分类：`"stock"`（A 股）/ `"fund"`（场内基金）；不支持 → `None`。
+
+    基金口径：沪 5 开头全系（ETF/LOF/REITs）；深 15/16/18 开头（ETF 159、LOF 16x、
+    REITs 184）——深 11x/12x 是可转债，不属于基金。取数走基金专用接口：A 股接口
+    对基金会静默失败或返回错误数据。
+    """
+    if symbol[:3] in _A_SHARE_PREFIXES:
+        return "stock"
+    if symbol.startswith("5") or symbol.startswith(("15", "16", "18")):
+        return "fund"
+    return None
+
+
 def validate_symbols(symbols: Sequence[str]) -> tuple[str, ...]:
     """校验入参并返回去重后的标的（保持输入顺序）。
 
     与 replay 一致：空/非法参数 → `VALIDATION_ERROR`；不在支持范围 → `NOT_FOUND`
     + `market_failure="not_supported"`（NAV 侧降级为 blocked，不让整段 404）。
+    支持范围：A 股主板/科创板/创业板 + 场内基金（ETF/LOF/REITs，沪 5、深 15/16/18）。
     """
     if not symbols:
         raise ApiError(ErrorCode.VALIDATION_ERROR, detail="symbols 不能为空")
@@ -181,13 +199,13 @@ def validate_symbols(symbols: Sequence[str]) -> tuple[str, ...]:
         if not isinstance(raw, str) or not raw:
             raise ApiError(ErrorCode.VALIDATION_ERROR, detail=f"非法 symbol: {raw!r}")
         symbol = raw.strip()
-        if not _SYMBOL_RE.fullmatch(symbol) or symbol[:3] not in _A_SHARE_PREFIXES:
+        if not _SYMBOL_RE.fullmatch(symbol) or _classify_symbol(symbol) is None:
             raise _market_error(
                 ErrorCode.NOT_FOUND,
                 reason=FAILURE_NOT_SUPPORTED,
                 detail=(
-                    f"标的不在支持范围：{symbol}（v1 仅支持 A 股主板/科创板/创业板；"
-                    "ETF/可转债/B 股/北交所/港美股暂不支持）"
+                    f"标的不在支持范围：{symbol}（支持 A 股主板/科创板/创业板与场内基金"
+                    " ETF/LOF/REITs；可转债/B 股/北交所/港美股暂不支持）"
                 ),
             )
         wanted[symbol] = None
@@ -195,10 +213,23 @@ def validate_symbols(symbols: Sequence[str]) -> tuple[str, ...]:
 
 
 def _symbol_to_sina(symbol: str) -> str:
-    """601688 → sh601688（沪市 6 开头用 sh，其余深市用 sz）。"""
-    if symbol.startswith("6"):
+    """601688 → sh601688（沪市 6/5 开头用 sh，其余深市用 sz）。
+
+    股票（6→沪）与基金（5→沪、1→深）都适用；腾讯源 `_normalize_tx_symbol`
+    同样接受 sh/sz 前缀，故该函数复用于腾讯兜底源。
+    """
+    if symbol.startswith(("6", "5")):
         return f"sh{symbol}"
     return f"sz{symbol}"
+
+
+# 行情源列名：东财（eastmoney）为中文；新浪/腾讯/新浪基金均为英文 date/close。
+_SOURCE_COLUMNS: dict[str, tuple[str, str]] = {
+    "eastmoney": ("日期", "收盘"),
+    "sina": ("date", "close"),
+    "tx": ("date", "close"),
+    "fund_sina": ("date", "close"),
+}
 
 
 def _parse_rows(
@@ -208,17 +239,11 @@ def _parse_rows(
 ) -> tuple[list[tuple[date, int, int]], date | None]:
     """行情源行字典 → `[(trade_date, close_units, return_units)]`。
 
-    兼容两种列名：
-    - eastmoney：中文（日期 / 收盘）
-    - sina：英文（date / close）
-
-    只依赖日期/收盘价两列；NaN/None/负价/重复日期一律 fail-closed。
-    `return_units` 由 close 序列派生（首根 0），与 `close_units` 严格自洽。
+    列名按 `_SOURCE_COLUMNS` 映射；只依赖日期/收盘价两列；NaN/None/负价/重复日期
+    一律 fail-closed。`return_units` 由 close 序列派生（首根 0），与 `close_units`
+    严格自洽。
     """
-    if source == "sina":
-        date_key, close_key = "date", "close"
-    else:
-        date_key, close_key = "日期", "收盘"
+    date_key, close_key = _SOURCE_COLUMNS[source]
     parsed: list[tuple[date, int]] = []
     for index, row in enumerate(rows):
         trade_date = _row_date(row.get(date_key), where=f"{source} row[{index}].{date_key}")
@@ -487,27 +512,38 @@ class AkshareMarketDataSource:
     def _fetch_units(
         self, symbol: str, start: date, end: date
     ) -> tuple[list[tuple[date, int, int]], date | None]:
-        """在线程内执行：lazy import akshare → 调用 → 行解析。
+        """在线程内执行：lazy import akshare → 按品种路由 → 多源 fallback → 行解析。
 
-        多源 fallback：东财 → 新浪。东财在部分网络环境下会被 TLS 层直接 RST，
-        新浪（AkShare `stock_zh_a_daily`）列名不同（date/close vs 日期/收盘），
-        `_parse_rows(source=...)` 已兼容。
+        - 股票：东财 → 新浪 → 腾讯。腾讯保留退市股历史（新浪对退市股返回空响应），
+          是退市股的最终兜底。
+        - 基金：东财 `fund_etf_hist_em` → 新浪 `fund_etf_hist_sina`（后者无起止参数，
+          全量返回后本地过滤）。
+        - 多源 fallback：瞬时故障（超时/TLS RST/JSON 解析）降级到下一源；空结果也交叉
+          验证下一源（单源空可能是停牌/退市/源缺口，全部源一致空才返回空，走负缓存）；
+          InvalidData 说明源返回了东西但口径坏了，不盲目降级（可能掩盖问题）。
         """
         try:
             module = _import_akshare()
         except RuntimeError as exc:  # 运行期兜底：启动期已用 find_spec 拦截
             raise _TransientMarketError(str(exc)) from exc
-        sources = [self._fetch_eastmoney, self._fetch_sina]
+        if _classify_symbol(symbol) == "fund":
+            sources = [self._fetch_fund_eastmoney, self._fetch_fund_sina]
+        else:
+            sources = [self._fetch_eastmoney, self._fetch_sina, self._fetch_tx]
         last_exc: Exception | None = None
+        all_transient = True
         for fetcher in sources:
             try:
-                return fetcher(module, symbol, start, end)
+                rows, data_end = fetcher(module, symbol, start, end)
             except _TransientMarketError as exc:
-                # 只有网络/超时类瞬时故障才降级到下一个源；InvalidData 说明源返回了东西
-                # 但口径坏了，不应盲目降级到另一个口径不同的源（可能掩盖问题）。
                 last_exc = exc
                 continue
-        raise _TransientMarketError(f"所有行情源均不可用：{last_exc}") from last_exc
+            all_transient = False
+            if rows:
+                return rows, data_end
+        if all_transient and last_exc is not None:
+            raise _TransientMarketError(f"所有行情源均不可用：{last_exc}") from last_exc
+        return [], None
 
     def _fetch_eastmoney(
         self, module: Any, symbol: str, start: date, end: date
@@ -561,6 +597,95 @@ class AkshareMarketDataSource:
         if not rows:
             return [], None
         return _parse_rows(rows, source="sina")
+
+    def _fetch_tx(
+        self, module: Any, symbol: str, start: date, end: date
+    ) -> tuple[list[tuple[date, int, int]], date | None]:
+        """腾讯证券日频（退市股兜底）：新浪对退市股返回空响应，腾讯保留历史。
+
+        腾讯按年循环拉取；对「查无此票/无上市信息」抛 IndexError/KeyError，
+        映射为空结果（走负缓存），不判 invalid_data。
+        """
+        try:
+            frame = module.stock_zh_a_hist_tx(
+                symbol=_symbol_to_sina(symbol),
+                start_date=start.strftime("%Y%m%d"),
+                end_date=end.strftime("%Y%m%d"),
+                adjust=ADJUST,
+                timeout=self._timeout_seconds,
+            )
+        except Exception as exc:
+            if _is_transient_failure(exc):
+                raise _TransientMarketError(f"tx {type(exc).__name__}: {exc}") from exc
+            if isinstance(exc, (IndexError, KeyError)):
+                return [], None
+            raise _invalid_data(f"tx 调用失败：{type(exc).__name__}: {exc}") from exc
+        if frame is None:
+            return [], None
+        try:
+            rows = frame.to_dict("records")
+        except Exception as exc:
+            raise _invalid_data(f"tx 返回结构非法：{type(exc).__name__}") from exc
+        if not rows:
+            return [], None
+        return _parse_rows(rows, source="tx")
+
+    def _fetch_fund_eastmoney(
+        self, module: Any, symbol: str, start: date, end: date
+    ) -> tuple[list[tuple[date, int, int]], date | None]:
+        """东财基金接口：与 `stock_zh_a_hist` 同 kline 端点、同中文列名。
+
+        `fund_etf_hist_em` 无 timeout 参数（内部硬编码 15s），不覆盖默认超时。
+        """
+        try:
+            frame = module.fund_etf_hist_em(
+                symbol=symbol,
+                period="daily",
+                start_date=start.strftime("%Y%m%d"),
+                end_date=end.strftime("%Y%m%d"),
+                adjust=ADJUST,
+            )
+        except Exception as exc:
+            if _is_transient_failure(exc):
+                raise _TransientMarketError(f"fund_eastmoney {type(exc).__name__}: {exc}") from exc
+            raise _invalid_data(f"fund_eastmoney 调用失败：{type(exc).__name__}: {exc}") from exc
+        if frame is None:
+            return [], None
+        try:
+            rows = frame.to_dict("records")
+        except Exception as exc:
+            raise _invalid_data(f"fund_eastmoney 返回结构非法：{type(exc).__name__}") from exc
+        if not rows:
+            return [], None
+        return _parse_rows(rows, source="eastmoney")
+
+    def _fetch_fund_sina(
+        self, module: Any, symbol: str, start: date, end: date
+    ) -> tuple[list[tuple[date, int, int]], date | None]:
+        """新浪基金接口：无起止参数、全量返回，本地按 `[start, end]` 过滤。
+
+        returns 先在全序列上派生再过滤，窗口首根保留真实收益（与东财按窗口拉取、
+        首根 return=0 的口径不同，但更准）。
+        """
+        try:
+            frame = module.fund_etf_hist_sina(symbol=_symbol_to_sina(symbol))
+        except Exception as exc:
+            if _is_transient_failure(exc):
+                raise _TransientMarketError(f"fund_sina {type(exc).__name__}: {exc}") from exc
+            raise _invalid_data(f"fund_sina 调用失败：{type(exc).__name__}: {exc}") from exc
+        if frame is None:
+            return [], None
+        try:
+            rows = frame.to_dict("records")
+        except Exception as exc:
+            raise _invalid_data(f"fund_sina 返回结构非法：{type(exc).__name__}") from exc
+        if not rows:
+            return [], None
+        bars, _ = _parse_rows(rows, source="fund_sina")
+        filtered = [bar for bar in bars if start <= bar[0] <= end]
+        if not filtered:
+            return [], None
+        return filtered, filtered[-1][0]
 
 
 # ── DB 缓存装饰器 ───────────────────────────────────────────

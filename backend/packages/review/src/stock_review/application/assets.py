@@ -904,6 +904,23 @@ async def list_assets(
     return [_to_point(row) for row in rows], next_cursor, build
 
 
+async def get_asset_build_state(
+    session: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    clock: Clock,
+    market_data: MarketDataSource,
+) -> tuple[AssetBuildState, str]:
+    """只读构建摘要 + 当前口径版本（Dashboard 复用，避免复制 state 判定链）。"""
+    repo = AssetRepository(session)
+    state = await repo.get_state(user_id)
+    definition_version = state.definition_version if state is not None else ASSET_DEFINITION_VERSION
+    build = await _build_state_view(
+        repo, user_id=user_id, clock=clock, market_data=market_data, state=state
+    )
+    return build, definition_version
+
+
 def _jsonable(value: date | datetime | None) -> str | None:
     return None if value is None else value.isoformat()
 

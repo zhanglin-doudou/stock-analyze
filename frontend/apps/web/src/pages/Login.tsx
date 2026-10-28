@@ -19,7 +19,7 @@ export function Login() {
     try {
       const result = await api.auth.login({ email, password });
       saveTokens(result);
-      navigate("/trades", { replace: true });
+      navigate("/dashboard", { replace: true });
     } catch (err) {
       setError(err);
     } finally {

@@ -35,7 +35,7 @@ export function Register() {
         accept_tos: acceptTos,
       });
       saveTokens(result);
-      navigate("/trades", { replace: true });
+      navigate("/dashboard", { replace: true });
     } catch (err) {
       setError(err);
     } finally {

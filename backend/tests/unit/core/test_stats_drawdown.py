@@ -66,6 +66,46 @@ class TestDrawdownFamily:
         assert df.unreliable is True
 
 
+class TestDrawdownIndices:
+    """峰/谷/恢复在 index 序列中的下标（Dashboard 回撤区间映射日期用）。"""
+
+    def test_peak_trough_recovery_indices(self) -> None:
+        returns = _ratio_to_scale8([0.05, -0.10, -0.05, 0.20])
+        df = drawdown_family(returns)
+        # I = [1, 1.05, 0.945, 0.89775, 1.0773]；峰在 I_1，谷在 I_3，I_4 回到前高。
+        assert df.peak_index == 1
+        assert df.trough_index == 3
+        assert df.recovery_index == 4
+        assert df.recovery_censored is False
+
+    def test_not_recovered_recovery_index_is_none(self) -> None:
+        returns = _ratio_to_scale8([0.02, -0.05, -0.03, 0.01])
+        df = drawdown_family(returns)
+        assert df.peak_index is not None
+        assert df.trough_index is not None
+        assert df.recovery_index is None
+        assert df.recovery_censored is True
+
+    def test_zero_drawdown_has_no_indices(self) -> None:
+        df = drawdown_family(_ratio_to_scale8([0.01, 0.01, 0.01]))
+        assert df.mdd_units == 0
+        assert df.peak_index is None
+        assert df.trough_index is None
+        assert df.recovery_index is None
+
+    def test_blocked_has_no_indices(self) -> None:
+        df = drawdown_family(_ratio_to_scale8([0.01, 0.02]), blocked=True)
+        assert df.peak_index is None
+        assert df.trough_index is None
+        assert df.recovery_index is None
+
+    def test_insufficient_has_no_indices(self) -> None:
+        df = drawdown_family(_ratio_to_scale8([0.01]))
+        assert df.peak_index is None
+        assert df.trough_index is None
+        assert df.recovery_index is None
+
+
 class TestDrawdownCalmar:
     def test_calmar_with_positive_mdd(self) -> None:
         """简单两期：先跌 -5% 再平，年化 TWR ≈ (0.95)^(365/2) - 1 < 0 → Calmar 不可算。"""

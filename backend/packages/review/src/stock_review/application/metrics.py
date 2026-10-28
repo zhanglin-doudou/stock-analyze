@@ -87,8 +87,13 @@ class ExplainResult:
     metric_id: str
     definition_version: str
     period: str
+    meaning: str
     conclusion: str | None
     method: str
+    domain: str
+    unit: str
+    precision: int
+    sample: dict[str, Any]
     drilldown: dict[str, Any]
     status: str
     reason: str | None
@@ -438,6 +443,7 @@ async def explain_metric(
     )
     lang = _language(accept_language)
     explain = definition.explain
+    meaning = explain.conclusion_en if lang == "en" else explain.conclusion_zh
     if outcome.conclusion_available:
         conclusion = explain.conclusion_en if lang == "en" else explain.conclusion_zh
         what_to_do = None
@@ -450,12 +456,25 @@ async def explain_metric(
             if lang == "en"
             else "增加样本或等待窗口走完后再看结论。"
         )
+    sample_policy = definition.sample_policy
     return ExplainResult(
         metric_id=metric_id,
         definition_version=definition.definition_version,
         period=outcome.period,
+        meaning=meaning,
         conclusion=conclusion,
         method=explain.method_en if lang == "en" else explain.method_zh,
+        domain=outcome.domain,
+        unit=outcome.unit,
+        precision=outcome.precision,
+        sample={
+            "n": outcome.n,
+            "n_pending": outcome.n_pending,
+            "sample_status": outcome.sample_status,
+            "min_n": sample_policy.min_n,
+            "ci_min_n": sample_policy.ci_min_n,
+            "ci": sample_policy.ci,
+        },
         drilldown={
             "endpoint": definition.drilldown.endpoint,
             "params": dict(definition.drilldown.params),
