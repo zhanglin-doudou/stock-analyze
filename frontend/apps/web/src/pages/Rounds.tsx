@@ -11,7 +11,7 @@ import {
 import { api } from "../client";
 import { Cursor } from "../ui/Cursor";
 import { ProblemView } from "../ui/Problem";
-import { Table, type Column } from "../ui/Table";
+import { DataTable, type DataTableColumn } from "../ui/DataTable";
 
 const STATUS_LABELS: Record<RoundStatus, string> = {
   closed: "已平仓",
@@ -153,30 +153,40 @@ export function Rounds() {
     }
   }
 
-  const columns: Array<Column<Round>> = [
+  const columns: Array<DataTableColumn<Round>> = [
     {
       key: "security",
       header: "代码 / 名称",
+      priority: 1,
       render: (row) => `${row.security_code} ${row.security_name}`.trim(),
     },
     {
       key: "status",
       header: "状态",
+      priority: 1,
       render: (row) => <span className={`badge badge-${row.status}`}>{roundStatusLabel(row.status)}</span>,
     },
-    { key: "open", header: "开仓日", render: (row) => row.open_date },
-    { key: "close", header: "平仓日", render: (row) => row.close_date ?? "—" },
-    { key: "quantity", header: "数量", render: (row) => row.quantity },
-    { key: "cost", header: "买入成本", render: (row) => row.cost },
-    { key: "proceeds", header: "卖出金额", render: (row) => row.proceeds },
-    { key: "dividend", header: "股息", render: (row) => row.dividend },
-    { key: "pnl", header: "盈亏", render: (row) => <span className={signedClass(row.pnl)}>{row.pnl}</span> },
-    { key: "return", header: "收益率（小数）", render: (row) => row.return_rate },
-    { key: "days", header: "持有交易日", render: (row) => row.holding_days },
-    { key: "fills", header: "配对笔数", render: (row) => row.fills_count },
+    { key: "open", header: "开仓日", priority: 2, render: (row) => row.open_date },
+    { key: "close", header: "平仓日", priority: 2, render: (row) => row.close_date ?? "—" },
+    { key: "quantity", header: "数量", priority: 2, align: "right", render: (row) => row.quantity },
+    { key: "cost", header: "买入成本", priority: 2, align: "right", render: (row) => row.cost },
+    { key: "proceeds", header: "卖出金额", priority: 2, align: "right", render: (row) => row.proceeds },
+    { key: "dividend", header: "股息", priority: 3, align: "right", render: (row) => row.dividend },
+    {
+      key: "pnl",
+      header: "盈亏",
+      priority: 1,
+      align: "right",
+      render: (row) => <span className={signedClass(row.pnl)}>{row.pnl}</span>,
+    },
+    { key: "return", header: "收益率（小数）", priority: 3, align: "right", render: (row) => row.return_rate },
+    { key: "days", header: "持有交易日", priority: 3, align: "right", render: (row) => row.holding_days },
+    { key: "fills", header: "配对笔数", priority: 3, align: "right", render: (row) => row.fills_count },
     {
       key: "actions",
       header: "操作",
+      priority: 1,
+      align: "right",
       render: (row) => (
         <Link className="btn btn-ghost" to={`/rounds/${row.round_id}`}>
           详情
@@ -253,7 +263,14 @@ export function Rounds() {
       {notice ? <p className="notice">{notice}</p> : null}
       <ProblemView error={error} onRetry={() => void load()} />
 
-      <Table columns={columns} rows={page?.items ?? []} rowKey={(row) => row.round_id} emptyText={emptyText} />
+      <DataTable
+        caption="回合列表"
+        columns={columns}
+        rows={page?.items ?? []}
+        rowKey={(row) => row.round_id}
+        emptyText={emptyText}
+        loading={loading && page == null}
+      />
 
       {page ? (
         <Cursor

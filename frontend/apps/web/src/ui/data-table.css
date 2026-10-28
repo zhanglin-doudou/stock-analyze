@@ -1,0 +1,111 @@
+/* Phase 2 · DataTable（tokens-only；兼容旧 .table 语义但独立类名） */
+
+.dt-wrap {
+  width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.dt {
+  width: 100%;
+  min-width: 640px;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.dt-caption {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.dt th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  height: 36px;
+  padding: 0 var(--s3);
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--line-strong);
+  color: var(--muted);
+  font-size: var(--fs-micro);
+  font-weight: var(--fw-regular);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.dt td {
+  height: var(--row-h);
+  padding: 0 var(--s3);
+  border-bottom: 1px solid var(--line);
+  font-size: 13px;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.dt .dt-left {
+  text-align: left;
+}
+
+.dt .dt-right {
+  text-align: right;
+}
+
+.dt .dt-center {
+  text-align: center;
+}
+
+.dt tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.dt tbody tr:hover td {
+  background: var(--accent-soft);
+}
+
+.dt tbody tr.is-interactive {
+  cursor: pointer;
+}
+
+.dt tbody tr:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.dt .dt-empty {
+  height: var(--row-h);
+  padding: var(--s5) var(--s3);
+  color: var(--muted);
+  text-align: center;
+  font-size: var(--fs-sm);
+  white-space: normal;
+}
+
+/* 列优先级：先隐藏低价值列，保留关键列与横向滚动提示 */
+@media (max-width: 1279px) {
+  .dt .dt-p3 {
+    display: none;
+  }
+}
+
+@media (max-width: 1023px) {
+  .dt .dt-p2 {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dt tbody tr {
+    transition: none;
+  }
+}

@@ -137,6 +137,7 @@ export default defineConfig({
 | `apps/web/src/ui/format.ts` | Phase 1 符号/空值展示辅助（只读后端字符串） |
 | `apps/web/src/charts/TrendChart.tsx` | Phase 1c 总资产趋势图（自研 SVG，数据来自 /assets） |
 | `apps/web/src/pages/dashboard.css` | Phase 1c Dashboard 样式（tokens-only） |
+| `apps/web/src/ui/DataTable.tsx` | Phase 2 统一数据表（粘性表头/列优先级/键盘行/空加载态） |
 | `apps/web/src/charts/zero-caliber.test.ts` | 全 src 零口径门禁（geometry 白名单除外） |
 | `apps/web/src/styles/tokens.css` | Phase 0 设计 tokens（颜色/字体/间距/圆角/状态/图表/密度），组件只消费语义变量 |
 | `apps/web/src/theme/theme.ts` | Phase 0 主题/密度/趋势色偏好读写（`data-theme`/`data-density`/`data-trend`） |
