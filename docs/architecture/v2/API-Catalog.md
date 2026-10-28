@@ -134,9 +134,10 @@
 | API-081 | GET | `/assets` | 每日资产快照列表（现金/持仓市值/成本/浮盈/日收益） | D1 | read | — | 同步 | P0 | 200 |
 | API-082 | POST | `/assets/build` | 构建/增量更新资产表 | D1 | write | 必需 | 异步 | P0 | 202 |
 | API-083 | POST | `/jobs/rebuild-period` | 按月一键编排（rounds→assets→nav→metrics） | R2/D1 | write | 必需 | 异步 | P0 | 202 |
+| API-084 | GET | `/dashboard` | Dashboard 两板块聚合（资产概览 + 历史概览） | D1 | read | — | 同步 | P0 | 200 |
 
 ## §2 分域详细契约
-> 下列 32 个端点为**详细契约**；其余 51 个的请求/响应字段以 `openapi/openapi.json` 为准（§1 已登记、§6 已配验收用例）。断言均为可脚本执行：状态码 + 字段值 + 状态迁移 + 副作用。
+> 下列 32 个端点为**详细契约**；其余 52 个的请求/响应字段以 `openapi/openapi.json` 为准（§1 已登记、§6 已配验收用例）。断言均为可脚本执行：状态码 + 字段值 + 状态迁移 + 副作用。
 ### 2.1 认证、导入与流水
 #### API-001 POST /auth/register
 - 用途：注册账号；FR-L2；认证：公开；幂等：支持；同步。
@@ -618,6 +619,7 @@ data: {"job_id":"job_01J9Z6","status":"succeeded","result_ref":"/api/v1/reports/
 | API-081 | assets_daily_series | 200 日期倒序且 06-30 行金额==oracle（含 daily_return_pct）；未构建 items=[]+build.state=missing；blocked 行数值全 null；from/to 闭区间/status/sort/limit 校验；跨用户 0 条、admin 403 | fx_round30 | P0 |
 | API-082 | assets_build_incremental | 202+Location/Retry-After 且 type=build_assets；同 key 重放同一 job_id+Idempotency-Replayed；同参 X-Job-Reused、异参 409；drain 后 build.last_mode=incremental 且 last_rows_written==窗口天数<rows_count；无锚点 build.last_status=blocked | fx_round30 | P0 |
 | API-083 | rebuild_period_orchestration | 202+Location 且 type=rebuild_period；同 key 重放 Idempotency-Replayed、同参 X-Job-Reused、异参 409；drain 后 job.result 四阶段键齐全、metric_result 该 period 恰核心 10 行（include_exploratory=true 则 18 行含 M1）；阶段 rounds→assets→nav→metrics 顺序与 progress 单调；运行中异参 409、可 cancel；缺 key/坏 period 422、read PAT/admin 403 | fx_round30 | P0 |
+| API-084 | dashboard_two_sections | 200 且两板块字段齐全；最新资产日=headline、全历史=计数/最赚最亏/回撤；未构建 asset_overview 全 null+build_state=missing；blocked 快照不输出 0；跨用户 404、admin 403；无写副作用（不建 job/不写表） | fx_round30 | P0 |
 
 ### 6.1 端到端脚本（5 条，覆盖「注册登录 → PAT → preview → commit → 取指标 → 下载月报」）
 ```bash

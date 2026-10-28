@@ -879,6 +879,650 @@
         "title": "BridgeIdentityOut",
         "type": "object"
       },
+      "DashboardAssetOverviewOut": {
+        "additionalProperties": false,
+        "description": "资产概览：当前快照（最新资产日）+ 全历史峰值成本/总收益/费用。",
+        "properties": {
+          "cash": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cash"
+          },
+          "holdings": {
+            "items": {
+              "$ref": "#/components/schemas/DashboardHoldingOut"
+            },
+            "title": "Holdings",
+            "type": "array"
+          },
+          "market_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Value"
+          },
+          "max_cost_return_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Cost Return Pct"
+          },
+          "max_invested_cost": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Invested Cost"
+          },
+          "position_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Position Pct"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "degraded",
+              "stale",
+              "blocked",
+              "missing",
+              "insufficient"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "total_assets": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Assets"
+          },
+          "total_fees": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Fees"
+          },
+          "total_profit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Profit"
+          }
+        },
+        "required": [
+          "status",
+          "holdings"
+        ],
+        "title": "DashboardAssetOverviewOut",
+        "type": "object"
+      },
+      "DashboardHistoryOverviewOut": {
+        "additionalProperties": false,
+        "description": "历史概览：全历史已平仓计数/最赚最亏 + 最大回撤。",
+        "properties": {
+          "bottom_rounds": {
+            "items": {
+              "$ref": "#/components/schemas/DashboardRoundOut"
+            },
+            "title": "Bottom Rounds",
+            "type": "array"
+          },
+          "closed_round_count": {
+            "title": "Closed Round Count",
+            "type": "integer"
+          },
+          "closed_security_count": {
+            "title": "Closed Security Count",
+            "type": "integer"
+          },
+          "flat_count": {
+            "title": "Flat Count",
+            "type": "integer"
+          },
+          "flat_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Flat Pct"
+          },
+          "loss_count": {
+            "title": "Loss Count",
+            "type": "integer"
+          },
+          "loss_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Loss Pct"
+          },
+          "max_drawdown": {
+            "$ref": "#/components/schemas/DashboardMaxDrawdownOut"
+          },
+          "max_profit": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Profit"
+          },
+          "max_profit_cost_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Profit Cost Pct"
+          },
+          "max_profit_round": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DashboardRoundOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "degraded",
+              "stale",
+              "blocked",
+              "missing",
+              "insufficient"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "top_rounds": {
+            "items": {
+              "$ref": "#/components/schemas/DashboardRoundOut"
+            },
+            "title": "Top Rounds",
+            "type": "array"
+          },
+          "win_count": {
+            "title": "Win Count",
+            "type": "integer"
+          },
+          "win_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Win Pct"
+          }
+        },
+        "required": [
+          "status",
+          "closed_security_count",
+          "closed_round_count",
+          "win_count",
+          "loss_count",
+          "flat_count",
+          "top_rounds",
+          "bottom_rounds",
+          "max_drawdown"
+        ],
+        "title": "DashboardHistoryOverviewOut",
+        "type": "object"
+      },
+      "DashboardHoldingOut": {
+        "additionalProperties": false,
+        "description": "当前持仓行（证券维度；金额 2 位、数量 4 位、权重 scale=8）。",
+        "properties": {
+          "cost": {
+            "title": "Cost",
+            "type": "string"
+          },
+          "market_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Value"
+          },
+          "quantity": {
+            "title": "Quantity",
+            "type": "string"
+          },
+          "security_code": {
+            "title": "Security Code",
+            "type": "string"
+          },
+          "security_name": {
+            "title": "Security Name",
+            "type": "string"
+          },
+          "weight_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weight Pct"
+          }
+        },
+        "required": [
+          "security_code",
+          "security_name",
+          "quantity",
+          "cost"
+        ],
+        "title": "DashboardHoldingOut",
+        "type": "object"
+      },
+      "DashboardLinksOut": {
+        "additionalProperties": false,
+        "description": "下钻/占位页链接（旧五卡按 `legacy_period` 懒加载）。",
+        "properties": {
+          "assets": {
+            "title": "Assets",
+            "type": "string"
+          },
+          "attribution": {
+            "title": "Attribution",
+            "type": "string"
+          },
+          "exports": {
+            "title": "Exports",
+            "type": "string"
+          },
+          "metrics": {
+            "title": "Metrics",
+            "type": "string"
+          },
+          "reports": {
+            "title": "Reports",
+            "type": "string"
+          },
+          "rounds": {
+            "title": "Rounds",
+            "type": "string"
+          }
+        },
+        "required": [
+          "assets",
+          "rounds",
+          "metrics",
+          "reports",
+          "exports",
+          "attribution"
+        ],
+        "title": "DashboardLinksOut",
+        "type": "object"
+      },
+      "DashboardMaxDrawdownOut": {
+        "additionalProperties": false,
+        "description": "历史最大回撤区间；insufficient/blocked 时 mdd_pct 显式 null。",
+        "properties": {
+          "duration_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Days"
+          },
+          "duration_obs": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Duration Obs"
+          },
+          "from_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From Date"
+          },
+          "mdd_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mdd Pct"
+          },
+          "n_obs": {
+            "title": "N Obs",
+            "type": "integer"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "recovery_censored": {
+            "default": false,
+            "title": "Recovery Censored",
+            "type": "boolean"
+          },
+          "recovery_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recovery Days"
+          },
+          "sample_status": {
+            "enum": [
+              "ok",
+              "insufficient",
+              "unreliable",
+              "blocked"
+            ],
+            "title": "Sample Status",
+            "type": "string"
+          },
+          "to_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To Date"
+          }
+        },
+        "required": [
+          "n_obs",
+          "sample_status"
+        ],
+        "title": "DashboardMaxDrawdownOut",
+        "type": "object"
+      },
+      "DashboardMissingOut": {
+        "additionalProperties": false,
+        "description": "一个缺失/降级字段（字段为 null 的机读原因 + 可执行指引）。",
+        "properties": {
+          "code": {
+            "enum": [
+              "DASHBOARD_ASSET_MISSING",
+              "DASHBOARD_ASSET_BLOCKED",
+              "DASHBOARD_STALE",
+              "DASHBOARD_TOTAL_PROFIT_UNAVAILABLE",
+              "DASHBOARD_MAX_INVESTED_COST_MISSING",
+              "DASHBOARD_MDD_INSUFFICIENT",
+              "DASHBOARD_MDD_UNRELIABLE",
+              "DASHBOARD_MDD_GAPS",
+              "DASHBOARD_HOLDINGS_TRUNCATED",
+              "DASHBOARD_HOLDING_PRICE_MISSING",
+              "DASHBOARD_HOLDINGS_MISMATCH",
+              "DASHBOARD_NO_CLOSED_ROUNDS"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "field": {
+            "title": "Field",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "what_to_do": {
+            "title": "What To Do",
+            "type": "string"
+          }
+        },
+        "required": [
+          "field",
+          "code",
+          "reason",
+          "what_to_do"
+        ],
+        "title": "DashboardMissingOut",
+        "type": "object"
+      },
+      "DashboardOut": {
+        "additionalProperties": false,
+        "description": "API-084：Dashboard 两板块聚合（只读；金额/比率全部后端格式化）。",
+        "properties": {
+          "as_of": {
+            "format": "date",
+            "title": "As Of",
+            "type": "string"
+          },
+          "asset_overview": {
+            "$ref": "#/components/schemas/DashboardAssetOverviewOut"
+          },
+          "assumptions": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Assumptions",
+            "type": "object"
+          },
+          "build_state": {
+            "enum": [
+              "missing",
+              "current",
+              "stale",
+              "blocked"
+            ],
+            "title": "Build State",
+            "type": "string"
+          },
+          "data_as_of": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data As Of"
+          },
+          "definition_version": {
+            "title": "Definition Version",
+            "type": "string"
+          },
+          "history_overview": {
+            "$ref": "#/components/schemas/DashboardHistoryOverviewOut"
+          },
+          "inputs_hash": {
+            "title": "Inputs Hash",
+            "type": "string"
+          },
+          "legacy_period": {
+            "title": "Legacy Period",
+            "type": "string"
+          },
+          "links": {
+            "$ref": "#/components/schemas/DashboardLinksOut"
+          },
+          "missing": {
+            "items": {
+              "$ref": "#/components/schemas/DashboardMissingOut"
+            },
+            "title": "Missing",
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "degraded",
+              "stale",
+              "blocked",
+              "missing",
+              "insufficient"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "as_of",
+          "legacy_period",
+          "status",
+          "build_state",
+          "definition_version",
+          "asset_overview",
+          "history_overview",
+          "missing",
+          "links",
+          "assumptions",
+          "inputs_hash"
+        ],
+        "title": "DashboardOut",
+        "type": "object"
+      },
+      "DashboardRoundOut": {
+        "additionalProperties": false,
+        "description": "最赚/最亏列表行（pnl 2 位、收益率 scale=8）。",
+        "properties": {
+          "close_date": {
+            "format": "date",
+            "title": "Close Date",
+            "type": "string"
+          },
+          "holding_days": {
+            "title": "Holding Days",
+            "type": "integer"
+          },
+          "pnl": {
+            "title": "Pnl",
+            "type": "string"
+          },
+          "return_rate": {
+            "title": "Return Rate",
+            "type": "string"
+          },
+          "return_rate_pct": {
+            "title": "Return Rate Pct",
+            "type": "string"
+          },
+          "round_id": {
+            "title": "Round Id",
+            "type": "string"
+          },
+          "security_code": {
+            "title": "Security Code",
+            "type": "string"
+          },
+          "security_name": {
+            "title": "Security Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "round_id",
+          "security_code",
+          "security_name",
+          "close_date",
+          "pnl",
+          "return_rate",
+          "return_rate_pct",
+          "holding_days"
+        ],
+        "title": "DashboardRoundOut",
+        "type": "object"
+      },
       "Error": {
         "additionalProperties": false,
         "description": "RFC 7807 问题详情 + 平台扩展字段（code/user_message/what_to_do/retryable/request_id/errors），对应 Content-Type: application/problem+json。",
@@ -5528,6 +6172,251 @@
         ],
         "x-idempotent": true,
         "x-required-scope": "public"
+      }
+    },
+    "/api/v1/dashboard": {
+      "get": {
+        "description": "API-084：Dashboard 两板块聚合（只读；旧五卡按 legacy_period 懒加载）。",
+        "operationId": "getDashboard",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-api-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "as_of": "2026-06-30",
+                  "asset_overview": {
+                    "cash": "40000.00",
+                    "holdings": [
+                      {
+                        "cost": "150000.00",
+                        "market_value": "160000.00",
+                        "quantity": "100.0000",
+                        "security_code": "600519",
+                        "security_name": "贵州茅台",
+                        "weight_pct": "1.00000000"
+                      }
+                    ],
+                    "market_value": "160000.00",
+                    "max_cost_return_pct": "14.71%",
+                    "max_invested_cost": "170000.00",
+                    "position_pct": "80.00%",
+                    "status": "ok",
+                    "total_assets": "200000.00",
+                    "total_fees": "320.00",
+                    "total_profit": "25000.00"
+                  },
+                  "assumptions": {
+                    "calendar": "weekday_proxy",
+                    "cost_model": "moving_average",
+                    "mdd": "longest_valid_segment",
+                    "total_profit_basis": "full_history_bridge"
+                  },
+                  "build_state": "current",
+                  "data_as_of": "2026-09-30",
+                  "definition_version": "1.0",
+                  "history_overview": {
+                    "bottom_rounds": [],
+                    "closed_round_count": 12,
+                    "closed_security_count": 6,
+                    "flat_count": 0,
+                    "flat_pct": "0.00%",
+                    "loss_count": 4,
+                    "loss_pct": "33.33%",
+                    "max_drawdown": {
+                      "duration_days": 16,
+                      "duration_obs": 16,
+                      "from_date": "2026-05-12",
+                      "mdd_pct": "8.42%",
+                      "n_obs": 96,
+                      "reason": null,
+                      "recovery_censored": false,
+                      "recovery_days": 9,
+                      "sample_status": "ok",
+                      "to_date": "2026-05-28"
+                    },
+                    "max_profit": "12000.00",
+                    "max_profit_cost_pct": "7.06%",
+                    "max_profit_round": {
+                      "close_date": "2026-06-18",
+                      "holding_days": 21,
+                      "pnl": "12000.00",
+                      "return_rate": "0.08000000",
+                      "return_rate_pct": "8.00%",
+                      "round_id": "rnd_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                      "security_code": "600519",
+                      "security_name": "贵州茅台"
+                    },
+                    "status": "ok",
+                    "top_rounds": [],
+                    "win_count": 8,
+                    "win_pct": "66.67%"
+                  },
+                  "inputs_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+                  "legacy_period": "2026-06",
+                  "links": {
+                    "assets": "/assets",
+                    "attribution": "/attribution?period=2026-06",
+                    "exports": "/exports",
+                    "metrics": "/metrics?period=2026-06",
+                    "reports": "/reports",
+                    "rounds": "/rounds"
+                  },
+                  "missing": [],
+                  "status": "ok"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/DashboardOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "UNKNOWN_QUERY_PARAM",
+                  "detail": "请求包含未知参数。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 400,
+                  "title": "UNKNOWN_QUERY_PARAM",
+                  "type": "https://stock-analyze.local/errors/UNKNOWN_QUERY_PARAM",
+                  "user_message": "请求包含未知参数。",
+                  "what_to_do": "移除未知参数后重试。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "请求参数错误"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "TOKEN_EXPIRED",
+                  "detail": "访问凭证已过期。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 401,
+                  "title": "TOKEN_EXPIRED",
+                  "type": "https://stock-analyze.local/errors/TOKEN_EXPIRED",
+                  "user_message": "访问凭证已过期。",
+                  "what_to_do": "用 refresh_token 换新 access，或重建 PAT。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "未认证或凭证无效"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "ADMIN_CANNOT_READ_TRADES",
+                  "detail": "管理员账号不能查看交易明细。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 403,
+                  "title": "ADMIN_CANNOT_READ_TRADES",
+                  "type": "https://stock-analyze.local/errors/ADMIN_CANNOT_READ_TRADES",
+                  "user_message": "管理员账号不能查看交易明细。",
+                  "what_to_do": "用数据所有者账号访问。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "权限不足"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "example": {
+                  "code": "VALIDATION_ERROR",
+                  "detail": "请求参数有问题。",
+                  "errors": [
+                    {
+                      "code": "invalid",
+                      "field": "body.email",
+                      "message": "邮箱格式不正确。"
+                    }
+                  ],
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 422,
+                  "title": "VALIDATION_ERROR",
+                  "type": "https://stock-analyze.local/errors/VALIDATION_ERROR",
+                  "user_message": "请求参数有问题。",
+                  "what_to_do": "按 errors[] 修正字段后重试。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Dashboard Endpoint",
+        "tags": [
+          "dashboard"
+        ],
+        "x-async": false,
+        "x-error-codes": [
+          "TOKEN_EXPIRED",
+          "TOKEN_REVOKED",
+          "MULTIPLE_CREDENTIALS",
+          "ADMIN_CANNOT_READ_TRADES",
+          "UNKNOWN_QUERY_PARAM",
+          "VALIDATION_ERROR"
+        ],
+        "x-idempotent": false,
+        "x-required-scope": "read"
       }
     },
     "/api/v1/errors": {

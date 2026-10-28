@@ -115,6 +115,38 @@ class AssetRepository:
         )
         return await self._session.scalar(stmt)
 
+    async def latest(
+        self,
+        user_id: uuid.UUID,
+        *,
+        definition_version: str,
+        on_or_before: date,
+    ) -> AssetDaily | None:
+        """最新一行资产快照（`trade_date <= on_or_before`，口径版本一致）；无行返回 None。"""
+        stmt = (
+            select(AssetDaily)
+            .where(
+                AssetDaily.user_id == user_id,
+                AssetDaily.definition_version == definition_version,
+                AssetDaily.trade_date <= on_or_before,
+            )
+            .order_by(AssetDaily.trade_date.desc())
+            .limit(1)
+        )
+        return await self._session.scalar(stmt)
+
+    async def series(self, user_id: uuid.UUID, *, definition_version: str) -> list[AssetDaily]:
+        """全历史资产序列（升序）；Dashboard 的峰值成本/回撤只读这一份。"""
+        stmt = (
+            select(AssetDaily)
+            .where(
+                AssetDaily.user_id == user_id,
+                AssetDaily.definition_version == definition_version,
+            )
+            .order_by(AssetDaily.trade_date.asc())
+        )
+        return list(await self._session.scalars(stmt))
+
     # ── 写：删除 / 插入 / 计数 ────────────────────────────────
     async def delete_all(self, user_id: uuid.UUID) -> int:
         result = await self._session.execute(

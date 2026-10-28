@@ -10,7 +10,7 @@ afterEach(() => {
 });
 
 describe("router / Layout（FT-09 导航与登录保护）", () => {
-  it("顶部导航含「资产」链接且指向 /assets，外壳渲染子路由", () => {
+  it("顶部导航首项「看板」指向 /dashboard，外壳渲染子路由", () => {
     render(
       <MemoryRouter initialEntries={["/assets"]}>
         <Routes>
@@ -23,10 +23,11 @@ describe("router / Layout（FT-09 导航与登录保护）", () => {
 
     const link = screen.getByRole("link", { name: "资产" });
     expect(link.getAttribute("href")).toBe("/assets");
+    expect(screen.getByRole("link", { name: "看板" }).getAttribute("href")).toBe("/dashboard");
     expect(screen.getByText("资产页占位")).toBeTruthy();
-    // 原有导航项仍在（顺序：交易流水 → 回合 → 净值 → 资产）
+    // Period2-12：看板成为首项，原有导航项顺序顺延（交易流水 → 回合 → 净值 → 资产）
     const labels = screen.getAllByRole("link").map((item) => item.textContent);
-    expect(labels.slice(0, 4)).toEqual(["交易流水", "回合", "净值", "资产"]);
+    expect(labels.slice(0, 5)).toEqual(["看板", "交易流水", "回合", "净值", "资产"]);
   });
 
   it("未登录访问 /assets 跳转登录页", () => {

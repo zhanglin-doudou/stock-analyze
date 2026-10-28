@@ -663,6 +663,135 @@ class AssetBuildAccepted(StrictModel):
     links: JobLinks
 
 
+# ── Dashboard（API-084，Period2-12）─────────────────────────
+DashboardStatus = Literal["ok", "degraded", "stale", "blocked", "missing", "insufficient"]
+DashboardMissingCode = Literal[
+    "DASHBOARD_ASSET_MISSING",
+    "DASHBOARD_ASSET_BLOCKED",
+    "DASHBOARD_STALE",
+    "DASHBOARD_TOTAL_PROFIT_UNAVAILABLE",
+    "DASHBOARD_MAX_INVESTED_COST_MISSING",
+    "DASHBOARD_MDD_INSUFFICIENT",
+    "DASHBOARD_MDD_UNRELIABLE",
+    "DASHBOARD_MDD_GAPS",
+    "DASHBOARD_HOLDINGS_TRUNCATED",
+    "DASHBOARD_HOLDING_PRICE_MISSING",
+    "DASHBOARD_HOLDINGS_MISMATCH",
+    "DASHBOARD_NO_CLOSED_ROUNDS",
+]
+
+
+class DashboardMissingOut(StrictModel):
+    """一个缺失/降级字段（字段为 null 的机读原因 + 可执行指引）。"""
+
+    field: str
+    code: DashboardMissingCode
+    reason: str
+    what_to_do: str
+
+
+class DashboardHoldingOut(StrictModel):
+    """当前持仓行（证券维度；金额 2 位、数量 4 位、权重 scale=8）。"""
+
+    security_code: str
+    security_name: str
+    quantity: str
+    cost: str
+    market_value: str | None = None
+    weight_pct: str | None = None
+
+
+class DashboardRoundOut(StrictModel):
+    """最赚/最亏列表行（pnl 2 位、收益率 scale=8）。"""
+
+    round_id: str
+    security_code: str
+    security_name: str
+    close_date: date
+    pnl: str
+    return_rate: str
+    return_rate_pct: str
+    holding_days: int
+
+
+class DashboardMaxDrawdownOut(StrictModel):
+    """历史最大回撤区间；insufficient/blocked 时 mdd_pct 显式 null。"""
+
+    from_date: date | None = None
+    to_date: date | None = None
+    duration_days: int | None = None
+    duration_obs: int | None = None
+    recovery_days: int | None = None
+    recovery_censored: bool = False
+    mdd_pct: str | None = None
+    n_obs: int
+    sample_status: Literal["ok", "insufficient", "unreliable", "blocked"]
+    reason: str | None = None
+
+
+class DashboardAssetOverviewOut(StrictModel):
+    """资产概览：当前快照（最新资产日）+ 全历史峰值成本/总收益/费用。"""
+
+    status: DashboardStatus
+    holdings: list[DashboardHoldingOut]
+    market_value: str | None = None
+    cash: str | None = None
+    total_assets: str | None = None
+    position_pct: str | None = None
+    total_profit: str | None = None
+    max_invested_cost: str | None = None
+    max_cost_return_pct: str | None = None
+    total_fees: str | None = None
+
+
+class DashboardHistoryOverviewOut(StrictModel):
+    """历史概览：全历史已平仓计数/最赚最亏 + 最大回撤。"""
+
+    status: DashboardStatus
+    closed_security_count: int
+    closed_round_count: int
+    win_count: int
+    loss_count: int
+    flat_count: int
+    win_pct: str | None = None
+    loss_pct: str | None = None
+    flat_pct: str | None = None
+    max_profit: str | None = None
+    max_profit_round: DashboardRoundOut | None = None
+    max_profit_cost_pct: str | None = None
+    top_rounds: list[DashboardRoundOut]
+    bottom_rounds: list[DashboardRoundOut]
+    max_drawdown: DashboardMaxDrawdownOut
+
+
+class DashboardLinksOut(StrictModel):
+    """下钻/占位页链接（旧五卡按 `legacy_period` 懒加载）。"""
+
+    assets: str
+    rounds: str
+    metrics: str
+    reports: str
+    exports: str
+    attribution: str
+
+
+class DashboardOut(StrictModel):
+    """API-084：Dashboard 两板块聚合（只读；金额/比率全部后端格式化）。"""
+
+    as_of: date
+    data_as_of: date | None = None
+    legacy_period: str
+    status: DashboardStatus
+    build_state: Literal["missing", "current", "stale", "blocked"]
+    definition_version: str
+    asset_overview: DashboardAssetOverviewOut
+    history_overview: DashboardHistoryOverviewOut
+    missing: list[DashboardMissingOut]
+    links: DashboardLinksOut
+    assumptions: dict[str, str]
+    inputs_hash: str
+
+
 # ── 运维（API-071~076）──────────────────────────────────────
 class HealthOut(BaseModel):
     status: Literal["ok"] = "ok"

@@ -198,6 +198,19 @@ class RoundRepository:
         )
         return list(rows)
 
+    async def closed_rounds(self, user_id: uuid.UUID) -> list[Round]:
+        """全历史已平仓且非 data_error 的回合（Dashboard 计数/最赚最亏）。"""
+        rows = await self._session.scalars(
+            select(Round)
+            .where(
+                Round.user_id == user_id,
+                Round.status == "closed",
+                Round.data_error.is_(False),
+            )
+            .order_by(Round.close_date.asc().nulls_last(), Round.id.asc())
+        )
+        return list(rows)
+
     async def fills_in_period(self, user_id: uuid.UUID, start: date, end: date) -> list[RoundFill]:
         """指标视图：平仓日落在区间内的逐 chunk 明细。"""
         rows = await self._session.scalars(

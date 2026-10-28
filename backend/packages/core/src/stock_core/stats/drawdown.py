@@ -29,6 +29,10 @@ class DrawdownFamily:
     # 状态
     blocked: bool = False  # blocked 断点（调用方标记）
     unreliable: bool = False  # |r|>1 或其他异常
+    # 峰/谷/恢复在 index 序列（长度 n+1，I_0 在前）中的下标；MDD=0 时峰谷均为 None。
+    peak_index: int | None = None
+    trough_index: int | None = None
+    recovery_index: int | None = None
 
 
 def _compound_index(
@@ -181,9 +185,12 @@ def drawdown_family(
         twr_annual_u = q(twr_annual)
         calmar_u = q(calmar_dec) if calmar_dec is not None else None
 
+    has_drawdown = max_dd > 0
+    recovery_index = mdd_idx + recovery_obs if recovery_obs is not None else None
+
     return DrawdownFamily(
         mdd_units=mdd_u,
-        mdd_duration_obs=mdd_duration if max_dd > 0 else None,
+        mdd_duration_obs=mdd_duration if has_drawdown else None,
         mdd_recovery_obs=recovery_obs,
         recovery_censored=recovery_censored,
         underwater_ratio_units=underwater_u,
@@ -192,4 +199,7 @@ def drawdown_family(
         twr_annual_units=twr_annual_u,
         n_obs=n,
         unreliable=unreliable,
+        peak_index=peak_start_idx if has_drawdown else None,
+        trough_index=mdd_idx if has_drawdown else None,
+        recovery_index=recovery_index if has_drawdown else None,
     )

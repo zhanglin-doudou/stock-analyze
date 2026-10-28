@@ -243,6 +243,8 @@ ADMIN_FORBIDDEN: list[tuple[str, str]] = [
     ("get", "/metrics/{metric_id}"),
     ("get", "/metrics/{metric_id}/explain"),
     ("get", "/metrics/{metric_id}/drilldown"),
+    # Period2-12：Dashboard 聚合（身份越权 → 403）
+    ("get", "/dashboard"),
 ]
 
 #: 列表型端点：A/B 各自造数据，B 的列表不得包含 A 的行（跨租户列表隔离）
@@ -257,6 +259,8 @@ LIST_ISOLATION_MATRIX: list[tuple[str, str]] = [
     ("get", "/reconciliation/bridge"),
     # Period2-16：资产表列表（seed 自定义 asset_daily 行，按 date 断言）
     ("get", "/assets"),
+    # Period2-12：Dashboard 跨租户不串号（B 的持仓/计数为空，A 自己可见）
+    ("get", "/dashboard"),
 ]
 
 #: 无凭证 → 401：覆盖全部受保护端点（gate_tenant_coverage.py 校验 23/23 完整）。
@@ -309,6 +313,8 @@ UNAUTHENTICATED_MATRIX: list[tuple[str, str]] = [
     ("get", "/metrics/{metric_id}/drilldown"),
     # Period2-07（API-083 按月编排；admin 403 由 tests/api/test_api_083 显式覆盖）
     ("post", "/jobs/rebuild-period"),
+    # Period2-12（API-084 Dashboard 聚合）
+    ("get", "/dashboard"),
 ]
 
 #: 路径参数占位值（只用于越权/401 用例；资源不存在时恰好也走 404 分支）。
@@ -474,6 +480,17 @@ async def test_cross_account_list_isolated(
         assert owner_resp.status_code == 200, owner_resp.text
         owner_dates = {item["date"] for item in owner_resp.json()["items"]}
         assert asset_date.isoformat() in owner_dates, "A 自己的资产行应可见（防止假阳性）"
+        return
+
+    if template == "/dashboard":
+        # 聚合对象：B 的持仓/已平仓计数为空；A 自己的回合计入（防止"两边都空"的假通过）。
+        assert body["asset_overview"]["holdings"] == [], "B 的看板看到了 A 的持仓"
+        assert body["history_overview"]["closed_round_count"] == 0, "B 的看板看到了 A 的回合"
+        owner_resp = await _call(client, method, url, owner.headers)
+        assert owner_resp.status_code == 200, owner_resp.text
+        assert owner_resp.json()["history_overview"]["closed_round_count"] == 1, (
+            "A 自己的回合应计入看板（防止假阳性）"
+        )
         return
 
     if template == "/reconciliation/bridge":

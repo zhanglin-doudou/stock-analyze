@@ -158,6 +158,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/dashboard": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Dashboard Endpoint
+         * @description API-084：Dashboard 两板块聚合（只读；旧五卡按 legacy_period 懒加载）。
+         */
+        get: operations["getDashboard"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/errors": {
         parameters: {
             query?: never;
@@ -1248,6 +1268,220 @@ export interface components {
             realized_pnl: string;
             /** Residual */
             residual: string;
+        };
+        /**
+         * DashboardAssetOverviewOut
+         * @description 资产概览：当前快照（最新资产日）+ 全历史峰值成本/总收益/费用。
+         */
+        DashboardAssetOverviewOut: {
+            /** Cash */
+            cash?: string | null;
+            /** Holdings */
+            holdings: components["schemas"]["DashboardHoldingOut"][];
+            /** Market Value */
+            market_value?: string | null;
+            /** Max Cost Return Pct */
+            max_cost_return_pct?: string | null;
+            /** Max Invested Cost */
+            max_invested_cost?: string | null;
+            /** Position Pct */
+            position_pct?: string | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "degraded" | "stale" | "blocked" | "missing" | "insufficient";
+            /** Total Assets */
+            total_assets?: string | null;
+            /** Total Fees */
+            total_fees?: string | null;
+            /** Total Profit */
+            total_profit?: string | null;
+        };
+        /**
+         * DashboardHistoryOverviewOut
+         * @description 历史概览：全历史已平仓计数/最赚最亏 + 最大回撤。
+         */
+        DashboardHistoryOverviewOut: {
+            /** Bottom Rounds */
+            bottom_rounds: components["schemas"]["DashboardRoundOut"][];
+            /** Closed Round Count */
+            closed_round_count: number;
+            /** Closed Security Count */
+            closed_security_count: number;
+            /** Flat Count */
+            flat_count: number;
+            /** Flat Pct */
+            flat_pct?: string | null;
+            /** Loss Count */
+            loss_count: number;
+            /** Loss Pct */
+            loss_pct?: string | null;
+            max_drawdown: components["schemas"]["DashboardMaxDrawdownOut"];
+            /** Max Profit */
+            max_profit?: string | null;
+            /** Max Profit Cost Pct */
+            max_profit_cost_pct?: string | null;
+            max_profit_round?: components["schemas"]["DashboardRoundOut"] | null;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "degraded" | "stale" | "blocked" | "missing" | "insufficient";
+            /** Top Rounds */
+            top_rounds: components["schemas"]["DashboardRoundOut"][];
+            /** Win Count */
+            win_count: number;
+            /** Win Pct */
+            win_pct?: string | null;
+        };
+        /**
+         * DashboardHoldingOut
+         * @description 当前持仓行（证券维度；金额 2 位、数量 4 位、权重 scale=8）。
+         */
+        DashboardHoldingOut: {
+            /** Cost */
+            cost: string;
+            /** Market Value */
+            market_value?: string | null;
+            /** Quantity */
+            quantity: string;
+            /** Security Code */
+            security_code: string;
+            /** Security Name */
+            security_name: string;
+            /** Weight Pct */
+            weight_pct?: string | null;
+        };
+        /**
+         * DashboardLinksOut
+         * @description 下钻/占位页链接（旧五卡按 `legacy_period` 懒加载）。
+         */
+        DashboardLinksOut: {
+            /** Assets */
+            assets: string;
+            /** Attribution */
+            attribution: string;
+            /** Exports */
+            exports: string;
+            /** Metrics */
+            metrics: string;
+            /** Reports */
+            reports: string;
+            /** Rounds */
+            rounds: string;
+        };
+        /**
+         * DashboardMaxDrawdownOut
+         * @description 历史最大回撤区间；insufficient/blocked 时 mdd_pct 显式 null。
+         */
+        DashboardMaxDrawdownOut: {
+            /** Duration Days */
+            duration_days?: number | null;
+            /** Duration Obs */
+            duration_obs?: number | null;
+            /** From Date */
+            from_date?: string | null;
+            /** Mdd Pct */
+            mdd_pct?: string | null;
+            /** N Obs */
+            n_obs: number;
+            /** Reason */
+            reason?: string | null;
+            /**
+             * Recovery Censored
+             * @default false
+             */
+            recovery_censored: boolean;
+            /** Recovery Days */
+            recovery_days?: number | null;
+            /**
+             * Sample Status
+             * @enum {string}
+             */
+            sample_status: "ok" | "insufficient" | "unreliable" | "blocked";
+            /** To Date */
+            to_date?: string | null;
+        };
+        /**
+         * DashboardMissingOut
+         * @description 一个缺失/降级字段（字段为 null 的机读原因 + 可执行指引）。
+         */
+        DashboardMissingOut: {
+            /**
+             * Code
+             * @enum {string}
+             */
+            code: "DASHBOARD_ASSET_MISSING" | "DASHBOARD_ASSET_BLOCKED" | "DASHBOARD_STALE" | "DASHBOARD_TOTAL_PROFIT_UNAVAILABLE" | "DASHBOARD_MAX_INVESTED_COST_MISSING" | "DASHBOARD_MDD_INSUFFICIENT" | "DASHBOARD_MDD_UNRELIABLE" | "DASHBOARD_MDD_GAPS" | "DASHBOARD_HOLDINGS_TRUNCATED" | "DASHBOARD_HOLDING_PRICE_MISSING" | "DASHBOARD_HOLDINGS_MISMATCH" | "DASHBOARD_NO_CLOSED_ROUNDS";
+            /** Field */
+            field: string;
+            /** Reason */
+            reason: string;
+            /** What To Do */
+            what_to_do: string;
+        };
+        /**
+         * DashboardOut
+         * @description API-084：Dashboard 两板块聚合（只读；金额/比率全部后端格式化）。
+         */
+        DashboardOut: {
+            /**
+             * As Of
+             * Format: date
+             */
+            as_of: string;
+            asset_overview: components["schemas"]["DashboardAssetOverviewOut"];
+            /** Assumptions */
+            assumptions: {
+                [key: string]: string;
+            };
+            /**
+             * Build State
+             * @enum {string}
+             */
+            build_state: "missing" | "current" | "stale" | "blocked";
+            /** Data As Of */
+            data_as_of?: string | null;
+            /** Definition Version */
+            definition_version: string;
+            history_overview: components["schemas"]["DashboardHistoryOverviewOut"];
+            /** Inputs Hash */
+            inputs_hash: string;
+            /** Legacy Period */
+            legacy_period: string;
+            links: components["schemas"]["DashboardLinksOut"];
+            /** Missing */
+            missing: components["schemas"]["DashboardMissingOut"][];
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "degraded" | "stale" | "blocked" | "missing" | "insufficient";
+        };
+        /**
+         * DashboardRoundOut
+         * @description 最赚/最亏列表行（pnl 2 位、收益率 scale=8）。
+         */
+        DashboardRoundOut: {
+            /**
+             * Close Date
+             * Format: date
+             */
+            close_date: string;
+            /** Holding Days */
+            holding_days: number;
+            /** Pnl */
+            pnl: string;
+            /** Return Rate */
+            return_rate: string;
+            /** Return Rate Pct */
+            return_rate_pct: string;
+            /** Round Id */
+            round_id: string;
+            /** Security Code */
+            security_code: string;
+            /** Security Name */
+            security_name: string;
         };
         /** @description RFC 7807 问题详情 + 平台扩展字段（code/user_message/what_to_do/retryable/request_id/errors），对应 Content-Type: application/problem+json。 */
         Error: {
@@ -2944,6 +3178,66 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getDashboard: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DashboardOut"];
+                };
+            };
+            /** @description 请求参数错误 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                     "application/problem+json": components["schemas"]["Error"];
                 };
             };

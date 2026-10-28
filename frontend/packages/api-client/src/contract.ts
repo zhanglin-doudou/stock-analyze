@@ -111,6 +111,15 @@ export type AssetBuildStateOut = ApiSchemas["AssetBuildStateOut"];
 export type AssetBuildIn = ApiSchemas["AssetBuildIn"];
 export type AssetBuildAccepted = ApiSchemas["AssetBuildAccepted"];
 
+// Period2-12：Dashboard 两板块聚合（API-084）
+export type DashboardOut = ApiSchemas["DashboardOut"];
+export type DashboardAssetOverviewOut = ApiSchemas["DashboardAssetOverviewOut"];
+export type DashboardHistoryOverviewOut = ApiSchemas["DashboardHistoryOverviewOut"];
+export type DashboardHoldingOut = ApiSchemas["DashboardHoldingOut"];
+export type DashboardRoundOut = ApiSchemas["DashboardRoundOut"];
+export type DashboardMaxDrawdownOut = ApiSchemas["DashboardMaxDrawdownOut"];
+export type DashboardMissingOut = ApiSchemas["DashboardMissingOut"];
+
 // Period2-05/07：三域指标（API-033/079）+ 按月一键编排（API-083）
 export type MetricItemOut = ApiSchemas["MetricItemOut"];
 export type MetricBatchOut = ApiSchemas["MetricBatchOut"];

@@ -11,6 +11,7 @@ import type {
   BatchList,
   CommitImportBody,
   CreateTokenBody,
+  DashboardOut,
   ErrorCatalogOut,
   HealthOut,
   ImportBatch,
@@ -648,6 +649,13 @@ export function createClient(options: ClientOptions) {
     },
   };
 
+  const dashboard = {
+    /** API-084：Dashboard 两板块聚合（纯读；金额/比率全部后端格式化）。 */
+    get() {
+      return send<DashboardOut>({ path: "/dashboard" }).then((r) => r.data);
+    },
+  };
+
   const metricsApi = {
     /** API-033：指标批量查询（read-through；默认核心 10，`include_exploratory` 按需）。 */
     batch(query: GetMetricsQuery = {}) {
@@ -706,7 +714,7 @@ export function createClient(options: ClientOptions) {
     },
   };
 
-  return { auth, tokens, imports, jobs, trades, rounds, nav, assets, metrics: metricsApi, ops, request: send };
+  return { auth, tokens, imports, jobs, trades, rounds, nav, assets, dashboard, metrics: metricsApi, ops, request: send };
 }
 
 export type ApiClient = ReturnType<typeof createClient>;
