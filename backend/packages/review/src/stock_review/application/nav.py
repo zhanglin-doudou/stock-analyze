@@ -76,6 +76,9 @@ from stock_review.application.valuation import (
     load_prices as _load_prices,
 )
 from stock_review.application.valuation import (
+    new_stock_pending_codes as _new_stock_pending_codes,
+)
+from stock_review.application.valuation import (
     total_market_value as _total_market_value,
 )
 from stock_review.models import NavDaily
@@ -192,6 +195,10 @@ async def compute_nav_points(
     # 3. 期初持仓（区间前 open lots）+ 成本；货基行不进持仓（按余额计）
     money_fund_codes = {t.security_code for t in trades if _is_money_fund_row(t)}
     initial_money_fund = _initial_money_fund_balances(trades, period_start)
+    # 新股待上市（认购缴款已入库、尚无行情）：按认购成本兜底估值，不阻断（设计 D11）。
+    pending_new_stock_codes = {
+        canonical_code(bond_alias, code) for code in _new_stock_pending_codes(trades)
+    }
     bond_divisors = _bond_face_divisors(trades)
     fifo_before = build_rounds(
         trades_to_events([t for t in trades if t.trade_date < period_start], bond_alias=bond_alias)
@@ -228,7 +235,7 @@ async def compute_nav_points(
         for t in all_trades_in_range
         if t.security_code
         and not _is_money_fund_row(t)
-        and _holding_delta(_category(t), t.quantity_units) != 0
+        and _holding_delta(_category(t), t.quantity_units, amount_units=t.amount_units) != 0
     }
     all_symbols = sorted(holding_symbols | set(initial_holdings.keys()))
     # 回看窗口：期初基准需要「期初当日或之前」的收盘价，否则第一天就判缺行情。
@@ -240,14 +247,20 @@ async def compute_nav_points(
 
     # 6a. 月度首日「昨日资产」：期初现金 + 货基余额 + 期初持仓按上一交易日收盘价估值。
     #     仅用于展示首日的昨日资产/日收益额（不进入 TWR 序列）。
-    prev_day_value, prev_day_missing, prev_day_fallback = _total_market_value(
+    (
+        prev_day_value,
+        prev_day_missing,
+        prev_day_fallback,
+        prev_day_new_stock_fallback,
+    ) = _total_market_value(
         dict(initial_holdings),
         ladder,
         period_start - timedelta(days=1),
         cost_basis=dict(initial_cost),
         bond_divisors=bond_divisors,
+        new_stock_codes=pending_new_stock_codes,
     )
-    if prev_day_fallback:
+    if prev_day_fallback or prev_day_new_stock_fallback:
         bond_fallback_any = True
     prev_day_value_units: int | None = (
         None if prev_day_missing else initial_cash + initial_money_fund_units + prev_day_value
@@ -260,14 +273,20 @@ async def compute_nav_points(
     #     没有它，TWR 只能从首个交易日算起，整段收益会漏掉首日涨跌。
     baseline_date = period_start
     if trade_dates[0] > period_start:
-        baseline_value, baseline_missing, baseline_fallback = _total_market_value(
+        (
+            baseline_value,
+            baseline_missing,
+            baseline_fallback,
+            baseline_new_stock_fallback,
+        ) = _total_market_value(
             dict(initial_holdings),
             ladder,
             baseline_date,
             cost_basis=dict(initial_cost),
             bond_divisors=bond_divisors,
+            new_stock_codes=pending_new_stock_codes,
         )
-        if baseline_fallback:
+        if baseline_fallback or baseline_new_stock_fallback:
             bond_fallback_any = True
         if baseline_missing:
             return (
@@ -319,7 +338,9 @@ async def compute_nav_points(
             elif code:
                 code = canonical_code(bond_alias, code)  # 发债代码归并上市代码（设计 D3）
                 # 持仓数量变化
-                delta = _holding_delta(category, trade.quantity_units)
+                delta = _holding_delta(
+                    category, trade.quantity_units, amount_units=trade.amount_units
+                )
                 if delta:
                     state.holdings[code] = state.holdings.get(code, 0) + delta
                 # 成本变化：buy/rights/new_stock 增加成本，sell 按比例结转
@@ -327,7 +348,7 @@ async def compute_nav_points(
                     state.cost_basis[code] = state.cost_basis.get(code, 0) + (-trade.amount_units)
                 elif category == "sell":
                     old_qty = state.holdings.get(code, 0) - _holding_delta(
-                        category, trade.quantity_units
+                        category, trade.quantity_units, amount_units=trade.amount_units
                     )
                     if old_qty > 0 and delta < 0:
                         old_cost = state.cost_basis.get(code, 0)
@@ -351,14 +372,15 @@ async def compute_nav_points(
             state.cash_units += day_cash_delta
 
         # 当日市值（债券缺行情按买入价兜底，不阻断）
-        market_value, missing, bond_fallback = _total_market_value(
+        market_value, missing, bond_fallback, new_stock_fallback = _total_market_value(
             state.holdings,
             ladder,
             d,
             cost_basis=state.cost_basis,
             bond_divisors=bond_divisors,
+            new_stock_codes=pending_new_stock_codes,
         )
-        if bond_fallback:
+        if bond_fallback or new_stock_fallback:
             bond_fallback_any = True
         if missing:
             # 缺行情 → 当日阻断（继续推演后续日，不中断整段）

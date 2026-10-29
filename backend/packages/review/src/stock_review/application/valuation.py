@@ -19,7 +19,7 @@
 from __future__ import annotations
 
 import bisect
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from datetime import date, timedelta
 from decimal import Decimal
 
@@ -52,6 +52,9 @@ _MARKET_FAILURE_PRIORITY: tuple[str, ...] = ("unavailable", "not_supported", "no
 
 # 债券无行情时的兜底估值口径文案（行级 degraded 原因，设计 §6.4）。
 BOND_COST_FALLBACK_PREFIX = "债券按买入价估值（无行情"
+# 新股待上市：认购缴款后至上市首日之前没有行情，按认购成本（含费缴款金额）兜底估值，
+# 该日标 degraded 而非 blocked（设计 D11）。
+NEW_STOCK_COST_FALLBACK_PREFIX = "新股待上市，按认购价估值（无行情"
 # 货基单位净值恒 1.0000（价格列缺失时用于份额 → 金额换算）。
 _MONEY_FUND_UNIT_PRICE_UNITS = Price.from_decimal(Decimal(1)).units
 # 可转债：数量单位是手，1 手 = 10 张；行情/成交价格是单张金额（元/张），
@@ -77,6 +80,27 @@ def bond_value_units(
 def bond_fallback_reason(symbols: list[str]) -> str:
     """`债券按买入价估值（无行情：019547,113050）`。"""
     return f"{BOND_COST_FALLBACK_PREFIX}：{','.join(sorted(symbols))}）"
+
+
+def new_stock_fallback_reason(symbols: list[str]) -> str:
+    """`新股待上市，按认购价估值（无行情：001237）`。"""
+    return f"{NEW_STOCK_COST_FALLBACK_PREFIX}：{','.join(sorted(symbols))}）"
+
+
+def new_stock_pending_codes(trades: Iterable[Trade]) -> set[str]:
+    """新股认购缴款（`new_stock` 且发生金额非 0）的标的集合。
+
+    这些标的在上市首日之前没有任何行情，估值时按认购成本兜底（设计 D11）。零金额的
+    中签/入帐通知行不算（它们不建仓）。
+    """
+    return {
+        trade.security_code
+        for trade in trades
+        if trade.security_code
+        and not is_money_fund_row(trade)
+        and (trade.category or "").strip().lower() == "new_stock"
+        and trade.amount_units != 0
+    }
 
 
 def category(trade: Trade) -> str:
@@ -164,8 +188,15 @@ def bond_face_divisors(trades: list[Trade]) -> dict[str, int]:
     return divisors
 
 
-def holding_delta(category: str, quantity_units: int) -> int:
-    """单笔 trade 对持仓数量的增量（buy/bonus/rights/new_stock 加，sell 减）。"""
+def holding_delta(category: str, quantity_units: int, *, amount_units: int = 0) -> int:
+    """单笔 trade 对持仓数量的增量（buy/bonus/rights/new_stock 加，sell 减）。
+
+    新股例外：`new_stock` 且发生金额为 0 的行是「申购中签 / 新股入帐」通知行——同一批
+    中签会先后出现中签、入帐、缴款三行，只有缴款行（金额非 0）才是真正的建仓，通知行
+    一律不计持仓，否则持仓会被重复计数。
+    """
+    if category == "new_stock" and amount_units == 0:
+        return 0
     if category in {"buy", "bonus", "rights", "new_stock"}:
         return quantity_units
     if category == "sell":
@@ -209,37 +240,47 @@ def total_market_value(
     *,
     cost_basis: dict[str, int] | None = None,
     bond_divisors: dict[str, int] | None = None,
-) -> tuple[int, list[str], list[str]]:
-    """当日持仓市值（scale=2）+ 缺行情阻断标的 + 按买入价兜底的债券标的。
+    new_stock_codes: set[str] | None = None,
+) -> tuple[int, list[str], list[str], list[str]]:
+    """当日持仓市值（scale=2）+ 缺行情阻断标的 + 按成本兜底的债券 / 新股待上市标的。
 
     市值 = Σ qty_units * close_units / 1e8（qty scale=4 × price scale=6 → scale=2）；
     **逐标的 floor**（先乘后整除），与设计 §4.1 口径一致。
 
     债券例外（设计 D8/D9）：akshare 收盘是净价（元/百元面值），市值再除以换算系数
     `bond_divisors[code]`（默认 100）；缺行情时按 `cost_basis[code]`（含费成本）兜底，
-    计入 `fallback`（调用方标 degraded，不阻断）。`cost_basis=None` 表示调用方不启用
-    兜底（缺行情仍进 `missing`）。
+    计入 `bond_fallback`（调用方标 degraded，不阻断）。
+
+    新股例外（设计 D11）：`new_stock_codes` 里的标的（认购缴款已入库、尚未上市）同样
+    缺行情，按认购成本兜底计入 `new_stock_fallback`；上市后有了行情就回到市价口径。
+    `cost_basis=None` 表示调用方不启用任何兜底（缺行情一律进 `missing`）。
     """
     total = 0
     missing: list[str] = []
-    fallback: list[str] = []
+    bond_fallback: list[str] = []
+    stock_fallback: list[str] = []
     for symbol, qty in holdings.items():
         if qty == 0:
             continue
         bond = is_bond(symbol)
         close = close_on_or_before(ladder, symbol, trade_date)
         if close is None:
-            if bond and cost_basis is not None:
-                fallback.append(symbol)
-                total += cost_basis.get(symbol, 0)
-                continue
+            if cost_basis is not None:
+                if bond:
+                    bond_fallback.append(symbol)
+                    total += cost_basis.get(symbol, 0)
+                    continue
+                if new_stock_codes and symbol in new_stock_codes:
+                    stock_fallback.append(symbol)
+                    total += cost_basis.get(symbol, 0)
+                    continue
             missing.append(symbol)
             continue
         if bond:
             total += bond_value_units(symbol, qty, close, bond_divisors)
         else:
             total += qty * close // QTY_PRICE_SCALE
-    return total, missing, fallback
+    return total, missing, bond_fallback, stock_fallback
 
 
 def market_failure_cause(exc: ApiError) -> str:
@@ -302,6 +343,7 @@ __all__ = [
     "CBOND_LOT_SIZE",
     "COST_ADD_CATEGORIES",
     "HOLDING_CATEGORIES",
+    "NEW_STOCK_COST_FALLBACK_PREFIX",
     "PRICE_LOOKBACK",
     "QTY_PRICE_SCALE",
     "blocked_price_reason",
@@ -318,5 +360,7 @@ __all__ = [
     "load_prices",
     "market_failure_cause",
     "money_fund_share_delta",
+    "new_stock_fallback_reason",
+    "new_stock_pending_codes",
     "total_market_value",
 ]

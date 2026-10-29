@@ -257,3 +257,60 @@ def _money_fund_row_delta(row: ParsedRow) -> int:
 - 门禁：`make lint` / `make typecheck` / core **100% 覆盖**（318 条）/ `make test-p2`（含 api-check、
   快照无漂移）/ `make test-metrics` / `make verify-p1` 全绿；单元 749 条全过。
   期间 `test_rebuild_rounds_job_runs_through_worker` 单发 worker 领取 flake，单跑即过（已知环境性问题）。
+
+---
+
+# 第四篇 新股待上市口径（2026-10-29 用户决策）
+
+> 起因：用户上传真实账单（`changed_new.xlsx`），001237 惠康科技「认购缴款 → 上市首日」之间
+> 无行情，资产表整段 `blocked`，且回合构建不出来。用户要求：**上市前应降级（按买入价计资产）
+> 而非阻断，回合数据也要能构建**。
+
+## 16. 根因（三处，均与「新股」语义相关）
+
+| # | 现象 | 根因 |
+|---|---|---|
+| R1 | 001237 持仓 500 股被算成 1500 股 | 同一批中签有三行（05-14「市值申购中签」、05-19「新股入帐」、05-18「新股申购确认缴款」），全部命中 `new_stock` 规则且 `qty>0` → `holding_delta` 每行都 +500 |
+| R2 | 回合构建不出（data_error 超卖） | FIFO 只把 `EventKind.BUY` 建 lot，`NEW_STOCK` 落入「不参与配对」分支 → 上市首日卖出无 lot 可配 |
+| R3 | 资产表 05-18 ~ 05-21 整段 `blocked` | `total_market_value` 只对**债券**缺行情做成本兜底，股票缺行情一律进 `missing` → blocked |
+
+## 17. 落地内容（对照设计 D11）
+
+| 改动 | 实现 | 位置 |
+|---|---|---|
+| 通知行不计持仓 | `holding_delta(category, qty, *, amount_units=0)`：`new_stock` 且 `amount_units == 0` → 0（只有缴款行建仓）；送股（`bonus`）不受影响 | `valuation.py` |
+| 缴款行建 lot | `build_rounds`：`EventKind.BUY` **或**（`NEW_STOCK` 且 `amount != 0`）建 lot；零金额通知行仍不建 | `stock_core/fifo/engine.py` |
+| 待上市成本兜底 | `total_market_value(..., new_stock_codes=...)` 返回 **4 元组** `(total, missing, bond_fallback, new_stock_fallback)`；`new_stock_pending_codes(trades)` 取「`new_stock` 且金额非 0」的代码集合 | `valuation.py` |
+| 行级状态 | `_row_status_reason` 新增 `new_stock_fallback` → 「新股待上市，按认购价估值（无行情：001237）」；命中即 `degraded` | `assets.py` |
+| 净值口径同步 | nav 三处 `_total_market_value` + 三处 `holding_delta` 同步（Dashboard 与资产表不打架） | `nav.py` |
+| Dashboard | `holding_delta` 调用补 `amount_units` | `dashboard.py` |
+| 口径版本 | `ASSET_DEFINITION_VERSION` 1.3 → **1.4**（持仓语义变化，自动全量重建） | `assets.py` |
+
+设计权衡：`pending_codes` 只由「缴款金额非 0」的行构成，避免把真缺行情的普通标的也兜底（那会掩盖
+数据源缺口）；上市后一旦有收盘价就自动回到市价口径，无需额外状态位。
+
+## 18. 真实账单端到端验证（changed_new.xlsx）
+
+| 环节 | 修复前 | 修复后 |
+|---|---|---|
+| 持仓 | 001237 = 1500 股（通知行重复计数） | **500 股**（仅缴款行建仓） |
+| 回合 | 无（超卖 data_error） | 1 个 `closed` 回合：qty 500 / 成本 26630.00 / 卖出 67457.81 / **PnL 40827.81**，显示名「N惠康」 |
+| 资产表 05-18 ~ 05-21 | `blocked`（缺行情数据：001237…） | **`degraded`**「新股待上市，按认购价估值（无行情：001237）」，总资产 = 现金 + 认购成本 |
+| 资产表 05-22（上市首日） | 仍 blocked | **`ok`**，按市价 135 元/股估值 |
+
+## 19. 测试与门禁（第四篇）
+
+- 新增：`test_fifo_engine.py`（缴款建 lot + 上市卖出成回合、仅缴款保持 open 回合 2 例）；
+  `test_valuation.py`（通知行不计持仓、`new_stock_pending_codes`、待上市兜底 3 例）；
+  `test_assets_application.py`（001237 上市前 degraded / 上市首日 ok / 持仓只计一次 1 例）。
+- 口径修订：`definition_version` 断言 1.3 → 1.4（5 处）。
+- 门禁：`make lint` / `make typecheck` / core **100% 覆盖**（320 条）/ `make test-p2` / `make test-metrics` /
+  `make verify-p1` 全绿。
+- 环境说明：本机 dev API/worker 与测试共用 `stock_analyze` 库，TRUNCATE 会与之争锁导致 `deadlock detected`。
+  门禁改在**独立测试库** `stock_analyze_test` 上执行（`createdb` + `create extension citext/pgcrypto` +
+  `STOCK_DB_NAME=stock_analyze_test make migrate`），不改动用户运行中的 dev 进程。
+
+## 20. 遗留（第四篇范围外，已确认非本次回归）
+
+- 账单期前已持有的股票（本例 000938 / 688126 / 688181）卖出时无期初 lot → 超卖 data_error，
+  资产表对应日期仍 `degraded`「FIFO 数据异常」。属既有「无期初持仓锚点」限制，与本篇新股口径无关。

@@ -119,7 +119,11 @@ def _process_security(
     current: _RoundState | None = None
 
     for event in events:
-        if event.kind is EventKind.BUY:
+        # 新股认购缴款（NEW_STOCK 且金额非 0）就是建仓买入：打新回合必须有 lot 才能与
+        # 上市卖出配对；零金额的中签/入帐通知行不建 lot（份额已由缴款行承担）。
+        if event.kind is EventKind.BUY or (
+            event.kind is EventKind.NEW_STOCK and event.amount_units != 0
+        ):
             if event.quantity_units <= 0:
                 errors.append(_invalid_event(event, security_code, detail="买入数量必须为正"))
                 continue
@@ -197,7 +201,7 @@ def _process_security(
             _apply_bonus(event, security_code, lots, errors)
         elif event.kind is EventKind.RIGHTS:
             _apply_rights(event, security_code, lots, errors)
-        # 其余事件（interest/fee/transfer/new_stock/other）只在 bridge 中使用，不参与配对。
+        # 其余事件（interest/fee/transfer/零金额 new_stock 通知行/other）只在 bridge 中使用。
 
     # 期末仍有 lot → 周期 open（含中间做T的 fills）
     open_rounds: list[Round] = []

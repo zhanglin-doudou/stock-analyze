@@ -841,6 +841,85 @@ def test_window_boundary_arithmetic() -> None:
 # ── 可转债发债代码归并（设计 2026-10-29 D3）：上市前 degraded / 上市后正常 ──
 
 
+def test_new_stock_prelisting_degraded_not_blocked_and_holding_counted_once() -> None:
+    """新股 001237：中签/入帐通知行（金额 0）不计持仓，缴款行建仓 500 股。
+
+    上市前（05-18 ~ 05-21）无行情 → 按认购成本兜底 degraded（不 blocked）；
+    上市首日（05-22）有行情 → 按市价 ok；通知行不再重复计数（持仓恒 500 股）。
+    """
+    trades = [
+        _trade(
+            trade_date=date(2026, 5, 1),
+            category="other",
+            amount_units=0,
+            cash_balance_units=cents("100000.00"),
+        ),
+        # 中签通知 / 缴款 / 入帐通知三行：只有缴款行建仓。
+        _trade(
+            trade_date=date(2026, 5, 14),
+            category="new_stock",
+            security_code="001237",
+            quantity_units=shares("500"),
+            price_units=price("53.26"),
+            amount_units=0,
+        ),
+        _trade(
+            trade_date=date(2026, 5, 18),
+            category="new_stock",
+            security_code="001237",
+            quantity_units=shares("500"),
+            price_units=price("53.26"),
+            amount_units=-cents("26630.00"),
+        ),
+        _trade(
+            trade_date=date(2026, 5, 19),
+            category="new_stock",
+            security_code="001237",
+            quantity_units=shares("500"),
+            price_units=price("53.26"),
+            amount_units=0,
+        ),
+        _trade(
+            trade_date=date(2026, 5, 23),
+            category="sell",
+            security_code="001237",
+            side="sell",
+            quantity_units=shares("500"),
+            price_units=price("135.00"),
+            amount_units=cents("67500.00"),
+        ),
+    ]
+    ladder = _ladder(_bar("001237", date(2026, 5, 22), "135.00"), symbols=["001237"])
+    result = _run(trades, date(2026, 5, 1), date(2026, 5, 23), ladder=ladder)
+    assert result.global_blocked is False
+
+    # 中签通知行当天：还没缴款，不持有 → ok。
+    notice = _row(result, date(2026, 5, 14))
+    assert notice["status"] == "ok"
+    assert notice["holding_count"] == 0
+
+    # 缴款后上市前：按认购成本兜底 degraded，现金 73370 + 成本 26630 = 100000。
+    pre = _row(result, date(2026, 5, 20))
+    assert pre["status"] == "degraded"
+    assert "新股待上市" in (pre["status_reason"] or "")
+    assert "001237" in (pre["status_reason"] or "")
+    assert pre["market_value_units"] == cents("26630")
+    assert pre["total_assets_units"] == cents("100000")
+    assert pre["holding_count"] == 1  # 通知行不重复计数：500 股而非 1500 股
+
+    # 上市首日：有行情 → 市价估值 ok，现金 73370 + 67500 = 140870。
+    listed = _row(result, date(2026, 5, 22))
+    assert listed["status"] == "ok"
+    assert listed["market_value_units"] == cents("67500")
+    assert listed["total_assets_units"] == cents("140870")
+    assert listed["holding_count"] == 1
+    # 次日卖出：持仓清零，现金 140870。
+    after = _row(result, date(2026, 5, 23))
+    assert after["status"] == "ok"
+    assert after["holding_count"] == 0
+    assert after["total_assets_units"] == cents("140870")
+
+
 def test_cbond_alias_prelisting_degraded_postlisting_ok() -> None:
     """754019 曙26发债（07-20 中签缴款 1 手@-1000）归并到 113050 曙26转债：
     上市前（08-03 前）按买入价兜底 degraded；上市后按行情估值 ok，且全程不 blocked。"""

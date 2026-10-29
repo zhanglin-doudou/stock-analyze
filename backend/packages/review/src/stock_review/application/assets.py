@@ -56,6 +56,8 @@ from stock_review.application.valuation import (
     is_cash_balance,
     is_money_fund_row,
     load_prices,
+    new_stock_fallback_reason,
+    new_stock_pending_codes,
     total_market_value,
 )
 from stock_review.models import AssetBuildState as AssetBuildStateRow
@@ -68,7 +70,8 @@ log = get_logger("stock_review.assets")
 # 1.1：资产余额口径 = 现金 + 货币基金余额 + 持仓市值（货基不再当持仓估值）。
 # 1.2：可转债发债代码归并上市代码（持仓/行情按 canonical），可转债市值固定 1 手=10 张。
 # 1.3：货基无锚点时按「-min(累计净额)」反推期初下界（赎回行自证持仓），余额不再为负。
-ASSET_DEFINITION_VERSION = "1.3"
+# 1.4：新股中签/入帐通知行（金额 0）不再计持仓；待上市新股缺行情按认购成本兜底 degraded。
+ASSET_DEFINITION_VERSION = "1.4"
 # 安全窗：每次有新数据/脏流水/行情 as_of 变化时重算最近 45 天。
 SAFETY_DAYS = 45
 # 水位线重叠窗：PG `now()` = 事务开始时间，覆盖「长事务晚提交」竞态。
@@ -214,9 +217,10 @@ def _row_status_reason(
     fifo_error: bool,
     uncovered: bool,
     bond_fallback: list[str] | None = None,
+    new_stock_fallback: list[str] | None = None,
     money_fund_unknown: bool = False,
 ) -> str | None:
-    """行级 degraded 原因（FIFO 异常 / 行情未覆盖 / 债券按买入价 / 货基期初未知）。
+    """行级 degraded 原因（FIFO 异常 / 行情未覆盖 / 债券按买入价 / 新股待上市 / 货基期初未知）。
 
     都不命中返回 NULL；多条原因用「；」拼接（去重由调用方保证）。
     """
@@ -227,6 +231,8 @@ def _row_status_reason(
         reasons.append(MARKET_UNCOVERED_REASON)
     if bond_fallback:
         reasons.append(bond_fallback_reason(bond_fallback))
+    if new_stock_fallback:
+        reasons.append(new_stock_fallback_reason(new_stock_fallback))
     if money_fund_unknown:
         reasons.append(MONEY_FUND_UNKNOWN_REASON)
     return "；".join(reasons) if reasons else None
@@ -256,6 +262,8 @@ def compute_daily_valuations(
     持仓/成本/货基键按 `bond_alias` 归一为上市代码（发债代码不请求行情，设计 D3）。
     """
     alias = bond_alias or {}
+    # 新股待上市（认购缴款已入库、尚无行情）：按认购成本兜底估值，不阻断（设计 D11）。
+    pending_codes = {canonical_code(alias, code) for code in new_stock_pending_codes(trades)}
     initial = _initial_cash(trades, start)
     if initial is None:
         return _DailyValuations(rows=[], global_blocked=True, global_reason=NO_ANCHOR_REASON)
@@ -288,7 +296,9 @@ def compute_daily_valuations(
                 money_fund[code] = int(trade.money_fund_balance_units or 0)
             elif code:
                 code = canonical_code(alias, code)  # 发债代码归并上市代码（设计 D3）
-                delta = holding_delta(trade_category, trade.quantity_units)
+                delta = holding_delta(
+                    trade_category, trade.quantity_units, amount_units=trade.amount_units
+                )
                 if delta:
                     holdings[code] = holdings.get(code, 0) + delta
                 if trade_category in {"buy", "rights", "new_stock"} and trade.amount_units != 0:
@@ -310,12 +320,13 @@ def compute_daily_valuations(
         else:
             cash_units += day_cash_delta
 
-        market_value_units, missing, bond_fallback = total_market_value(
+        market_value_units, missing, bond_fallback, new_stock_fallback = total_market_value(
             holdings,
             ladder,
             cursor_date,
             cost_basis=cost_basis,
             bond_divisors=bond_divisors,
+            new_stock_codes=pending_codes,
         )
         money_fund_units = sum(money_fund.values())
         nonzero_holdings = sum(1 for qty in holdings.values() if qty != 0)
@@ -349,7 +360,13 @@ def compute_daily_valuations(
         fifo_error_today = any(code in fifo_error_codes for code in holdings)
         status = (
             ROW_STATUS_DEGRADED
-            if (fifo_error_today or uncovered or bond_fallback or money_fund_unknown)
+            if (
+                fifo_error_today
+                or uncovered
+                or bond_fallback
+                or new_stock_fallback
+                or money_fund_unknown
+            )
             else ROW_STATUS_OK
         )
         status_reason = (
@@ -357,6 +374,7 @@ def compute_daily_valuations(
                 fifo_error=fifo_error_today,
                 uncovered=uncovered,
                 bond_fallback=bond_fallback,
+                new_stock_fallback=new_stock_fallback,
                 money_fund_unknown=money_fund_unknown,
             )
             if status == ROW_STATUS_DEGRADED
@@ -514,7 +532,10 @@ def _symbols(live: list[Trade], bond_alias: dict[str, str] | None = None) -> lis
             for trade in live
             if trade.security_code
             and not is_money_fund_row(trade)
-            and holding_delta(category(trade), trade.quantity_units) != 0
+            and holding_delta(
+                category(trade), trade.quantity_units, amount_units=trade.amount_units
+            )
+            != 0
         }
     )
 

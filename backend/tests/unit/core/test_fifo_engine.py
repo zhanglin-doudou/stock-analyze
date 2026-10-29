@@ -399,6 +399,63 @@ def test_sell_without_any_holding_records_only_data_error() -> None:
     assert result.rounds[0].key == "b1:s2"
 
 
+# ── 新股认购：NEW_STOCK 缴款行建仓，上市卖出可配对成回合（设计 D11）──
+
+
+def _new_stock(
+    trade_id: str,
+    day: date,
+    count: int,
+    amount_yuan: str,
+    *,
+    code: str = "001237",
+    name: str = "惠康科技",
+) -> FifoEvent:
+    return FifoEvent(
+        trade_id=trade_id,
+        trade_date=day,
+        kind=EventKind.NEW_STOCK,
+        security_code=code,
+        security_name=name,
+        quantity_units=shares(count),
+        price_units=price_of("53.26"),
+        amount_units=cents(amount_yuan),
+    )
+
+
+def test_new_stock_subscription_builds_round_with_listing_sell() -> None:
+    """中签通知（金额 0）不建仓；缴款建 lot；上市首日卖出 → 一个 closed 回合。"""
+    result = build_rounds(
+        [
+            _new_stock("win", date(2026, 5, 14), 500, "0.00"),  # 中签通知：不计持仓
+            _new_stock("pay", date(2026, 5, 18), 500, "-26630.00"),  # 认购缴款：建仓
+            _new_stock("book", date(2026, 5, 19), 500, "0.00"),  # 入帐通知：不计持仓
+            sell("s1", date(2026, 5, 22), 500, "135.00", code="001237", name="N惠康"),
+        ]
+    )
+    assert result.data_errors == ()
+    assert len(result.rounds) == 1
+    round_ = result.rounds[0]
+    assert round_.status == "closed"
+    assert round_.open_trade_id == "pay"
+    assert round_.quantity_units == shares(500)
+    assert round_.cost_units == cents("26630.00")
+    assert round_.proceeds_units == cents("67500.00")
+    assert round_.pnl_units == cents("67500.00") - cents("26630.00")
+    assert round_.security_name == "N惠康"  # 显示名取最后一次卖出的名称
+
+
+def test_new_stock_paid_position_stays_open_without_sell() -> None:
+    """只有缴款、尚未卖出：产出 open 回合（上市前也能看到打新仓位）。"""
+    result = build_rounds([_new_stock("pay", date(2026, 5, 18), 500, "-26630.00")])
+    assert result.data_errors == ()
+    assert len(result.rounds) == 1
+    assert result.rounds[0].status == "open"
+    assert result.rounds[0].open_date == date(2026, 5, 18)
+    assert [lot.quantity_units for lot in result.open_lots] == [shares(500)]
+    assert [lot.cost_units for lot in result.open_lots] == [cents("26630.00")]
+
+
 # ── 货基超卖容忍（allow_oversell）：红利发放行隔离未入账，超出份额 = 利息 ──
 
 

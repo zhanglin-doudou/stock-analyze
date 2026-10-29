@@ -246,7 +246,7 @@ async def _holdings_at(
         if not code:
             continue
         trade_category = category(trade)
-        delta = holding_delta(trade_category, trade.quantity_units)
+        delta = holding_delta(trade_category, trade.quantity_units, amount_units=trade.amount_units)
         if delta:
             holdings[code] = holdings.get(code, 0) + delta
             names[code] = trade.security_name or code
