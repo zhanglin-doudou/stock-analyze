@@ -114,6 +114,8 @@ def trades_to_events(
     - `line_no` 空值按 0 处理（稳定序需要 int）；
     - 可转债发债代码按 `bond_alias` 归一到上市代码（未传时从本批 trades 派生），
       申购缴款与上市卖出进入同一 FIFO 组（设计 D3）。
+    - 货基行（`money_fund_balance_units` 非空）打 `allow_oversell`：红利发放行隔离未入账，
+      赎回略多于申购的部分按利息零成本计收益，不报超卖（引擎口径）。
     """
     alias = (
         bond_alias
@@ -139,6 +141,7 @@ def trades_to_events(
                 ratio_units=0,
                 line_no=trade.line_no or 0,
                 summary=trade.summary or "",
+                allow_oversell=trade.money_fund_balance_units is not None,
             )
         )
     return events

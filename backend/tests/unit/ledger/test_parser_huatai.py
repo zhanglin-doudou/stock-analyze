@@ -494,18 +494,24 @@ def test_wrapped_summary_newline_normalized_for_side_and_parse() -> None:
     assert quarantined_lines[25].reason_code == QuarantineReason.INVALID_AMOUNT.value
 
 
-def test_money_fund_balance_running_with_opening_zero_assumption() -> None:
-    """货基行逐行累计余额（份额 × 1.0000 → 金额分）；无持仓锚点时期初 0、余额可为负并留痕。"""
+def test_money_fund_balance_running_with_opening_inferred_assumption() -> None:
+    """货基行逐行累计余额（份额 × 1.0000 → 金额分）。
+
+    无持仓锚点且账单内有净赎回：期初按「-min(累计净额)」反推下界（赎回行自证期初持仓），
+    余额全程 ≥ 0，并写 assumptions["money_fund_opening_inferred"] 留痕。
+    """
     bill = _parse(_FUND_BILL.read_bytes(), file_name=_FUND_BILL.name)
     by_line = {row.line_no: row for row in bill.rows}
     # 折行名称（华泰紫金天\n天发货币）仍识别为货基；其余股票/转账行为 NULL。
-    assert by_line[17].money_fund_balance_units == -116295_38
-    assert by_line[18].money_fund_balance_units == -9586_85
-    assert by_line[20].money_fund_balance_units == -116307_65
-    assert by_line[23].money_fund_balance_units == -110639_33
+    # 期初下界 = 116307.65（最小累计净额 -116307.65 的反推），各行余额 = 旧值 + 期初。
+    assert by_line[17].money_fund_balance_units == 12_27
+    assert by_line[18].money_fund_balance_units == 106720_80
+    assert by_line[20].money_fund_balance_units == 0
+    assert by_line[23].money_fund_balance_units == 5668_32
     assert by_line[21].money_fund_balance_units is None
     assert by_line[22].money_fund_balance_units is None
-    assert bill.assumptions["money_fund_opening_zero"] == ["940018"]
+    assert bill.assumptions["money_fund_opening_inferred"] == {"940018": 116307_65}
+    assert "money_fund_opening_zero" not in bill.assumptions
 
 
 def test_money_fund_balance_anchored_by_fund_holding_section() -> None:

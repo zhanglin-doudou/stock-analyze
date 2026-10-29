@@ -67,7 +67,8 @@ log = get_logger("stock_review.assets")
 # 资产表口径版本：bump 后旧 state 触发全量重建。
 # 1.1：资产余额口径 = 现金 + 货币基金余额 + 持仓市值（货基不再当持仓估值）。
 # 1.2：可转债发债代码归并上市代码（持仓/行情按 canonical），可转债市值固定 1 手=10 张。
-ASSET_DEFINITION_VERSION = "1.2"
+# 1.3：货基无锚点时按「-min(累计净额)」反推期初下界（赎回行自证持仓），余额不再为负。
+ASSET_DEFINITION_VERSION = "1.3"
 # 安全窗：每次有新数据/脏流水/行情 as_of 变化时重算最近 45 天。
 SAFETY_DAYS = 45
 # 水位线重叠窗：PG `now()` = 事务开始时间，覆盖「长事务晚提交」竞态。

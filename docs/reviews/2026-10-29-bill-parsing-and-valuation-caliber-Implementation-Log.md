@@ -215,3 +215,45 @@ def _money_fund_row_delta(row: ParsedRow) -> int:
 - 「托管转入」一并隔离（与「托管转出」同类纯通知行）；有金额或有资金余额的同名行不受影响。
 - stem 冲突（同名两只转债）只留日志/assumptions，不归并、不阻断——符合设计「宁可不归并，不可错归并」。
 - 未做：历史已入库的零金额信息行不在本次清理（重导账单即按新口径隔离）；如需回填清理，另开任务。
+
+---
+
+# 第三篇 货基超卖容忍 + 无锚点期初反推（2026-10-29 用户决策）
+
+> 起因：用户上传真实账单（`changed_new.xlsx`，无「基金持仓」锚点区块、940018 首行即赎回
+> 116,295.38、含五零「红利发放」行），构建资产表后**所有日期 degraded**。诊断出三个根因：
+> ① 货基期初按 0 → 首行赎回后余额恒负 → `money_fund_unknown` 全表降级；
+> ② 红利发放行被 INVALID_AMOUNT 隔离 → 份额丢失 → 09-30 赎回 106,720.80 > 申购 106,708.53
+> → FIFO 超卖 12.27；③ 货基行参与 FIFO，首行赎回无买入可配必报 data_error。
+> 用户拍板：**货基允许超卖，超卖数量 = 当次交易的收益（即红利发放的利息）；红利发放依旧隔离。**
+
+## 13. 落地内容（对照设计 D10 + §6.4 修订）
+
+| 改动 | 实现 | 位置 |
+|---|---|---|
+| 货基超卖容忍 | `FifoEvent` 新增 `allow_oversell`（默认 False）；`_apply_sell`：货基**部分超卖**的超出份额生成零成本 Fill（`buy_trade_id=""`、holding_days=0），卖款差额全额计 `pnl`（利息），不记 data_error；**全额超卖**（无 lot 可配，期初本金赎回）返回 `(None, 0)` 静默跳过，不记错、不计损益 | `stock_core/fifo/types.py` / `engine.py` |
+| 货基行打标 | `trades_to_events`：`allow_oversell = trade.money_fund_balance_units is not None`（rebuild/nav/bridge 全部调用方自动生效） | `application/rebuild.py` |
+| 无锚点期初反推 | `_apply_money_fund_balances` 改两遍推演：第一遍期初 0 记录各代码最小累计净额，无锚点且 min<0 → `期初 = -min`（赎回行自证持仓下界），写 `assumptions["money_fund_opening_inferred"]`；min≥0 → 保持 `money_fund_opening_zero`。返回签名 `set[str]` → `tuple[dict[str,int], set[str]]` | `parsers/huatai.py` |
+| 口径版本 | `ASSET_DEFINITION_VERSION` 1.2 → **1.3**（货基余额值变化，自动全量重建） | `application/assets.py` |
+| 红利发放 | **保持隔离**（INVALID_AMOUNT 五零规则不动），利息经 FIFO 超卖口径回到回合 PnL | 无改动 |
+
+设计权衡：零成本利息 Fill 保持了「Σ fills = 回合聚合」守恒不变量，且无需 rounds 表结构变更；
+全额超卖静默跳过是保守选择——无法区分本金与利息时一律按本金（pnl 0）处理，杜绝phantom收益。
+
+## 14. 真实账单端到端验证（changed_new.xlsx）
+
+| 环节 | 结果 |
+|---|---|
+| 解析 | `assumptions["money_fund_opening_inferred"] = {"940018": 11630765}`；余额序列 12.27 → 106720.80 → 0 → 5668.32 → 7782.33 → **0**，全程 ≥ 0（期末恰好清空，与账单一致） |
+| FIFO | `data_errors = []`；940018 两个 closed 回合：PnL **+12.27**（利息）与 0.00，`oversell_units = 0` |
+| 资产表 | 31 行 **0 行 degraded**（仅剩缺行情 blocked，离线验证空 ladder 所致，生产有行情即为 ok）；修复前同账单全部 degraded |
+
+## 15. 测试与门禁（第三篇）
+
+- 新增：`test_fifo_engine.py` 货基部分超卖（零成本利息 Fill + 守恒）/ 全额超卖（静默跳过）2 例；
+  `test_mapping.py` 货基行打标 + 940018 申赎利息 12.27 闭环 2 例。
+- 口径修订：`test_parser_huatai.py`（opening_zero → opening_inferred，余额 12.27/106720.80/0/5668.32）；
+  `test_classification.py`（API 出参 12.27 / 106720.80）；`definition_version` 断言 1.2 → 1.3（5 处）。
+- 门禁：`make lint` / `make typecheck` / core **100% 覆盖**（318 条）/ `make test-p2`（含 api-check、
+  快照无漂移）/ `make test-metrics` / `make verify-p1` 全绿；单元 749 条全过。
+  期间 `test_rebuild_rounds_job_runs_through_worker` 单发 worker 领取 flake，单跑即过（已知环境性问题）。

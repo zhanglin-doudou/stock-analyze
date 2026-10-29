@@ -51,6 +51,9 @@ class FifoEvent:
     ratio_units: int = 0
     line_no: int = 0
     summary: str = ""
+    # 货基标记：允许超卖且超卖不计 data_error。货基红利发放行按口径隔离、不进流水，
+    # 赎回时份额会略多于已入账申购——超出部分即累计利息（零成本），卖款全额计收益。
+    allow_oversell: bool = False
 
     @property
     def stable_key(self) -> tuple[date, int, str, int, int, str]:
