@@ -384,8 +384,37 @@ def test_money_fund_balance_counts_into_assets_without_market_request() -> None:
     assert day2["market_value_units"] == 0
     assert day2["holding_count"] == 0
     assert day2["total_assets_units"] == cents("1000.00")
-    # 货基余额非负 → 不触发 money_fund_unknown。
     assert day2["status_reason"] is None
+
+
+def test_money_fund_negative_balance_is_clamped_not_degraded() -> None:
+    """历史入库的负货基余额（账单缺赎回流水）→ 按 0 兜底，不产生降级行。"""
+    trades = [
+        _trade(
+            trade_date=date(2026, 1, 1),
+            category="other",
+            amount_units=0,
+            cash_balance_units=cents("20000.00"),
+            line_no=1,
+        ),
+        _trade(
+            trade_date=date(2026, 1, 2),
+            category="buy",
+            security_code="004369",
+            amount_units=-cents("10000.00"),
+            quantity_units=shares("10000"),
+            price_units=price("1.0000"),
+            money_fund_balance_units=-cents("9971.96"),
+            line_no=2,
+        ),
+    ]
+    result = _run(trades, date(2026, 1, 1), date(2026, 1, 3))
+
+    day2 = _row(result, date(2026, 1, 2))
+    assert day2["status"] == "ok"
+    assert day2["status_reason"] is None
+    assert day2["money_fund_units"] == 0
+    assert day2["total_assets_units"] == cents("10000.00")
 
 
 def test_money_fund_balance_override_takes_last_row_of_day() -> None:

@@ -122,6 +122,16 @@ def is_money_fund_row(trade: Trade) -> bool:
     return trade.money_fund_balance_units is not None
 
 
+def money_fund_balance(trade: Trade) -> int:
+    """货基行的余额（scale=2）；负余额按 0 兜底。
+
+    账单缺赎回/转出流水时（如 [省心投] 只列申购），按期末基金持仓锚点回推的中间余额会
+    为负——余额定义上不可能为负，解析器已写 0（设计 D12）；这里再兜底一次，兼容早先
+    入库的负值数据，避免把缺失流水误报成「期初未知」降级。
+    """
+    return max(0, int(trade.money_fund_balance_units or 0))
+
+
 def money_fund_share_delta(trade: Trade) -> int:
     """货基行的余额增量（金额分；卖出取负，其余含「红利发放」红利再投取正）。
 
@@ -142,7 +152,7 @@ def initial_money_fund_balances(trades: list[Trade], period_start: date) -> dict
     balances: dict[str, int] = {}
     for trade in trades:
         if trade.trade_date < period_start and is_money_fund_row(trade):
-            balances[trade.security_code] = int(trade.money_fund_balance_units or 0)
+            balances[trade.security_code] = money_fund_balance(trade)
     seen: set[str] = set(balances)
     for trade in trades:
         if trade.trade_date < period_start or not is_money_fund_row(trade):
@@ -151,7 +161,7 @@ def initial_money_fund_balances(trades: list[Trade], period_start: date) -> dict
         if code in seen:
             continue
         seen.add(code)
-        balances[code] = int(trade.money_fund_balance_units or 0) - money_fund_share_delta(trade)
+        balances[code] = max(0, money_fund_balance(trade) - money_fund_share_delta(trade))
     return balances
 
 

@@ -314,3 +314,70 @@ def _money_fund_row_delta(row: ParsedRow) -> int:
 
 - 账单期前已持有的股票（本例 000938 / 688126 / 688181）卖出时无期初 lot → 超卖 data_error，
   资产表对应日期仍 `degraded`「FIFO 数据异常」。属既有「无期初持仓锚点」限制，与本篇新股口径无关。
+
+# 第五篇 看板持仓口径对齐 + 货基负余额兜底（2026-10-29）
+
+## 21. 问题与根因
+
+**现象（用户报告，账号 `1234@dev.com`）**
+
+- 资产表显示 `degraded`；
+- 看板 `DASHBOARD_HOLDING_PRICE_MISSING / asset_overview.holdings.market_value`，
+  缺行情标的 18 个：000730、001526、004137、004262、004369、004749、005194、009712、010051、
+  011063、011258、012470、015649、016778、017539、202308、754019、940018。
+
+**根因（两处，均为「货基上线后口径漂移」）**
+
+1. **看板未跟上资产表口径**：`dashboard._holdings_at` 仍把每一行当「普通持仓」累加数量，然后对所有
+   标的统一请求行情。18 个代码中 **17 个是货币基金**（解析上传账单得到货基代码 20 个，两者交集
+   即这 17 个）；剩下 1 个 `754019` 是**可转债发债代码**（`「xx发债」，1 手=10 张`），持仓数量为 0
+   （新建仓行 qty=0、托管转出行 delta=0）。
+   → 货基本来「余额在 `money_fund_balance_units`，不该请求行情」，看板却把它们当持仓去要价 → 必然缺失。
+2. **资产表负余额降级**：货基余额按「账单末尾『基金持仓』区块」**期末锚点反推**，而这份账单缺
+   `[省心投]` 赎回/转出流水（如 004369 两笔申购累计 19990.96，期末锚点只有 19.00）→ 期初被反推成
+   −19971.96、首行余额 −9971.96。旧实现把「反推中间余额为负」判为「期初未知」，把
+   2021-10-29 ~ 2025-12-16 共 **1510 行**资产标 `degraded`。
+
+> 说明：本机各库（`stock_analyze` / `stock_analyze_test` / Docker `sa-dev-db`）的 `ledger.trade` 均为 0 行，
+> 无法直接查该账号落库数据；因此复现统一采用**「解析上传电子对账单 → 内存跑 compute_daily_valuations / 看板持仓」**。
+
+## 22. 落地内容（对照设计 D12）
+
+| 文件 | 改动 |
+|---|---|
+| `packages/review/src/stock_review/application/dashboard.py` | `_holdings_at` 与资产表同口径：货基行 `continue`（不进持仓/不请求行情）；`canonical_code` 归并发债代码；无行情时债券/待上市新股按 `cost_basis` 兜底（`cost_fallback`），只有真缺价的普通标的进 `missing_prices`。返回值改为 4 元组 `(holdings, missing_prices, cost_fallback, truncated)` |
+| 同上 | 新增 WARNING `dashboard.holdings_degraded`（`missing_price_symbols` / `cost_fallback_symbols` / `asset_status` / `asset_status_reason`），满足「日志输出降级原因」 |
+| `packages/review/src/stock_review/application/assets.py` | 删除 `MONEY_FUND_UNKNOWN_REASON` 与 `money_fund_unknown` 降级分支；`status` 只看 `fifo_error_today \|\| uncovered \|\| bond_fallback \|\| new_stock_fallback`；`ASSET_DEFINITION_VERSION` 1.4 → **1.5** |
+| 同上 | `build_degraded` 日志新增 `degraded_reasons`（分类计数）与 `fallback_symbols`（成本兜底标的）；新增 `assets.money_fund_balance_clamped` 监控日志 |
+| `packages/review/src/stock_review/application/valuation.py` | 新增 `money_fund_balance(trade) = max(0, balance_units)`；`initial_money_fund_balances` 两处改用之 |
+| `packages/review/src/stock_review/application/nav.py` | 逐日货基余额同样走 `money_fund_balance`（净值/资产/看板同一口径） |
+| `packages/ledger/src/stock_ledger/parsers/huatai.py` | `_apply_money_fund_balances` 返回 `(inferred, zero, clamped)`；反推负值写 0（**不改累计值**，期末仍落锚点）；`assumptions["money_fund_balance_clamped"]` 留痕 |
+
+## 23. 真实账单端到端验证（普通账户电子对账单_20261020135757.xlsx）
+
+| 指标 | 修复前 | 修复后 |
+|---|---|---|
+| 解析 assumptions | `{}`（全按反推值落库，含负值） | `{"money_fund_opening_zero": ["001526"], "money_fund_balance_clamped": ["002960","004137","004369","016778"]}` |
+| 资产表（1817 行） | 1510 行 `degraded`「货币基金期初余额未知（无基金持仓锚点）」 | **1817 行全 `ok`，0 blocked / 0 degraded** |
+| 看板请求行情标的 | 18 个（含 17 个货基 + 754019） | **8 个真实股票**：000938 / 002020 / 300009 / 300373 / 300496 / 300863 / 688019 / 688165 |
+| 隔离行 | 714 条（706 `[省心投]红利发放` INVALID_AMOUNT + 8 条 qty=0 转存管转出） | 不变（按设计仍隔离） |
+
+## 24. 测试与门禁（第五篇）
+
+- 新增 `backend/tests/unit/review/test_dashboard_holdings.py`（4 例）：货基不进持仓且不请求行情 /
+  可转债发债代码归并（1 手×110×10 = 1100.00）/ 债券+待上市新股成本兜底 / 普通股票真缺价仍 missing。
+- 新增 `test_parser_huatai.py::test_money_fund_negative_reverse_balance_clamped_to_zero`（004369 两笔申购
+  19990.96、锚点 19.00 → 行余额 0 / 1900，`clamped={"004369"}`）。
+- 新增 `test_assets_application.py::test_money_fund_negative_balance_is_clamped_not_degraded`（当日 `ok`、
+  `money_fund_units=0`、`total_assets_units=10000.00`）。
+- 口径修订：`definition_version` 断言 1.4 → 1.5（5 处，`test_assets_incremental.py` / `test_api_081_assets.py`）。
+- 门禁：`backend/tests/unit` 759 passed / unit/review 205 passed / parser_huatai 60 passed；
+  `make lint`、`make typecheck`（mypy strict + import-linter + tsc）通过；`STOCK_DB_NAME=stock_analyze_test make test-p2`
+  全绿（269 passed）。
+- 备注：`test_metrics_persist.py::test_concurrent_same_key_upsert` 曾在整套并发负载下偶发
+  `duplicate key ... metric_result_pkey`，**单独运行与整套重跑均通过**，与本次改动无文件交集（指标落库链路未动）。
+
+## 25. 遗留（第五篇范围外）
+
+- 账单期前已持有股票卖出无期初 lot → 超卖 data_error（同第四篇 §20，属既有「期初持仓锚点」缺失问题）。
+- 货基余额「0 兜底」只解决**账单单侧流水缺陷**；若后续补导完整流水，重建即由锚点自然修正。

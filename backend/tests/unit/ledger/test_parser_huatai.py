@@ -15,7 +15,12 @@ from stock_contracts.enums import QuarantineReason, WarningCode
 from stock_contracts.errors import ApiError, ErrorCode
 from stock_ledger.parsers.columns import detect_date_format, map_columns
 from stock_ledger.parsers.dedupe import dedupe_key
-from stock_ledger.parsers.huatai import ParsedBill, parse_bill
+from stock_ledger.parsers.huatai import (
+    ParsedBill,
+    ParsedRow,
+    _apply_money_fund_balances,
+    parse_bill,
+)
 
 CLOCK = FrozenClock(datetime(2026, 7, 1, 9, 0, tzinfo=UTC))
 
@@ -529,6 +534,52 @@ def test_money_fund_balance_anchored_by_fund_holding_section() -> None:
     # 202308 无持仓锚点 → 期初 0，余额 = 买入份额 10000.00。
     assert by_line[21].money_fund_balance_units == 10000_00
     assert bill.assumptions["money_fund_opening_zero"] == ["202308"]
+
+
+def _mf_row(
+    line_no: int, trade_date: date, code: str, side: str, *, quantity_units: int
+) -> ParsedRow:
+    """构造一条货基行（其余字段取最小可用值，只测余额推演）。"""
+    return ParsedRow(
+        line_no=line_no,
+        trade_date=trade_date,
+        security_code=code,
+        security_name="前海开源聚财宝货币B",
+        side=side,
+        quantity_units=quantity_units,
+        price_units=1_000_000,
+        amount_units=0,
+        commission_units=0,
+        stamp_tax_units=0,
+        other_fee_units=0,
+        cash_balance_units=None,
+        cash_balance_available=False,
+        summary=None,
+        summary_code=None,
+        account_masked=None,
+        occurrence_idx=0,
+        dedupe_key=f"k{line_no}",
+        raw={},
+    )
+
+
+def test_money_fund_negative_reverse_balance_clamped_to_zero() -> None:
+    """账单缺赎回/转出流水：按期末锚点回推的中间余额为负 → 写 0（期末仍落锚点）。
+
+    复现 2026-10-29 用户账单（[省心投] 只列申购、无赎回流水）：004369 两笔申购累计
+    19990.96，基金持仓表期末仅 19.00 → 锚点反推期初 = -19971.96，第一行余额 -9971.96。
+    """
+    rows = [
+        _mf_row(1, date(2025, 4, 28), "004369", "buy", quantity_units=10_000_00_00),
+        _mf_row(2, date(2025, 12, 15), "004369", "buy", quantity_units=9_990_96_00),
+    ]
+    inferred, zero, clamped = _apply_money_fund_balances(rows, {"004369": 1_900})
+
+    assert inferred == {}
+    assert zero == set()
+    assert clamped == {"004369"}
+    assert rows[0].money_fund_balance_units == 0  # 负余额写 0 兜底
+    assert rows[1].money_fund_balance_units == 1_900  # 期末仍等于基金持仓锚点
 
 
 def test_money_fund_recognized_by_price_one_and_zero_fees() -> None:

@@ -228,20 +228,22 @@ def _read_fund_holding_anchors(rows: list[list[str]], codes: set[str]) -> dict[s
 
 def _apply_money_fund_balances(
     rows: list[ParsedRow], anchors: dict[str, int]
-) -> tuple[dict[str, int], set[str]]:
+) -> tuple[dict[str, int], set[str], set[str]]:
     """按余额累计（+ 账单「基金持仓」期末锚点反推期初）逐行写货币基金余额。
 
     全部在**金额标度（分）**上运行：份额增量先按「份额 × 单位净值(1.0000)」换算成金额，
-    避免 Qty(scale=4) 与 Money(scale=2) 混算。返回 ``(inferred, zero)``：
+    避免 Qty(scale=4) 与 Money(scale=2) 混算。返回 ``(inferred, zero, clamped)``：
 
     - ``inferred``：无锚点但账单内出现净赎回（余额会为负）的代码 → 期初按下界反推
       ``-min(累计净额)``。赎回行本身就是期初持仓的证据（不可能赎回没有的份额），
-      这是账单自证的下界推断而非伪造；余额全程 ≥ 0，不再触发「期初未知」降级。
+      这是账单自证的下界推断而非伪造；余额全程 ≥ 0。
     - ``zero``：无锚点且余额天然非负（如只有申购）的代码 → 期初按 0，留痕即可。
+    - ``clamped``：有锚点但账单**缺赎回/转出流水**（如 [省心投] 只列申购），按期末锚点
+      反推的中间余额会为负；余额定义上不可能为负 → 写 0 兜底留痕（设计 D12）。
     """
     codes = _money_fund_codes(rows)
     if not codes:
-        return {}, set()
+        return {}, set(), set()
     ordered = sorted(rows, key=lambda row: (row.trade_date, row.line_no))
     # 第一遍：期初 0 推演，记录各代码的累计净额与最小余额。
     running: dict[str, int] = dict.fromkeys(codes, 0)
@@ -261,12 +263,18 @@ def _apply_money_fund_balances(
     for code in codes:
         opening[code] = anchors[code] - running[code] if code in anchors else inferred.get(code, 0)
     balance = dict(opening)
+    clamped: set[str] = set()
     for row in ordered:
         if row.security_code not in codes:
             continue
         balance[row.security_code] += _money_fund_row_delta(row)
-        row.money_fund_balance_units = balance[row.security_code]
-    return inferred, zero
+        stored = balance[row.security_code]
+        if stored < 0:
+            # 缺流水导致的反推负余额：写 0（不修改累计值，期末仍落在锚点上）。
+            clamped.add(row.security_code)
+            stored = 0
+        row.money_fund_balance_units = stored
+    return inferred, zero, clamped
 
 
 def _money_fund_row_delta(row: ParsedRow) -> int:
@@ -663,13 +671,15 @@ def parse_bill(
     # （赎回行自证期初持仓），其余无锚点代码期初按 0；均写 assumptions 留痕，不伪造余额。
     fund_rows = raw_rows[stop_row_index + 1 :] if stop_row_index is not None else []
     fund_anchors = _read_fund_holding_anchors(fund_rows, _money_fund_codes(rows))
-    mf_inferred, mf_zero = _apply_money_fund_balances(rows, fund_anchors)
+    mf_inferred, mf_zero, mf_clamped = _apply_money_fund_balances(rows, fund_anchors)
     if mf_zero:
         assumptions["money_fund_opening_zero"] = sorted(mf_zero)
     if mf_inferred:
         assumptions["money_fund_opening_inferred"] = {
             code: mf_inferred[code] for code in sorted(mf_inferred)
         }
+    if mf_clamped:
+        assumptions["money_fund_balance_clamped"] = sorted(mf_clamped)
     if rows and rows[0].side != "buy":
         warnings.append(WarningCode.FIRST_ROW_NOT_BUY)
     if any(q.reason_code == QuarantineReason.DUPLICATE_IN_FILE.value for q in quarantined):

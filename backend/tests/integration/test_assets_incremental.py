@@ -915,7 +915,7 @@ async def test_list_assets_state_chain_and_pagination(
         )
     assert build.state == "current"
     assert build.last_status == "ok"
-    assert build.definition_version == "1.4"
+    assert build.definition_version == "1.5"
     assert build.data_as_of == replay_market.as_of
     assert build.rows_count > 0
     assert [point.trade_date for point in points] == sorted(
@@ -1093,7 +1093,7 @@ async def test_list_assets_missing_after_empty_build_hides_state_fields(
     assert build.status_reason is None
     assert build.data_as_of is None
     assert build.has_new_market_data is False
-    assert build.definition_version == "1.4"
+    assert build.definition_version == "1.5"
 
 
 # ── worker handler：progress / result / 取消 ─────────────

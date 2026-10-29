@@ -31,6 +31,7 @@
 | D9 | 债券买价兜底 | 行情取不到（`not_supported` / `no_data` / `unavailable`）的**债券**标的：按 `cost_basis`（含费买入成本）估值，当日标 `degraded`，原因「债券按买入价估值（无行情：代码）」；非债券缺行情仍 `blocked` | 债券也 blocked | 满足「取不到就按买入价」，同时保留可解释状态 |
 | D10 | 货基超卖与利息口径（2026-10-29 用户确认） | **货基允许超卖**：红利发放行保持隔离（不进流水），赎回份额略多于已入账申购的**超出部分 = 累计利息**（零成本，卖款全额计收益）；**全额超卖**（账单期前本金赎回，无成本信息）静默跳过、不计损益。无锚点时货基期初按「-min(累计净额)」反推下界（赎回行自证期初持仓），余额全程 ≥ 0 | 红利发放解析入账 / 货基整体退出 FIFO | 消除「货基赎回必超卖 data_error」与「负余额全表 degraded」；回合 PnL 正确归属利息 |
 | D11 | 新股待上市口径（2026-10-29 用户确认） | 新股「认购缴款 → 上市首日」之间没有任何行情：①同一批中签会出现「中签通知 / 新股入帐 / 缴款」多行，**只有缴款行（金额非 0）才建仓**，零金额通知行不计持仓；②`new_stock` 缴款行在 FIFO 中**建 lot**（等同买入），上市卖出能配成回合（未卖出则为 open 回合）；③资产表持有待上市新股且无行情时，按**认购成本**兜底估值为 `degraded`（原因「新股待上市，按认购价估值（无行情：001237）」），不再 `blocked`；上市后自动回到市价口径 | 通知行重复计数 / 缴款行不建 lot / 待上市整表 blocked | 打新期间资产 = 现金 + 认购成本（恒等于缴款前后总资产），回合可审计，上市后无缝切换市价 |
+| D12 | 看板持仓口径对齐 + 货基负余额兜底（2026-10-29 用户确认） | ①**Dashboard 当前持仓必须与资产表同口径**：货基行不进持仓、不请求行情；可转债发债代码（`754xxx「xx发债」`）按名称 stem 归并到上市代码；债券/待上市新股无行情时按成本兜底（`bond_fallback` / `new_stock_fallback`），不再计入 `missing_prices`。②**货基反推中间余额为负 → 写 0 兜底**，期末仍落「基金持仓」锚点，写 `assumptions["money_fund_balance_clamped"]`，**不标 `degraded`**（账单缺赎回/转出流水属单侧流水缺陷，不是期初未知）。③`ASSET_DEFINITION_VERSION` 1.4 → **1.5** | 看板沿用旧口径（货基当持仓 → 18 个代码误报 `DASHBOARD_HOLDING_PRICE_MISSING`）/ 负余额整段 degraded | 看板与资产表口径一致；1510 行「货币基金期初余额未知」降级消失；降级原因落日志（`assets.build_degraded.degraded_reasons` / `dashboard.holdings_degraded` / `assets.money_fund_balance_clamped`） |
 
 ## 2. 现状与问题
 
@@ -96,7 +97,7 @@
 |---|---|---|---|---|
 | `money_fund_balance_units` | `BigInteger` | 是 | 金额 scale=2 | 该行**发生后**该标的（货币基金）份额余额。`NULL` = 非货币基金行；非空即货基行标记 |
 
-- 与 `cash_balance_units` 同构，不加 CHECK（允许负余额，见 §6.4）。
+- 与 `cash_balance_units` 同构，不加 CHECK：列层面不强约束符号（人工 PATCH 修正仍可写入原始账实值）；解析器侧对「有锚点反推负值」按 0 兜底并记 `assumptions["money_fund_balance_clamped"]`（见 §6.4 / D12）。
 - 索引：无需新增（查询按 `user_id + trade_date` 已有索引）。
 - 回滚：`ALTER TABLE ledger.trade DROP COLUMN money_fund_balance_units`。
 
@@ -148,12 +149,14 @@ row.money_fund_balance_units = balance_after(code) × price_units(1.0000) → sc
 - 反推：`balance_before(最后一行) = 锚点 − 最后一行 delta`，向前逐行回推；同时从期初正向推演校验，二者不一致（差额 > 0.01 元）→ 以**锚点反推值**为准并写 `WarningCode`（新增枚举值或复用 assumptions 计数）。
 - 无「基金持仓」区块：期初余额按 0，写 `assumptions["money_fund_opening_zero"] = [code...]`。
 
-### 6.4 无锚点/部分导入的处理（2026-10-29 D10 修订）
+### 6.4 无锚点/部分导入的处理（2026-10-29 D10 / D12 修订）
 
 - 无锚点但账单内出现净赎回（期初 0 推演余额会为负）：期初按 **「-min(累计净额)」反推下界**——赎回行本身就是期初持仓的证据（不可能赎回没有的份额），这是账单自证的推断而非伪造；写 `assumptions["money_fund_opening_inferred"]`。余额全程 ≥ 0，不再触发降级。
 - 无锚点且余额天然非负（如只有申购）：期初按 0，写 `assumptions["money_fund_opening_zero"]`。
-- 有锚点但反推后余额仍为负（数据矛盾）：**不钳 0、不伪造**；该日行标 `degraded` + 原因「货币基金期初余额未知（无基金持仓锚点）」。
+- **有锚点但账单缺赎回/转出流水（单侧流水缺陷）导致反推中间余额为负**（2026-10-29 D12 修订）：其余额按 **0 兜底**（`stored < 0 → 0`），**期末仍落「基金持仓」锚点**，并写 `assumptions["money_fund_balance_clamped"] = [code...]`；该日行**不再标 `degraded`**（原因不再是「期初余额未知」），同时打 `assets.money_fund_balance_clamped` 监控日志说明「账单缺赎回/转出流水，货基中间余额为负，按 0 兜底」。
+  - 之所以与「无锚点」情形区别对待：有锚点时期末余额是账单自证的权威值，中间负值只可能是流水缺失，钳 0 是**不伪造下限**的最小代价；无锚点则必须靠赎回行反推期初（见第一条）。
 - 用户可通过 `PATCH /trades/{id}` 手工修正该行 `money_fund_balance`（新增可编辑字段），修正后重建资产表即恢复。
+- **看板同口径（D12）**：`dashboard._holdings_at` 复用本节的估值工具——货基行不进持仓/不请求行情，可转债发债代码归并，债券/待上市新股缺行情按成本兜底只算 `cost_fallback`；仅真缺行情的普通标的计入 `missing_prices` 并触发 `DASHBOARD_HOLDING_PRICE_MISSING`。
 
 ### 6.5 估值推演（review 层，assets / nav / bridge 共用）
 

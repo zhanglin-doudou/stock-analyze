@@ -45,7 +45,9 @@ from stock_review.application.bond_alias import build_bond_alias, canonical_code
 from stock_review.application.bridge import _initial_cash
 from stock_review.application.rebuild import trades_to_events
 from stock_review.application.valuation import (
+    BOND_COST_FALLBACK_PREFIX,
     CASHFLOW_CATEGORIES,
+    NEW_STOCK_COST_FALLBACK_PREFIX,
     PRICE_LOOKBACK,
     blocked_price_reason,
     bond_face_divisors,
@@ -56,6 +58,7 @@ from stock_review.application.valuation import (
     is_cash_balance,
     is_money_fund_row,
     load_prices,
+    money_fund_balance,
     new_stock_fallback_reason,
     new_stock_pending_codes,
     total_market_value,
@@ -71,7 +74,9 @@ log = get_logger("stock_review.assets")
 # 1.2：可转债发债代码归并上市代码（持仓/行情按 canonical），可转债市值固定 1 手=10 张。
 # 1.3：货基无锚点时按「-min(累计净额)」反推期初下界（赎回行自证持仓），余额不再为负。
 # 1.4：新股中签/入帐通知行（金额 0）不再计持仓；待上市新股缺行情按认购成本兜底 degraded。
-ASSET_DEFINITION_VERSION = "1.4"
+# 1.5：货基负余额按 0 兜底（账单缺赎回/转出流水时不再误报「期初未知」降级），看板持仓与
+#      资产表同口径（货基不进持仓、可转债代码归并、债券/待上市新股按成本兜底）。
+ASSET_DEFINITION_VERSION = "1.5"
 # 安全窗：每次有新数据/脏流水/行情 as_of 变化时重算最近 45 天。
 SAFETY_DAYS = 45
 # 水位线重叠窗：PG `now()` = 事务开始时间，覆盖「长事务晚提交」竞态。
@@ -99,8 +104,6 @@ STATE_BLOCKED = "blocked"
 NO_ANCHOR_REASON = "无现金余额锚点（无 cash_balance 行）"
 FIFO_ERROR_REASON = "FIFO 数据异常（超卖等）"
 MARKET_UNCOVERED_REASON = "行情未覆盖，按最近收盘估值"
-# 货基余额为负 = 区间首行即赎回且账单无「基金持仓」锚点（期初按 0 推演）。
-MONEY_FUND_UNKNOWN_REASON = "货币基金期初余额未知（无基金持仓锚点）"
 MISSING_PRICE_PREFIX = "缺行情数据"
 # blocked 行原因列上限（String(256)）
 _REASON_MAX = 256
@@ -218,9 +221,8 @@ def _row_status_reason(
     uncovered: bool,
     bond_fallback: list[str] | None = None,
     new_stock_fallback: list[str] | None = None,
-    money_fund_unknown: bool = False,
 ) -> str | None:
-    """行级 degraded 原因（FIFO 异常 / 行情未覆盖 / 债券按买入价 / 新股待上市 / 货基期初未知）。
+    """行级 degraded 原因（FIFO 异常 / 行情未覆盖 / 债券按买入价 / 新股待上市）。
 
     都不命中返回 NULL；多条原因用「；」拼接（去重由调用方保证）。
     """
@@ -233,9 +235,28 @@ def _row_status_reason(
         reasons.append(bond_fallback_reason(bond_fallback))
     if new_stock_fallback:
         reasons.append(new_stock_fallback_reason(new_stock_fallback))
-    if money_fund_unknown:
-        reasons.append(MONEY_FUND_UNKNOWN_REASON)
     return "；".join(reasons) if reasons else None
+
+
+# degraded 原因聚合标签（日志用）：去掉逐日变化的标的清单，避免键随组合爆炸。
+_BOND_FALLBACK_TAG = "债券按买入价估值（无行情）"
+_NEW_STOCK_FALLBACK_TAG = "新股待上市，按认购价估值（无行情）"
+_COST_FALLBACK_TAGS = frozenset({_BOND_FALLBACK_TAG, _NEW_STOCK_FALLBACK_TAG})
+_COST_FALLBACK_PREFIXES = (
+    (BOND_COST_FALLBACK_PREFIX, _BOND_FALLBACK_TAG),
+    (NEW_STOCK_COST_FALLBACK_PREFIX, _NEW_STOCK_FALLBACK_TAG),
+)
+
+
+def _reason_tag(part: str) -> tuple[str, list[str]]:
+    """degraded 原因片段 → ``(短标签, 涉及标的)``（标的从「前缀：a,b）」文案中摘出）。"""
+    text = part.strip()
+    for prefix, tag in _COST_FALLBACK_PREFIXES:
+        marker = prefix + "："
+        if text.startswith(marker):
+            symbols = text[len(marker) :].rstrip("）")
+            return tag, [item for item in symbols.split(",") if item]
+    return text, []
 
 
 def compute_daily_valuations(
@@ -293,7 +314,7 @@ def compute_daily_valuations(
             code = trade.security_code
             if is_money_fund_row(trade):
                 # 货基：不进持仓/成本/市值，只覆盖余额（同日多行以稳定序最后一行为准）。
-                money_fund[code] = int(trade.money_fund_balance_units or 0)
+                money_fund[code] = money_fund_balance(trade)
             elif code:
                 code = canonical_code(alias, code)  # 发债代码归并上市代码（设计 D3）
                 delta = holding_delta(
@@ -355,18 +376,11 @@ def compute_daily_valuations(
         )
         unrealized_pnl_units = market_value_units - holding_cost_units
         uncovered = cursor_date > as_of and nonzero_holdings > 0
-        money_fund_unknown = any(balance < 0 for balance in money_fund.values())
         # FIFO 异常只影响持有问题代码的那些天；对无 FIFO 问题代码持仓的其他天不降级。
         fifo_error_today = any(code in fifo_error_codes for code in holdings)
         status = (
             ROW_STATUS_DEGRADED
-            if (
-                fifo_error_today
-                or uncovered
-                or bond_fallback
-                or new_stock_fallback
-                or money_fund_unknown
-            )
+            if (fifo_error_today or uncovered or bond_fallback or new_stock_fallback)
             else ROW_STATUS_OK
         )
         status_reason = (
@@ -375,7 +389,6 @@ def compute_daily_valuations(
                 uncovered=uncovered,
                 bond_fallback=bond_fallback,
                 new_stock_fallback=new_stock_fallback,
-                money_fund_unknown=money_fund_unknown,
             )
             if status == ROW_STATUS_DEGRADED
             else None
@@ -806,12 +819,41 @@ async def build_assets(
         degraded_rows=degraded_rows,
         data_as_of=market_as_of.isoformat(),
     )
+    # 监控点：货基余额为负（账单缺赎回/转出流水，按期末锚点回推）→ 估值时按 0 兜底，
+    # 不降级但要留痕，说明「货基余额字段为什么比买入成本小」。
+    clamped_money_fund = sorted(
+        {
+            trade.security_code
+            for trade in live
+            if is_money_fund_row(trade) and int(trade.money_fund_balance_units or 0) < 0
+        }
+    )
+    if clamped_money_fund:
+        log.warning(
+            "assets.money_fund_balance_clamped",
+            user_id=str(user_id),
+            symbols=clamped_money_fund,
+            reason="账单缺赎回/转出流水，货基中间余额为负，按 0 兜底",
+        )
     if blocked_rows or degraded_rows:
-        reasons: dict[str, int] = {}
+        blocked_reasons: dict[str, int] = {}
+        # degraded 原因按「类别」聚合（去掉逐日变化的标的清单），否则日志键会随行情覆盖
+        # 组合爆炸；被成本兜底的标的另用 fallback_symbols 汇总。
+        degraded_reasons: dict[str, int] = {}
+        fallback_symbols: set[str] = set()
         for row in valuations.rows:
-            if row["status"] == ROW_STATUS_BLOCKED:
-                key = str(row["status_reason"] or "unknown")
-                reasons[key] = reasons.get(key, 0) + 1
+            status = row["status"]
+            reason = str(row["status_reason"] or "unknown")
+            if status == ROW_STATUS_BLOCKED:
+                blocked_reasons[reason] = blocked_reasons.get(reason, 0) + 1
+                continue
+            if status != ROW_STATUS_DEGRADED:
+                continue
+            for part in reason.split("；"):
+                tag, symbols = _reason_tag(part)
+                degraded_reasons[tag] = degraded_reasons.get(tag, 0) + 1
+                if tag in _COST_FALLBACK_TAGS:
+                    fallback_symbols.update(symbols)
         log.warning(
             "assets.build_degraded",
             user_id=str(user_id),
@@ -820,7 +862,9 @@ async def build_assets(
             end=end.isoformat(),
             blocked_rows=blocked_rows,
             degraded_rows=degraded_rows,
-            blocked_reasons=reasons,
+            blocked_reasons=blocked_reasons,
+            degraded_reasons=degraded_reasons,
+            fallback_symbols=sorted(fallback_symbols),
             market_causes=market_causes,
             fifo_error=fifo_error_now,
         )

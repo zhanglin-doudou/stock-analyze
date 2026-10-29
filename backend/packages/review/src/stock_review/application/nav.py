@@ -76,6 +76,9 @@ from stock_review.application.valuation import (
     load_prices as _load_prices,
 )
 from stock_review.application.valuation import (
+    money_fund_balance as _money_fund_balance,
+)
+from stock_review.application.valuation import (
     new_stock_pending_codes as _new_stock_pending_codes,
 )
 from stock_review.application.valuation import (
@@ -333,8 +336,8 @@ async def compute_nav_points(
             category = _category(trade)
             code = trade.security_code
             if _is_money_fund_row(trade):
-                # 货基：不进持仓/成本，只覆盖余额（同日以稳定序最后一行为准）。
-                state.money_fund[code] = int(trade.money_fund_balance_units or 0)
+                # 货基：不进持仓/成本，只覆盖余额（同日以稳定序最后一行为准；负余额按 0 兜底）。
+                state.money_fund[code] = _money_fund_balance(trade)
             elif code:
                 code = canonical_code(bond_alias, code)  # 发债代码归并上市代码（设计 D3）
                 # 持仓数量变化
