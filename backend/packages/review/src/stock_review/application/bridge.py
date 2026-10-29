@@ -38,6 +38,7 @@ from stock_core.fifo import BridgeIdentity, BridgeLedger, build_rounds, compute_
 from stock_ledger.models import Trade
 from stock_ledger.repositories.trades import TradeRepository
 
+from stock_review.application.bond_alias import build_bond_alias
 from stock_review.application.rebuild import trades_to_events
 from stock_review.application.valuation import category as _category
 from stock_review.application.valuation import is_cash_balance as _is_cash_balance
@@ -185,10 +186,13 @@ async def bridge_for_period(
     initial_cash, _anchor_source = initial
 
     # 区间前持仓成本（FIFO open lots）与区间内平仓损益、期末未平仓成本。
+    # 可转债发债代码从全量明细派生别名后归一（设计 D3）：申购缴款与上市卖出配对，
+    # 卖出的实现损益才能进 trading_pnl。
+    bond_alias, _unresolved = build_bond_alias((t.security_code, t.security_name) for t in trades)
     result_start = build_rounds(
-        trades_to_events([t for t in trades if t.trade_date < period_start])
+        trades_to_events([t for t in trades if t.trade_date < period_start], bond_alias=bond_alias)
     )
-    result_end = build_rounds(trades_to_events(trades))
+    result_end = build_rounds(trades_to_events(trades, bond_alias=bond_alias))
     initial_open_cost = sum(lot.cost_units for lot in result_start.open_lots)
     open_cost = sum(lot.cost_units for lot in result_end.open_lots)
     # 新引擎：round = 0→非0→0 仓位周期；open round 内含部分卖出的 fills（做T）。

@@ -41,15 +41,20 @@ from stock_platform.jobs import JobQueue
 from stock_platform.obs import get_logger
 from stock_platform.ports import MarketDataSource
 
+from stock_review.application.bond_alias import build_bond_alias, canonical_code
 from stock_review.application.bridge import _initial_cash
 from stock_review.application.rebuild import trades_to_events
 from stock_review.application.valuation import (
     CASHFLOW_CATEGORIES,
     PRICE_LOOKBACK,
     blocked_price_reason,
+    bond_face_divisors,
+    bond_fallback_reason,
     category,
     holding_delta,
+    initial_money_fund_balances,
     is_cash_balance,
+    is_money_fund_row,
     load_prices,
     total_market_value,
 )
@@ -60,7 +65,9 @@ from stock_review.repositories.assets import AssetRepository
 log = get_logger("stock_review.assets")
 
 # 资产表口径版本：bump 后旧 state 触发全量重建。
-ASSET_DEFINITION_VERSION = "1.0"
+# 1.1：资产余额口径 = 现金 + 货币基金余额 + 持仓市值（货基不再当持仓估值）。
+# 1.2：可转债发债代码归并上市代码（持仓/行情按 canonical），可转债市值固定 1 手=10 张。
+ASSET_DEFINITION_VERSION = "1.2"
 # 安全窗：每次有新数据/脏流水/行情 as_of 变化时重算最近 45 天。
 SAFETY_DAYS = 45
 # 水位线重叠窗：PG `now()` = 事务开始时间，覆盖「长事务晚提交」竞态。
@@ -88,6 +95,8 @@ STATE_BLOCKED = "blocked"
 NO_ANCHOR_REASON = "无现金余额锚点（无 cash_balance 行）"
 FIFO_ERROR_REASON = "FIFO 数据异常（超卖等）"
 MARKET_UNCOVERED_REASON = "行情未覆盖，按最近收盘估值"
+# 货基余额为负 = 区间首行即赎回且账单无「基金持仓」锚点（期初按 0 推演）。
+MONEY_FUND_UNKNOWN_REASON = "货币基金期初余额未知（无基金持仓锚点）"
 MISSING_PRICE_PREFIX = "缺行情数据"
 # blocked 行原因列上限（String(256)）
 _REASON_MAX = 256
@@ -100,6 +109,7 @@ class AssetPoint:
     id: str
     trade_date: date
     cash_units: int
+    money_fund_units: int
     market_value_units: int
     total_assets_units: int
     holding_cost_units: int
@@ -198,13 +208,26 @@ def _state_reason(last_status: str, *, fifo_error: bool) -> str | None:
     return None
 
 
-def _row_status_reason(*, fifo_error: bool, uncovered: bool) -> str | None:
-    """行级 degraded 原因（FIFO 异常 / 行情未覆盖；都不命中返回 NULL）。"""
+def _row_status_reason(
+    *,
+    fifo_error: bool,
+    uncovered: bool,
+    bond_fallback: list[str] | None = None,
+    money_fund_unknown: bool = False,
+) -> str | None:
+    """行级 degraded 原因（FIFO 异常 / 行情未覆盖 / 债券按买入价 / 货基期初未知）。
+
+    都不命中返回 NULL；多条原因用「；」拼接（去重由调用方保证）。
+    """
     reasons: list[str] = []
     if fifo_error:
         reasons.append(FIFO_ERROR_REASON)
     if uncovered:
         reasons.append(MARKET_UNCOVERED_REASON)
+    if bond_fallback:
+        reasons.append(bond_fallback_reason(bond_fallback))
+    if money_fund_unknown:
+        reasons.append(MONEY_FUND_UNKNOWN_REASON)
     return "；".join(reasons) if reasons else None
 
 
@@ -219,8 +242,9 @@ def compute_daily_valuations(
     market_causes: dict[str, str],
     as_of: date,
     prev_row: AssetDaily | None,
-    fifo_error: bool,
+    fifo_error_codes: set[str],
     rebuilt_at: datetime,
+    bond_alias: dict[str, str] | None = None,
 ) -> _DailyValuations:
     """内存重放 `[start, end]`，为 `[rebuild_from, end]` 生成资产日行（纯计算，无 I/O）。
 
@@ -228,14 +252,20 @@ def compute_daily_valuations(
     逐标的 floor 市值；缺行情 → 该日 blocked（数值 0、prev/pnl/return NULL）；FIFO 异常或
     `date > as_of` 且仍有持仓 → degraded（按最近收盘估值）。`prev_total` 取**严格上一自然日**
     非 blocked 总资产，首行取期初现金锚点；`rebuild_from > start` 时首行用落库的 `prev_row`。
+    持仓/成本/货基键按 `bond_alias` 归一为上市代码（发债代码不请求行情，设计 D3）。
     """
+    alias = bond_alias or {}
     initial = _initial_cash(trades, start)
     if initial is None:
         return _DailyValuations(rows=[], global_blocked=True, global_reason=NO_ANCHOR_REASON)
     initial_cash, _assumption = initial
+    initial_money_fund = initial_money_fund_balances(trades, start)
+    bond_divisors = bond_face_divisors(trades)
+    initial_total = initial_cash + sum(initial_money_fund.values())
 
     by_date = _group_trades_by_date(trades)
     cash_units = initial_cash
+    money_fund: dict[str, int] = dict(initial_money_fund)
     holdings: dict[str, int] = {}
     cost_basis: dict[str, int] = {}
     # 上一自然日的非 blocked 总资产；None 表示首日之前或上一日 blocked。
@@ -252,7 +282,11 @@ def compute_daily_valuations(
         for trade in day_trades:
             trade_category = category(trade)
             code = trade.security_code
-            if code:
+            if is_money_fund_row(trade):
+                # 货基：不进持仓/成本/市值，只覆盖余额（同日多行以稳定序最后一行为准）。
+                money_fund[code] = int(trade.money_fund_balance_units or 0)
+            elif code:
+                code = canonical_code(alias, code)  # 发债代码归并上市代码（设计 D3）
                 delta = holding_delta(trade_category, trade.quantity_units)
                 if delta:
                     holdings[code] = holdings.get(code, 0) + delta
@@ -275,7 +309,14 @@ def compute_daily_valuations(
         else:
             cash_units += day_cash_delta
 
-        market_value_units, missing = total_market_value(holdings, ladder, cursor_date)
+        market_value_units, missing, bond_fallback = total_market_value(
+            holdings,
+            ladder,
+            cursor_date,
+            cost_basis=cost_basis,
+            bond_divisors=bond_divisors,
+        )
+        money_fund_units = sum(money_fund.values())
         nonzero_holdings = sum(1 for qty in holdings.values() if qty != 0)
 
         # blocked 判定优先：缺行情 → 该日硬阻断（数值 0，prev/pnl/return NULL）。
@@ -296,15 +337,27 @@ def compute_daily_valuations(
             cursor_date += timedelta(days=1)
             continue
 
-        total_assets_units = cash_units + market_value_units
+        total_assets_units = cash_units + money_fund_units + market_value_units
         holding_cost_units = sum(
             cost for code, cost in cost_basis.items() if holdings.get(code, 0) != 0
         )
         unrealized_pnl_units = market_value_units - holding_cost_units
         uncovered = cursor_date > as_of and nonzero_holdings > 0
-        status = ROW_STATUS_DEGRADED if (fifo_error or uncovered) else ROW_STATUS_OK
+        money_fund_unknown = any(balance < 0 for balance in money_fund.values())
+        # FIFO 异常只影响持有问题代码的那些天；对无 FIFO 问题代码持仓的其他天不降级。
+        fifo_error_today = any(code in fifo_error_codes for code in holdings)
+        status = (
+            ROW_STATUS_DEGRADED
+            if (fifo_error_today or uncovered or bond_fallback or money_fund_unknown)
+            else ROW_STATUS_OK
+        )
         status_reason = (
-            _row_status_reason(fifo_error=fifo_error, uncovered=uncovered)
+            _row_status_reason(
+                fifo_error=fifo_error_today,
+                uncovered=uncovered,
+                bond_fallback=bond_fallback,
+                money_fund_unknown=money_fund_unknown,
+            )
             if status == ROW_STATUS_DEGRADED
             else None
         )
@@ -313,7 +366,7 @@ def compute_daily_valuations(
         # 增量窗口首行用落库的 prev_row（窗口外行不重写，但必须与旧行衔接）。
         if cursor_date >= rebuild_from:
             effective_prev = (
-                prev_row_total(prev_row, cursor_date, start, rebuild_from, initial_cash)
+                prev_row_total(prev_row, cursor_date, start, rebuild_from, initial_total)
                 if cursor_date == rebuild_from
                 else prior_total
             )
@@ -333,6 +386,7 @@ def compute_daily_valuations(
                     "user_id": user_id,
                     "trade_date": cursor_date,
                     "cash_units": cash_units,
+                    "money_fund_units": money_fund_units,
                     "market_value_units": market_value_units,
                     "total_assets_units": total_assets_units,
                     "holding_cost_units": holding_cost_units,
@@ -360,11 +414,11 @@ def prev_row_total(
     trade_date: date,
     start: date,
     rebuild_from: date,
-    initial_cash: int,
+    initial_total: int,
 ) -> int | None:
-    """增量窗口首行的 `prev_total`：首行取期初锚点，否则落库上一日行（blocked → NULL）。"""
+    """增量窗口首行的 `prev_total`：首行取期初锚点（现金 + 货基），否则落库上一日行。"""
     if trade_date == start:
-        return initial_cash
+        return initial_total
     if rebuild_from > start and trade_date == rebuild_from:
         if prev_row is None or prev_row.status == ROW_STATUS_BLOCKED:
             return None
@@ -381,6 +435,7 @@ def _blocked_row(
         "user_id": user_id,
         "trade_date": trade_date,
         "cash_units": 0,
+        "money_fund_units": 0,
         "market_value_units": 0,
         "total_assets_units": 0,
         "holding_cost_units": 0,
@@ -446,13 +501,19 @@ async def _reset_state(
     await _persist_state(repo, user_id, existing=existing, fields=fields)
 
 
-def _symbols(live: list[Trade]) -> list[str]:
-    """可能形成持仓的标的（现金余额伪代码等无持仓影响的类别不算）。"""
+def _symbols(live: list[Trade], bond_alias: dict[str, str] | None = None) -> list[str]:
+    """可能形成持仓的标的（现金余额伪代码/货币基金等无持仓影响的类别不算）。
+
+    发债代码归并为上市代码：行情请求只发 canonical 代码（申购代码无行情，设计 D3）。
+    """
+    alias = bond_alias or {}
     return sorted(
         {
-            trade.security_code
+            canonical_code(alias, trade.security_code)
             for trade in live
-            if trade.security_code and holding_delta(category(trade), trade.quantity_units) != 0
+            if trade.security_code
+            and not is_money_fund_row(trade)
+            and holding_delta(category(trade), trade.quantity_units) != 0
         }
     )
 
@@ -505,6 +566,17 @@ async def build_assets(
     start = min(trade.trade_date for trade in live)
     end = clock.today()
 
+    # 可转债发债→上市代码别名（设计 D3）：回合/持仓/行情请求统一用 canonical 代码。
+    bond_alias, bond_alias_unresolved = build_bond_alias(
+        (trade.security_code, trade.security_name) for trade in live
+    )
+    if bond_alias_unresolved:
+        log.warning(
+            "assets.bond_alias_unresolved",
+            user_id=str(user_id),
+            codes=bond_alias_unresolved,
+        )
+
     # 2) 未来流水 / 时钟回拨：清空并 reset（不出现负 rows_count）。
     if end < start:
         await repo.delete_all(user_id)
@@ -530,9 +602,9 @@ async def build_assets(
             data_as_of=None,
         )
 
-    fifo_error_now = any(
-        round_.status == "data_error" for round_ in build_rounds(trades_to_events(live)).rounds
-    )
+    fifo_result = build_rounds(trades_to_events(live, bond_alias=bond_alias))
+    fifo_error_codes: set[str] = {e.security_code for e in fifo_result.data_errors}
+    fifo_error_now = bool(fifo_error_codes)
     market_as_of = market_data.as_of
     market_changed = state is not None and state.data_as_of != market_as_of
 
@@ -631,7 +703,9 @@ async def build_assets(
 
     # 6) 行情：全量拉 [start-45, end]；增量只拉窗口 [rebuild_from-45, end]。
     price_from = (start if full else rebuild_from) - PRICE_LOOKBACK
-    ladder, market_causes = await load_prices(market_data, _symbols(live), price_from, end)
+    ladder, market_causes = await load_prices(
+        market_data, _symbols(live, bond_alias), price_from, end
+    )
 
     # 7) 内存逐日推演（无 I/O）；仅窗口行待写。
     valuations = compute_daily_valuations(
@@ -644,8 +718,9 @@ async def build_assets(
         market_causes=market_causes,
         as_of=market_as_of,
         prev_row=prev_row,
-        fifo_error=fifo_error_now,
+        fifo_error_codes=fifo_error_codes,
         rebuilt_at=clock.now(),
+        bond_alias=bond_alias,
     )
     build_mode = BUILD_MODE_FULL if full else BUILD_MODE_INCREMENTAL
 
@@ -768,6 +843,7 @@ def _to_point(row: AssetDaily) -> AssetPoint:
         id=row.id,
         trade_date=row.trade_date,
         cash_units=row.cash_units,
+        money_fund_units=row.money_fund_units,
         market_value_units=row.market_value_units,
         total_assets_units=row.total_assets_units,
         holding_cost_units=row.holding_cost_units,

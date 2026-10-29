@@ -159,3 +159,69 @@ def test_amount_sign_passthrough_keeps_fifo_semantics() -> None:
     second = trades_to_events([trade])
     assert first == second
     assert trade.amount_units == -1_000_000
+
+
+# ── 可转债发债代码 → 上市代码归并（设计 2026-10-29 D3）─────────────────────
+
+
+def _cbond_buy() -> object:
+    return _trade(
+        security_code="754019",
+        security_name="曙26发债",
+        trade_date=date(2026, 7, 20),
+        category="buy",
+        side="buy",
+        quantity_units=1_0000,  # 1 手
+        price_units=100_000000,  # 100 元/张
+        amount_units=-1000_00,
+    )
+
+
+def _cbond_sell() -> object:
+    return _trade(
+        security_code="113050",
+        security_name="曙26转债",
+        trade_date=date(2026, 8, 3),
+        category="sell",
+        side="sell",
+        quantity_units=1_0000,
+        price_units=130_000000,
+        amount_units=1300_00,
+    )
+
+
+def test_cbond_subscription_merged_into_listed_round() -> None:
+    """申购缴款（754019 曙26发债）与上市卖出（113050 曙26转债）配成同一回合。"""
+    from stock_core.fifo import build_rounds
+
+    events = trades_to_events([_cbond_buy(), _cbond_sell()])  # type: ignore[list-item]
+    assert {event.security_code for event in events} == {"113050"}
+    result = build_rounds(events)
+    assert len(result.closed_rounds) == 1
+    round_ = result.closed_rounds[0]
+    assert round_.security_code == "113050"
+    assert round_.security_name == "曙26转债"  # 显示名取最新一行（上市后）
+    assert round_.pnl_units == 300_00  # 1300 - 1000
+    assert not result.data_errors
+
+
+def test_cbond_explicit_alias_applies_to_subset() -> None:
+    """调用方传入全量派生的别名时，子集（无转债行）也按 canonical 归一。"""
+    (event,) = trades_to_events([_cbond_buy()], bond_alias={"754019": "113050"})  # type: ignore[list-item]
+    assert event.security_code == "113050"
+
+
+def test_cbond_alias_conflict_leaves_codes_unmerged() -> None:
+    """同一 stem 两只上市转债 → 不归并，各自按原代码分组（卖出会超卖，属预期）。"""
+    other_sell = _trade(
+        security_code="123001",
+        security_name="曙26转债",
+        trade_date=date(2026, 8, 3),
+        category="sell",
+        side="sell",
+        quantity_units=1_0000,
+        price_units=130_000000,
+        amount_units=1300_00,
+    )
+    events = trades_to_events([_cbond_buy(), _cbond_sell(), other_sell])  # type: ignore[list-item]
+    assert {event.security_code for event in events} == {"754019", "113050", "123001"}

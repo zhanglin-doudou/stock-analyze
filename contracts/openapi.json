@@ -346,6 +346,17 @@
         "additionalProperties": false,
         "description": "每日资产快照行（金额 2 位定点字符串；blocked 行数值字段**显式 null**）。",
         "properties": {
+          "balance": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Balance"
+          },
           "cash": {
             "anyOf": [
               {
@@ -432,6 +443,17 @@
               }
             ],
             "title": "Market Value"
+          },
+          "money_fund": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Money Fund"
           },
           "prev_total_assets": {
             "anyOf": [
@@ -965,6 +987,28 @@
         "additionalProperties": false,
         "description": "资产概览：当前快照（最新资产日）+ 全历史峰值成本/总收益/费用。",
         "properties": {
+          "balance": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Balance"
+          },
+          "balance_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Balance Display"
+          },
           "cash": {
             "anyOf": [
               {
@@ -1048,6 +1092,28 @@
               }
             ],
             "title": "Max Invested Cost Display"
+          },
+          "money_fund": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Money Fund"
+          },
+          "money_fund_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Money Fund Display"
           },
           "position_pct": {
             "anyOf": [
@@ -4653,6 +4719,17 @@
             ],
             "title": "Deleted At"
           },
+          "money_fund_balance": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Money Fund Balance"
+          },
           "note": {
             "anyOf": [
               {
@@ -4849,6 +4926,17 @@
               }
             ],
             "title": "Commission"
+          },
+          "money_fund_balance": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Money Fund Balance"
           },
           "note": {
             "anyOf": [
@@ -14345,6 +14433,7 @@
                     "created_at": "2026-09-30T09:30:00Z",
                     "dedupe_key": "ddk_01J9Z6ABCDEFGHJKMNPQRSTVWX",
                     "deleted_at": "2026-09-30T09:30:00Z",
+                    "money_fund_balance": "示例",
                     "note": "示例备注",
                     "other_fee": "1234.56",
                     "price": "12.340000",
@@ -14760,6 +14849,7 @@
                     "created_at": "2026-09-30T09:30:00Z",
                     "dedupe_key": "ddk_01J9Z6ABCDEFGHJKMNPQRSTVWX",
                     "deleted_at": "2026-09-30T09:30:00Z",
+                    "money_fund_balance": "示例",
                     "note": "示例备注",
                     "other_fee": "1234.56",
                     "price": "12.340000",

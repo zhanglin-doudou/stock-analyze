@@ -286,7 +286,7 @@ export function Dashboard(): ReactElement {
       {/* 资产概览 */}
       <section className="dash-hero" data-testid="asset-overview">
         <div className="dash-hero-main">
-          <div className="dash-eyebrow">总资产 · 含现金与市值</div>
+          <div className="dash-eyebrow">总资产 · 含资产余额与市值</div>
           <div className="dash-hero-value">
             <span className="dash-cny">¥</span>
             <span data-testid="kpi-total-assets">
@@ -313,7 +313,7 @@ export function Dashboard(): ReactElement {
             value={shown(asset.market_value_display, asset.market_value)}
             testId="kpi-market-value"
           />
-          <Kpi label="现金余额" value={shown(asset.cash_display, asset.cash)} testId="kpi-cash" />
+          <Kpi label="资产余额" value={shown(asset.balance_display, asset.balance)} testId="kpi-balance" />
           <div className="dash-kpi" data-testid="kpi-position">
             <span className="dash-kpi-label">仓位</span>
             <strong className="num">{displayValue(asset.position_pct)}</strong>

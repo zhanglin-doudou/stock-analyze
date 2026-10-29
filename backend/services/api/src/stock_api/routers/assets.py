@@ -63,6 +63,8 @@ def _asset_point_out(dto: Any) -> AssetPointOut:
     return AssetPointOut(
         date=dto.trade_date,
         cash=None if blocked else str(Money(dto.cash_units)),
+        money_fund=None if blocked else str(Money(dto.money_fund_units)),
+        balance=None if blocked else str(Money(dto.cash_units + dto.money_fund_units)),
         market_value=None if blocked else str(Money(dto.market_value_units)),
         total_assets=None if blocked else str(Money(dto.total_assets_units)),
         holding_cost=None if blocked else str(Money(dto.holding_cost_units)),

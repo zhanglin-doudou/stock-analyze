@@ -48,6 +48,8 @@ _MARKET_AS_OF = "2026-09-30"
 #   06-30 收盘 1706.20 → 市值 170620.00，总资产 100620.00，pnl 620.00，日收益 0.62%
 _ORACLE_0630 = {
     "cash": "-70000.00",
+    "money_fund": "0.00",
+    "balance": "-70000.00",
     "market_value": "170620.00",
     "total_assets": "100620.00",
     "holding_cost": "170000.00",
@@ -281,7 +283,7 @@ async def test_api_081_happy_path_oracle(
     assert items, "构建后应至少一行"
     dates = [item["date"] for item in items]
     assert dates == sorted(dates, reverse=True), "默认应按 trade_date 倒序"
-    assert body["definition_version"] == "1.0"
+    assert body["definition_version"] == "1.2"
     assert body["data_as_of"] == _MARKET_AS_OF
 
     row = next(item for item in items if item["date"] == "2026-06-30")
@@ -293,6 +295,8 @@ async def test_api_081_happy_path_oracle(
     # 金额/比率格式
     for field in (
         "cash",
+        "money_fund",
+        "balance",
         "market_value",
         "total_assets",
         "holding_cost",
@@ -319,7 +323,7 @@ async def test_api_081_happy_path_oracle(
     assert build["rows_count"] == expected_days
     assert len(items) == expected_days
     assert build["last_rows_written"] == expected_days
-    assert build["definition_version"] == "1.0"
+    assert build["definition_version"] == "1.2"
 
 
 # ── AT-02 未构建 / AT-10 全局 blocked ───────────────────────
@@ -340,7 +344,7 @@ async def test_api_081_not_built_returns_missing(
     assert build["last_mode"] is None
     assert build["last_built_through"] is None
     assert build["has_new_market_data"] is False
-    assert body["definition_version"] == "1.0"
+    assert body["definition_version"] == "1.2"
     assert body["data_as_of"] is None
     assert await _count_rows(owner_engine, user_id=acc.user_id) == 0
 
@@ -431,6 +435,8 @@ async def test_api_081_blocked_rows_are_null(
         assert item["status"] == "blocked"
         for field in (
             "cash",
+            "money_fund",
+            "balance",
             "market_value",
             "total_assets",
             "holding_cost",

@@ -72,7 +72,7 @@
 ### 1.2 目标
 
 1. 交付 `/dashboard` 两板块：
-   - **资产概览**：当前持仓及市值、现金余额、仓位百分比、总收益额、总投入最大成本、最大成本收益率、总费用消耗。
+   - **资产概览**：当前持仓及市值、资产余额（现金 + 货币基金）、仓位百分比、总收益额、总投入最大成本、最大成本收益率、总费用消耗。
    - **历史概览**：已平仓股票数量、平仓盈利/亏损数量及占比、历史最大收益额、最大收益额与最大成本比率、最大回撤时间段、回撤收益率。
 2. 与既有验收（五卡/PRD FR-D1）**合并而非丢失**：旧内容按 §2 映射为两板块子块；验收脚本改为两板块断言。
 3. 未完成 P2 功能：**前端入口预留**（可发现、可测试、无假数据），并在文档列出缺失内容清单（§8）。
@@ -86,7 +86,7 @@
 |---|---|---|---|---|---|
 | A1 | 当前持仓 | `asset_overview.holdings[]` | 当前持仓 | `holding-row-*` | 最新 `asset_daily` + 持仓重建 |
 | A2 | 持仓市值 | `asset_overview.market_value` | 持仓市值 | `kpi-market-value` | 最新资产日 |
-| A3 | 现金余额 | `asset_overview.cash` | 现金余额 | `kpi-cash` | 最新资产日 |
+| A3 | 资产余额 | `asset_overview.balance` | 资产余额（现金+货币基金） | `kpi-balance` | 最新资产日 |
 | A4 | 仓位百分比 | `asset_overview.position_pct` | 仓位 | `kpi-position` | `market_value/total_assets` |
 | A5 | 总收益额 | `asset_overview.total_profit` | 总收益 | `kpi-total-profit` | 全历史（D-02） |
 | A6 | 总投入最大成本 | `asset_overview.max_invested_cost` | 历史峰值持仓成本 | `kpi-max-invested-cost` | 全历史（D-01） |
@@ -142,6 +142,8 @@
 |---|---|---|---|
 | `holdings[]` | 当前持仓：代码/名称/数量/成本/市值/权重；成本口径与 `asset_daily` 一致（见 §4.2） | 数量/金额定点串；权重 `"12.34%"` | 无持仓 → `[]`；单标缺价 → 该标 `market_value=null` + `degraded` |
 | `cash` | `A.cash_units` | CNY 2 位 | A 缺失/blocked → null |
+| `money_fund` | `A.money_fund_units` | CNY 2 位 | A 缺失/blocked → null |
+| `balance` | `A.cash_units + A.money_fund_units`（资产余额口径，页面「余额」统一显示） | CNY 2 位 | A 缺失/blocked → null |
 | `market_value` | `A.market_value_units` | CNY 2 位 | null |
 | `total_assets` | `A.total_assets_units` | CNY 2 位 | null |
 | `position_pct` | `market_value / total_assets`（8 位比率、2 位百分比展示） | `"76.19%"` | `total_assets<=0` → null + reason |

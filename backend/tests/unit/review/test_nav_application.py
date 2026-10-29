@@ -49,6 +49,7 @@ def _trade(
     commission_units: int = 0,
     stamp_tax_units: int = 0,
     other_fee_units: int = 0,
+    money_fund_balance_units: int | None = None,
 ) -> Trade:
     return Trade(
         id=f"trd_{uuid.uuid4().hex[:12]}",
@@ -66,6 +67,7 @@ def _trade(
         other_fee_units=other_fee_units,
         cash_balance_units=cash_balance_units,
         cash_balance_available=cash_balance_units is not None,
+        money_fund_balance_units=money_fund_balance_units,
         category=category,
         occurrence_idx=0,
         line_no=0,
@@ -443,6 +445,35 @@ async def test_blocked_reason_annotates_market_failure(cause: str, label: str) -
     reason = blocked[0][1]
     assert reason.startswith("缺行情数据：")
     assert label in reason
+
+
+@pytest.mark.asyncio
+async def test_money_fund_balance_keeps_nav_flat_and_needs_no_market() -> None:
+    """货基申购只是「现金 → 货基」的内部转移：净值不变、不请求行情（缺行情不 blocked）。"""
+    trades = [
+        _trade(
+            trade_date=date(2026, 1, 2),
+            category="other",
+            amount_units=0,
+            cash_balance_units=cents("1000.00"),
+        ),
+        _trade(
+            trade_date=date(2026, 1, 3),
+            category="buy",
+            security_code="940018",
+            quantity_units=shares("500"),
+            price_units=price("1.0000"),
+            amount_units=-cents("500.00"),
+            cash_balance_units=cents("500.00"),
+            money_fund_balance_units=cents("500.00"),
+        ),
+    ]
+    points, blocked, reasons, degraded, _, _, _ = await compute_nav_points(
+        trades, date(2026, 1, 1), date(2026, 1, 4), _EmptyMarket()
+    )
+    assert blocked == [] and reasons == [] and degraded is False
+    assert (date(2026, 1, 3), cents("1000.00"), 0) in points
+    assert (date(2026, 1, 4), cents("1000.00"), 0) in points
 
 
 @pytest.mark.asyncio

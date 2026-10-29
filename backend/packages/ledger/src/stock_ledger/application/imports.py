@@ -104,6 +104,7 @@ def _parsed_to_trade_row(parsed: ParsedRow, batch_id: str) -> TradeRow:
         other_fee_units=parsed.other_fee_units,
         cash_balance_units=parsed.cash_balance_units,
         cash_balance_available=parsed.cash_balance_available,
+        money_fund_balance_units=parsed.money_fund_balance_units,
         occurrence_idx=parsed.occurrence_idx,
         account_masked=parsed.account_masked,
         line_no=parsed.line_no,

@@ -143,6 +143,7 @@ class DashboardAssetOverview:
     holdings: list[DashboardHolding]
     market_value_units: int | None
     cash_units: int | None
+    money_fund_units: int | None
     total_assets_units: int | None
     position_ratio_units: int | None
     total_profit_units: int | None
@@ -603,6 +604,7 @@ async def build_dashboard(
         holdings: list[DashboardHolding] = []
         market_value_units = None
         cash_units = None
+        money_fund_units = None
         total_assets_units = None
         position_ratio_units = None
     else:
@@ -611,6 +613,7 @@ async def build_dashboard(
         )
         market_value_units = latest.market_value_units
         cash_units = latest.cash_units
+        money_fund_units = latest.money_fund_units
         total_assets_units = latest.total_assets_units
         position_ratio_units = _ratio_units(market_value_units, total_assets_units)
         if truncated:
@@ -780,6 +783,7 @@ async def build_dashboard(
             holdings=holdings,
             market_value_units=market_value_units,
             cash_units=cash_units,
+            money_fund_units=money_fund_units,
             total_assets_units=total_assets_units,
             position_ratio_units=position_ratio_units,
             total_profit_units=total_profit_units,

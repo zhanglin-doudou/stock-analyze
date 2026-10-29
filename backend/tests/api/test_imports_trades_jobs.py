@@ -910,6 +910,29 @@ async def test_api_018_patch_bumps_version(client, api_prefix, user, owner_engin
     assert body["note"] == "人工修正"
 
 
+async def test_api_018_patch_money_fund_balance_roundtrip(
+    client, api_prefix, user, owner_engine
+) -> None:
+    """货基余额可人工修正：非空即货基行，显式 null 清除标记。"""
+    trade_id = await _seed_trade(owner_engine, user_id=user.user_id)
+    resp = await client.patch(
+        f"{api_prefix}/trades/{trade_id}",
+        headers={**user.headers, "If-Match": "1"},
+        json={"money_fund_balance": "1234.56"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()["trade"]
+    assert body["money_fund_balance"] == "1234.56"
+
+    cleared = await client.patch(
+        f"{api_prefix}/trades/{trade_id}",
+        headers={**user.headers, "If-Match": str(body["version"])},
+        json={"money_fund_balance": None},
+    )
+    assert cleared.status_code == 200, cleared.text
+    assert cleared.json()["trade"]["money_fund_balance"] is None
+
+
 async def test_api_018_patch_stale_version_conflicts(
     client, api_prefix, user, owner_engine
 ) -> None:

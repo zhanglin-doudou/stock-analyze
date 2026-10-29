@@ -49,7 +49,7 @@ function makeBuild(overrides: Partial<AssetBuildState> = {}): AssetBuildState {
     assumption: "back_solved",
     status_reason: null,
     has_new_market_data: false,
-    definition_version: "1.0",
+    definition_version: "1.1",
     ...overrides,
   };
 }
@@ -58,6 +58,8 @@ function makePoint(overrides: Partial<AssetPoint> = {}): AssetPoint {
   return {
     date: "2026-06-30",
     cash: "-70000.00",
+    money_fund: "20000.00",
+    balance: "-50000.00",
     market_value: "170620.00",
     total_assets: "100620.00",
     holding_cost: "170000.00",
@@ -80,7 +82,7 @@ function makePage(overrides: Partial<AssetPage> = {}): AssetPage {
     next_cursor: null,
     has_more: false,
     build: makeBuild(),
-    definition_version: "1.0",
+    definition_version: "1.1",
     data_as_of: "2026-09-30",
     ...overrides,
   };
@@ -104,9 +106,9 @@ function missingPage(items: AssetPoint[] = []): AssetPage {
       assumption: null,
       status_reason: null,
       has_new_market_data: false,
-      definition_version: "1.0",
+      definition_version: "1.1",
     },
-    definition_version: "1.0",
+    definition_version: "1.1",
     data_as_of: null,
   };
 }
@@ -325,6 +327,8 @@ describe("Assets 资产表页", () => {
           makePoint({
             date: "2026-06-28",
             cash: null,
+            money_fund: null,
+            balance: null,
             market_value: null,
             total_assets: null,
             holding_cost: null,
@@ -468,7 +472,7 @@ describe("Assets 资产表页", () => {
     expect(summary.textContent).toContain("最近模式：增量");
     expect(summary.textContent).toContain("重写行数：45");
     expect(summary.textContent).toContain("锚点：期初反推（back_solved）");
-    expect(summary.textContent).toContain("口径版本：1.0");
+    expect(summary.textContent).toContain("口径版本：1.1");
   });
 
   it("FT-08 blocked 横幅：state=blocked 显示阻断原因与空态", async () => {

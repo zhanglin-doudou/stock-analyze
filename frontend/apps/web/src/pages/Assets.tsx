@@ -310,7 +310,21 @@ export function Assets() {
           <strong>{row.total_assets}</strong>
         ),
     },
-    { key: "cash", header: "现金", priority: 2, align: "right", render: (row) => moneyCell(row.cash) },
+    { key: "cash", header: "现金", priority: 3, align: "right", render: (row) => moneyCell(row.cash) },
+    {
+      key: "money_fund",
+      header: "货币基金",
+      priority: 3,
+      align: "right",
+      render: (row) => moneyCell(row.money_fund),
+    },
+    {
+      key: "balance",
+      header: "资产余额",
+      priority: 2,
+      align: "right",
+      render: (row) => moneyCell(row.balance),
+    },
     {
       key: "market_value",
       header: "持仓市值",
@@ -390,7 +404,7 @@ export function Assets() {
     <div>
       <h1>资产表</h1>
       <p className="muted">
-        每日资产快照（现金 + 持仓市值），用于资产变化与后续回撤；本页不做计算。
+        每日资产快照（资产余额 = 现金 + 货币基金，另加持仓市值），用于资产变化与后续回撤；本页不做计算。
       </p>
 
       <div className="card filters">

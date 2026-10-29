@@ -108,6 +108,8 @@ class QuarantineReason(StrEnum):
     DUPLICATE_IN_FILE = "DUPLICATE_IN_FILE"
     # 金额字段全为 0（佣金/印花税/其他费/发生金额/资金余额）：无资金流的噪音行。
     INVALID_AMOUNT = "INVALID_AMOUNT"
+    # 申购中签/新股入账/托管转出等纯通知行：无金额且无余额，不进明细（可审计可恢复）。
+    ZERO_AMOUNT_INFO = "ZERO_AMOUNT_INFO"
 
 
 class WarningCode(StrEnum):
@@ -119,3 +121,5 @@ class WarningCode(StrEnum):
     DATE_FORMAT_AMBIGUOUS = "DATE_FORMAT_AMBIGUOUS"
     # 导入收尾对账发现余额链缺口，已自动写入 side=missing 补差行：提示账单存在缺失。
     RECONCILIATION_AUTOFILLED = "RECONCILIATION_AUTOFILLED"
+    # 可转债「数量(手) × 10 × 单张价」与发生金额偏差超容差：口径异常留痕（不阻断）。
+    CBOND_AMOUNT_INCONSISTENT = "CBOND_AMOUNT_INCONSISTENT"

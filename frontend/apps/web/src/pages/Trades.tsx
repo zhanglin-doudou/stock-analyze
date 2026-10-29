@@ -106,6 +106,13 @@ export function Trades() {
       align: "right",
       render: (row) => row.cash_balance,
     },
+    {
+      key: "money_fund_balance",
+      header: "货币基金余额",
+      priority: 3,
+      align: "right",
+      render: (row) => row.money_fund_balance,
+    },
     { key: "version", header: "版本", priority: 3, align: "right", render: (row) => row.version },
     {
       key: "deleted",

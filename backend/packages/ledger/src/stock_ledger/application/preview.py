@@ -141,6 +141,11 @@ def row_to_sample(row: ParsedRow) -> dict[str, Any]:
         "cash_balance": (
             str(Money(row.cash_balance_units)) if row.cash_balance_units is not None else None
         ),
+        "money_fund_balance": (
+            str(Money(row.money_fund_balance_units))
+            if row.money_fund_balance_units is not None
+            else None
+        ),
         "summary": row.summary,
         "occurrence_idx": row.occurrence_idx,
     }

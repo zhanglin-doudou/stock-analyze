@@ -300,6 +300,8 @@ class TradeOut(BaseModel):
     other_fee: str
     cash_balance: str | None = None
     cash_balance_available: bool
+    # 货币基金余额（该行发生后该标的的份额余额）；non-null 即货基行。
+    money_fund_balance: str | None = None
     account_masked: str | None = None
     summary: str | None = None
     summary_code: str | None = None
@@ -332,6 +334,7 @@ class TradePatchIn(StrictModel):
     stamp_tax: str | None = None
     other_fee: str | None = None
     cash_balance: str | None = None
+    money_fund_balance: str | None = None
     note: str | None = Field(default=None, max_length=200)
 
 
@@ -604,6 +607,10 @@ class AssetPointOut(StrictModel):
     date: date
     # blocked 行以下金额/比率字段一律 null（不是 "0.00"、也不是省略键）。
     cash: str | None = None
+    # 货币基金余额（单位净值恒 1.0000；不再作为持仓估值）
+    money_fund: str | None = None
+    # 资产余额 = 现金 + 货币基金（用户口径：页面「余额」统一显示资产余额）
+    balance: str | None = None
     market_value: str | None = None
     total_assets: str | None = None
     holding_cost: str | None = None
@@ -762,6 +769,9 @@ class DashboardAssetOverviewOut(StrictModel):
     holdings: list[DashboardHoldingOut]
     market_value: str | None = None
     cash: str | None = None
+    # 货币基金余额 + 资产余额（= 现金 + 货币基金），页面「余额」统一用资产余额。
+    money_fund: str | None = None
+    balance: str | None = None
     total_assets: str | None = None
     position_pct: str | None = None
     total_profit: str | None = None
@@ -771,6 +781,8 @@ class DashboardAssetOverviewOut(StrictModel):
     # 后端已格式化的展示串（千分位金额）；前端优先使用，raw 保留兼容。
     market_value_display: str | None = None
     cash_display: str | None = None
+    money_fund_display: str | None = None
+    balance_display: str | None = None
     total_assets_display: str | None = None
     total_profit_display: str | None = None
     max_invested_cost_display: str | None = None

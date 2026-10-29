@@ -210,11 +210,14 @@ async def test_money_fund_bill_imports_with_zero_amount_quarantine(
     assert redeem["category"] == "sell"
     assert redeem["summary_code"] == "sys_redeem"
     assert redeem["amount"] == "116295.38"
+    # 货基行带余额（份额 × 1.0000）；无持仓锚点 → 期初 0、允许为负。
+    assert redeem["money_fund_balance"] == "-116295.38"
 
     subscribe = by_summary[("申购确认", "buy")]
     assert subscribe["category"] == "buy"
     assert subscribe["summary_code"] == "sys_fund_buy"
     assert subscribe["amount"] == "-106708.53"
+    assert subscribe["money_fund_balance"] == "-9586.85"
 
     assert {item["category"] for item in trades} == {"buy", "sell", "transfer"}
 
@@ -264,6 +267,9 @@ async def test_real_statement_excerpt_quarantine_only_zero_amount(
         "transfer",
         "new_stock",
     }
+    # 基金持仓区块是期末锚点：940018 赎回后余额 = 参考市值 51859.86；202308 期初 0。
+    balances = {item["money_fund_balance"] for item in trades if item["money_fund_balance"]}
+    assert balances == {"51859.86", "10000.00"}
 
 
 async def test_unknown_summary_preview_equals_commit_quarantine(

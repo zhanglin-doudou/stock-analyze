@@ -171,6 +171,9 @@ class Trade(Base):
     other_fee_units: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     cash_balance_units: Mapped[int | None] = mapped_column(BigInteger)
     cash_balance_available: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # 货币基金余额（该行发生后该标的的份额余额，金额 scale=2）。非空即「货基行」标记：
+    # 货基没有可估值净值（单位净值恒 1.0000），按余额计入资产，不请求行情。
+    money_fund_balance_units: Mapped[int | None] = mapped_column(BigInteger)
     category: Mapped[str | None] = mapped_column(String(24))
     dedupe_key: Mapped[str] = mapped_column(String(128), nullable=False)
     occurrence_idx: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

@@ -14,6 +14,7 @@ from stock_contracts.clock import FrozenClock
 from stock_contracts.enums import QuarantineReason, WarningCode
 from stock_contracts.errors import ApiError, ErrorCode
 from stock_ledger.parsers.columns import detect_date_format, map_columns
+from stock_ledger.parsers.dedupe import dedupe_key
 from stock_ledger.parsers.huatai import ParsedBill, parse_bill
 
 CLOCK = FrozenClock(datetime(2026, 7, 1, 9, 0, tzinfo=UTC))
@@ -493,6 +494,124 @@ def test_wrapped_summary_newline_normalized_for_side_and_parse() -> None:
     assert quarantined_lines[25].reason_code == QuarantineReason.INVALID_AMOUNT.value
 
 
+def test_money_fund_balance_running_with_opening_zero_assumption() -> None:
+    """货基行逐行累计余额（份额 × 1.0000 → 金额分）；无持仓锚点时期初 0、余额可为负并留痕。"""
+    bill = _parse(_FUND_BILL.read_bytes(), file_name=_FUND_BILL.name)
+    by_line = {row.line_no: row for row in bill.rows}
+    # 折行名称（华泰紫金天\n天发货币）仍识别为货基；其余股票/转账行为 NULL。
+    assert by_line[17].money_fund_balance_units == -116295_38
+    assert by_line[18].money_fund_balance_units == -9586_85
+    assert by_line[20].money_fund_balance_units == -116307_65
+    assert by_line[23].money_fund_balance_units == -110639_33
+    assert by_line[21].money_fund_balance_units is None
+    assert by_line[22].money_fund_balance_units is None
+    assert bill.assumptions["money_fund_opening_zero"] == ["940018"]
+
+
+def test_money_fund_balance_anchored_by_fund_holding_section() -> None:
+    """真实节选：基金持仓区块给出期末锚点 51859.86，赎回行反推期初 100999.18。"""
+    bill = _parse(_STATEMENT_BILL.read_bytes(), file_name=_STATEMENT_BILL.name)
+    by_line = {row.line_no: row for row in bill.rows}
+    # 卖出 49139.32 份后余额 = 期末参考市值 51859.86。
+    assert by_line[26].money_fund_balance_units == 51859_86
+    assert by_line[26].quantity_units == 49139_32_00
+    # 期初 = 51859.86 − (−49139.32) = 100999.18（由锚点反推，无负余额）。
+    opening = by_line[26].money_fund_balance_units - (
+        -by_line[26].quantity_units * by_line[26].price_units // 10**8
+    )
+    assert opening == 100999_18
+    # 202308 无持仓锚点 → 期初 0，余额 = 买入份额 10000.00。
+    assert by_line[21].money_fund_balance_units == 10000_00
+    assert bill.assumptions["money_fund_opening_zero"] == ["202308"]
+
+
+def test_money_fund_recognized_by_price_one_and_zero_fees() -> None:
+    """名称不含「货币」：买卖价格 = 1.000 且佣金/印花税/其他费全 0 → 按货基余额口径。"""
+    bill = _parse(
+        _xlsx(
+            _HEADERS,
+            [
+                _buy_row(
+                    证券代码="511880",
+                    证券名称="银华日利",
+                    成交价格="1.000",
+                    成交数量="10000",
+                    成交金额="10000.00",
+                    佣金="0.00",
+                    资金余额="50000.00",
+                )
+            ],
+        )
+    )
+    row = bill.rows[0]
+    assert row.money_fund_balance_units == 10000_00
+    assert bill.assumptions["money_fund_opening_zero"] == ["511880"]
+
+
+def test_price_one_with_fees_is_not_money_fund() -> None:
+    """价格为 1 但有费用 → 仍按普通标的处理（不写货基余额）。"""
+    bill = _parse(
+        _xlsx(
+            _HEADERS,
+            [
+                _buy_row(
+                    证券代码="511880",
+                    证券名称="银华日利",
+                    成交价格="1.000",
+                    成交数量="10000",
+                    成交金额="10000.00",
+                    佣金="1.00",
+                    资金余额="50000.00",
+                )
+            ],
+        )
+    )
+    assert bill.rows[0].money_fund_balance_units is None
+
+
+def test_money_fund_price_one_sell_reduces_balance() -> None:
+    """价格 1 零费用的卖出行同样识别为货基，余额按份额减少。"""
+    bill = _parse(
+        _xlsx(
+            _HEADERS,
+            [
+                _buy_row(
+                    证券代码="511880",
+                    证券名称="银华日利",
+                    成交价格="1.000",
+                    成交数量="10000",
+                    成交金额="10000.00",
+                    佣金="0.00",
+                    资金余额="50000.00",
+                ),
+                _buy_row(
+                    证券代码="511880",
+                    证券名称="银华日利",
+                    买卖标志="证券卖出",
+                    摘要="证券卖出",
+                    成交价格="1.000",
+                    成交数量="2000",
+                    成交金额="2000.00",
+                    佣金="0.00",
+                    资金余额="52000.00",
+                ),
+            ],
+        )
+    )
+    assert bill.rows[0].money_fund_balance_units == 10000_00
+    assert bill.rows[1].money_fund_balance_units == 8000_00
+
+
+def test_dedupe_key_ignores_money_fund_balance() -> None:
+    """改余额不改去重键：货基余额是推演产物，不是账单原生字段。"""
+    from dataclasses import replace
+
+    bill = _parse(_FUND_BILL.read_bytes(), file_name=_FUND_BILL.name)
+    row = next(item for item in bill.rows if item.money_fund_balance_units is not None)
+    other = replace(row, money_fund_balance_units=(row.money_fund_balance_units or 0) + 1)
+    assert dedupe_key(row) == dedupe_key(other)
+
+
 def test_blank_code_unknown_summary_quarantined() -> None:
     """证券代码为空且摘要不属于非交易类 → 仍隔离（数据缺失保护）。"""
     row = _buy_row(证券代码="", 证券名称="", 买卖标志="", 摘要="未知业务XYZ")
@@ -568,3 +687,118 @@ def test_quarantine_raw_account_already_hashed() -> None:
     raw = bill.quarantined[0].raw
     assert raw["股东账号"] == hashlib.md5(b"0327201469").hexdigest()
     assert raw["股东账号"] != "0327201469"
+
+
+# ── 零金额信息行隔离（ZERO_AMOUNT_INFO，设计 2026-10-29 D1）──────────────────
+
+
+def _info_row(**overrides: str) -> list[str]:
+    """零金额纯通知行：无金额、无资金余额、无明确买卖方向。"""
+    row = _buy_row(
+        证券代码="001237",
+        证券名称="惠康科技",
+        买卖标志="",
+        成交数量="0",
+        成交价格="0",
+        成交金额="0",
+        佣金="0",
+        印花税="0",
+        其他费="0",
+        资金余额="",
+        摘要="申购中签",
+    )
+    values = dict(zip(_HEADERS, row, strict=True))
+    values.update(overrides)
+    return [values[header] for header in _HEADERS]
+
+
+@pytest.mark.parametrize("keyword", ["申购中签", "新股入账", "托管转出", "托管转入"])
+def test_zero_amount_info_rows_quarantined(keyword: str) -> None:
+    bill = _parse(_xlsx(_HEADERS, [_info_row(摘要=keyword)]))
+    assert bill.rows == []
+    assert len(bill.quarantined) == 1
+    assert bill.quarantined[0].reason_code == QuarantineReason.ZERO_AMOUNT_INFO.value
+
+
+def test_zero_amount_info_folded_summary_quarantined() -> None:
+    # 摘要折行（券商导出常见）归一化后同样命中关键词。
+    bill = _parse(_xlsx(_HEADERS, [_info_row(摘要="申购中\n签")]))
+    assert [q.reason_code for q in bill.quarantined] == [QuarantineReason.ZERO_AMOUNT_INFO.value]
+
+
+def test_zero_amount_info_with_amount_kept() -> None:
+    """同类摘要但有真实金额（中签缴款 -1000）→ 正常进明细，不隔离。"""
+    bill = _parse(
+        _xlsx(
+            _HEADERS,
+            [_info_row(买卖标志="证券买入", 成交金额="-1000.00", 摘要="申购中签")],
+        )
+    )
+    assert bill.quarantined == []
+    assert len(bill.rows) == 1
+    assert bill.rows[0].amount_units == -1000_00
+
+
+def test_zero_amount_info_with_cash_balance_kept() -> None:
+    """摘要命中关键词但带资金余额（对账锚点）→ 保留，不隔离。"""
+    bill = _parse(_xlsx(_HEADERS, [_info_row(资金余额="5000.00", 摘要="新股入账")]))
+    assert bill.quarantined == []
+    assert len(bill.rows) == 1
+    assert bill.rows[0].cash_balance_units == 5000_00
+
+
+def test_zero_amount_non_keyword_row_not_newly_quarantined() -> None:
+    """无金额无余额但摘要不命中关键词 → 不落入 ZERO_AMOUNT_INFO（维持原口径）。"""
+    bill = _parse(_xlsx(_HEADERS, [_info_row(摘要="其他业务")]))
+    assert bill.quarantined == []
+    assert len(bill.rows) == 1
+
+
+# ── 可转债数量口径一致性 WARN（设计 2026-10-29 D2）──────────────────────────
+
+
+def _cbond_row(**overrides: str) -> list[str]:
+    row = _buy_row(
+        证券代码="754019",
+        证券名称="曙26发债",
+        买卖标志="证券买入",
+        成交数量="1",
+        成交价格="100.00",
+        成交金额="-1000.00",
+        摘要="申购缴款",
+    )
+    values = dict(zip(_HEADERS, row, strict=True))
+    values.update(overrides)
+    return [values[header] for header in _HEADERS]
+
+
+def test_cbond_consistent_row_no_warning() -> None:
+    """1 手 × 10 张 × 100 元/张 = 1000 元，与发生金额一致 → 无 WARN。"""
+    bill = _parse(_xlsx(_HEADERS, [_cbond_row()]))
+    assert len(bill.rows) == 1
+    assert WarningCode.CBOND_AMOUNT_INCONSISTENT not in bill.warnings
+    assert "cbond_amount_inconsistent_rows" not in bill.assumptions
+
+
+@pytest.mark.parametrize(
+    ("code", "name"),
+    [("754019", "曙26发债"), ("113050", "曙26转债")],
+)
+def test_cbond_inconsistent_row_warns(code: str, name: str) -> None:
+    """发债代码（按名称识别）与上市转债代码（按代码段识别）偏差 >2% 都 WARN。"""
+    bill = _parse(_xlsx(_HEADERS, [_cbond_row(证券代码=code, 证券名称=name, 成交金额="-5000.00")]))
+    assert len(bill.rows) == 1  # 不阻断
+    assert WarningCode.CBOND_AMOUNT_INCONSISTENT in bill.warnings
+    assert bill.assumptions["cbond_amount_inconsistent_rows"] == 1
+
+
+def test_cbond_tolerance_covers_fees() -> None:
+    """金额含少量费用（-1000.50，偏差 0.05% ≤ 2%）→ 不误报。"""
+    bill = _parse(_xlsx(_HEADERS, [_cbond_row(成交金额="-1000.50")]))
+    assert WarningCode.CBOND_AMOUNT_INCONSISTENT not in bill.warnings
+
+
+def test_non_bond_row_not_checked() -> None:
+    """普通股票行不走可转债校验（600519 量价额自洽口径不同）。"""
+    bill = _parse(_xlsx(_HEADERS, [_buy_row()]))
+    assert WarningCode.CBOND_AMOUNT_INCONSISTENT not in bill.warnings

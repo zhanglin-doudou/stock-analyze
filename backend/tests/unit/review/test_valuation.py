@@ -20,13 +20,18 @@ from stock_review.application.valuation import (
     PRICE_LOOKBACK,
     QTY_PRICE_SCALE,
     blocked_price_reason,
+    bond_face_divisors,
+    bond_value_units,
     category,
     close_on_or_before,
     closing_price_ladder,
     holding_delta,
+    initial_money_fund_balances,
     is_cash_balance,
+    is_money_fund_row,
     load_prices,
     market_failure_cause,
+    money_fund_share_delta,
     total_market_value,
 )
 
@@ -52,23 +57,29 @@ def _trade(
     quantity_units: int = 0,
     amount_units: int = 0,
     cash_balance_units: int | None = None,
+    security_code: str = "600519",
+    security_name: str = "贵州茅台",
+    side: str = "buy",
+    price_units: int = 0,
+    money_fund_balance_units: int | None = None,
 ) -> Trade:
     return Trade(
         id=f"trd_{uuid.uuid4().hex[:12]}",
         user_id=_USER,
         batch_id=None,
         trade_date=trade_date,
-        security_code="600519",
-        security_name="贵州茅台",
-        side="buy",
+        security_code=security_code,
+        security_name=security_name,
+        side=side,
         quantity_units=quantity_units,
-        price_units=0,
+        price_units=price_units,
         amount_units=amount_units,
         commission_units=0,
         stamp_tax_units=0,
         other_fee_units=0,
         cash_balance_units=cash_balance_units,
         cash_balance_available=cash_balance_units is not None,
+        money_fund_balance_units=money_fund_balance_units,
         category=category_,
         occurrence_idx=0,
         line_no=0,
@@ -170,18 +181,116 @@ def test_total_market_value_floors_each_symbol() -> None:
         "300750": [],
     }
     holdings = {"600519": 3, "000001": 3, "300750": 0}
-    total, missing = total_market_value(holdings, ladder, date(2026, 2, 1))
+    total, missing, bond_fallback = total_market_value(holdings, ladder, date(2026, 2, 1))
     # 逐标的 floor：3*1_000_001//1e8=0，3*999_999//1e8=0；qty=0 不请求行情、不报缺失。
     assert total == 0
     assert missing == []
+    assert bond_fallback == []
     holdings = {"600519": 10**8, "000001": 10**8}
-    total, missing = total_market_value(holdings, ladder, date(2026, 2, 1))
+    total, missing, bond_fallback = total_market_value(holdings, ladder, date(2026, 2, 1))
     assert total == 1_000_001 + 999_999
     assert missing == []
+    assert bond_fallback == []
     # 持有但无任何收盘 → 缺失（由调用方判 blocked）
-    total, missing = total_market_value({"300750": 10**8}, ladder, date(2026, 2, 1))
+    total, missing, _bond_fallback = total_market_value({"300750": 10**8}, ladder, date(2026, 2, 1))
     assert total == 0
     assert missing == ["300750"]
+
+
+# ── 货币基金 / 债券（设计 2026-10-29）─────────────────────────
+
+
+_MF_NAME = "华泰紫金天\n天发货币"
+
+
+def test_money_fund_primitives_and_opening_balances() -> None:
+    buy = _trade(
+        trade_date=date(2026, 1, 5),
+        category_="buy",
+        security_code="940018",
+        security_name=_MF_NAME,
+        quantity_units=shares("10000"),
+        amount_units=-cents("10000"),
+        price_units=price("1.0000"),
+        money_fund_balance_units=cents("10000"),
+    )
+    sell = _trade(
+        trade_date=date(2026, 1, 6),
+        category_="sell",
+        security_code="940018",
+        security_name=_MF_NAME,
+        side="sell",
+        quantity_units=shares("2000"),
+        amount_units=cents("2000"),
+        price_units=price("1.0000"),
+        money_fund_balance_units=cents("8000"),
+    )
+    assert is_money_fund_row(buy) and is_money_fund_row(sell)
+    # 余额列为 NULL 的普通行不是货基行（哪怕名称含「货币」）。
+    assert not is_money_fund_row(_trade(trade_date=date(2026, 1, 5), category_="buy"))
+    # 份额 × 1.0000 → 金额；卖出取负。
+    assert money_fund_share_delta(buy) == cents("10000")
+    assert money_fund_share_delta(sell) == -cents("2000")
+    # 区间前有余额行 → 直取最后一条。
+    assert initial_money_fund_balances([buy, sell], date(2026, 2, 1)) == {"940018": cents("8000")}
+    # 区间内首条余额行 → 反推期初（8000 − (−2000) = 10000）。
+    assert initial_money_fund_balances([sell], date(2026, 1, 6)) == {"940018": cents("10000")}
+    # 无货基行 → 空。
+    assert initial_money_fund_balances([], date(2026, 2, 1)) == {}
+
+
+def test_bond_face_divisor_consistent_with_valuation() -> None:
+    """成交金额反推系数必须与 `qty × close ÷ 1e8 ÷ divisor` 自洽。"""
+    # 数量按「张」：10 张 × 净价 100 = 1000 元 → 系数 1。
+    zhang = _trade(
+        trade_date=date(2026, 1, 5),
+        category_="buy",
+        security_code="019547",
+        security_name="国债",
+        quantity_units=shares("10"),
+        price_units=price("100.00"),
+        amount_units=-cents("1000"),
+    )
+    # 数量按「面值」：1000 面值 × 净价 100 ÷ 100 = 1000 元 → 系数 100（公司债，
+    # 可转债不走反推，见下方 cbond 专项用例）。
+    face = _trade(
+        trade_date=date(2026, 1, 5),
+        category_="buy",
+        security_code="122009",
+        security_name="公司债",
+        quantity_units=shares("1000"),
+        price_units=price("100.00"),
+        amount_units=-cents("1000"),
+    )
+    assert bond_face_divisors([zhang]) == {"019547": 1}
+    assert bond_face_divisors([face]) == {"122009": 100}
+
+    ladder = {"019547": [(date(2026, 1, 5), price("100.00"))]}
+    total, missing, fallback = total_market_value(
+        {"019547": shares("10")},
+        ladder,
+        date(2026, 1, 5),
+        bond_divisors=bond_face_divisors([zhang]),
+    )
+    assert (total, missing, fallback) == (cents("1000"), [], [])
+
+
+def test_bond_missing_quote_falls_back_to_cost_basis() -> None:
+    ladder = {"019547": [], "600519": []}
+    holdings = {"019547": shares("1000"), "600519": shares("100")}
+    cost = {"019547": cents("980"), "600519": cents("5000")}
+    # 债券缺行情 → 按买入成本兜底（fallback），非债券缺行情 → missing（调用方 blocked）。
+    total, missing, fallback = total_market_value(
+        holdings, ladder, date(2026, 1, 5), cost_basis=cost, bond_divisors={"019547": 1}
+    )
+    assert total == cents("980")
+    assert fallback == ["019547"]
+    assert missing == ["600519"]
+    # 不启用兜底（cost_basis=None）时债券也进 missing。
+    total, missing, fallback = total_market_value(holdings, ladder, date(2026, 1, 5))
+    assert total == 0
+    assert fallback == []
+    assert missing == ["019547", "600519"]
 
 
 # ── 行情失败分类 ────────────────────────────────────────────
@@ -261,3 +370,66 @@ async def test_load_prices_degrades_to_per_symbol_on_batch_failure() -> None:
     assert ladder["600519"] == [(date(2026, 1, 30), price("1600.00"))]
     # 逐标的失败类别被保留，供 blocked_reason 细化
     assert causes == {"999999": "not_supported"}
+
+
+# ── 可转债市值：固定 1 手 = 10 张（设计 2026-10-29 D2）──────────────────────
+
+
+def test_cbond_value_fixed_lot_10() -> None:
+    """1 手 @ 收盘 130 元/张 → 10 张 × 130 = 1300 元（不走成交金额反推）。"""
+    assert bond_value_units("113050", shares("1"), price("130"), None) == cents("1300")
+    # 其它债券仍按反推系数折算（张口径：10 张 × 101.5 = 1015 元）。
+    assert bond_value_units("019547", shares("10"), price("101.5"), {"019547": 1}) == cents("1015")
+    # 面值口径公司债：1000 面值 × 100 ÷ 100 = 1000 元。
+    assert bond_value_units("122009", shares("1000"), price("100"), {"122009": 100}) == cents(
+        "1000"
+    )
+
+
+def test_bond_face_divisors_skips_convertible() -> None:
+    """可转债不反推（申购代码无成交行可推，口径固定 1 手 = 10 张）。"""
+    cbond = _trade(
+        trade_date=date(2026, 7, 20),
+        category_="buy",
+        security_code="113050",
+        security_name="曙26转债",
+        quantity_units=shares("1"),
+        price_units=price("100.00"),
+        amount_units=-cents("1000"),
+    )
+    gov = _trade(
+        trade_date=date(2026, 1, 5),
+        category_="buy",
+        security_code="019547",
+        security_name="国债",
+        quantity_units=shares("10"),
+        price_units=price("100.00"),
+        amount_units=-cents("1000"),
+    )
+    divisors = bond_face_divisors([cbond, gov])
+    assert "113050" not in divisors
+    assert divisors["019547"] == 1
+
+
+def test_cbond_market_value_in_total() -> None:
+    ladder = {"113050": [(date(2026, 8, 3), price("130"))]}
+    total, missing, fallback = total_market_value(
+        {"113050": shares("1")},
+        ladder,
+        date(2026, 8, 3),
+        cost_basis={"113050": cents("1000")},
+        bond_divisors={},
+    )
+    assert (total, missing, fallback) == (cents("1300"), [], [])
+
+
+def test_cbond_missing_quote_falls_back_to_cost_basis() -> None:
+    """上市前窗口（无行情）：按买入成本兜底，进 fallback 不进 missing。"""
+    total, missing, fallback = total_market_value(
+        {"113050": shares("1")},
+        {"113050": []},
+        date(2026, 7, 21),
+        cost_basis={"113050": cents("1000")},
+        bond_divisors={},
+    )
+    assert (total, missing, fallback) == (cents("1000"), [], ["113050"])

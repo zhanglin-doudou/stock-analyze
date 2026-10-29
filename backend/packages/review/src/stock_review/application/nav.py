@@ -28,7 +28,9 @@ from stock_core.nav import CashflowPoint, NavSeries, build_nav_series, compute_x
 from stock_ledger.models import Trade
 from stock_ledger.repositories.trades import TradeRepository
 from stock_platform.ports import MarketDataSource
+from stock_platform.symbols import is_bond
 
+from stock_review.application.bond_alias import build_bond_alias, canonical_code
 from stock_review.application.bridge import _initial_cash
 from stock_review.application.rebuild import trades_to_events
 from stock_review.application.valuation import (
@@ -47,6 +49,12 @@ from stock_review.application.valuation import (
     blocked_price_reason as _blocked_reason,
 )
 from stock_review.application.valuation import (
+    bond_face_divisors as _bond_face_divisors,
+)
+from stock_review.application.valuation import (
+    bond_value_units as _bond_value_units,
+)
+from stock_review.application.valuation import (
     category as _category,
 )
 from stock_review.application.valuation import (
@@ -56,7 +64,13 @@ from stock_review.application.valuation import (
     holding_delta as _holding_delta,
 )
 from stock_review.application.valuation import (
+    initial_money_fund_balances as _initial_money_fund_balances,
+)
+from stock_review.application.valuation import (
     is_cash_balance as _is_cash_balance,
+)
+from stock_review.application.valuation import (
+    is_money_fund_row as _is_money_fund_row,
 )
 from stock_review.application.valuation import (
     load_prices as _load_prices,
@@ -89,6 +103,7 @@ class _DailyState:
     cash_units: int
     holdings: dict[str, int]  # security_code → quantity_units (scale=4)
     cost_basis: dict[str, int]  # security_code → 累计成本 (scale=2)
+    money_fund: dict[str, int]  # security_code → 货币基金余额 (scale=2)
     cashflow_units: int  # 当日外部现金流（scale=2）
 
 
@@ -166,22 +181,34 @@ async def compute_nav_points(
         return [], [], ["无现金余额锚点（无 cash_balance 行）"], False, {}, None, None
     initial_cash, assumption = initial
 
+    # 可转债发债→上市代码别名（设计 D3）：从全量明细派生，期初持仓/区间交易/行情统一
+    # 用 canonical 代码，避免「754019 申购持仓 + 113xxx 上市卖出」被当成两只证券。
+    bond_alias, _unresolved = build_bond_alias((t.security_code, t.security_name) for t in trades)
+
     # 2. FIFO 结果用于检测 data_error（降级）
-    fifo_all = build_rounds(trades_to_events(trades))
+    fifo_all = build_rounds(trades_to_events(trades, bond_alias=bond_alias))
     degraded = any(r.status == "data_error" for r in fifo_all.rounds)
 
-    # 3. 期初持仓（区间前 open lots）+ 成本
-    fifo_before = build_rounds(trades_to_events([t for t in trades if t.trade_date < period_start]))
+    # 3. 期初持仓（区间前 open lots）+ 成本；货基行不进持仓（按余额计）
+    money_fund_codes = {t.security_code for t in trades if _is_money_fund_row(t)}
+    initial_money_fund = _initial_money_fund_balances(trades, period_start)
+    bond_divisors = _bond_face_divisors(trades)
+    fifo_before = build_rounds(
+        trades_to_events([t for t in trades if t.trade_date < period_start], bond_alias=bond_alias)
+    )
     initial_holdings: dict[str, int] = defaultdict(int)
     initial_cost: dict[str, int] = defaultdict(int)
     code_names: dict[str, str] = {}
     for lot in fifo_before.open_lots:
+        if lot.security_code in money_fund_codes:
+            continue  # 货基份额不进持仓，余额由 initial_money_fund 承担
         initial_holdings[lot.security_code] += lot.quantity_units
         initial_cost[lot.security_code] += lot.cost_units
-    # 从所有 trades 构建 code → name 映射（覆盖期初持仓 + 区间内新买入）
+    # 从所有 trades 构建 code → name 映射（覆盖期初持仓 + 区间内新买入）；
+    # 发债代码归并到上市代码，名称取最新一行（上市后为「xx转债」）。
     for trade in trades:
         if trade.security_code and trade.security_name:
-            code_names[trade.security_code] = trade.security_name
+            code_names[canonical_code(bond_alias, trade.security_code)] = trade.security_name
 
     # 4. 按日分组 trades（只取区间内；区间前的持仓/现金已由 initial_holdings / initial_cash 承担）
     all_trades_in_range = [t for t in trades if period_start <= t.trade_date <= period_end]
@@ -194,35 +221,54 @@ async def compute_nav_points(
     if trade_dates[-1] < period_end:
         trade_dates.append(period_end)
 
-    # 6. 需要行情的标的：**只取可能形成持仓的标的**（现金余额行的伪代码如 CASH 不算）
+    # 6. 需要行情的标的：**只取可能形成持仓的标的**（现金余额行/货基行不算）；
+    #    发债代码归并为上市代码（申购代码无行情，只发 canonical 请求）。
     holding_symbols = {
-        t.security_code
+        canonical_code(bond_alias, t.security_code)
         for t in all_trades_in_range
-        if t.security_code and _holding_delta(_category(t), t.quantity_units) != 0
+        if t.security_code
+        and not _is_money_fund_row(t)
+        and _holding_delta(_category(t), t.quantity_units) != 0
     }
     all_symbols = sorted(holding_symbols | set(initial_holdings.keys()))
     # 回看窗口：期初基准需要「期初当日或之前」的收盘价，否则第一天就判缺行情。
     ladder, market_causes = await _load_prices(
         market_data, all_symbols, period_start - _PRICE_LOOKBACK, trade_dates[-1]
     )
+    initial_money_fund_units = sum(initial_money_fund.values())
+    bond_fallback_any = False
 
-    # 6a. 月度首日「昨日资产」：期初现金 + 期初持仓按上一交易日收盘价估值。
+    # 6a. 月度首日「昨日资产」：期初现金 + 货基余额 + 期初持仓按上一交易日收盘价估值。
     #     仅用于展示首日的昨日资产/日收益额（不进入 TWR 序列）。
-    prev_day_value, prev_day_missing = _total_market_value(
-        dict(initial_holdings), ladder, period_start - timedelta(days=1)
+    prev_day_value, prev_day_missing, prev_day_fallback = _total_market_value(
+        dict(initial_holdings),
+        ladder,
+        period_start - timedelta(days=1),
+        cost_basis=dict(initial_cost),
+        bond_divisors=bond_divisors,
     )
-    prev_day_value_units: int | None = None if prev_day_missing else initial_cash + prev_day_value
+    if prev_day_fallback:
+        bond_fallback_any = True
+    prev_day_value_units: int | None = (
+        None if prev_day_missing else initial_cash + initial_money_fund_units + prev_day_value
+    )
 
     points: list[tuple[date, int, int]] = []
     holdings_by_date: dict[date, list[_HoldingSnapshot]] = {}
 
-    # 6b. 期初基准点：区间首日之前的总资产（现金 + 期初持仓按市价）。
+    # 6b. 期初基准点：区间首日之前的总资产（现金 + 货基 + 期初持仓按市价）。
     #     没有它，TWR 只能从首个交易日算起，整段收益会漏掉首日涨跌。
     baseline_date = period_start
     if trade_dates[0] > period_start:
-        baseline_value, baseline_missing = _total_market_value(
-            dict(initial_holdings), ladder, baseline_date
+        baseline_value, baseline_missing, baseline_fallback = _total_market_value(
+            dict(initial_holdings),
+            ladder,
+            baseline_date,
+            cost_basis=dict(initial_cost),
+            bond_divisors=bond_divisors,
         )
+        if baseline_fallback:
+            bond_fallback_any = True
         if baseline_missing:
             return (
                 [],
@@ -238,9 +284,14 @@ async def compute_nav_points(
                 assumption,
                 prev_day_value_units,
             )
-        points.append((baseline_date, initial_cash + baseline_value, 0))
+        points.append((baseline_date, initial_cash + initial_money_fund_units + baseline_value, 0))
         holdings_by_date[baseline_date] = _build_holding_snapshots(
-            dict(initial_holdings), dict(initial_cost), ladder, baseline_date, code_names
+            dict(initial_holdings),
+            dict(initial_cost),
+            ladder,
+            baseline_date,
+            code_names,
+            bond_divisors=bond_divisors,
         )
 
     # 7. 逐日推演
@@ -248,6 +299,7 @@ async def compute_nav_points(
         cash_units=initial_cash,
         holdings=dict(initial_holdings),
         cost_basis=dict(initial_cost),
+        money_fund=dict(initial_money_fund),
         cashflow_units=0,
     )
     blocked_points: list[tuple[date, str]] = []
@@ -261,7 +313,11 @@ async def compute_nav_points(
         for trade in day_trades:
             category = _category(trade)
             code = trade.security_code
-            if code:
+            if _is_money_fund_row(trade):
+                # 货基：不进持仓/成本，只覆盖余额（同日以稳定序最后一行为准）。
+                state.money_fund[code] = int(trade.money_fund_balance_units or 0)
+            elif code:
+                code = canonical_code(bond_alias, code)  # 发债代码归并上市代码（设计 D3）
                 # 持仓数量变化
                 delta = _holding_delta(category, trade.quantity_units)
                 if delta:
@@ -294,20 +350,42 @@ async def compute_nav_points(
         else:
             state.cash_units += day_cash_delta
 
-        # 当日市值
-        market_value, missing = _total_market_value(state.holdings, ladder, d)
+        # 当日市值（债券缺行情按买入价兜底，不阻断）
+        market_value, missing, bond_fallback = _total_market_value(
+            state.holdings,
+            ladder,
+            d,
+            cost_basis=state.cost_basis,
+            bond_divisors=bond_divisors,
+        )
+        if bond_fallback:
+            bond_fallback_any = True
         if missing:
             # 缺行情 → 当日阻断（继续推演后续日，不中断整段）
             blocked_points.append((d, _blocked_reason("缺行情数据", missing, market_causes)))
             continue
 
-        total_value = state.cash_units + market_value
+        money_fund_units = sum(state.money_fund.values())
+        total_value = state.cash_units + money_fund_units + market_value
         points.append((d, total_value, cashflow))
         holdings_by_date[d] = _build_holding_snapshots(
-            dict(state.holdings), dict(state.cost_basis), ladder, d, code_names
+            dict(state.holdings),
+            dict(state.cost_basis),
+            ladder,
+            d,
+            code_names,
+            bond_divisors=bond_divisors,
         )
 
-    return points, blocked_points, [], degraded, holdings_by_date, assumption, prev_day_value_units
+    return (
+        points,
+        blocked_points,
+        [],
+        degraded or bond_fallback_any,
+        holdings_by_date,
+        assumption,
+        prev_day_value_units,
+    )
 
 
 def _build_holding_snapshots(
@@ -316,11 +394,16 @@ def _build_holding_snapshots(
     ladder: dict[str, list[tuple[date, int]]],
     trade_date: date,
     code_names: dict[str, str],
+    *,
+    bond_divisors: dict[str, int] | None = None,
 ) -> list[_HoldingSnapshot]:
     """根据某日推演结束后的 holdings/cost_basis + 价格阶梯，构建持仓快照列表。
 
-    过滤 qty=0 的标的；按 security_code 排序，保证确定性。
+    过滤 qty=0 的标的；按 security_code 排序，保证确定性。债券价格按换算系数折算
+    （akshare 净价是元/百元面值）；缺行情的债券在总资产里已按买入价兜底，快照跳过
+    （避免展示 0 现价）。
     """
+    divisors = bond_divisors or {}
     snapshots: list[_HoldingSnapshot] = []
     for code in sorted(holdings):
         qty = holdings[code]
@@ -328,9 +411,13 @@ def _build_holding_snapshots(
             continue
         close = _close_on_or_before(ladder, code, trade_date)
         if close is None:
-            continue  # 缺行情的日期会被判 blocked，这里只是兜底过滤
+            continue  # 缺行情的日期会被判 blocked / 债券已按买入价兜底，这里只是兜底过滤
         cost = cost_basis.get(code, 0)
-        market_value = qty * close // _QTY_PRICE_SCALE
+        market_value = (
+            _bond_value_units(code, qty, close, divisors)
+            if is_bond(code)
+            else qty * close // _QTY_PRICE_SCALE
+        )
         snapshots.append(
             _HoldingSnapshot(
                 security_code=code,

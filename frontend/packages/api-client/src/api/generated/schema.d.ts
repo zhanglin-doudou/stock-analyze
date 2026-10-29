@@ -1092,6 +1092,8 @@ export interface components {
          * @description 每日资产快照行（金额 2 位定点字符串；blocked 行数值字段**显式 null**）。
          */
         AssetPointOut: {
+            /** Balance */
+            balance?: string | null;
             /** Cash */
             cash?: string | null;
             /** Cashflow */
@@ -1116,6 +1118,8 @@ export interface components {
             holding_count: number;
             /** Market Value */
             market_value?: string | null;
+            /** Money Fund */
+            money_fund?: string | null;
             /** Prev Total Assets */
             prev_total_assets?: string | null;
             /**
@@ -1330,6 +1334,10 @@ export interface components {
          * @description 资产概览：当前快照（最新资产日）+ 全历史峰值成本/总收益/费用。
          */
         DashboardAssetOverviewOut: {
+            /** Balance */
+            balance?: string | null;
+            /** Balance Display */
+            balance_display?: string | null;
             /** Cash */
             cash?: string | null;
             /** Cash Display */
@@ -1346,6 +1354,10 @@ export interface components {
             max_invested_cost?: string | null;
             /** Max Invested Cost Display */
             max_invested_cost_display?: string | null;
+            /** Money Fund */
+            money_fund?: string | null;
+            /** Money Fund Display */
+            money_fund_display?: string | null;
             /** Position Pct */
             position_pct?: string | null;
             /**
@@ -2675,6 +2687,8 @@ export interface components {
             dedupe_key: string;
             /** Deleted At */
             deleted_at?: string | null;
+            /** Money Fund Balance */
+            money_fund_balance?: string | null;
             /** Note */
             note?: string | null;
             /** Other Fee */
@@ -2743,6 +2757,8 @@ export interface components {
             cash_balance?: string | null;
             /** Commission */
             commission?: string | null;
+            /** Money Fund Balance */
+            money_fund_balance?: string | null;
             /** Note */
             note?: string | null;
             /** Other Fee */

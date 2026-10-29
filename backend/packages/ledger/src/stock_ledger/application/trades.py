@@ -61,6 +61,7 @@ class TradeDTO:
     other_fee_units: int
     cash_balance_units: int | None
     cash_balance_available: bool
+    money_fund_balance_units: int | None
     occurrence_idx: int
     account_masked: str | None
     note: str | None
@@ -92,6 +93,11 @@ class TradeDTO:
                 str(Money(self.cash_balance_units)) if self.cash_balance_units is not None else None
             ),
             "cash_balance_available": self.cash_balance_available,
+            "money_fund_balance": (
+                str(Money(self.money_fund_balance_units))
+                if self.money_fund_balance_units is not None
+                else None
+            ),
             "account_masked": self.account_masked,
             "note": self.note,
             "source": self.source,
@@ -132,6 +138,7 @@ def trade_to_dto(trade: Trade) -> TradeDTO:
         other_fee_units=trade.other_fee_units,
         cash_balance_units=trade.cash_balance_units,
         cash_balance_available=trade.cash_balance_available,
+        money_fund_balance_units=trade.money_fund_balance_units,
         occurrence_idx=trade.occurrence_idx,
         account_masked=trade.account_masked,
         note=trade.note,
@@ -163,6 +170,7 @@ def trade_snapshot(trade: Trade) -> dict[str, Any]:
         "stamp_tax_units": trade.stamp_tax_units,
         "other_fee_units": trade.other_fee_units,
         "cash_balance_units": trade.cash_balance_units,
+        "money_fund_balance_units": trade.money_fund_balance_units,
         "category": trade.category,
         "account_masked": trade.account_masked,
         "note": trade.note,

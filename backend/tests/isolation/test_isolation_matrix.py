@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from stock_contracts.errors import ErrorCode
 from stock_ledger.models import ImportBatch, SummaryRule, Trade
 from stock_platform.models import ApiToken, Job, JobEvent
+from stock_review.application.assets import ASSET_DEFINITION_VERSION
 
 pytestmark = [pytest.mark.isolation, pytest.mark.api]
 
@@ -192,9 +193,14 @@ async def _seed_asset_row(engine: AsyncEngine, *, user_id: uuid.UUID) -> date:
                 "prev_total_assets_units, daily_pnl_units, daily_return_units, status, "
                 "status_reason, definition_version, rebuilt_at) "
                 "values (:id, :user_id, :d, 1000000, 0, 1000000, 0, 0, 0, 0, "
-                "NULL, NULL, NULL, 'ok', NULL, '1.0', now())"
+                "NULL, NULL, NULL, 'ok', NULL, :ver, now())"
             ),
-            {"id": f"ast_{uuid.uuid4().hex}", "user_id": user_id, "d": trade_date},
+            {
+                "id": f"ast_{uuid.uuid4().hex}",
+                "user_id": user_id,
+                "d": trade_date,
+                "ver": ASSET_DEFINITION_VERSION,
+            },
         )
     return trade_date
 
@@ -237,6 +243,7 @@ ADMIN_FORBIDDEN: list[tuple[str, str]] = [
     ("get", "/nav"),
     # Period2-16：admin 不可读写资产表（身份越权 → 403，不是 404）
     ("get", "/assets"),
+    ("get", "/assets/chart"),
     ("post", "/assets/build"),
     # Period2-06：admin 不可读指标（身份越权 → 403）
     ("get", "/metrics"),
@@ -259,6 +266,7 @@ LIST_ISOLATION_MATRIX: list[tuple[str, str]] = [
     ("get", "/reconciliation/bridge"),
     # Period2-16：资产表列表（seed 自定义 asset_daily 行，按 date 断言）
     ("get", "/assets"),
+    ("get", "/assets/chart"),
     # Period2-12：Dashboard 跨租户不串号（B 的持仓/计数为空，A 自己可见）
     ("get", "/dashboard"),
 ]
@@ -305,6 +313,7 @@ UNAUTHENTICATED_MATRIX: list[tuple[str, str]] = [
     ("get", "/nav"),
     # Period2-16（API-081/082 资产表）
     ("get", "/assets"),
+    ("get", "/assets/chart"),
     ("post", "/assets/build"),
     # Period2-06（API-033/034/035/079 指标）
     ("get", "/metrics"),
@@ -491,6 +500,14 @@ async def test_cross_account_list_isolated(
         assert owner_resp.json()["history_overview"]["closed_round_count"] == 1, (
             "A 自己的回合应计入看板（防止假阳性）"
         )
+        return
+
+    if template == "/assets/chart":
+        # 图线只含本人非 blocked 行；B 无数据 → n_points=0。
+        assert body["n_points"] == 0, "B 的资产图看到了 A 的行"
+        owner_resp = await _call(client, method, url, owner.headers)
+        assert owner_resp.status_code == 200, owner_resp.text
+        assert owner_resp.json()["n_points"] >= 1, "A 自己的资产图应可见（防止假阳性）"
         return
 
     if template == "/reconciliation/bridge":

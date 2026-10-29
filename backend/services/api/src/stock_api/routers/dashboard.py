@@ -111,6 +111,12 @@ def _to_out(result: Any) -> DashboardOut:
             ],
             market_value=_money(asset.market_value_units),
             cash=_money(asset.cash_units),
+            money_fund=_money(asset.money_fund_units),
+            balance=(
+                None
+                if asset.cash_units is None or asset.money_fund_units is None
+                else _money(asset.cash_units + asset.money_fund_units)
+            ),
             total_assets=_money(asset.total_assets_units),
             position_pct=_pct_2dp(asset.position_ratio_units),
             total_profit=_money(asset.total_profit_units),
@@ -119,6 +125,12 @@ def _to_out(result: Any) -> DashboardOut:
             total_fees=_money(asset.total_fees_units),
             market_value_display=_money_display(asset.market_value_units),
             cash_display=_money_display(asset.cash_units),
+            money_fund_display=_money_display(asset.money_fund_units),
+            balance_display=(
+                None
+                if asset.cash_units is None or asset.money_fund_units is None
+                else _money_display(asset.cash_units + asset.money_fund_units)
+            ),
             total_assets_display=_money_display(asset.total_assets_units),
             total_profit_display=_money_display(asset.total_profit_units),
             max_invested_cost_display=_money_display(asset.max_invested_cost_units),
