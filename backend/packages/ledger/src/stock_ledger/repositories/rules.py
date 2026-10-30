@@ -39,6 +39,18 @@ _BASE_SYSTEM_RULES: tuple[tuple[str, str, str, str, str, str, int], ...] = (
     ("sys_sell_stock", "证券卖出→卖出", "sell", "both", "exact", "证券卖出", 10),
     ("sys_buy_plain", "买入→买入", "buy", "both", "exact", "买入", 20),
     ("sys_sell_plain", "卖出→卖出", "sell", "both", "exact", "卖出", 20),
+    # 省心投申购确认（华泰基金投顾）：主账户资金转出到省心投投顾账户，转出动作不在
+    # 账单留记录——该行视同银行转出，归资金划转（解析器已转成 CASH 资金行，设计 D14）。
+    # 必须 exact 且 priority 高于货基「申购确认→买入」(15)，否则会被误分类成货基申购。
+    (
+        "sys_sxt_out",
+        "[省心投]申购确认→资金划转",
+        "transfer",
+        "both",
+        "exact",
+        "[省心投]申购确认",
+        12,
+    ),
     # 货币基金申赎确认（货基账单通常没有「买卖标志」列，摘要只写「申购/赎回确认」）：
     # 关键词与解析器 `FUND_SUMMARY_SIDE` 保持一致（漂移由单测锁定）。「申购确认」
     # priority 必须高于通用「申购→新股」(50)，否则货基申购会被误分类成打新。

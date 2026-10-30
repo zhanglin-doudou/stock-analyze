@@ -116,7 +116,8 @@ def test_fund_rules_reuse_parser_vocabulary() -> None:
     [
         # 真实对账单摘要会被券商折行；匹配前必须归一，否则整片误隔离。
         ("[省心投]红\n利发放", "unknown", "dividend", "sys_div_paid"),
-        ("[省心投]申\n购确认", "buy", "buy", "sys_fund_buy"),
+        # [省心投]申购确认视同银行转出（设计 D14）：exact 规则优先于货基「申购确认」。
+        ("[省心投]申\n购确认", "buy", "transfer", "sys_sxt_out"),
         ("[省心投]转\n托管确认", "unknown", "transfer", "sys_rehold"),
         ("托管转出", "unknown", "transfer", "sys_hold_out"),
         ("证券清理", "unknown", "other", "sys_cleanup"),
@@ -245,7 +246,7 @@ def test_money_fund_fixture_parse_and_classify_zero_quarantine() -> None:
 
 
 def test_real_statement_excerpt_parse_and_classify() -> None:
-    """真实对账单节选：折行摘要全部命中，持仓/声明区块被忽略，全零金额行隔离。"""
+    """真实对账单节选：折行摘要全部命中，持仓/声明区块被忽略，省心投红利/全零行隔离。"""
     fixture = Path(__file__).parents[2] / "api" / "华泰账单_真实节选_mock.xlsx"
     bill = parse_bill(
         fixture.read_bytes(),
@@ -256,7 +257,7 @@ def test_real_statement_excerpt_parse_and_classify() -> None:
     )
     assert len(bill.rows) == 5
     assert [item.line_no for item in bill.quarantined] == [17, 18, 19, 20, 25]
-    assert {item.reason_code for item in bill.quarantined} == {"INVALID_AMOUNT"}
+    assert {item.reason_code for item in bill.quarantined} == {"INVALID_AMOUNT", "ZERO_AMOUNT_INFO"}
 
     rules = _rules()
     categories: dict[str, set[str]] = {}
@@ -265,7 +266,8 @@ def test_real_statement_excerpt_parse_and_classify() -> None:
         assert rule is not None, row.summary
         categories.setdefault(row.summary or "", set()).add(rule.category)
     assert categories == {
-        "[省心投]申\n购确认": {"buy"},
+        # [省心投]申购确认视同银行转出（设计 D14）→ 资金划转。
+        "[省心投]申\n购确认": {"transfer"},
         "托管转出": {"transfer"},
         "新股申购确\n认缴款": {"new_stock"},
         "新股入帐": {"new_stock"},

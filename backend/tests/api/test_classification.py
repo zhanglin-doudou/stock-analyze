@@ -250,7 +250,9 @@ async def test_real_statement_excerpt_quarantine_only_zero_amount(
 
     items = await _quarantine(client, api_prefix, user, accepted["batch_id"])
     assert len(items) == 5
-    assert {item["reason_code"] for item in items} == {"INVALID_AMOUNT"}
+    # 3 条 [省心投]红利发放 → ZERO_AMOUNT_INFO（设计 D14）；转托管确认 + 证券清理全零
+    # → INVALID_AMOUNT。
+    assert {item["reason_code"] for item in items} == {"INVALID_AMOUNT", "ZERO_AMOUNT_INFO"}
     assert {item["line_no"] for item in items} == {17, 18, 19, 20, 25}
     # 持仓/声明区块（夹具第 27 行起）不应出现在隔离区。
     assert all(item["line_no"] < 27 for item in items)
@@ -259,18 +261,20 @@ async def test_real_statement_excerpt_quarantine_only_zero_amount(
     assert len(trades) == 5
     assert all(item["category"] for item in trades)
     by_summary = {item["summary"]: item for item in trades}
-    assert by_summary["[省心投]申\n购确认"]["category"] == "buy"
+    # [省心投]申购确认视同银行转出（设计 D14）：category=transfer，CASH 占位、方向 buy。
+    assert by_summary["[省心投]申\n购确认"]["category"] == "transfer"
+    assert by_summary["[省心投]申\n购确认"]["security_code"] == "CASH"
     assert by_summary["新股申购确\n认缴款"]["category"] == "new_stock"
     assert by_summary["[省心投]申\n购确认"]["side"] == "buy"
     assert {item["category"] for item in trades} == {
-        "buy",
         "sell",
         "transfer",
         "new_stock",
     }
-    # 基金持仓区块是期末锚点：940018 赎回后余额 = 参考市值 51859.86；202308 期初 0。
+    # 基金持仓区块是期末锚点：940018 赎回后余额 = 参考市值 51859.86；省心投申购行已转
+    # CASH 资金行，不再产生货基余额。
     balances = {item["money_fund_balance"] for item in trades if item["money_fund_balance"]}
-    assert balances == {"51859.86", "10000.00"}
+    assert balances == {"51859.86"}
 
 
 async def test_unknown_summary_preview_equals_commit_quarantine(

@@ -108,7 +108,8 @@ class QuarantineReason(StrEnum):
     DUPLICATE_IN_FILE = "DUPLICATE_IN_FILE"
     # 金额字段全为 0（佣金/印花税/其他费/发生金额/资金余额）：无资金流的噪音行。
     INVALID_AMOUNT = "INVALID_AMOUNT"
-    # 申购中签/新股入账/托管转出等纯通知行：无金额且无余额，不进明细（可审计可恢复）。
+    # 申购中签/新股入账/托管转出、[省心投]红利发放（省心投账户内部份额通知，与主账户
+    # 资金无关）等纯通知行：无资金意义，不进明细（可审计可恢复）。
     ZERO_AMOUNT_INFO = "ZERO_AMOUNT_INFO"
 
 
