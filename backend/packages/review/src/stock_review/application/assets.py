@@ -40,6 +40,7 @@ from stock_ledger.models import Trade
 from stock_platform.jobs import JobQueue
 from stock_platform.obs import get_logger
 from stock_platform.ports import MarketDataSource
+from stock_platform.symbols import is_convertible_bond
 
 from stock_review.application.bond_alias import build_bond_alias, canonical_code
 from stock_review.application.bridge import _initial_cash
@@ -47,7 +48,6 @@ from stock_review.application.rebuild import trades_to_events
 from stock_review.application.valuation import (
     BOND_COST_FALLBACK_PREFIX,
     CASHFLOW_CATEGORIES,
-    NEW_STOCK_COST_FALLBACK_PREFIX,
     PRICE_LOOKBACK,
     blocked_price_reason,
     bond_face_divisors,
@@ -59,7 +59,6 @@ from stock_review.application.valuation import (
     is_money_fund_row,
     load_prices,
     money_fund_balance,
-    new_stock_fallback_reason,
     new_stock_pending_codes,
     total_market_value,
 )
@@ -76,7 +75,9 @@ log = get_logger("stock_review.assets")
 # 1.4：新股中签/入帐通知行（金额 0）不再计持仓；待上市新股缺行情按认购成本兜底 degraded。
 # 1.5：货基负余额按 0 兜底（账单缺赎回/转出流水时不再误报「期初未知」降级），看板持仓与
 #      资产表同口径（货基不进持仓、可转债代码归并、债券/待上市新股按成本兜底）。
-ASSET_DEFINITION_VERSION = "1.5"
+# 1.6：新股按认购成本兜底 / 可转债按买入价兜底 → 不再 degraded（视为正常估值），
+#      新增 remark 列标注「当日资产含可转债」；仅非可转债按成本兜底仍 degraded。
+ASSET_DEFINITION_VERSION = "1.6"
 # 安全窗：每次有新数据/脏流水/行情 as_of 变化时重算最近 45 天。
 SAFETY_DAYS = 45
 # 水位线重叠窗：PG `now()` = 事务开始时间，覆盖「长事务晚提交」竞态。
@@ -128,6 +129,7 @@ class AssetPoint:
     daily_return_units: int | None
     status: str
     status_reason: str | None
+    remark: str | None
     definition_version: str
 
 
@@ -220,10 +222,10 @@ def _row_status_reason(
     fifo_error: bool,
     uncovered: bool,
     bond_fallback: list[str] | None = None,
-    new_stock_fallback: list[str] | None = None,
 ) -> str | None:
-    """行级 degraded 原因（FIFO 异常 / 行情未覆盖 / 债券按买入价 / 新股待上市）。
+    """行级 degraded 原因（FIFO 异常 / 行情未覆盖 / 非可转债按买入价）。
 
+    新股按认购成本兜底、可转债按买入价兜底不再降级（视为正常估值）。
     都不命中返回 NULL；多条原因用「；」拼接（去重由调用方保证）。
     """
     reasons: list[str] = []
@@ -233,19 +235,13 @@ def _row_status_reason(
         reasons.append(MARKET_UNCOVERED_REASON)
     if bond_fallback:
         reasons.append(bond_fallback_reason(bond_fallback))
-    if new_stock_fallback:
-        reasons.append(new_stock_fallback_reason(new_stock_fallback))
     return "；".join(reasons) if reasons else None
 
 
 # degraded 原因聚合标签（日志用）：去掉逐日变化的标的清单，避免键随组合爆炸。
 _BOND_FALLBACK_TAG = "债券按买入价估值（无行情）"
-_NEW_STOCK_FALLBACK_TAG = "新股待上市，按认购价估值（无行情）"
-_COST_FALLBACK_TAGS = frozenset({_BOND_FALLBACK_TAG, _NEW_STOCK_FALLBACK_TAG})
-_COST_FALLBACK_PREFIXES = (
-    (BOND_COST_FALLBACK_PREFIX, _BOND_FALLBACK_TAG),
-    (NEW_STOCK_COST_FALLBACK_PREFIX, _NEW_STOCK_FALLBACK_TAG),
-)
+_COST_FALLBACK_TAGS = frozenset({_BOND_FALLBACK_TAG})
+_COST_FALLBACK_PREFIXES = ((BOND_COST_FALLBACK_PREFIX, _BOND_FALLBACK_TAG),)
 
 
 def _reason_tag(part: str) -> tuple[str, list[str]]:
@@ -341,7 +337,7 @@ def compute_daily_valuations(
         else:
             cash_units += day_cash_delta
 
-        market_value_units, missing, bond_fallback, new_stock_fallback = total_market_value(
+        market_value_units, missing, bond_fallback, _new_stock_fallback = total_market_value(
             holdings,
             ladder,
             cursor_date,
@@ -349,6 +345,12 @@ def compute_daily_valuations(
             bond_divisors=bond_divisors,
             new_stock_codes=pending_codes,
         )
+        # 新股按认购成本兜底（待上市）→ 视为正常，不再降级；
+        # 可转债按买入价兜底 → 视为正常（产品债务记录），仅在 remark 标注；
+        # 只有非可转债（如普通企业债）按成本兜底才 degraded。
+        convertible_bonds = [s for s in bond_fallback if is_convertible_bond(s)]
+        other_bonds = [s for s in bond_fallback if not is_convertible_bond(s)]
+        has_convertible = bool(convertible_bonds)
         money_fund_units = sum(money_fund.values())
         nonzero_holdings = sum(1 for qty in holdings.values() if qty != 0)
 
@@ -379,16 +381,13 @@ def compute_daily_valuations(
         # FIFO 异常只影响持有问题代码的那些天；对无 FIFO 问题代码持仓的其他天不降级。
         fifo_error_today = any(code in fifo_error_codes for code in holdings)
         status = (
-            ROW_STATUS_DEGRADED
-            if (fifo_error_today or uncovered or bond_fallback or new_stock_fallback)
-            else ROW_STATUS_OK
+            ROW_STATUS_DEGRADED if (fifo_error_today or uncovered or other_bonds) else ROW_STATUS_OK
         )
         status_reason = (
             _row_status_reason(
                 fifo_error=fifo_error_today,
                 uncovered=uncovered,
-                bond_fallback=bond_fallback,
-                new_stock_fallback=new_stock_fallback,
+                bond_fallback=other_bonds,
             )
             if status == ROW_STATUS_DEGRADED
             else None
@@ -430,6 +429,7 @@ def compute_daily_valuations(
                     "daily_return_units": daily_return_units,
                     "status": status,
                     "status_reason": status_reason,
+                    "remark": "当日资产含可转债" if has_convertible else None,
                     "definition_version": ASSET_DEFINITION_VERSION,
                     "rebuilt_at": rebuilt_at,
                 }
@@ -479,6 +479,7 @@ def _blocked_row(
         "daily_return_units": None,
         "status": ROW_STATUS_BLOCKED,
         "status_reason": reason,
+        "remark": None,
         "definition_version": ASSET_DEFINITION_VERSION,
         "rebuilt_at": rebuilt_at,
     }
@@ -921,6 +922,7 @@ def _to_point(row: AssetDaily) -> AssetPoint:
         daily_return_units=row.daily_return_units,
         status=row.status,
         status_reason=row.status_reason,
+        remark=row.remark,
         definition_version=row.definition_version,
     )
 

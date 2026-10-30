@@ -283,7 +283,7 @@ def _asset_row(trade_date: date, *, status: str, daily_return_units: int | None)
         daily_return_units=daily_return_units,
         status=status,
         status_reason="新股待上市，按认购价估值" if status == "degraded" else None,
-        definition_version="1.5",
+        definition_version="1.6",
         rebuilt_at=datetime(2026, 1, 1, tzinfo=UTC),
     )
 

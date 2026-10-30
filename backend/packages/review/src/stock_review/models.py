@@ -249,6 +249,7 @@ class AssetDaily(Base):
     daily_return_units: Mapped[int | None] = mapped_column(BigInteger)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="ok")
     status_reason: Mapped[str | None] = mapped_column(String(256))
+    remark: Mapped[str | None] = mapped_column(String(256))
     definition_version: Mapped[str] = mapped_column(String(16), nullable=False)
     rebuilt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(

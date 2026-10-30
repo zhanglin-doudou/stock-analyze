@@ -466,6 +466,17 @@
             ],
             "title": "Prev Total Assets"
           },
+          "remark": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Remark"
+          },
           "status": {
             "enum": [
               "ok",

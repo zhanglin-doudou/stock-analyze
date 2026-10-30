@@ -930,7 +930,7 @@ def test_window_boundary_arithmetic() -> None:
 def test_new_stock_prelisting_degraded_not_blocked_and_holding_counted_once() -> None:
     """新股 001237：中签/入帐通知行（金额 0）不计持仓，缴款行建仓 500 股。
 
-    上市前（05-18 ~ 05-21）无行情 → 按认购成本兜底 degraded（不 blocked）；
+    上市前（05-18 ~ 05-21）无行情 → 按认购成本兜底，视为正常（ok，不 degraded）；
     上市首日（05-22）有行情 → 按市价 ok；通知行不再重复计数（持仓恒 500 股）。
     """
     trades = [
@@ -984,11 +984,11 @@ def test_new_stock_prelisting_degraded_not_blocked_and_holding_counted_once() ->
     assert notice["status"] == "ok"
     assert notice["holding_count"] == 0
 
-    # 缴款后上市前：按认购成本兜底 degraded，现金 73370 + 成本 26630 = 100000。
+    # 缴款后上市前：按认购成本兜底，视为正常（ok），现金 73370 + 成本 26630 = 100000。
     pre = _row(result, date(2026, 5, 20))
-    assert pre["status"] == "degraded"
-    assert "新股待上市" in (pre["status_reason"] or "")
-    assert "001237" in (pre["status_reason"] or "")
+    assert pre["status"] == "ok"
+    assert pre["status_reason"] is None
+    assert pre["remark"] is None
     assert pre["market_value_units"] == cents("26630")
     assert pre["total_assets_units"] == cents("100000")
     assert pre["holding_count"] == 1  # 通知行不重复计数：500 股而非 1500 股
@@ -1008,7 +1008,8 @@ def test_new_stock_prelisting_degraded_not_blocked_and_holding_counted_once() ->
 
 def test_cbond_alias_prelisting_degraded_postlisting_ok() -> None:
     """754019 曙26发债（07-20 中签缴款 1 手@-1000）归并到 113050 曙26转债：
-    上市前（08-03 前）按买入价兜底 degraded；上市后按行情估值 ok，且全程不 blocked。"""
+    上市前（08-03 前）按买入价兜底，视为正常（ok），remark 标注含可转债；
+    上市后按行情估值 ok，全程不 blocked。"""
     alias = {"754019": "113050"}
     trades = [
         _trade(
@@ -1037,10 +1038,10 @@ def test_cbond_alias_prelisting_degraded_postlisting_ok() -> None:
     assert result.global_blocked is False
 
     pre = _row(result, date(2026, 7, 20))
-    # 上市前无行情 → 债券按买入价兜底：现金 99000 + 成本 1000 = 100000。
-    assert pre["status"] == "degraded"
-    assert "113050" in (pre["status_reason"] or "")
-    assert "754019" not in (pre["status_reason"] or "")
+    # 上市前无行情 → 可转债按买入价兜底，视为正常（ok），remark 标注；现金 99000 + 成本 1000 = 100000。
+    assert pre["status"] == "ok"
+    assert pre["status_reason"] is None
+    assert pre["remark"] == "当日资产含可转债"
     assert pre["total_assets_units"] == cents("100000")
     assert pre["market_value_units"] == cents("1000")
 

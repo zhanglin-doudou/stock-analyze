@@ -628,6 +628,7 @@ class AssetPointOut(StrictModel):
     daily_return_pct: str | None = None
     status: Literal["ok", "blocked", "degraded"]
     status_reason: str | None = None
+    remark: str | None = None
 
 
 class AssetBuildStateOut(StrictModel):

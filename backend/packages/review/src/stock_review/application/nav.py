@@ -28,7 +28,7 @@ from stock_core.nav import CashflowPoint, NavSeries, build_nav_series, compute_x
 from stock_ledger.models import Trade
 from stock_ledger.repositories.trades import TradeRepository
 from stock_platform.ports import MarketDataSource
-from stock_platform.symbols import is_bond
+from stock_platform.symbols import is_bond, is_convertible_bond
 
 from stock_review.application.bond_alias import build_bond_alias, canonical_code
 from stock_review.application.bridge import _initial_cash
@@ -254,7 +254,7 @@ async def compute_nav_points(
         prev_day_value,
         prev_day_missing,
         prev_day_fallback,
-        prev_day_new_stock_fallback,
+        _prev_day_new_stock_fallback,
     ) = _total_market_value(
         dict(initial_holdings),
         ladder,
@@ -263,7 +263,7 @@ async def compute_nav_points(
         bond_divisors=bond_divisors,
         new_stock_codes=pending_new_stock_codes,
     )
-    if prev_day_fallback or prev_day_new_stock_fallback:
+    if any(not is_convertible_bond(s) for s in prev_day_fallback):
         bond_fallback_any = True
     prev_day_value_units: int | None = (
         None if prev_day_missing else initial_cash + initial_money_fund_units + prev_day_value
@@ -280,7 +280,7 @@ async def compute_nav_points(
             baseline_value,
             baseline_missing,
             baseline_fallback,
-            baseline_new_stock_fallback,
+            _baseline_new_stock_fallback,
         ) = _total_market_value(
             dict(initial_holdings),
             ladder,
@@ -289,7 +289,7 @@ async def compute_nav_points(
             bond_divisors=bond_divisors,
             new_stock_codes=pending_new_stock_codes,
         )
-        if baseline_fallback or baseline_new_stock_fallback:
+        if any(not is_convertible_bond(s) for s in baseline_fallback):
             bond_fallback_any = True
         if baseline_missing:
             return (
@@ -375,7 +375,7 @@ async def compute_nav_points(
             state.cash_units += day_cash_delta
 
         # 当日市值（债券缺行情按买入价兜底，不阻断）
-        market_value, missing, bond_fallback, new_stock_fallback = _total_market_value(
+        market_value, missing, bond_fallback, _new_stock_fallback = _total_market_value(
             state.holdings,
             ladder,
             d,
@@ -383,7 +383,7 @@ async def compute_nav_points(
             bond_divisors=bond_divisors,
             new_stock_codes=pending_new_stock_codes,
         )
-        if bond_fallback or new_stock_fallback:
+        if any(not is_convertible_bond(s) for s in bond_fallback):
             bond_fallback_any = True
         if missing:
             # 缺行情 → 当日阻断（继续推演后续日，不中断整段）

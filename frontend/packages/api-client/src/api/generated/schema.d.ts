@@ -1142,6 +1142,8 @@ export interface components {
             money_fund?: string | null;
             /** Prev Total Assets */
             prev_total_assets?: string | null;
+            /** Remark */
+            remark?: string | null;
             /**
              * Status
              * @enum {string}
