@@ -171,7 +171,7 @@ export function Assets() {
     setLoading(true);
     setError(null);
     try {
-      const data = await api.assets.list({ limit: PAGE_LIMIT, cursor, sort: 'trade_date' });
+      const data = await api.assets.list({ limit: PAGE_LIMIT, cursor, sort: '-trade_date' });
       if (cursor) {
         setPage((previous) => {
           if (!previous) return data;
