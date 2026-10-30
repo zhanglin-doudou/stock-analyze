@@ -205,6 +205,31 @@ def test_drawdown_blocked_row_suppresses_value() -> None:
     assert value.decomposition["n_blocked_rows"] == 1
 
 
+def test_drawdown_small_degraded_ratio_still_computes() -> None:
+    """D5：窗口内少量 degraded（≤20%）仍计算，避免 60TD 回看被个别降级日整段拒答。"""
+    rows = tuple(make_asset_day(JUNE_DAYS[i], daily_return_units=0) for i in range(10))
+    rows = (*rows[:3], dataclasses.replace(rows[3], status="degraded"), *rows[4:])
+    ctx = dataclasses.replace(make_context(), asset_daily=rows)
+    value = timing_drawdown.DEF.compute(ctx)
+    assert value.value_units is not None
+    assert value.n == 10
+
+
+def test_drawdown_large_degraded_ratio_suppresses_value() -> None:
+    rows = tuple(make_asset_day(JUNE_DAYS[i], daily_return_units=0) for i in range(10))
+    rows = (
+        dataclasses.replace(rows[0], status="degraded"),
+        dataclasses.replace(rows[1], status="degraded"),
+        dataclasses.replace(rows[2], status="degraded"),
+        *rows[3:],
+    )
+    ctx = dataclasses.replace(make_context(), asset_daily=rows)
+    value = timing_drawdown.DEF.compute(ctx)
+    assert value.value_units is None
+    assert value.n == 0
+    assert value.decomposition["n_degraded_rows"] == 3
+
+
 def test_drawdown_empty() -> None:
     value = timing_drawdown.DEF.compute(make_context())
     assert value.value_units is None

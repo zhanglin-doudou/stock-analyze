@@ -355,6 +355,7 @@ make verify-p3
 | API-079 | 二 | Period2-06 | API-080 | 一 | Period1-12 |
 | API-081 | 二 | Period2-16 | API-082 | 二 | Period2-16 |
 | API-083 | 二 | Period2-07 | API-084 | 二 | Period2-12 |
+| API-086 | 二 | Period2-06 | | | |
 
 > 校验：`make api-coverage` 读取本表与 [API-Catalog §1](architecture/v2/API-Catalog.md) 比对，断言 `已映射 / 总数 == 1.0`。
 

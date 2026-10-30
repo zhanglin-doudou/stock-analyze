@@ -9,3 +9,8 @@ export function currentMonth(now: Date = new Date()): string {
   const month = String(now.getMonth() + 1).padStart(2, "0");
   return `${year}-${month}`;
 }
+
+/** 最近一个完整自然月（P0-4：指标页默认月份，避免展示进行中的当月）。 */
+export function latestCompletedMonth(now: Date = new Date()): string {
+  return currentMonth(new Date(now.getFullYear(), now.getMonth() - 1, 1));
+}

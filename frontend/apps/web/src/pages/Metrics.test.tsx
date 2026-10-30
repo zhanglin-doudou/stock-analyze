@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import type { Job, JobAccepted, JobEvent, JobPage, MetricBatch, MetricItem } from "@sa/api-client";
-import { currentMonth } from "../lib/date";
+import { latestCompletedMonth } from "../lib/date";
 import { Metrics } from "./Metrics";
 import { api } from "../client";
 
@@ -26,7 +26,7 @@ const getJob = vi.mocked(api.jobs.get);
 const jobEvents = vi.mocked(api.jobs.events);
 const rebuildPeriod = vi.mocked(api.jobs.rebuildPeriod);
 
-const CURRENT_MONTH = currentMonth();
+const CURRENT_MONTH = latestCompletedMonth();
 
 function makeItem(overrides: Partial<MetricItem> = {}): MetricItem {
   return {
@@ -45,6 +45,28 @@ function makeItem(overrides: Partial<MetricItem> = {}): MetricItem {
     ci_low: null,
     ci_high: null,
     data_as_of: "2026-06-30",
+    presentation: {
+      display_name: "盈亏比",
+      direction: "higher_better",
+      confidence: { level: "high", label: "可信", reason: "样本与窗口满足门槛" },
+      progress: {
+        current: 4,
+        required: 10,
+        remaining: 6,
+        unit: "samples",
+        unit_label: "笔/日",
+        label: "还差 6 笔/日 可出结论",
+      },
+      verdict: { level: "neutral", label: "中性", rationale: "经验区间判定" },
+      bands: null,
+      window: { kind: "month", label: CURRENT_MONTH },
+      interpretation: {
+        fact: "盈亏比 1.50000000；n=4。",
+        meaning: "样本不足，仅展示原始值。",
+        action: "再积累 6 个样本后再看。",
+      },
+      caveats: [],
+    },
     ...overrides,
   };
 }
@@ -64,6 +86,7 @@ function makeBatch(overrides: Partial<MetricBatch> = {}): MetricBatch {
         sample_status: "blocked",
         reason: "BENCHMARK_MISSING",
         value: undefined,
+        presentation: null,
       }),
     ],
     ...overrides,
@@ -151,6 +174,7 @@ describe("Metrics 指标页（API-083）", () => {
       include_exploratory: false,
     });
     await screen.findByText("perf.pnl_ratio");
+    expect(screen.getByTestId("market-data-notice").textContent).toContain("收盘后同步");
     expect(screen.getByText("1.50000000")).toBeTruthy();
     // blocked 行无 value 键（C-31）→ 显示 — 与原因
     expect(screen.getByText("BENCHMARK_MISSING")).toBeTruthy();

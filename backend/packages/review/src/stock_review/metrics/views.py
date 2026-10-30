@@ -63,6 +63,9 @@ class TradeView:
     cash_balance_units: int | None
     deleted_at: datetime | None
     version: int
+    # 视图 additive（2026-10-30）：识别伪代码/货基/发债归并用，不参与旧 compute。
+    security_name: str = ""
+    money_fund_balance_units: int | None = None
 
 
 @dataclass(frozen=True, slots=True)

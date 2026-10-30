@@ -7,7 +7,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -15,8 +15,10 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from stock_contracts.clock import Clock
 from stock_contracts.errors import ApiError, ErrorCode
 from stock_platform.ports import MarketDataSource
+from stock_platform.symbols import classify_symbol
 
 from stock_review.application.assets import ASSET_DEFINITION_VERSION
+from stock_review.application.bond_alias import build_bond_alias, canonical_code
 from stock_review.metrics.views import (
     AssetBuildView,
     AssetDailyView,
@@ -33,6 +35,22 @@ from stock_review.repositories.metrics import MetricDatasetRepository
 
 DEFAULT_BENCHMARK = "hs300_tr"
 _SCALE_RATIO_BOUND = 10**8
+# 风险/择时指标需要「截至期末的滚动窗口」而不是自然月内样本：资产日视图向前多取
+# 120 自然日（≈80 个交易日），供 beta 的 60TD 配对与 drawdown 的 60TD 窗口使用。
+_ASSET_LOOKBACK_DAYS = 120
+# 选股类指标（BHAR 20/60）需要「买入后前向 N 个交易日」的行情；若只加载到 period_end，
+# 期初买入的样本永远凑不齐前向窗口（n=0）。向前多取 120 自然日（≈80 个交易日），
+# 上限今天；回放模式按夹具自然截断。
+BAR_FORWARD_DAYS = 120
+# 伪代码/非证券行：不参与行情请求（CASH 是现金余额占位，货基由 money_fund 列标记）。
+_PSEUDO_CODES = frozenset({"CASH"})
+# live 模式下总收益指数暂以对应 ETF 作为代理（akshare 无 hs300_tr 全收益序列）；
+# replay 模式保留原 symbol，避免破坏回放夹具。接入正式全收益指数后删除本表。
+_BENCHMARK_LIVE_PROXY: dict[str, str] = {
+    "hs300_tr": "510300",
+    "zz500_tr": "510500",
+    "csi1000_tr": "512100",
+}
 
 
 def _iso(value: Any) -> str | None:
@@ -95,6 +113,8 @@ def _trade_view(row: Any) -> TradeView:
         cash_balance_units=row.cash_balance_units,
         deleted_at=row.deleted_at,
         version=row.version,
+        security_name=row.security_name or "",
+        money_fund_balance_units=row.money_fund_balance_units,
     )
 
 
@@ -159,21 +179,8 @@ def _asset_build_view(
     )
 
 
-async def _bars_for_symbols(
-    market_data: MarketDataSource,
-    symbols: tuple[str, ...],
-    start: date,
-    end: date,
-) -> tuple[tuple[BarView, ...], bool]:
-    if not symbols:
-        return (), False
-    try:
-        bars = await market_data.get_daily_bars(symbols, start, end)
-    except ApiError as exc:
-        if exc.code is ErrorCode.NOT_FOUND:
-            return (), True
-        raise
-    views = tuple(
+def _bar_views(bars: Any) -> tuple[BarView, ...]:
+    return tuple(
         BarView(
             symbol=bar.symbol,
             trade_date=bar.trade_date,
@@ -182,7 +189,69 @@ async def _bars_for_symbols(
         )
         for bar in bars
     )
-    return views, False
+
+
+async def _bars_for_symbols(
+    market_data: MarketDataSource,
+    symbols: tuple[str, ...],
+    start: date,
+    end: date,
+) -> tuple[tuple[BarView, ...], bool, tuple[str, ...]]:
+    """批量取 bars；任一不支持时逐 symbol 重试，避免一个坏代码杀死整批指标。
+
+    返回 ``(bars, all_missing, missing_symbols)``：``all_missing`` 仅当所有 symbol 都
+    取不到时为 True（门禁 blocked）；部分缺失不阻断，由指标按实际 bars 计算并由 n 体现。
+    """
+    if not symbols:
+        return (), False, ()
+    try:
+        bars = await market_data.get_daily_bars(symbols, start, end)
+    except ApiError as exc:
+        if exc.code is not ErrorCode.NOT_FOUND:
+            raise
+        collected: list[Any] = []
+        missing: list[str] = []
+        for symbol in symbols:
+            try:
+                part = await market_data.get_daily_bars([symbol], start, end)
+            except ApiError as inner:
+                if inner.code is not ErrorCode.NOT_FOUND:
+                    raise
+                missing.append(symbol)
+                continue
+            collected.extend(part)
+        missing_tuple = tuple(missing)
+        return _bar_views(collected), len(missing_tuple) == len(symbols), missing_tuple
+    return _bar_views(bars), False, ()
+
+
+def bars_window(period_end: date, today: date) -> tuple[date, date]:
+    """行情读取窗口的结束日：期末 + 前向窗口，且不超过今天。"""
+    return period_end, min(today, period_end + timedelta(days=BAR_FORWARD_DAYS))
+
+
+def benchmark_fetch_symbol(benchmark: str, market_data: MarketDataSource) -> str:
+    """live 模式下用 ETF 代理总收益指数；replay 模式保留夹具 symbol。"""
+    if market_data.capabilities.mode == "replay":
+        return benchmark
+    return _BENCHMARK_LIVE_PROXY.get(benchmark, benchmark)
+
+
+def metric_symbols(rounds_raw: list[Round], trades_raw: list[Any]) -> tuple[str, ...]:
+    """需要请求行情的标的：过滤伪代码/货基，按 bond alias 归并，并剔除不支持品种。"""
+    bond_alias, _unresolved = build_bond_alias(
+        (row.security_code, row.security_name) for row in trades_raw
+    )
+    wanted: set[str] = set()
+    for row in rounds_raw:
+        if row.security_code and row.security_code not in _PSEUDO_CODES:
+            wanted.add(row.security_code)
+    for row in trades_raw:
+        code = row.security_code
+        if not code or code in _PSEUDO_CODES or row.money_fund_balance_units is not None:
+            continue
+        wanted.add(canonical_code(bond_alias, code))
+    return tuple(sorted(code for code in wanted if classify_symbol(code) is not None))
 
 
 async def load_viewset(
@@ -202,25 +271,37 @@ async def load_viewset(
     rounds_raw = await repo.rounds_in_period(user_id, period_start, period_end)
     fills_raw = await repo.fills_in_period(user_id, period_start, period_end)
     trades_raw = await repo.trades_in_period(user_id, period_start, period_end)
-    asset_raw = await repo.asset_daily_in_period(user_id, period_start, period_end)
+    # 资产日多取一段回看：beta/drawdown 用「期末回看 60 个交易日」而不是自然月内。
+    asset_raw = await repo.asset_daily_in_period(
+        user_id, period_start - timedelta(days=_ASSET_LOOKBACK_DAYS), period_end
+    )
+    asset_period_raw = [row for row in asset_raw if period_start <= row.trade_date <= period_end]
     state = await repo.asset_build_state(user_id)
 
     today = clock.today()
-    market_as_of = market_data.as_of if market_data.capabilities.supports_daily_bars else None
-    asset_build = _asset_build_view(state, market_as_of=market_as_of, today=today)
-
-    symbols = tuple(
-        sorted(
-            {row.security_code for row in rounds_raw} | {row.security_code for row in trades_raw}
-        )
+    symbols = metric_symbols(rounds_raw, trades_raw)
+    # 行情加载区间：期初 → min(今天, 期末+前向窗口)，供 BHAR 前向收益使用。
+    bar_from = period_start
+    bar_to = bars_window(period_end, today)[1]
+    bars, bars_missing, bars_missing_symbols = await _bars_for_symbols(
+        market_data, symbols, bar_from, bar_to
     )
-    bars, bars_missing = await _bars_for_symbols(market_data, symbols, period_start, period_end)
+    # 只读缓存模式下 market_data.as_of 可能是进程启动时的近似值；用实际 bars 的最大日期，
+    # 让 asset_build stale 判定与 data_as_of 一致。
+    market_as_of = (
+        max((bar.trade_date for bar in bars), default=None)
+        if market_data.capabilities.supports_daily_bars
+        else None
+    ) or (market_data.as_of if market_data.capabilities.supports_daily_bars else None)
+    asset_build = _asset_build_view(state, market_as_of=market_as_of, today=today)
 
     benchmark_series: tuple[BenchmarkView, ...] = ()
     benchmark_missing = False
+    benchmark_fetch = None
     if benchmark:
-        raw_benchmark, benchmark_missing = await _bars_for_symbols(
-            market_data, (benchmark,), period_start, period_end
+        benchmark_fetch = benchmark_fetch_symbol(benchmark, market_data)
+        raw_benchmark, benchmark_missing, _ = await _bars_for_symbols(
+            market_data, (benchmark_fetch,), bar_from, bar_to
         )
         provenance = market_data.provenance if not benchmark_missing else ""
         benchmark_series = tuple(
@@ -234,7 +315,15 @@ async def load_viewset(
         )
 
     calendar_days = calendar_of(period_start, period_end)
-    observed_days = len({bar.trade_date for bar in bars})
+    # bar_density 只统计「本期」行情覆盖，不被前向窗口放大。
+    period_bar_days = {
+        bar.trade_date for bar in bars if period_start <= bar.trade_date <= period_end
+    }
+    bar_observed_days = len(period_bar_days)
+    # 日频 sample_status 的观察天数：取行情/资产回看中较大的交易日集合（beta/drawdown
+    # 依赖回看窗口；bar_density 仍只用 bar_observed_days，避免被回看放大）。
+    asset_trading_days = len({row.trade_date for row in asset_raw if row.trade_date.weekday() < 5})
+    observed_days = max(bar_observed_days, asset_trading_days)
 
     # ── 指纹（§6.4）────────────────────────────────────────
     fingerprints: dict[str, str] = {}
@@ -275,6 +364,7 @@ async def load_viewset(
             "as_of": _iso(market_as_of),
             "symbols": list(symbols),
             "bars": len(bars),
+            "missing_symbols": list(bars_missing_symbols),
         }
     )
     fingerprints["bars_daily"] = market_fingerprint
@@ -282,6 +372,7 @@ async def load_viewset(
         {
             "dataset": "benchmark_series",
             "benchmark": benchmark,
+            "fetch_symbol": benchmark_fetch,
             "provenance": market_data.provenance if benchmark else None,
             "as_of": _iso(market_as_of),
             "available": not benchmark_missing,
@@ -295,10 +386,10 @@ async def load_viewset(
         abs(row.return_rate_units) > _SCALE_RATIO_BOUND for row in rounds_raw
     ) or any(
         row.daily_return_units is not None and abs(row.daily_return_units) > _SCALE_RATIO_BOUND
-        for row in asset_raw
+        for row in asset_period_raw
     )
     density = (
-        (Decimal(observed_days) / Decimal(calendar_days.trading_days))
+        (Decimal(bar_observed_days) / Decimal(calendar_days.trading_days))
         if calendar_days.trading_days
         else Decimal(0)
     )
@@ -311,8 +402,10 @@ async def load_viewset(
         "market_asof_lag": bool(market_as_of is not None and market_as_of < min(today, period_end)),
         "data_out_of_range": ratio_out_of_range,
         "bar_density_low": bool(density < Decimal("0.8")),
-        "degraded_rows": any(row.status in {"degraded", "blocked"} for row in asset_raw),
-        "recon_blocked": any(row.status == "blocked" for row in asset_raw),
+        # 部分标的缺行情：不阻断（指标按可得样本算，n 体现覆盖），留 flag 供排障/文案。
+        "bars_partial": bool(bars_missing_symbols) and not bars_missing,
+        "degraded_rows": any(row.status in {"degraded", "blocked"} for row in asset_period_raw),
+        "recon_blocked": any(row.status == "blocked" for row in asset_period_raw),
     }
 
     return ViewSet(

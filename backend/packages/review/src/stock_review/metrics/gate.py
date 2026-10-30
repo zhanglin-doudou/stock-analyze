@@ -103,11 +103,18 @@ def _stale(definition: MetricDef, ctx: MetricContext) -> GateDecision | None:
 
 def _unreliable(definition: MetricDef, ctx: MetricContext) -> GateDecision | None:
     behavior = definition.sample_policy
+    datasets = dataset_dependencies(definition)
     if ctx.flags.get("data_out_of_range"):
         return GateDecision(STATUS_UNRELIABLE, REASON_DATA_OUT_OF_RANGE, True)
-    if behavior.min_trading_days > 0 and ctx.flags.get("bar_density_low"):
+    # bar_density 只描述「行情数据覆盖」，只应惩罚依赖 bars_daily 的指标；回撤/β 等
+    # 资产日指标不应因为某标的缺 bar 而整指标不可用（2026-10-30 修复）。
+    if (
+        "bars_daily" in datasets
+        and behavior.min_trading_days > 0
+        and ctx.flags.get("bar_density_low")
+    ):
         return GateDecision(STATUS_UNRELIABLE, REASON_BAR_DENSITY_LOW, True)
-    if "asset_daily" in dataset_dependencies(definition) and ctx.flags.get("degraded_rows"):
+    if "asset_daily" in datasets and ctx.flags.get("degraded_rows"):
         return GateDecision(STATUS_UNRELIABLE, REASON_DATA_DEGRADED, True)
     return None
 

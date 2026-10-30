@@ -93,6 +93,9 @@ cd frontend && pnpm install && cd ..
 # 4) 造演示数据（固定体验账号 + 行情回放 + 账单）
 make seed-demo
 
+# 4b) live 模式先同步行情到本地缓存（replay 模式可跳过）
+make sync-market
+
 # 5) 起服务（api + worker + web；不会自动起 DB）
 make dev
 ```
@@ -121,6 +124,17 @@ make dev
 - `make seed-tenants` / `make seed-demo` 使用固定口令 `1234`；`backend/tests/conftest.py` 的 `DEV_EMAIL/DEV_PASSWORD` 与体验账号一致。
 - 账号/口令仅用于本地测试，**禁止用于生产或对外环境**。
 - 全新数据库（或 `make db-reset` 后）四个账号口令均为 `1234`；旧数据库里此前创建的账号 seed 会重置口令；已有有效流水会跳过导入，无流水账号会重新导入。需要完全重建数据时请 `make db-reset` 后重新 seed。
+
+### Live 行情（收盘后同步，盘中不拉取）
+
+`MARKET_MODE=live` 时，API/worker 的读路径**只读本地** `market.daily_bar`，不会在请求中访问第三方行情；
+盘中也不会拉取当天行情。行情更新由显式命令完成（东八区 16:30 前自动截到昨天，留出收盘数据发布窗口）：
+
+```bash
+make sync-market          # 只补本地缺失区间；已有数据不重复请求
+```
+
+指标/看板页面会显示「行情来自本地缓存（仅收盘后同步，盘中不拉取实时行情）」。`MARKET_MODE=replay` 使用夹具，无需同步。
 
 ### 首次看板数据
 

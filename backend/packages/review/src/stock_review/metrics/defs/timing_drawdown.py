@@ -26,7 +26,11 @@ from stock_review.metrics.base import (
     ScopeSpec,
     StatusRule,
 )
-from stock_review.metrics.defs._common import EmptyParams, asset_days_in_period
+from stock_review.metrics.defs._common import (
+    EmptyParams,
+    asset_days_in_period,
+    asset_days_window,
+)
 from stock_review.metrics.gate import (
     REASON_ASSET_BUILD_BLOCKED,
     REASON_ASSET_BUILD_STALE,
@@ -92,19 +96,32 @@ class DrawdownDef:
     )
 
     def compute(self, ctx: MetricContext) -> MetricValue:
-        rows = asset_days_in_period(ctx)
+        # 期末回看 60 个交易日（不是自然月内）：视图已向前加载回看资产日。
+        rows = asset_days_window(ctx, MIN_TRADING_DAYS)
         n_blocked = sum(1 for row in rows if row.status == "blocked")
         n_degraded = sum(1 for row in rows if row.status == "degraded")
-        if n_blocked > 0 or n_degraded > 0:
+        # D5：少量 degraded（≤20% 窗口）仍可计算，避免 60TD 回看窗口被个别降级日整段拒答；
+        # blocked 一律拒绝（断链不可拼接）。
+        degraded_ratio = (n_degraded / len(rows)) if rows else 0
+        if n_blocked > 0 or degraded_ratio > 0.25:
             return MetricValue(
                 value_units=None,
                 n=0,
-                decomposition={"n_blocked_rows": n_blocked, "n_degraded_rows": n_degraded},
+                decomposition={
+                    "n_blocked_rows": n_blocked,
+                    "n_degraded_rows": n_degraded,
+                },
             )
         usable = [row for row in rows if row.daily_return_units is not None]
         n_missing = len(rows) - len(usable)
         returns = [row.daily_return_units for row in usable if row.daily_return_units is not None]
-        natural_days = (ctx.period_end - ctx.period_start).days + 1
+        # 年化自然日：窗口覆盖整个 period 时沿用 period 跨度（保持既有 golden 口径）；
+        # 否则用真实窗口跨度（月度 60TD 回看时不能用 30 天当年化分母）。
+        period_span = (ctx.period_end - ctx.period_start).days + 1
+        window_span = (rows[-1].trade_date - rows[0].trade_date).days + 1 if rows else period_span
+        natural_days = (
+            period_span if rows and rows[0].trade_date <= ctx.period_start else window_span
+        )
         family = timing_drawdown(returns, natural_days=natural_days)
         n_trading_days = sum(1 for row in usable if row.trade_date.weekday() < 5)
         decomposition = {

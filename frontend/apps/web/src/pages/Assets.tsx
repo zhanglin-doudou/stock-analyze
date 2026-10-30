@@ -406,6 +406,9 @@ export function Assets() {
       <p className="muted">
         每日资产快照（资产余额 = 现金 + 货币基金，另加持仓市值），用于资产变化与后续回撤；本页不做计算。
       </p>
+      <p className="muted" data-testid="market-data-notice">
+        行情来自本地缓存（仅收盘后同步，盘中不拉取实时行情）；构建前请确认已执行收盘后同步。
+      </p>
 
       <div className="card filters">
         <div className="row-actions">

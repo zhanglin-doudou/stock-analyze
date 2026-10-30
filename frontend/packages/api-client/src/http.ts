@@ -24,6 +24,7 @@ import type {
   LoginResponse,
   MeOut,
   MetricBatch,
+  MetricCatalog,
   MetricDrilldown,
   MetricExplain,
   Nav,
@@ -665,6 +666,10 @@ export function createClient(options: ClientOptions) {
   };
 
   const metricsApi = {
+    /** API-086：18 个指标的口径说明书（无 period；只读）。 */
+    catalog() {
+      return send<MetricCatalog>({ path: "/metrics/catalog" }).then((r) => r.data);
+    },
     /** API-033：指标批量查询（read-through；默认核心 10，`include_exploratory` 按需）。 */
     batch(query: GetMetricsQuery = {}) {
       return send<MetricBatch>({

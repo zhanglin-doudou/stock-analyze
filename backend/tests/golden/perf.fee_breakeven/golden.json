@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
   "metric_id": "perf.fee_breakeven",
-  "definition_version": "1.0",
+  "definition_version": "1.1",
   "fixture": {"id": "fx_fee_breakeven"},
   "period": "2026-06",
   "scope": "day",
   "params": {},
   "expected": {
-    "value": "0.01216700",
+    "value": "0.00100000",
     "unit": "ratio",
     "n": 10,
     "ci_low": null,
@@ -17,8 +17,9 @@
     "decomposition": {
       "fee_amount": 1000,
       "n_blocked_days": 0,
+      "avg_total_assets": 1000000,
       "annualized_fee": 12167,
-      "avg_holding_mv": 1000000,
+      "annualized_fee_ratio": 1216700,
       "twr": 0,
       "annualized_twr": 0,
       "twr_eaten_pct": null,
@@ -26,10 +27,10 @@
     }
   },
   "tolerance": {"kind": "ratio_bp", "eps": "0.0001"},
-  "expected_source": {"kind": "hand_calc", "ref": "§7.1.6：佣金 1000×365/30=12167；12167÷1000000=0.012167", "oracle": null},
-  "review": {"author": "test-designer", "reviewer": "zhang", "approved": true, "approved_at": "2026-10-27"},
+  "expected_source": {"kind": "hand_calc", "ref": "2026-10-30 决策 5：期间费用 1000 ÷ 期间平均总资产 1000000 = 0.00100000；年化参考 1000×365/30=12167", "oracle": null},
+  "review": {"author": "AI", "reviewer": "zhang", "approved": true, "approved_at": "2026-10-30", "note": "2026-10-30 决策 5 口径变更，待人工复核签署"},
   "boundaries": [
     "10 个无 blocked 的资产日、日收益全 0 → TWR=0，twr_eaten_pct 无定义",
-    "年化费用 = 费用×365/自然日（自然日 30），分母 = 日均持仓市值"
+    "value = 期间费用 ÷ 期间平均总资产（不年化）；annualized_fee 仅作 12M 年度带比较参考"
   ]
 }

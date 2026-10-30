@@ -777,6 +777,19 @@ OPERATION_META: dict[str, dict[str, Any]] = {
         "async": False,
         "error_codes": ["INTERNAL_ERROR"],
     },
+    "metrics_catalog": {
+        "api_id": "API-086",
+        "scope": "read",
+        "idempotent": False,
+        "async": False,
+        "error_codes": [
+            "UNKNOWN_QUERY_PARAM",
+            "TOKEN_EXPIRED",
+            "TOKEN_REVOKED",
+            "MULTIPLE_CREDENTIALS",
+            "ADMIN_CANNOT_READ_TRADES",
+        ],
+    },
     "metrics_batch": {
         "api_id": "API-033",
         "scope": "read",

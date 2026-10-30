@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import type { MetricDrilldown, MetricDrilldownItem, MetricExplain } from "@sa/api-client";
 import { api } from "../client";
-import { currentMonth } from "../lib/date";
+import { latestCompletedMonth } from "../lib/date";
 import { MonthInput } from "../ui/MonthInput";
 import { ProblemView } from "../ui/Problem";
 import { DataTable, type DataTableColumn } from "../ui/DataTable";
@@ -33,7 +33,7 @@ function drilldownValue(item: MetricDrilldownItem): string {
 export function MetricDetail() {
   const { metricId = "" } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
-  const period = searchParams.get("period") ?? currentMonth();
+  const period = searchParams.get("period") ?? latestCompletedMonth();
   const [explain, setExplain] = useState<MetricExplain | null>(null);
   const [drilldown, setDrilldown] = useState<MetricDrilldown | null>(null);
   const [loading, setLoading] = useState(false);
@@ -104,8 +104,8 @@ export function MetricDetail() {
         <div className="detail-eyebrow">
           {explain ? `${domainLabel(explain.domain)} · ` : ""}期间 {period}
         </div>
-        <h1 className="detail-title">{metricId}</h1>
-        <p className="detail-sub">指标详情 · 含义 / 计算方式 / 样本与下钻</p>
+        <h1 className="detail-title">{explain?.presentation?.display_name ?? metricId}</h1>
+        <p className="detail-sub">指标详情 · 解读 / 计算方式 / 样本与下钻</p>
       </header>
 
       <div className="detail-toolbar">
@@ -134,16 +134,65 @@ export function MetricDetail() {
         <>
           <div className="detail-card detail-status" data-testid="metric-status">
             <div className="detail-status-line">
-              <span>状态</span>
-              <span className={`badge badge-${explain.status}`}>
-                {metricStatusLabel(explain.status)}
+              <span>可信度</span>
+              <span className={`badge badge-${explain.presentation?.confidence.level ?? explain.status}`}>
+                {explain.presentation?.confidence.label ?? metricStatusLabel(explain.status)}
               </span>
+              {explain.presentation ? (
+                <span className={`badge badge-${explain.presentation.verdict.level}`}>
+                  {explain.presentation.verdict.label}
+                </span>
+              ) : null}
               <span>数据截至 {explain.data_as_of}</span>
               <span>口径版本 {explain.definition_version}</span>
             </div>
-            {explain.reason ? <p className="muted">原因：{explain.reason}</p> : null}
+            {explain.presentation ? (
+              <p className="muted">
+                {explain.presentation.window.label}
+                {explain.presentation.progress
+                  ? `　样本 ${explain.presentation.progress.current}/${explain.presentation.progress.required}：${explain.presentation.progress.label}`
+                  : ""}
+              </p>
+            ) : null}
+            {explain.reason ? (
+              <p className="muted">原因：{explain.presentation?.confidence.reason ?? explain.reason}</p>
+            ) : null}
             {explain.what_to_do ? <p>{explain.what_to_do}</p> : null}
           </div>
+
+          {explain.presentation ? (
+            <div className="detail-card" data-testid="metric-interpretation">
+              <h2>本期解读</h2>
+              <p>
+                <strong>事实：</strong>
+                {explain.presentation.interpretation.fact}
+              </p>
+              <p>
+                <strong>解读：</strong>
+                {explain.presentation.interpretation.meaning}
+              </p>
+              <p>
+                <strong>下一步：</strong>
+                {explain.presentation.interpretation.action}
+              </p>
+              {explain.presentation.bands ? (
+                <p className="muted">
+                  经验区间：
+                  {explain.presentation.bands.map((band) => (
+                    <span key={band.level}>
+                      {band.label} [{band.from ?? "-∞"}, {band.to ?? "+∞"})　
+                    </span>
+                  ))}
+                  （经验值，非权威阈值）
+                </p>
+              ) : null}
+              {(explain.presentation.caveats?.length ?? 0) > 0 ? (
+                <p className="muted">
+                  注意：{(explain.presentation.caveats ?? []).join("；")}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
 
           <div className="detail-card" data-testid="metric-meaning">
             <h2>意义</h2>

@@ -51,6 +51,36 @@ function makeExplain(overrides: Partial<MetricExplain> = {}): MetricExplain {
     what_to_do: null,
     assumptions: {},
     data_as_of: "2026-06-30",
+    presentation: {
+      display_name: "胜率",
+      direction: "higher_better",
+      confidence: { level: "high", label: "可信", reason: "样本与窗口满足门槛" },
+      progress: {
+        current: 12,
+        required: 10,
+        remaining: 0,
+        unit: "samples",
+        unit_label: "笔/日",
+        label: "已满足样本门槛",
+      },
+      verdict: {
+        level: "neutral",
+        label: "中性",
+        rationale: "95% 置信区间跨过区间边界，点估计不足以定档",
+      },
+      bands: [
+        { level: "watch", label: "需关注", from: null, to: "0.40000000" },
+        { level: "neutral", label: "中性", from: "0.40000000", to: "0.55000000" },
+        { level: "good", label: "良好", from: "0.55000000", to: null },
+      ],
+      window: { kind: "month", label: "2026-06" },
+      interpretation: {
+        fact: "胜率 0.58333333；n=12。",
+        meaning: "95% 置信区间跨过区间边界，点估计不足以定档",
+        action: "查看下钻里的亏损回合，确认亏损是否集中在同一标的。",
+      },
+      caveats: [],
+    },
     ...overrides,
   };
 }

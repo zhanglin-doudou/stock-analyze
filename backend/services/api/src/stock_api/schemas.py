@@ -872,6 +872,89 @@ class MetricScopeOut(BaseModel):
     period: str
 
 
+class MetricConfidenceOut(BaseModel):
+    level: Literal["high", "medium", "low", "unavailable"]
+    label: str
+    reason: str
+
+
+class MetricProgressOut(BaseModel):
+    current: int
+    required: int
+    remaining: int
+    unit: str
+    unit_label: str
+    label: str
+
+
+class MetricVerdictOut(BaseModel):
+    level: Literal["good", "neutral", "watch", "unknown", "unavailable"]
+    label: str
+    rationale: str
+
+
+class MetricWindowOut(BaseModel):
+    kind: str
+    label: str
+
+
+class MetricInterpretationOut(BaseModel):
+    fact: str
+    meaning: str
+    action: str
+
+
+class MetricBandOut(BaseModel):
+    level: Literal["good", "neutral", "watch"]
+    label: str
+    from_: str | None = Field(default=None, alias="from")
+    """区间下界（定点字符串；None=无下界）。"""
+    to: str | None = None
+
+
+class MetricPresentationOut(BaseModel):
+    """指标呈现层（2026-10-30 P0-3）：后端渲染，前端零口径展示。"""
+
+    display_name: str
+    direction: Literal["higher_better", "lower_better", "neutral"]
+    confidence: MetricConfidenceOut
+    progress: MetricProgressOut | None = None
+    verdict: MetricVerdictOut
+    bands: list[MetricBandOut] | None = None
+    window: MetricWindowOut
+    interpretation: MetricInterpretationOut
+    caveats: list[str] = Field(default_factory=list)
+
+
+class MetricCatalogItemOut(BaseModel):
+    """单个指标的口径说明（API-086）：静态定义 + 经验区间，无用户数据。"""
+
+    metric_id: str
+    display_name: str
+    display_name_en: str
+    domain: str
+    direction: Literal["higher_better", "lower_better", "neutral"]
+    unit: Literal["CNY", "ratio", "days", "count", "z"]
+    precision: int
+    definition_version: str
+    scope: dict[str, str]
+    min_n: int
+    ci_min_n: int
+    ci: Literal["wilson", "bootstrap", "none"]
+    min_trading_days: int
+    window_kind: str
+    bands: list[MetricBandOut] | None = None
+    meaning: str
+    method: str
+    what_to_do: str | None = None
+    caveat: str | None = None
+
+
+class MetricCatalogOut(BaseModel):
+    registry_version: str
+    items: list[MetricCatalogItemOut] = Field(default_factory=list)
+
+
 class MetricItemOut(BaseModel):
     """单个指标结果；`value` 在非 ok / pending_window 时**整键省略**（C-31）。"""
 
@@ -895,6 +978,7 @@ class MetricItemOut(BaseModel):
     data_as_of: date
     inputs_hash: str
     computed_at: datetime
+    presentation: MetricPresentationOut | None = None
 
     @model_serializer(mode="wrap")
     def _omit_empty_value(self, handler: Any) -> dict[str, Any]:
@@ -948,6 +1032,7 @@ class MetricExplainOut(BaseModel):
     what_to_do: str | None = None
     assumptions: dict[str, Any] = Field(default_factory=dict)
     data_as_of: date
+    presentation: MetricPresentationOut
 
 
 class MetricDrilldownItemOut(BaseModel):

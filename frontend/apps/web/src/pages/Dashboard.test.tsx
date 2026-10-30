@@ -321,6 +321,7 @@ describe("Dashboard 看板", () => {
     expect(screen.getByTestId("dashboard-meta").textContent).toContain("最新");
     expect(screen.getByTestId("dashboard-meta").textContent).toContain("正常");
     expect(screen.getByTestId("dashboard-meta").textContent).toContain("2026-09-30");
+    expect(screen.getByTestId("market-data-notice").textContent).toContain("收盘后同步");
 
     expect(screen.getByTestId("link-reports").getAttribute("href")).toBe("/reports");
     expect(screen.getByTestId("link-exports").getAttribute("href")).toBe("/exports");

@@ -2303,6 +2303,51 @@
         "title": "MeOut",
         "type": "object"
       },
+      "MetricBandOut": {
+        "properties": {
+          "from": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "From"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "level": {
+            "enum": [
+              "good",
+              "neutral",
+              "watch"
+            ],
+            "title": "Level",
+            "type": "string"
+          },
+          "to": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "To"
+          }
+        },
+        "required": [
+          "level",
+          "label"
+        ],
+        "title": "MetricBandOut",
+        "type": "object"
+      },
       "MetricBatchOut": {
         "properties": {
           "assumptions": {
@@ -2337,6 +2382,200 @@
           "definition_version"
         ],
         "title": "MetricBatchOut",
+        "type": "object"
+      },
+      "MetricCatalogItemOut": {
+        "description": "单个指标的口径说明（API-086）：静态定义 + 经验区间，无用户数据。",
+        "properties": {
+          "bands": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/MetricBandOut"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bands"
+          },
+          "caveat": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Caveat"
+          },
+          "ci": {
+            "enum": [
+              "wilson",
+              "bootstrap",
+              "none"
+            ],
+            "title": "Ci",
+            "type": "string"
+          },
+          "ci_min_n": {
+            "title": "Ci Min N",
+            "type": "integer"
+          },
+          "definition_version": {
+            "title": "Definition Version",
+            "type": "string"
+          },
+          "direction": {
+            "enum": [
+              "higher_better",
+              "lower_better",
+              "neutral"
+            ],
+            "title": "Direction",
+            "type": "string"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "display_name_en": {
+            "title": "Display Name En",
+            "type": "string"
+          },
+          "domain": {
+            "title": "Domain",
+            "type": "string"
+          },
+          "meaning": {
+            "title": "Meaning",
+            "type": "string"
+          },
+          "method": {
+            "title": "Method",
+            "type": "string"
+          },
+          "metric_id": {
+            "title": "Metric Id",
+            "type": "string"
+          },
+          "min_n": {
+            "title": "Min N",
+            "type": "integer"
+          },
+          "min_trading_days": {
+            "title": "Min Trading Days",
+            "type": "integer"
+          },
+          "precision": {
+            "title": "Precision",
+            "type": "integer"
+          },
+          "scope": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Scope",
+            "type": "object"
+          },
+          "unit": {
+            "enum": [
+              "CNY",
+              "ratio",
+              "days",
+              "count",
+              "z"
+            ],
+            "title": "Unit",
+            "type": "string"
+          },
+          "what_to_do": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "What To Do"
+          },
+          "window_kind": {
+            "title": "Window Kind",
+            "type": "string"
+          }
+        },
+        "required": [
+          "metric_id",
+          "display_name",
+          "display_name_en",
+          "domain",
+          "direction",
+          "unit",
+          "precision",
+          "definition_version",
+          "scope",
+          "min_n",
+          "ci_min_n",
+          "ci",
+          "min_trading_days",
+          "window_kind",
+          "meaning",
+          "method"
+        ],
+        "title": "MetricCatalogItemOut",
+        "type": "object"
+      },
+      "MetricCatalogOut": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MetricCatalogItemOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "registry_version": {
+            "title": "Registry Version",
+            "type": "string"
+          }
+        },
+        "required": [
+          "registry_version"
+        ],
+        "title": "MetricCatalogOut",
+        "type": "object"
+      },
+      "MetricConfidenceOut": {
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "level": {
+            "enum": [
+              "high",
+              "medium",
+              "low",
+              "unavailable"
+            ],
+            "title": "Level",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "level",
+          "label",
+          "reason"
+        ],
+        "title": "MetricConfidenceOut",
         "type": "object"
       },
       "MetricDrilldownItemOut": {
@@ -2606,6 +2845,9 @@
             "title": "Precision",
             "type": "integer"
           },
+          "presentation": {
+            "$ref": "#/components/schemas/MetricPresentationOut"
+          },
           "reason": {
             "anyOf": [
               {
@@ -2665,7 +2907,8 @@
           "sample",
           "drilldown",
           "status",
-          "data_as_of"
+          "data_as_of",
+          "presentation"
         ],
         "title": "MetricExplainOut",
         "type": "object"
@@ -2720,8 +2963,140 @@
         "title": "MetricExplainSample",
         "type": "object"
       },
+      "MetricInterpretationOut": {
+        "properties": {
+          "action": {
+            "title": "Action",
+            "type": "string"
+          },
+          "fact": {
+            "title": "Fact",
+            "type": "string"
+          },
+          "meaning": {
+            "title": "Meaning",
+            "type": "string"
+          }
+        },
+        "required": [
+          "fact",
+          "meaning",
+          "action"
+        ],
+        "title": "MetricInterpretationOut",
+        "type": "object"
+      },
       "MetricItemOut": {
         "additionalProperties": true,
+        "type": "object"
+      },
+      "MetricPresentationOut": {
+        "description": "指标呈现层（2026-10-30 P0-3）：后端渲染，前端零口径展示。",
+        "properties": {
+          "bands": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/MetricBandOut"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bands"
+          },
+          "caveats": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Caveats",
+            "type": "array"
+          },
+          "confidence": {
+            "$ref": "#/components/schemas/MetricConfidenceOut"
+          },
+          "direction": {
+            "enum": [
+              "higher_better",
+              "lower_better",
+              "neutral"
+            ],
+            "title": "Direction",
+            "type": "string"
+          },
+          "display_name": {
+            "title": "Display Name",
+            "type": "string"
+          },
+          "interpretation": {
+            "$ref": "#/components/schemas/MetricInterpretationOut"
+          },
+          "progress": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MetricProgressOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "verdict": {
+            "$ref": "#/components/schemas/MetricVerdictOut"
+          },
+          "window": {
+            "$ref": "#/components/schemas/MetricWindowOut"
+          }
+        },
+        "required": [
+          "display_name",
+          "direction",
+          "confidence",
+          "verdict",
+          "window",
+          "interpretation"
+        ],
+        "title": "MetricPresentationOut",
+        "type": "object"
+      },
+      "MetricProgressOut": {
+        "properties": {
+          "current": {
+            "title": "Current",
+            "type": "integer"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "remaining": {
+            "title": "Remaining",
+            "type": "integer"
+          },
+          "required": {
+            "title": "Required",
+            "type": "integer"
+          },
+          "unit": {
+            "title": "Unit",
+            "type": "string"
+          },
+          "unit_label": {
+            "title": "Unit Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "current",
+          "required",
+          "remaining",
+          "unit",
+          "unit_label",
+          "label"
+        ],
+        "title": "MetricProgressOut",
         "type": "object"
       },
       "MetricScopeOut": {
@@ -2745,6 +3120,54 @@
           "period"
         ],
         "title": "MetricScopeOut",
+        "type": "object"
+      },
+      "MetricVerdictOut": {
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "level": {
+            "enum": [
+              "good",
+              "neutral",
+              "watch",
+              "unknown",
+              "unavailable"
+            ],
+            "title": "Level",
+            "type": "string"
+          },
+          "rationale": {
+            "title": "Rationale",
+            "type": "string"
+          }
+        },
+        "required": [
+          "level",
+          "label",
+          "rationale"
+        ],
+        "title": "MetricVerdictOut",
+        "type": "object"
+      },
+      "MetricWindowOut": {
+        "properties": {
+          "kind": {
+            "title": "Kind",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "kind",
+          "label"
+        ],
+        "title": "MetricWindowOut",
         "type": "object"
       },
       "NavHoldingOut": {
@@ -10228,6 +10651,204 @@
           "TOKEN_REVOKED",
           "MULTIPLE_CREDENTIALS",
           "ADMIN_CANNOT_READ_TRADES"
+        ],
+        "x-idempotent": false,
+        "x-required-scope": "read"
+      }
+    },
+    "/api/v1/metrics/catalog": {
+      "get": {
+        "description": "API-086：18 个指标的口径说明书（静态元数据；无用户数据/无副作用）。",
+        "operationId": "metrics_catalog",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-api-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "items": [
+                    {
+                      "bands": [
+                        {
+                          "from": "2026-09-30",
+                          "label": "示例",
+                          "level": "good",
+                          "to": "2026-09-30"
+                        }
+                      ],
+                      "caveat": "示例",
+                      "ci": "wilson",
+                      "ci_min_n": 1,
+                      "definition_version": "示例",
+                      "direction": "higher_better",
+                      "display_name": "示例",
+                      "display_name_en": "示例",
+                      "domain": "示例",
+                      "meaning": "示例",
+                      "method": "示例",
+                      "metric_id": "obj_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                      "min_n": 1,
+                      "min_trading_days": 1,
+                      "precision": 1,
+                      "scope": {
+                        "key": "示例"
+                      },
+                      "unit": "CNY",
+                      "what_to_do": "示例",
+                      "window_kind": "示例"
+                    }
+                  ],
+                  "registry_version": "示例"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/MetricCatalogOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "UNKNOWN_QUERY_PARAM",
+                  "detail": "请求包含未知参数。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 400,
+                  "title": "UNKNOWN_QUERY_PARAM",
+                  "type": "https://stock-analyze.local/errors/UNKNOWN_QUERY_PARAM",
+                  "user_message": "请求包含未知参数。",
+                  "what_to_do": "移除未知参数后重试。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "请求参数错误"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "TOKEN_EXPIRED",
+                  "detail": "访问凭证已过期。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 401,
+                  "title": "TOKEN_EXPIRED",
+                  "type": "https://stock-analyze.local/errors/TOKEN_EXPIRED",
+                  "user_message": "访问凭证已过期。",
+                  "what_to_do": "用 refresh_token 换新 access，或重建 PAT。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "未认证或凭证无效"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "ADMIN_CANNOT_READ_TRADES",
+                  "detail": "管理员账号不能查看交易明细。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 403,
+                  "title": "ADMIN_CANNOT_READ_TRADES",
+                  "type": "https://stock-analyze.local/errors/ADMIN_CANNOT_READ_TRADES",
+                  "user_message": "管理员账号不能查看交易明细。",
+                  "what_to_do": "用数据所有者账号访问。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "权限不足"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "example": {
+                  "code": "VALIDATION_ERROR",
+                  "detail": "请求参数有问题。",
+                  "errors": [
+                    {
+                      "code": "invalid",
+                      "field": "body.email",
+                      "message": "邮箱格式不正确。"
+                    }
+                  ],
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 422,
+                  "title": "VALIDATION_ERROR",
+                  "type": "https://stock-analyze.local/errors/VALIDATION_ERROR",
+                  "user_message": "请求参数有问题。",
+                  "what_to_do": "按 errors[] 修正字段后重试。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Metrics Catalog Endpoint",
+        "tags": [
+          "metrics"
+        ],
+        "x-async": false,
+        "x-error-codes": [
+          "UNKNOWN_QUERY_PARAM",
+          "TOKEN_EXPIRED",
+          "TOKEN_REVOKED",
+          "MULTIPLE_CREDENTIALS",
+          "ADMIN_CANNOT_READ_TRADES",
+          "VALIDATION_ERROR"
         ],
         "x-idempotent": false,
         "x-required-scope": "read"

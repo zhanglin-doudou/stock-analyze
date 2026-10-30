@@ -18,25 +18,31 @@ from fastapi import APIRouter, Depends, Header, Query, Request, Response
 from stock_contracts.errors import ApiError, ErrorCode
 from stock_platform.tenant import TenantContext
 from stock_review.application.metrics import (
+    batch_etag,
     batch_metrics,
+    catalog_metrics,
     detail_metric,
     drilldown_metric,
     explain_metric,
+    get_registry,
     persist_safely,
 )
 from stock_review.metrics.base import METRIC_ID_PATTERN, format_units
 from stock_review.metrics.engine import MetricOutcome
+from stock_review.metrics.presentation import build_presentation
 
 from stock_api.deps import get_state, get_tenant
 from stock_api.routing import StrictQueryRoute
 from stock_api.schemas import (
     MetricBatchOut,
+    MetricCatalogOut,
     MetricDrilldownItemOut,
     MetricDrilldownOut,
     MetricExplainDrilldown,
     MetricExplainOut,
     MetricExplainSample,
     MetricItemOut,
+    MetricPresentationOut,
     MetricScopeOut,
 )
 
@@ -96,6 +102,11 @@ def _scope_out(outcome: MetricOutcome) -> MetricScopeOut:
 
 def _item_out(outcome: MetricOutcome) -> MetricItemOut:
     """引擎 outcome（标度整数）→ API 边界模型（定点字符串）。"""
+    try:
+        definition = get_registry().require(outcome.metric_id)
+        presentation = MetricPresentationOut(**build_presentation(outcome, definition))
+    except KeyError:  # pragma: no cover - registry 与 outcome 同源，仅防御
+        presentation = None
     return MetricItemOut(
         metric_id=outcome.metric_id,
         definition_version=outcome.definition_version,
@@ -117,6 +128,7 @@ def _item_out(outcome: MetricOutcome) -> MetricItemOut:
         data_as_of=outcome.data_as_of,
         inputs_hash=outcome.inputs_hash,
         computed_at=outcome.computed_at,
+        presentation=presentation,
     )
 
 
@@ -145,7 +157,8 @@ async def metrics_batch_endpoint(
     parsed_ids = _parse_ids(ids)
 
     async with state.db.session(user_id=user_id, begin=True) as session:
-        result = await batch_metrics(
+        # 廉价 ETag 只读本地库（不含行情拉取/指标计算）：命中即 304，避免完整 batch。
+        etag_value = await batch_etag(
             session,
             user_id=user_id,
             clock=state.clock,
@@ -159,9 +172,24 @@ async def metrics_batch_endpoint(
             domain=domain,
             include_exploratory=include_exploratory,
         )
-        etag_header = f'W/"{result.etag}"'
-        if _if_none_match_hit(request.headers.get("if-none-match"), result.etag):
+        etag_header = f'W/"{etag_value}"'
+        if _if_none_match_hit(request.headers.get("if-none-match"), etag_value):
             return Response(status_code=304, headers={"ETag": etag_header})
+        result = await batch_metrics(
+            session,
+            user_id=user_id,
+            clock=state.clock,
+            market_data=state.market_data,
+            rf_annual=state.settings.rf_annual,
+            period=period,
+            date_from=date_from,
+            date_to=date_to,
+            benchmark=benchmark,
+            ids=parsed_ids,
+            domain=domain,
+            include_exploratory=include_exploratory,
+            etag=etag_value,
+        )
         await persist_safely(session, user_id, result.all_outcomes)
 
     response.headers["ETag"] = etag_header
@@ -171,6 +199,24 @@ async def metrics_batch_endpoint(
         definition_version=result.definition_version,
         assumptions=result.assumptions,
         items=[_item_out(outcome) for outcome in result.items],
+    )
+
+
+@router.get(
+    "/metrics/catalog",
+    response_model=MetricCatalogOut,
+    operation_id="metrics_catalog",
+)
+async def metrics_catalog_endpoint(
+    ctx: Annotated[TenantContext, Depends(get_tenant)],
+) -> MetricCatalogOut:
+    """API-086：18 个指标的口径说明书（静态元数据；无用户数据/无副作用）。"""
+    ctx.require_user()
+    ctx.forbid_admin_trades()
+    registry = get_registry()
+    return MetricCatalogOut(
+        registry_version=registry.version,
+        items=list(catalog_metrics(registry)),
     )
 
 
@@ -228,6 +274,7 @@ async def metrics_explain_endpoint(
         what_to_do=result.what_to_do,
         assumptions=result.assumptions,
         data_as_of=result.data_as_of,
+        presentation=MetricPresentationOut(**result.presentation),
     )
 
 

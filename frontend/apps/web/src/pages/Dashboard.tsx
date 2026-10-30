@@ -144,7 +144,7 @@ function LegacyMetrics({
               <tr key={row.metric_id}>
                 <td>
                   <Link to={`/metrics/${encodeURIComponent(row.metric_id)}?period=${period}`}>
-                    {row.metric_id}
+                    {row.presentation?.display_name ?? row.metric_id}
                   </Link>
                 </td>
                 <td>{valueCell(row)}</td>
@@ -155,7 +155,16 @@ function LegacyMetrics({
                     : null}
                 </td>
                 <td>
-                  <StatusBadge status={row.status} kind="data" />
+                  {row.presentation ? (
+                    <span
+                      className={`badge badge-${row.presentation.confidence.level}`}
+                      title={row.presentation.verdict.rationale}
+                    >
+                      {row.presentation.verdict.label}
+                    </span>
+                  ) : (
+                    <StatusBadge status={row.status} kind="data" />
+                  )}
                 </td>
               </tr>
             ))}
@@ -240,6 +249,9 @@ export function Dashboard(): ReactElement {
         </div>
         <h1 className="dash-title">看板</h1>
         <p className="dash-sub">先看清自己，再看清市场。所有数值均为后端口径，本页只做呈现与下钻。</p>
+        <p className="dash-muted" data-testid="market-data-notice">
+          行情来自本地缓存（仅收盘后同步，盘中不拉取实时行情）；数据截至 {data.data_as_of ?? "—"}。
+        </p>
         <div className="dash-head-meta" data-testid="dashboard-meta">
           <span>
             构建状态 <StatusBadge status={data.build_state} kind="build" />

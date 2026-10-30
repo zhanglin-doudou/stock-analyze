@@ -136,6 +136,7 @@
 | API-083 | POST | `/jobs/rebuild-period` | 按月一键编排（rounds→assets→nav→metrics） | R2/D1 | write | 必需 | 异步 | P0 | 202 |
 | API-084 | GET | `/dashboard` | Dashboard 两板块聚合（资产概览 + 历史概览） | D1 | read | — | 同步 | P0 | 200 |
 | API-085 | GET | `/assets/chart` | 资产日线 chart-ready 视图（归一化序列+展示标签） | D1 | read | — | 同步 | P0 | 200 |
+| API-086 | GET | `/metrics/catalog` | 18 个指标口径说明书（定义/方向/窗口/经验区间/版本） | D3/R8 | read | — | 同步 | P0 | 200 |
 
 ## §2 分域详细契约
 > 下列 32 个端点为**详细契约**；其余 52 个的请求/响应字段以 `openapi/openapi.json` 为准（§1 已登记、§6 已配验收用例）。断言均为可脚本执行：状态码 + 字段值 + 状态迁移 + 副作用。
@@ -322,15 +323,16 @@
 #### API-033 GET /metrics
 - 用途：三域指标批量查询；FR-R5/R6/R8；认证：read；同步。
 - 请求：query `ids`(逗号,与 domain 二选一) / `domain`(selection|timing|behavior|all) / `period` 或 `from`/`to` / `benchmark` / `include_exploratory`(默认 false)。
-- 响应 200：`items[]MetricResult(metric_id,definition_version,scope,period,value?,unit,n,ci_low,ci_high,sample_status,status,assumptions,data_as_of,inputs_hash,computed_at)` / `period` / `data_as_of` / `definition_version` / `assumptions{benchmark_id,rf_rate,A:244}`。
+- 响应 200：`items[]MetricResult(metric_id,definition_version,scope,period,value?,unit,n,ci_low,ci_high,sample_status,status,assumptions,data_as_of,inputs_hash,computed_at,presentation?)` / `period` / `data_as_of` / `definition_version` / `assumptions{benchmark_id,rf_rate,A:244}`。`presentation`（2026-10-30 新增，additive）为后端渲染的呈现层：`display_name/direction/confidence{level,label,reason}/progress{current,required,remaining,unit,unit_label,label}|null/verdict{level,label,rationale}/bands[{level,label,from,to}]/window{kind,label}/interpretation{fact,meaning,action}/caveats[]`；blocked/unreliable 也给 presentation（confidence=unavailable、verdict=unavailable），但不出 value。
 - 错误码：METRIC_NOT_FOUND(404)、INVALID_PERIOD(422)、VALIDATION_ERROR(422)。
-- 验收断言：① ids=win_rate&period=2026-09 → n==12、sample_status=="ok"、value 为小数、definition_version 匹配 `^\d+\.\d+$`；② ids=nav_return&断链 fixture → status=="blocked" 且该 item **无 value 键**；③ fx_n5 → sample_status=="insufficient" 且无 ci_low/ci_high；④ fx_n30 的 de → ci_low<value<ci_high；⑤ domain=behavior 返回 de 且 CI 不含 0（fx_de_pos），且 include_exploratory=false 时不含 exploratory 指标。
+- 304 快速路径（2026-10-30）：`If-None-Match` 命中时仅用本地数据指纹（参数/注册表/流水/回合/资产/行情缓存内容）判 ETag，**不读取行情、不执行指标计算、不写库**；ETag 与 200 响应一致。
+- 验收断言：① ids=win_rate&period=2026-09 → n==12、sample_status=="ok"、value 为小数、definition_version 匹配 `^\d+\.\d+$`；② ids=nav_return&断链 fixture → status=="blocked" 且该 item **无 value 键**；③ fx_n5 → sample_status=="insufficient" 且无 ci_low/ci_high；④ fx_n30 的 de → ci_low<value<ci_high；⑤ domain=behavior 返回 de 且 CI 不含 0（fx_de_pos），且 include_exploratory=false 时不含 exploratory 指标；⑥ 每个 item 含 `presentation.display_name/direction/verdict/interpretation`；n<min_n 时 `verdict.level=="unknown"` 且 `progress.remaining>0`；blocked 时 `confidence.level=="unavailable"`。
 #### API-034 GET /metrics/{metric_id}/explain
 - 用途：三段式（conclusion/method/drilldown）+ 人话术语；FR-D3；认证：read；同步。
 - 请求：path `metric_id`；query `period`(必填) / `benchmark`(可选)；头 Accept-Language。
-- 响应 200：`metric_id` / `definition_version` / `period` / `meaning`（指标含义，**恒非空**，含 status!="ok"）/ `conclusion`(string|null，本期结论，仅样本可用时) / `method` / `domain` / `unit` / `precision` / `sample{n,n_pending,sample_status,min_n,ci_min_n,ci}` / `drilldown{endpoint,params,description}` / `status` / `reason?` / `what_to_do?` / `assumptions` / `data_as_of`。
+- 响应 200：`metric_id` / `definition_version` / `period` / `meaning`（指标含义，**恒非空**，含 status!="ok"）/ `conclusion`(string|null，本期结论，仅样本可用时) / `method` / `domain` / `unit` / `precision` / `sample{n,n_pending,sample_status,min_n,ci_min_n,ci}` / `drilldown{endpoint,params,description}` / `status` / `reason?` / `what_to_do?` / `assumptions` / `data_as_of` / `presentation{display_name,direction,confidence,progress?,verdict,bands?,window,interpretation{fact,meaning,action},caveats[]}`（2026-10-30 新增，additive）。
 - 错误码：METRIC_NOT_FOUND(404)、INVALID_PERIOD(422)、VALIDATION_ERROR(422)。
-- 验收断言：① conclusion/meaning 不含裸术语（DE/BHAR/PGR/PLR/TWR/MWR/FIFO/HHI 均不出现）；② status!="ok" 时 conclusion==null 且 reason/what_to_do 非空，但 meaning 仍非空；③ drilldown.endpoint + params 直接调用 → 200 且 items 非空；④ Accept-Language=en-US 时文案变化但 code/数值不变；⑤ sample.min_n/ci_min_n/ci 与 def 的 sample_policy 一致，sample.n 与同 period GET /metrics 的 n 一致。
+- 验收断言：① conclusion/meaning 不含裸术语（DE/BHAR/PGR/PLR/TWR/MWR/FIFO/HHI 均不出现）；② status!="ok" 时 conclusion==null 且 reason/what_to_do 非空，但 meaning 仍非空；③ drilldown.endpoint + params 直接调用 → 200 且 items 非空；④ Accept-Language=en-US 时文案变化但 code/数值不变；⑤ sample.min_n/ci_min_n/ci 与 def 的 sample_policy 一致，sample.n 与同 period GET /metrics 的 n 一致；⑥ presentation.interpretation 三字段非空、数值与 item.value/n/CI 同源；样本不足时 verdict.level=="unknown" 且不出买卖动词。
 #### API-035 GET /metrics/{metric_id}/drilldown
 - 用途：指标可追溯下钻明细；FR-D3；认证：read；同步；游标分页。
 - 请求：path `metric_id`；query `period`(必填) / `round_id?` / `security_code?` / `limit` / `cursor`。
