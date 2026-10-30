@@ -776,6 +776,24 @@ class CachedMarketDataSource:
             for symbol, bar in sorted(last.items())
         )
 
+    async def get_cached_bars(
+        self, symbols: Sequence[str], start: date, end: date
+    ) -> Sequence[Bar]:
+        """只读缓存中的日线（不触发尾部补拉）。
+
+        看板持仓必须与 ``asset_daily`` 快照同价：快照写入时已把当时价格落库，
+        此处直接复用，避免盘中再次拉取导致「持仓市值与快照不一致」的假告警。
+        """
+        wanted = validate_symbols(symbols)
+        if start > end:
+            raise ApiError(
+                ErrorCode.VALIDATION_ERROR, detail=f"start({start}) 不能晚于 end({end})"
+            )
+        collected: list[Bar] = []
+        for symbol in wanted:
+            collected.extend(await self._load_bars(symbol, start, end))
+        return tuple(sorted(collected, key=lambda bar: (bar.trade_date, bar.symbol)))
+
     # ── 内部 ────────────────────────────────────────────
     async def _symbol_bars(self, symbol: str, start: date, end: date) -> tuple[Bar, ...]:
         today = self._clock.today()

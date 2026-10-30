@@ -735,6 +735,55 @@ async def test_bridge_other_categories_degrade(owner_engine: AsyncEngine, app_db
     assert result.other_units == -20_000
 
 
+async def test_bridge_paid_new_stock_is_cost_not_other(
+    owner_engine: AsyncEngine, app_db: Database
+) -> None:
+    """有份额的打新缴款已进 FIFO lot 成本，不得再计入 other（否则 27,630 元级双扣）。"""
+    user_id = await _insert_user(owner_engine)
+    await _seed_trade(
+        owner_engine,
+        user_id,
+        trade_date=date(2026, 2, 20),
+        code="600519",
+        side="buy",
+        quantity_units=10_000_000,
+        price_units=10_000_000,
+        amount_units=-1_000_000,
+        cash_balance_units=9_000_000,
+        category="buy",
+        line_no=1,
+    )
+    await _seed_trade(
+        owner_engine,
+        user_id,
+        trade_date=date(2026, 3, 6),
+        code="001237",
+        side="buy",
+        quantity_units=5_000_000,
+        price_units=4_000_000,
+        amount_units=-20_000,
+        cash_balance_units=8_980_000,
+        category="new_stock",
+        summary="新股申购确认缴款",
+        line_no=2,
+    )
+    async with app_db.tenant_tx(user_id) as session:
+        result = await bridge_for_period(
+            session,
+            user_id=user_id,
+            period_start=date(2026, 3, 1),
+            period_end=date(2026, 3, 31),
+            clock=CLOCK,
+        )
+    assert result.status == "ok"
+    assert result.balanced is True
+    assert result.residual_units == 0
+    assert result.other_units == 0
+    # 未平仓成本 = 原持仓 1000.00 + 打新缴款 200.00。
+    assert result.open_cost_units == 1_020_000
+    assert result.ending_value_units == 8_980_000 + 1_020_000
+
+
 # ── worker job handler（入队 → claim → handler → finish）───────────────
 
 

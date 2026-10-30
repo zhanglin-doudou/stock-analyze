@@ -285,11 +285,13 @@ async def _holdings_at(
         return [], [], [], False
 
     symbols = sorted(held)
+    # 只读缓存取价：与 asset_daily 快照同价，避免盘中补拉造成市值漂移。
     ladder, _causes = await load_prices(
         market_data,
         symbols,
         as_of - timedelta(days=PRICE_WINDOW_DAYS),
         as_of,
+        cached_only=True,
     )
     # 债券面值换算系数（成交金额反推；可转债固定 1 手 = 10 张）与待上市新股集合。
     bond_divisors = bond_face_divisors([trade for trade in trades if trade.trade_date <= as_of])
@@ -360,8 +362,9 @@ def _drawdown_segments(
 ) -> tuple[list[tuple[list[date], list[int]]], bool, int]:
     """把资产序列切成连续有效段：``(segments, has_gaps, valid_obs)``。
 
-    只接受 ``status=ok`` 且 ``daily_return`` 非 NULL；blocked/degraded/NULL 行以及
-    日期不连续（缺一天）都会断链，绝不跨断链拼接。
+    接受 ``status=ok/degraded`` 且 ``daily_return`` 非 NULL；degraded 行代表估值降级
+    （如新股待上市按成本、债券缺行情按成本），日收益仍然有效，不应断链。只有
+    blocked/NULL 行以及日期不连续（缺一天）才会断链，绝不跨断链拼接。
 
     序列**开头**的不可用行不算断链：首日 `prev_total=0`，日收益在数学上无法定义
     （锚点行），它是回撤序列的起点而非缺口。只有出现过有效观测之后的中途不可用行
@@ -375,7 +378,7 @@ def _drawdown_segments(
     valid_obs = 0
 
     for row in series:
-        usable = row.status == "ok" and row.daily_return_units is not None
+        usable = row.status in {"ok", "degraded"} and row.daily_return_units is not None
         if not usable:
             # 已开始观测后出现不可用行 → 断链；序列开头的锚点行按起点处理。
             if valid_obs:
@@ -510,7 +513,7 @@ def _max_drawdown(
             DashboardMissing(
                 field="history_overview.max_drawdown",
                 code=MISSING_MDD_GAPS,
-                reason="历史资产序列存在阻断/降级/缺日，回撤按最长连续有效段计算。",
+                reason="历史资产序列存在阻断/缺日，回撤按最长连续有效段计算。",
                 what_to_do="修复阻断日期后重新构建资产表可得到完整回撤。",
             )
         )
@@ -683,7 +686,13 @@ async def build_dashboard(
                 cost_fallback_symbols=cost_fallback,
             )
         holdings_total = sum(item.market_value_units or 0 for item in holdings)
-        if not missing_prices and abs(holdings_total - market_value_units) > 1:
+        # stale 时快照落后于当前流水/行情：holdings 是按最新输入重算的，与旧快照本就
+        # 不可比；统一由 DASHBOARD_STALE 提示，不叠加伪「市值不一致」错误。
+        if (
+            build_view.state != STATE_STALE
+            and not missing_prices
+            and abs(holdings_total - market_value_units) > 1
+        ):
             missing.append(
                 DashboardMissing(
                     field="asset_overview.holdings",
@@ -746,7 +755,9 @@ async def build_dashboard(
             )
         )
 
-    degraded_asset = any(row.status != "ok" for row in series) or any(
+    # 只看最新快照的估值状态：历史行降级（新股按成本、债券缺行情）不应把当前资产概览
+    # 标成 degraded，也不应影响回撤/总收益。
+    degraded_asset = (latest is not None and latest.status != "ok") or any(
         item.code in {MISSING_HOLDINGS_MISMATCH, MISSING_TOTAL_PROFIT} for item in missing
     )
     if build_view.state == STATE_BLOCKED or (latest is not None and latest.status == "blocked"):

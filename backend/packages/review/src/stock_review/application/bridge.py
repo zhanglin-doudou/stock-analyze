@@ -216,7 +216,14 @@ async def bridge_for_period(
         category = _category(trade)
         if category in _ROUND_CATEGORIES or category in _NON_CASH_CATEGORIES:
             continue
-        if category == "dividend":
+        if category == "new_stock":
+            # 有份额的打新缴款已按买入计入 FIFO lot 成本（engine NEW_STOCK），再进 other
+            # 会重复扣减；无份额的冻结/解冻等仍按未分类现金流进 other 并降级。
+            if trade.quantity_units > 0:
+                continue
+            other += trade.amount_units
+            degraded = True
+        elif category == "dividend":
             dividends += trade.amount_units
         elif category == "interest":
             interest += trade.amount_units

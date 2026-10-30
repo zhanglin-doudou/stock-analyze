@@ -315,6 +315,8 @@ async def load_prices(
     symbols: list[str],
     start: date,
     end: date,
+    *,
+    cached_only: bool = False,
 ) -> tuple[dict[str, list[tuple[date, int]]], dict[str, str]]:
     """取收盘价阶梯 + 每标的失败类别；缺行情时**降级为逐日阻断**，不让整段请求失败。
 
@@ -322,17 +324,22 @@ async def load_prices(
     批量取数失败后按标的逐个重试，取不到的标的跳过 —— 后续逐日推演会把持有该标的
     的日期判为阻断（缺行情数据），而不是把整段计算变成 404。返回的 `causes` 用于
     把阻断原因细化为三类（见 `docs/architecture/2026-10-22-live-market-data-source.md` §6）。
+
+    ``cached_only=True`` 时优先只读行情缓存（不触发尾部补拉），用于看板持仓与资产
+    快照同价；行情源没有缓存能力（replay / 无缓存 live）时回退到正常取数。
     """
     if not symbols:
         return {}, {}
     causes: dict[str, str] = {}
+    reader = getattr(market_data, "get_cached_bars", None) if cached_only else None
+    fetch = reader or market_data.get_daily_bars
     try:
-        bars: Sequence[Bar] = await market_data.get_daily_bars(symbols, start, end)
+        bars: Sequence[Bar] = await fetch(symbols, start, end)
     except ApiError:
         collected: list[Bar] = []
         for symbol in symbols:
             try:
-                collected.extend(await market_data.get_daily_bars([symbol], start, end))
+                collected.extend(await fetch([symbol], start, end))
             except ApiError as exc:
                 cause = market_failure_cause(exc)
                 if cause:

@@ -9,12 +9,13 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Sequence
-from datetime import date
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 from stock_ledger.models import Trade
 from stock_platform.ports import Bar, MarketCapabilities, Quote
-from stock_review.application.dashboard import _holdings_at
+from stock_review.application.dashboard import _drawdown_segments, _holdings_at
+from stock_review.models import AssetDaily
 
 _USER = uuid.uuid4()
 
@@ -262,3 +263,64 @@ async def test_holdings_report_missing_price_for_ordinary_stock() -> None:
 
     assert missing == ["600519"]
     assert fallback == []
+
+
+def _asset_row(trade_date: date, *, status: str, daily_return_units: int | None) -> AssetDaily:
+    return AssetDaily(
+        id=f"ast_{trade_date.isoformat()}",
+        user_id=_USER,
+        trade_date=trade_date,
+        cash_units=0,
+        money_fund_units=0,
+        market_value_units=0,
+        total_assets_units=0,
+        holding_cost_units=0,
+        unrealized_pnl_units=0,
+        holding_count=0,
+        cashflow_units=0,
+        prev_total_assets_units=None,
+        daily_pnl_units=None,
+        daily_return_units=daily_return_units,
+        status=status,
+        status_reason="新股待上市，按认购价估值" if status == "degraded" else None,
+        definition_version="1.5",
+        rebuilt_at=datetime(2026, 1, 1, tzinfo=UTC),
+    )
+
+
+def test_degraded_rows_do_not_break_drawdown_segments() -> None:
+    """历史 degraded 行（新股/债券按成本估值）日收益仍有效，不得报 MDD_GAPS。"""
+    start = date(2026, 1, 1)
+    rows = [
+        _asset_row(start, status="ok", daily_return_units=None),  # 首日锚点
+        _asset_row(start + timedelta(days=1), status="ok", daily_return_units=100),
+        _asset_row(start + timedelta(days=2), status="degraded", daily_return_units=200),
+        _asset_row(start + timedelta(days=3), status="degraded", daily_return_units=300),
+        _asset_row(start + timedelta(days=4), status="ok", daily_return_units=400),
+        _asset_row(start + timedelta(days=5), status="ok", daily_return_units=500),
+    ]
+
+    segments, has_gaps, valid_obs = _drawdown_segments(rows)
+
+    assert has_gaps is False
+    assert valid_obs == 5
+    assert len(segments) == 1
+    assert len(segments[0][1]) == 5
+
+
+def test_blocked_row_still_breaks_drawdown_segments() -> None:
+    """blocked 行（真实断链）必须继续断链，不能因放宽 degraded 而吞掉。"""
+    start = date(2026, 1, 1)
+    rows = [
+        _asset_row(start, status="ok", daily_return_units=None),
+        _asset_row(start + timedelta(days=1), status="ok", daily_return_units=100),
+        _asset_row(start + timedelta(days=2), status="blocked", daily_return_units=None),
+        _asset_row(start + timedelta(days=3), status="ok", daily_return_units=300),
+        _asset_row(start + timedelta(days=4), status="ok", daily_return_units=400),
+    ]
+
+    segments, has_gaps, valid_obs = _drawdown_segments(rows)
+
+    assert has_gaps is True
+    assert valid_obs == 3
+    assert [len(returns) for _, returns in segments] == [1, 2]
