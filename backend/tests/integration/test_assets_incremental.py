@@ -795,8 +795,12 @@ async def test_fifo_error_set_change_triggers_full(
     summary = await _build(app_db, user_id, replay_market)
     assert summary.mode == "full"
     rows = await _rows(app_db, user_id)
-    assert all(row.status == "degraded" for row in rows)
-    assert all(row.status_reason == FIFO_ERROR_REASON for row in rows)
+    # FIFO 超卖（600519 卖 200 > 持仓 100）只让**持有 600519 的日期段** degraded；
+    # 纯现金日（2025-12-31 ~ 2026-03-01）与超卖清仓日（2026-06-20 ~ ）保持 ok。
+    degraded = [r for r in rows if r.status == "degraded"]
+    assert len(degraded) > 0, "持有 600519 的日子应 degraded"
+    assert len(degraded) < len(rows), "纯现金日 / 清仓日不应因 600519 的 FIFO error 被连带 degraded"
+    assert all(r.status_reason == FIFO_ERROR_REASON for r in degraded)
 
 
 # ── IT-14：指纹竞态兜底 ──────────────────────────────────
@@ -911,7 +915,7 @@ async def test_list_assets_state_chain_and_pagination(
         )
     assert build.state == "current"
     assert build.last_status == "ok"
-    assert build.definition_version == "1.0"
+    assert build.definition_version == "1.5"
     assert build.data_as_of == replay_market.as_of
     assert build.rows_count > 0
     assert [point.trade_date for point in points] == sorted(
@@ -1089,7 +1093,7 @@ async def test_list_assets_missing_after_empty_build_hides_state_fields(
     assert build.status_reason is None
     assert build.data_as_of is None
     assert build.has_new_market_data is False
-    assert build.definition_version == "1.0"
+    assert build.definition_version == "1.5"
 
 
 # ── worker handler：progress / result / 取消 ─────────────

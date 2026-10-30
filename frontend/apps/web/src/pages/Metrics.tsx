@@ -8,9 +8,11 @@ import {
   type Problem,
 } from "@sa/api-client";
 import { api } from "../client";
+import { currentMonth } from "../lib/date";
+import { MonthInput } from "../ui/MonthInput";
 import { JobProgress } from "../ui/JobProgress";
 import { ProblemView } from "../ui/Problem";
-import { Table, type Column } from "../ui/Table";
+import { DataTable, type DataTableColumn } from "../ui/DataTable";
 
 const TERMINAL: ReadonlySet<JobStatus> = new Set<JobStatus>(["succeeded", "failed", "cancelled"]);
 
@@ -82,7 +84,7 @@ function jobFailureProblem(status: JobStatus): Problem {
 /** 指标页（/metrics）：按月一键构建复盘数据（rounds → 资产 → 净值 → 指标）+ 结果展示。 */
 export function Metrics() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const period = searchParams.get('period') || new Date().toISOString().slice(0, 7);
+  const period = searchParams.get('period') || currentMonth();
   const [includeExploratory, setIncludeExploratory] = useState(false);
   const [batch, setBatch] = useState<MetricBatch | null>(null);
   const [loading, setLoading] = useState(false);
@@ -211,7 +213,7 @@ export function Metrics() {
 
   const executing = activeJobId !== null || submitting;
 
-  const columns: Array<Column<MetricItem>> = [
+  const columns: Array<DataTableColumn<MetricItem>> = [
     {
       key: "metric_id",
       header: "指标",
@@ -271,11 +273,10 @@ export function Metrics() {
         <div className="row-actions">
           <label>
             月份{" "}
-            <input
-              type="month"
+            <MonthInput
               value={period}
               disabled={executing}
-              onChange={(event) => setSearchParams({period: event.target.value})}
+              onChange={(value) => setSearchParams({ period: value })}
             />
           </label>
           <button
@@ -337,10 +338,12 @@ export function Metrics() {
               {batch.items.length}
             </p>
           </div>
-          <Table
+          <DataTable
+            caption="月度指标列表"
             columns={columns}
             rows={batch.items}
             rowKey={(row) => row.metric_id}
+            loading={loading && batch.items.length === 0}
             emptyText={emptyText}
           />
           <p className="muted">

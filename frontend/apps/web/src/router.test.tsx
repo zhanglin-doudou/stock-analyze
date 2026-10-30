@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { Layout, RequireAuth } from "./router";
 import { clearSession, saveTokens } from "./store/session";
@@ -25,9 +25,13 @@ describe("router / Layout（FT-09 导航与登录保护）", () => {
     expect(link.getAttribute("href")).toBe("/assets");
     expect(screen.getByRole("link", { name: "看板" }).getAttribute("href")).toBe("/dashboard");
     expect(screen.getByText("资产页占位")).toBeTruthy();
-    // Period2-12：看板成为首项，原有导航项顺序顺延（交易流水 → 回合 → 净值 → 资产）
-    const labels = screen.getAllByRole("link").map((item) => item.textContent);
-    expect(labels.slice(0, 5)).toEqual(["看板", "交易流水", "回合", "净值", "资产"]);
+    // Phase 1b：导航按 5 组排列，前 5 项为 概览/交易/分析 的前三个入口
+    const labels = within(screen.getByRole("navigation", { name: "主导航" }))
+      .getAllByRole("link")
+      .map((item) => item.textContent);
+    expect(labels.slice(0, 5)).toEqual(["看板", "交易流水", "回合", "净值与收益", "指标"]);
+    // 当前页激活态由 NavLink 提供
+    expect(link.getAttribute("aria-current")).toBe("page");
   });
 
   it("未登录访问 /assets 跳转登录页", () => {

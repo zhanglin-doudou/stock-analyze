@@ -64,6 +64,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/assets/chart": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Assets Chart Endpoint
+         * @description API-085：资产日线 chart-ready 视图（只读；blocked 行不进入序列）。
+         */
+        get: operations["getAssetsChart"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/login": {
         parameters: {
             query?: never;
@@ -1012,6 +1032,42 @@ export interface components {
             status_reason?: string | null;
         };
         /**
+         * AssetChartOut
+         * @description API-085：资产日线 chart-ready 视图（只读；前端零解析）。
+         */
+        AssetChartOut: {
+            /**
+             * Build State
+             * @enum {string}
+             */
+            build_state: "missing" | "current" | "stale" | "blocked";
+            /** Data As Of */
+            data_as_of?: string | null;
+            /** Definition Version */
+            definition_version: string;
+            /** N Points */
+            n_points: number;
+            /** Points */
+            points: components["schemas"]["AssetChartPointOut"][];
+        };
+        /**
+         * AssetChartPointOut
+         * @description API-085：图表点（v 为后端归一化无量纲字符串，前端只做几何投影）。
+         */
+        AssetChartPointOut: {
+            /** Amount Label */
+            amount_label: string;
+            /**
+             * Date
+             * Format: date
+             */
+            date: string;
+            /** Label */
+            label: string;
+            /** V */
+            v: string;
+        };
+        /**
          * AssetPageOut
          * @description API-081：资产表分页（游标 + 构建摘要 + 口径血缘）。
          */
@@ -1036,6 +1092,8 @@ export interface components {
          * @description 每日资产快照行（金额 2 位定点字符串；blocked 行数值字段**显式 null**）。
          */
         AssetPointOut: {
+            /** Balance */
+            balance?: string | null;
             /** Cash */
             cash?: string | null;
             /** Cashflow */
@@ -1060,6 +1118,8 @@ export interface components {
             holding_count: number;
             /** Market Value */
             market_value?: string | null;
+            /** Money Fund */
+            money_fund?: string | null;
             /** Prev Total Assets */
             prev_total_assets?: string | null;
             /**
@@ -1274,16 +1334,30 @@ export interface components {
          * @description 资产概览：当前快照（最新资产日）+ 全历史峰值成本/总收益/费用。
          */
         DashboardAssetOverviewOut: {
+            /** Balance */
+            balance?: string | null;
+            /** Balance Display */
+            balance_display?: string | null;
             /** Cash */
             cash?: string | null;
+            /** Cash Display */
+            cash_display?: string | null;
             /** Holdings */
             holdings: components["schemas"]["DashboardHoldingOut"][];
             /** Market Value */
             market_value?: string | null;
+            /** Market Value Display */
+            market_value_display?: string | null;
             /** Max Cost Return Pct */
             max_cost_return_pct?: string | null;
             /** Max Invested Cost */
             max_invested_cost?: string | null;
+            /** Max Invested Cost Display */
+            max_invested_cost_display?: string | null;
+            /** Money Fund */
+            money_fund?: string | null;
+            /** Money Fund Display */
+            money_fund_display?: string | null;
             /** Position Pct */
             position_pct?: string | null;
             /**
@@ -1293,10 +1367,16 @@ export interface components {
             status: "ok" | "degraded" | "stale" | "blocked" | "missing" | "insufficient";
             /** Total Assets */
             total_assets?: string | null;
+            /** Total Assets Display */
+            total_assets_display?: string | null;
             /** Total Fees */
             total_fees?: string | null;
+            /** Total Fees Display */
+            total_fees_display?: string | null;
             /** Total Profit */
             total_profit?: string | null;
+            /** Total Profit Display */
+            total_profit_display?: string | null;
         };
         /**
          * DashboardHistoryOverviewOut
@@ -1322,6 +1402,8 @@ export interface components {
             max_profit?: string | null;
             /** Max Profit Cost Pct */
             max_profit_cost_pct?: string | null;
+            /** Max Profit Display */
+            max_profit_display?: string | null;
             max_profit_round?: components["schemas"]["DashboardRoundOut"] | null;
             /**
              * Status
@@ -1342,14 +1424,20 @@ export interface components {
         DashboardHoldingOut: {
             /** Cost */
             cost: string;
+            /** Cost Display */
+            cost_display?: string | null;
             /** Market Value */
             market_value?: string | null;
+            /** Market Value Display */
+            market_value_display?: string | null;
             /** Quantity */
             quantity: string;
             /** Security Code */
             security_code: string;
             /** Security Name */
             security_name: string;
+            /** Weight Display */
+            weight_display?: string | null;
             /** Weight Pct */
             weight_pct?: string | null;
         };
@@ -1472,6 +1560,8 @@ export interface components {
             holding_days: number;
             /** Pnl */
             pnl: string;
+            /** Pnl Display */
+            pnl_display?: string | null;
             /** Return Rate */
             return_rate: string;
             /** Return Rate Pct */
@@ -2597,6 +2687,8 @@ export interface components {
             dedupe_key: string;
             /** Deleted At */
             deleted_at?: string | null;
+            /** Money Fund Balance */
+            money_fund_balance?: string | null;
             /** Note */
             note?: string | null;
             /** Other Fee */
@@ -2665,6 +2757,8 @@ export interface components {
             cash_balance?: string | null;
             /** Commission */
             commission?: string | null;
+            /** Money Fund Balance */
+            money_fund_balance?: string | null;
             /** Note */
             note?: string | null;
             /** Other Fee */
@@ -2945,6 +3039,69 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getAssetsChart: {
+        parameters: {
+            query?: {
+                /** @description 最近 N 个资产日（1~500） */
+                limit?: number;
+            };
+            header?: {
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssetChartOut"];
+                };
+            };
+            /** @description 请求参数错误 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                     "application/problem+json": components["schemas"]["Error"];
                 };
             };

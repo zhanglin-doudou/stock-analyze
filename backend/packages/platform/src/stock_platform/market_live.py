@@ -51,6 +51,13 @@ from stock_platform.obs import (
     get_logger,
 )
 from stock_platform.ports import Bar, MarketCapabilities, MarketDataSource, Quote
+from stock_platform.symbols import (
+    CLASS_BOND,
+    CLASS_FUND,
+    bond_symbol,
+    classify_symbol,
+    is_convertible_bond,
+)
 
 log = get_logger("stock_platform.market")
 
@@ -67,15 +74,8 @@ _MAX_UNITS = 2**63 - 1
 _SYMBOL_RE = re.compile(r"^\d{6}$")
 _ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _COMPACT_DATE_RE = re.compile(r"^\d{8}$")
-# A 股主板/科创板/创业板（沪 600/601/603/605/688/689，深 000/001/002/003/300/301）。
-# akshare 东财接口的 market_code 只看首位是否为 6，深市非 A 股会静默返回对应品种
-# 数据，必须在这里拦截后再按品种路由到专用接口。
-_A_SHARE_PREFIXES: frozenset[str] = frozenset(
-    {"600", "601", "603", "605", "688", "689", "000", "001", "002", "003", "300", "301"}
-)
-# 场内基金：沪 5 开头（ETF/LOF/REITs 全系），深 15/16/18 开头（ETF 159、LOF 16x、
-# REITs 184）。注意深 11x/12x 是可转债、13x 是国债回购，不能按「1 开头」一刀切。
-# 其余品种（可转债/B 股/北交所/港美股）不支持。
+# 品种分类（A 股/场内基金/债券）见 `stock_platform.symbols`：行情源与估值兜底共用同一
+# 真相来源，避免「行情支持哪些品种」与「哪些品种可按买入价兜底」两处口径漂移。
 # akshare/requests 的瞬时故障（可重试）异常名与模块根；不 import requests 也能识别。
 _TRANSIENT_EXC_NAMES: frozenset[str] = frozenset(
     {
@@ -171,26 +171,13 @@ def _row_date(raw: object, *, where: str) -> date:
     raise _invalid_data(f"{where}: 非法日期 {raw!r}")
 
 
-def _classify_symbol(symbol: str) -> str | None:
-    """6 位代码分类：`"stock"`（A 股）/ `"fund"`（场内基金）；不支持 → `None`。
-
-    基金口径：沪 5 开头全系（ETF/LOF/REITs）；深 15/16/18 开头（ETF 159、LOF 16x、
-    REITs 184）——深 11x/12x 是可转债，不属于基金。取数走基金专用接口：A 股接口
-    对基金会静默失败或返回错误数据。
-    """
-    if symbol[:3] in _A_SHARE_PREFIXES:
-        return "stock"
-    if symbol.startswith("5") or symbol.startswith(("15", "16", "18")):
-        return "fund"
-    return None
-
-
 def validate_symbols(symbols: Sequence[str]) -> tuple[str, ...]:
     """校验入参并返回去重后的标的（保持输入顺序）。
 
     与 replay 一致：空/非法参数 → `VALIDATION_ERROR`；不在支持范围 → `NOT_FOUND`
     + `market_failure="not_supported"`（NAV 侧降级为 blocked，不让整段 404）。
-    支持范围：A 股主板/科创板/创业板 + 场内基金（ETF/LOF/REITs，沪 5、深 15/16/18）。
+    支持范围：A 股主板/科创板/创业板 + 场内基金（ETF/LOF/REITs，沪 5、深 15/16/18）
+    + 沪深交易所债券（国债/企业债/公司债/可转债）。
     """
     if not symbols:
         raise ApiError(ErrorCode.VALIDATION_ERROR, detail="symbols 不能为空")
@@ -199,13 +186,13 @@ def validate_symbols(symbols: Sequence[str]) -> tuple[str, ...]:
         if not isinstance(raw, str) or not raw:
             raise ApiError(ErrorCode.VALIDATION_ERROR, detail=f"非法 symbol: {raw!r}")
         symbol = raw.strip()
-        if not _SYMBOL_RE.fullmatch(symbol) or _classify_symbol(symbol) is None:
+        if not _SYMBOL_RE.fullmatch(symbol) or classify_symbol(symbol) is None:
             raise _market_error(
                 ErrorCode.NOT_FOUND,
                 reason=FAILURE_NOT_SUPPORTED,
                 detail=(
-                    f"标的不在支持范围：{symbol}（支持 A 股主板/科创板/创业板与场内基金"
-                    " ETF/LOF/REITs；可转债/B 股/北交所/港美股暂不支持）"
+                    f"标的不在支持范围：{symbol}（支持 A 股主板/科创板/创业板、场内基金"
+                    " ETF/LOF/REITs 与沪深债券；B 股/北交所/港美股暂不支持）"
                 ),
             )
         wanted[symbol] = None
@@ -223,12 +210,13 @@ def _symbol_to_sina(symbol: str) -> str:
     return f"sz{symbol}"
 
 
-# 行情源列名：东财（eastmoney）为中文；新浪/腾讯/新浪基金均为英文 date/close。
+# 行情源列名：东财（eastmoney）为中文；新浪/腾讯/新浪基金/债券均为英文 date/close。
 _SOURCE_COLUMNS: dict[str, tuple[str, str]] = {
     "eastmoney": ("日期", "收盘"),
     "sina": ("date", "close"),
     "tx": ("date", "close"),
     "fund_sina": ("date", "close"),
+    "bond": ("date", "close"),
 }
 
 
@@ -518,6 +506,8 @@ class AkshareMarketDataSource:
           是退市股的最终兜底。
         - 基金：东财 `fund_etf_hist_em` → 新浪 `fund_etf_hist_sina`（后者无起止参数，
           全量返回后本地过滤）。
+        - 债券：可转债走 `bond_zh_hs_cov_daily`，其余走 `bond_zh_hs_daily`（均无起止
+          参数，全量返回后本地过滤）。akshare 只此两接口，不做多源交叉验证。
         - 多源 fallback：瞬时故障（超时/TLS RST/JSON 解析）降级到下一源；空结果也交叉
           验证下一源（单源空可能是停牌/退市/源缺口，全部源一致空才返回空，走负缓存）；
           InvalidData 说明源返回了东西但口径坏了，不盲目降级（可能掩盖问题）。
@@ -526,8 +516,11 @@ class AkshareMarketDataSource:
             module = _import_akshare()
         except RuntimeError as exc:  # 运行期兜底：启动期已用 find_spec 拦截
             raise _TransientMarketError(str(exc)) from exc
-        if _classify_symbol(symbol) == "fund":
+        kind = classify_symbol(symbol)
+        if kind == CLASS_FUND:
             sources = [self._fetch_fund_eastmoney, self._fetch_fund_sina]
+        elif kind == CLASS_BOND:
+            sources = [self._fetch_bond]
         else:
             sources = [self._fetch_eastmoney, self._fetch_sina, self._fetch_tx]
         last_exc: Exception | None = None
@@ -687,6 +680,44 @@ class AkshareMarketDataSource:
             return [], None
         return filtered, filtered[-1][0]
 
+    def _fetch_bond(
+        self, module: Any, symbol: str, start: date, end: date
+    ) -> tuple[list[tuple[date, int, int]], date | None]:
+        """沪深交易所债券：可转债走 `bond_zh_hs_cov_daily`，其余走 `bond_zh_hs_daily`。
+
+        两接口均**没有起止参数**（全量返回），本地按 `[start, end]` 过滤；returns 先在
+        全序列上派生再过滤（与 `_fetch_fund_sina` 同口径）。不存在的代码抛
+        `KeyError('date')`（或 IndexError），映射为空结果走负缓存。已到期/退市债券
+        仍保留历史数据，不丢段。
+        """
+        bond_code = bond_symbol(symbol)
+        convertible = is_convertible_bond(symbol)
+        label = "bond_cov" if convertible else "bond"
+        try:
+            if convertible:
+                frame = module.bond_zh_hs_cov_daily(symbol=bond_code)
+            else:
+                frame = module.bond_zh_hs_daily(symbol=bond_code)
+        except Exception as exc:
+            if _is_transient_failure(exc):
+                raise _TransientMarketError(f"{label} {type(exc).__name__}: {exc}") from exc
+            if isinstance(exc, (KeyError, IndexError)):
+                return [], None
+            raise _invalid_data(f"{label} 调用失败：{type(exc).__name__}: {exc}") from exc
+        if frame is None:
+            return [], None
+        try:
+            rows = frame.to_dict("records")
+        except Exception as exc:
+            raise _invalid_data(f"{label} 返回结构非法：{type(exc).__name__}") from exc
+        if not rows:
+            return [], None
+        bars, _ = _parse_rows(rows, source="bond")
+        filtered = [bar for bar in bars if start <= bar[0] <= end]
+        if not filtered:
+            return [], None
+        return filtered, filtered[-1][0]
+
 
 # ── DB 缓存装饰器 ───────────────────────────────────────────
 class CachedMarketDataSource:
@@ -744,6 +775,24 @@ class CachedMarketDataSource:
             Quote(symbol=symbol, as_of=bar.trade_date, close_units=bar.close_units)
             for symbol, bar in sorted(last.items())
         )
+
+    async def get_cached_bars(
+        self, symbols: Sequence[str], start: date, end: date
+    ) -> Sequence[Bar]:
+        """只读缓存中的日线（不触发尾部补拉）。
+
+        看板持仓必须与 ``asset_daily`` 快照同价：快照写入时已把当时价格落库，
+        此处直接复用，避免盘中再次拉取导致「持仓市值与快照不一致」的假告警。
+        """
+        wanted = validate_symbols(symbols)
+        if start > end:
+            raise ApiError(
+                ErrorCode.VALIDATION_ERROR, detail=f"start({start}) 不能晚于 end({end})"
+            )
+        collected: list[Bar] = []
+        for symbol in wanted:
+            collected.extend(await self._load_bars(symbol, start, end))
+        return tuple(sorted(collected, key=lambda bar: (bar.trade_date, bar.symbol)))
 
     # ── 内部 ────────────────────────────────────────────
     async def _symbol_bars(self, symbol: str, start: date, end: date) -> tuple[Bar, ...]:

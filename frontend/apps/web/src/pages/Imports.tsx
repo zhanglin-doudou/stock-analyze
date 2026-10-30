@@ -6,7 +6,7 @@ import { Cursor } from "../ui/Cursor";
 import { ProblemView } from "../ui/Problem";
 import { QuarantineList } from "../ui/QuarantineList";
 import { RevokeBatchButton } from "../ui/RevokeBatch";
-import { Table, type Column } from "../ui/Table";
+import { DataTable, type DataTableColumn } from "../ui/DataTable";
 
 const STATUS_LABELS: Record<ImportBatchStatus, string> = {
   pending: "等待中",
@@ -98,16 +98,31 @@ export function Imports() {
     [load, loadDetail, selectedId],
   );
 
-  const columns: Array<Column<ImportBatch>> = [
-    { key: "batch", header: "批次号", render: (row) => <code>{row.batch_id}</code> },
-    { key: "file", header: "文件", render: (row) => row.file_name || "—" },
-    { key: "status", header: "状态", render: (row) => <span className={`badge badge-${row.status}`}>{batchStatusLabel(row.status)}</span> },
-    { key: "mode", header: "模式", render: (row) => row.mode },
-    { key: "counts", header: "解析 / 写入 / 跳过 / 隔离", render: (row) => countSummary(row) },
-    { key: "created", header: "创建时间", render: (row) => row.created_at },
+  const columns: Array<DataTableColumn<ImportBatch>> = [
+    { key: "batch", header: "批次号", priority: 1, render: (row) => <code>{row.batch_id}</code> },
+    { key: "file", header: "文件", priority: 1, render: (row) => row.file_name || "—" },
+    {
+      key: "status",
+      header: "状态",
+      priority: 1,
+      render: (row) => (
+        <span className={`badge badge-${row.status}`}>{batchStatusLabel(row.status)}</span>
+      ),
+    },
+    { key: "mode", header: "模式", priority: 3, render: (row) => row.mode },
+    {
+      key: "counts",
+      header: "解析 / 写入 / 跳过 / 隔离",
+      priority: 2,
+      align: "right",
+      render: (row) => countSummary(row),
+    },
+    { key: "created", header: "创建时间", priority: 2, render: (row) => row.created_at },
     {
       key: "actions",
       header: "操作",
+      priority: 1,
+      align: "right",
       render: (row) => (
         <div className="row-actions">
           <button className="btn btn-ghost" type="button" onClick={() => setSelectedId(row.batch_id)}>
@@ -127,11 +142,13 @@ export function Imports() {
       {notice ? <p className="notice">{notice}</p> : null}
       <ProblemView error={error} onRetry={() => void load()} />
 
-      <Table
+      <DataTable
+        caption="导入批次列表"
         columns={columns}
         rows={page?.items ?? []}
         rowKey={(row) => row.batch_id}
-        emptyText={loading ? "加载中…" : "还没有导入批次；先去「导入」上传账单"}
+        loading={loading && page == null}
+        emptyText="还没有导入批次；先去「导入」上传账单"
       />
       {page ? (
         <Cursor

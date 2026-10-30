@@ -1,4 +1,4 @@
-"""`stock_api.cli` —— 一期本地运维 / Mock 命令入口（对应 Makefile 目标）。
+"""`stock_api.cli` —— 本地运维 / 演示命令入口（对应 Makefile 目标）。
 
 全部子命令都用 `uv run python -m stock_api.cli <cmd>` 调用；只依赖标准库
 （`argparse` + `asyncio`），不引入 `click`/`typer` 等三方 CLI 依赖。
@@ -24,12 +24,14 @@ from collections.abc import Callable, Coroutine
 from pathlib import Path
 from typing import Any
 
+from sqlalchemy import func, select
 from stock_contracts.clock import FrozenClock
 from stock_contracts.enums import ImportBatchStatus, Role
 from stock_contracts.errors import CATALOG
 from stock_ledger.application.imports import commit_batch
 from stock_ledger.application.preview import create_preview, default_object_store
 from stock_ledger.fixtures import generate_huatai_bill, generate_market_quotes
+from stock_ledger.models import Trade
 from stock_ledger.repositories.imports import ImportBatchRepository
 from stock_ledger.repositories.rules import seed_system_rules
 from stock_platform.config import REPO_ROOT, get_settings
@@ -43,14 +45,16 @@ API_PREFIX = "/api/v1"
 ROOT_MARK = "（根）"
 OPENAPI_SELF_REF = "/openapi.json"
 DEMO_CLOCK = "2026-10-01T09:30:00+08:00"
-DEFAULT_PASSWORD = "Demo!Passw0rd2026"
+# 固定本地测试/体验账号：1234@dev.com / 1234（仅在本地 seed 使用，禁止生产）。
+DEFAULT_PASSWORD = "1234"
 # 邮箱必须满足 EmailStr（带点的域名），否则 seed 出来的账号无法经 API 登录。
 DEMO_ACCOUNTS: tuple[tuple[str, str, Role, int | None], ...] = (
-    ("a@demo.example.com", "演示账号 A（有业务数据）", Role.USER, 7),
-    ("b@demo.example.com", "演示账号 B（有业务数据）", Role.USER, 13),
+    ("1234@dev.com", "体验账号（有业务数据）", Role.USER, 7),
+    ("a@demo.example.com", "隔离对照账号 A（有业务数据）", Role.USER, 7),
+    ("b@demo.example.com", "隔离对照账号 B（有业务数据）", Role.USER, 13),
     ("admin@demo.example.com", "运维管理员（不可读写业务明细）", Role.ADMIN, None),
 )
-DEMO_EMAIL = "demo@demo.example.com"
+DEMO_EMAIL = "1234@dev.com"
 
 CATALOG_PATH = REPO_ROOT / "docs/architecture/v2/API-Catalog.md"
 DEV_PLAN_PATH = REPO_ROOT / "docs/DEV-PLAN-v2.md"
@@ -539,11 +543,12 @@ def _verify_p1() -> int:
 def _seed_plan() -> list[str]:
     return [
         "1. 写入系统分类规则（ledger.summary_rule，幂等）",
-        "2. 账号 A a@demo.example.com（user）：导入一份正常账单",
-        "3. 账号 B b@demo.example.com（user）：导入一份正常账单",
-        "4. 账号 admin@demo.example.com（admin）：仅建账号，无业务数据",
-        "5. 按 FIFO 建立回合（review.round / round_fill，幂等重建）",
-        f"统一口令：{DEFAULT_PASSWORD}（三个账号共用）",
+        "2. 体验账号 1234@dev.com（user）：导入一份正常账单",
+        "3. 隔离对照 A a@demo.example.com（user）：导入一份正常账单",
+        "4. 隔离对照 B b@demo.example.com（user）：导入一份正常账单",
+        "5. admin@demo.example.com（admin）：仅建账号，无业务数据",
+        "6. 按 FIFO 建立回合（review.round / round_fill，幂等重建）",
+        f"统一口令：{DEFAULT_PASSWORD}（四个账号共用；仅限本地）",
     ]
 
 
@@ -557,7 +562,11 @@ async def _ensure_user(db: Database, email: str, note: str, role: Role, password
             )
             emit(f"  + 新建账号 {email}（{role}）")
         else:
-            emit(f"  = 账号已存在 {email}（{user.role}），跳过创建")
+            # 本地 seed 账号固定口令：已存在账号也重置到当前 DEFAULT_PASSWORD，
+            # 避免旧库沿用历史弱口令导致“文档写 1234、实际登不上”。
+            user.password_hash = password_hash
+            await session.flush()
+            emit(f"  = 账号已存在 {email}（{user.role}），口令已重置")
         return user.id
 
 
@@ -624,6 +633,15 @@ async def _seed(db: Database, clock: FrozenClock, market_bill: bool) -> int:
         if seed is None:
             emit("  = 管理员仅建账号，不写入业务数据")
             continue
+        async with db.session(user_id=user_id) as session:
+            trade_count = await session.scalar(
+                select(func.count())
+                .select_from(Trade)
+                .where(Trade.user_id == user_id, Trade.deleted_at.is_(None))
+            )
+        if trade_count:
+            emit(f"  = 已有 {trade_count} 条有效流水，跳过导入")
+            continue
         data = generate_huatai_bill(seed=seed, months=3, count=120)
         file_name = "bill_huatai.xlsx" if market_bill else "huatai_2024.xlsx"
         await _import_bill(db, clock, user_id, data, file_name)
@@ -678,7 +696,7 @@ async def _seed_demo() -> int:
 
 
 async def _seed_tenants() -> int:
-    return await _run_seed("seed-tenants（A / B / admin 三账号就绪）", market_bill=False)
+    return await _run_seed("seed-tenants（体验账号 / A / B / admin 就绪）", market_bill=False)
 
 
 # ── demo-p1 ────────────────────────────────────────────────────
@@ -881,7 +899,7 @@ def _demo_p1(dry_run: bool, run: bool) -> int:
     emit("== demo-p1：5 分钟演示脚本 ==")
     emit(f"基础地址：{base}（可用 STOCK_API_BASE 覆盖）")
     emit(f"演示账单夹具：{bill.relative_to(REPO_ROOT)}（由 seed-demo 生成，确定性）")
-    emit("前置：先 `make seed-tenants`（或 make seed-demo）造好 A/B/admin 账号 + 数据")
+    emit("前置：先 `make seed-tenants`（或 make seed-demo）造好体验账号/A/B/admin + 数据")
     emit("")
     for title, command, expected in demo_steps(base, bill):
         emit(title)
@@ -907,11 +925,11 @@ def _demo_p1(dry_run: bool, run: bool) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="stock_api.cli",
-        description="个人交易复盘平台 —— 一期本地运维 / Mock 命令（Makefile 目标）",
+        description="个人交易复盘平台 —— 本地运维 / 演示命令（Makefile 目标）",
     )
     subparsers = parser.add_subparsers(dest="command")
 
-    subparsers.add_parser("seed-tenants", help="造 A/B/admin 三账号与账单（幂等）")
+    subparsers.add_parser("seed-tenants", help="造体验账号/A/B/admin 与账单（幂等）")
     subparsers.add_parser("seed-demo", help="造演示数据（含行情回放夹具）")
     subparsers.add_parser("api-check", help="契约完整性检查（路径/operationId/错误码/错误响应）")
     snapshot = subparsers.add_parser("api-snapshot", help="规范化写出 contracts/openapi.json")

@@ -1,0 +1,103 @@
+/*
+ * Phase 5 · 深色主题对旧组件的局部补丁。
+ * 新组件全部消费 tokens，无需在此覆盖；这里只兜底 styles.css 中仍有裸色的旧类，
+ * 保证旧页面（登录/流水/导入记录等）在 dark 下不出现白块。
+ */
+[data-theme="dark"] body {
+  background: var(--bg);
+  color: var(--text);
+}
+
+[data-theme="dark"] .card,
+[data-theme="dark"] .table,
+[data-theme="dark"] .kpi,
+[data-theme="dark"] .problem,
+[data-theme="dark"] .token-value,
+[data-theme="dark"] .notice-warn,
+[data-theme="dark"] .btn-ghost,
+[data-theme="dark"] .badge {
+  background: var(--surface);
+  color: var(--text);
+}
+
+[data-theme="dark"] .table th {
+  background: var(--surface-2);
+  color: var(--text-2);
+}
+
+[data-theme="dark"] .table th,
+[data-theme="dark"] .table td {
+  border-color: var(--line);
+}
+
+[data-theme="dark"] .problem {
+  background: var(--danger-soft);
+  border-color: var(--danger);
+}
+
+[data-theme="dark"] .notice-warn {
+  background: var(--warn-soft);
+  border-color: var(--warn);
+  color: var(--text-2);
+}
+
+[data-theme="dark"] .job-progress-bar {
+  background: var(--line);
+}
+
+[data-theme="dark"] .badge {
+  border: 1px solid var(--line);
+}
+
+[data-theme="dark"] .badge-succeeded,
+[data-theme="dark"] .badge-ok,
+[data-theme="dark"] .badge-closed,
+[data-theme="dark"] .badge-current {
+  background: var(--status-ok-soft);
+  color: var(--status-ok);
+}
+
+[data-theme="dark"] .badge-failed,
+[data-theme="dark"] .badge-blocked,
+[data-theme="dark"] .badge-data_error {
+  background: var(--status-blocked-soft);
+  color: var(--status-blocked);
+}
+
+[data-theme="dark"] .badge-pending,
+[data-theme="dark"] .badge-running,
+[data-theme="dark"] .badge-open {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+[data-theme="dark"] .badge-degraded,
+[data-theme="dark"] .badge-stale,
+[data-theme="dark"] .badge-missing,
+[data-theme="dark"] .badge-insufficient,
+[data-theme="dark"] .badge-unreliable {
+  background: var(--status-degraded-soft);
+  color: var(--status-degraded);
+}
+
+[data-theme="dark"] .badge-revoked {
+  background: var(--status-missing-soft);
+  color: var(--muted);
+}
+
+[data-theme="dark"] input,
+[data-theme="dark"] select,
+[data-theme="dark"] textarea {
+  background: var(--surface);
+  color: var(--text);
+  border-color: var(--line-strong);
+}
+
+[data-theme="dark"] ::selection {
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+[data-theme="dark"] a {
+  color: var(--accent);
+}

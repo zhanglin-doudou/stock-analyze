@@ -212,8 +212,9 @@ class AssetDaily(Base):
     `nav_daily` 按月稀疏且由 GET /nav 隐式写入，不适合做该数据源。
 
     硬约束（应用层断言 + DB CHECK）：
-    - `total_assets_units = cash_units + market_value_units`；
+    - `total_assets_units = cash_units + money_fund_units + market_value_units`；
     - `holding_count >= 0`；**不设** `market_value >= 0`（超卖日允许负市值，标 degraded）；
+    - `money_fund_units` 为货币基金余额合计（单位净值恒 1.0000，持仓不请求行情）；
     - blocked 行数值列全 0、`prev_total/daily_pnl/daily_return` 为 NULL、`status_reason` 非空
       （API 层把 blocked 数值列输出为 null）。
     主键确定性：`ast_` + sha256(user_id|trade_date)[:32]，重复构建幂等。
@@ -223,7 +224,7 @@ class AssetDaily(Base):
     __table_args__ = (
         UniqueConstraint("user_id", "trade_date", name="uq_asset_daily_user_date"),
         CheckConstraint(
-            "total_assets_units = cash_units + market_value_units",
+            "total_assets_units = cash_units + money_fund_units + market_value_units",
             name="ck_asset_daily_total",
         ),
         CheckConstraint("holding_count >= 0", name="ck_asset_daily_holding_count"),
@@ -236,6 +237,7 @@ class AssetDaily(Base):
     )
     trade_date: Mapped[date] = mapped_column(Date, nullable=False)
     cash_units: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
+    money_fund_units: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     market_value_units: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     total_assets_units: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     holding_cost_units: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)

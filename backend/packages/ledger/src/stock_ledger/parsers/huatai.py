@@ -29,6 +29,7 @@ from stock_contracts.constants import FILE_MAX_BYTES
 from stock_contracts.enums import QuarantineReason, Side, WarningCode
 from stock_contracts.errors import ApiError, ErrorCode, FieldError
 from stock_core.values import Money, Price, Qty
+from stock_platform.symbols import is_convertible_bond
 
 from stock_ledger.parsers.columns import (
     ColumnMapping,
@@ -38,6 +39,7 @@ from stock_ledger.parsers.columns import (
     map_columns,
     normalize_cell,
     normalize_header,
+    normalize_summary,
     parse_date_text,
     resolve_side,
 )
@@ -82,6 +84,239 @@ class ParsedRow:
     occurrence_idx: int
     dedupe_key: str
     raw: dict[str, str]
+    # 货币基金余额（该行发生后该标的的份额余额，金额 scale=2）。None = 非货基行。
+    # 货基单位净值恒 1.0000，没有可估值净值，资产口径按余额计（设计 §5.2）。
+    money_fund_balance_units: int | None = None
+
+
+# 货币基金识别：券商全称含「货币」（归一化折行/空白后），fixtures 3/3 命中。
+_MONEY_FUND_KEYWORD = "货币"
+# 货基单位净值恒 1.0000；价格列缺失时按此兜底（不伪造份额）。
+_ONE_PRICE_UNITS = Price.from_decimal(Decimal(1)).units
+
+
+def _is_money_fund_name(name: str) -> bool:
+    return _MONEY_FUND_KEYWORD in "".join(name.split())
+
+
+def _is_money_fund_row(row: ParsedRow) -> bool:
+    """货基行识别：名称含「货币」，或「买/卖价格 = 1 且佣金/印花税/其他费全 0」。
+
+    后者是对账口径的兜底（部分券商货基全称不含「货币」）；`quantity_units != 0`
+    排除转托管确认等零份额噪音行，避免整只标的被误判成货基。
+    """
+    if _is_money_fund_name(row.security_name):
+        return True
+    return (
+        row.side in (Side.BUY.value, Side.SELL.value)
+        and row.price_units == _ONE_PRICE_UNITS
+        and row.quantity_units != 0
+        and row.commission_units == 0
+        and row.stamp_tax_units == 0
+        and row.other_fee_units == 0
+    )
+
+
+def _money_fund_codes(rows: list[ParsedRow]) -> set[str]:
+    """账单中所有货基标的代码（名称 + 价格 1 零费用两条口径的并集）。"""
+    return {row.security_code for row in rows if _is_money_fund_row(row)}
+
+
+# 零金额信息行（纯通知，无资金意义）：申购中签/新股入账/托管转出/托管转入。
+_ZERO_AMOUNT_INFO_KEYWORDS: tuple[str, ...] = ("申购中签", "新股入账", "托管转出", "托管转入")
+# 省心投（华泰基金投顾）摘要（归一化后精确匹配，2026-10-30 用户确认口径，设计 D14）：
+# 资金在主账户与省心投投顾账户之间划转，但**转出动作不在账单留记录**——账单里只有
+# 「[省心投]申购确认」（主账户资金流出买省心投货基）与「[省心投]红利发放」（省心投
+# 账户内部的份额红利通知，金额恒 0，与主账户资金无关）。
+_SXT_SUBSCRIBE_SUMMARY = "[省心投]申购确认"
+_SXT_DIVIDEND_SUMMARY = "[省心投]红利发放"
+# 可转债：数量单位是手（1 手 = 10 张），成交/行情价格是单张金额。
+_CBOND_LOT_SIZE = 10
+# 「qty × 10 × 单张价 ≈ |amount|」容差（amount 含费用，对齐估值反推的 2% 口径）。
+_CBOND_AMOUNT_TOLERANCE_PERCENT = 2
+
+
+def _is_zero_amount_info_summary(summary: str) -> bool:
+    """摘要归一化后命中零金额信息关键词（申购中签/新股入账/托管转出入）。"""
+    if not summary:
+        return False
+    normalized = normalize_summary(summary)
+    return any(keyword in normalized for keyword in _ZERO_AMOUNT_INFO_KEYWORDS)
+
+
+def _is_cbond_subscription_name(name: str) -> bool:
+    """可转债申购（发债）行：名称去空白后以「发债」结尾（如「曙26发债」）。"""
+    return "".join(name.split()).endswith("发债")
+
+
+def _is_cbond_amount_inconsistent(row: ParsedRow) -> bool:
+    """可转债行「数量(手) × 10 × 单张价」与 |发生金额| 偏差超容差（留痕不阻断）。
+
+    只校验有明确买卖方向、量价额俱全的行；申购代码（754/780 等名称以发债结尾）
+    与上市转债代码（is_convertible_bond）都按同一口径校验。
+    """
+    if (
+        row.side not in (Side.BUY.value, Side.SELL.value)
+        or row.quantity_units <= 0
+        or row.price_units <= 0
+        or row.amount_units == 0
+    ):
+        return False
+    if not (
+        is_convertible_bond(row.security_code) or _is_cbond_subscription_name(row.security_name)
+    ):
+        return False
+    expected = Money.from_decimal(
+        Qty(row.quantity_units).to_decimal() * _CBOND_LOT_SIZE * Price(row.price_units).to_decimal()
+    ).units
+    if expected <= 0:
+        return False
+    return abs(expected - abs(row.amount_units)) * 100 > _CBOND_AMOUNT_TOLERANCE_PERCENT * expected
+
+
+def _share_value_units(shares_units: int, price_units: int) -> int:
+    """份额 × 单位净值 → 金额标度整数（Money scale=2，ROUND_HALF_UP）。"""
+    return Money.from_decimal(
+        Qty(shares_units).to_decimal() * Price(price_units).to_decimal()
+    ).units
+
+
+def _read_fund_holding_anchors(rows: list[list[str]], codes: set[str]) -> dict[str, int]:
+    """解析「基金持仓」区块，返回 `{货基代码: 期末参考市值(分)}`。
+
+    区块在流水「合计」之后（真实对账单实测表头：基金代码/基金名称/基金份额/单位净值/
+    参考市值/摊薄成本价/持仓盈亏），无独立日期列，锚点日按账单最大流水日。缺失
+    `参考市值` 时用 `份额 × 单位净值` 兜底；非货基代码忽略。
+    """
+    header_idx: int | None = None
+    for idx, row in enumerate(rows):
+        normalized = [normalize_header(cell) for cell in row]
+        if "基金代码" in normalized and "基金份额" in normalized:
+            header_idx = idx
+            break
+    if header_idx is None:
+        return {}
+    header = [normalize_header(cell) for cell in rows[header_idx]]
+    code_idx = header.index("基金代码")
+    share_idx = header.index("基金份额")
+    nav_idx = header.index("单位净值") if "单位净值" in header else None
+    value_idx = header.index("参考市值") if "参考市值" in header else None
+    anchors: dict[str, int] = {}
+    for row in rows[header_idx + 1 :]:
+        if not any(row):
+            continue
+        code = normalize_cell(row[code_idx]) if code_idx < len(row) else ""
+        if not code:
+            continue
+        if not code.isdigit():
+            # 区块以「合计/声明」等非代码行收尾。
+            break
+        if code not in codes:
+            continue
+        value_units: int | None = None
+        if value_idx is not None and value_idx < len(row) and row[value_idx]:
+            try:
+                value_units = _units(row[value_idx], Money)
+            except _RowError:
+                value_units = None
+        if value_units is None and share_idx < len(row) and row[share_idx]:
+            try:
+                shares = _units(row[share_idx], Qty)
+                nav_units = _units(row[nav_idx], Price) if nav_idx is not None else 0
+                if nav_units:
+                    value_units = _share_value_units(shares, nav_units)
+            except _RowError:
+                value_units = None
+        if value_units is not None:
+            anchors[code] = value_units
+    return anchors
+
+
+def _apply_money_fund_balances(
+    rows: list[ParsedRow], anchors: dict[str, int]
+) -> tuple[dict[str, int], set[str], set[str], set[str]]:
+    """按余额累计（+ 账单「基金持仓」期末锚点反推期初）逐行写货币基金余额。
+
+    全部在**金额标度（分）**上运行：份额增量先按「份额 × 单位净值(1.0000)」换算成金额，
+    避免 Qty(scale=4) 与 Money(scale=2) 混算。返回 ``(inferred, zero, clamped, interest)``：
+
+    - ``inferred``：无锚点且期初按赎回行自证为正（下界 ``-min(累计净额)``）的代码 → 留痕。
+    - ``zero``：无锚点且期初为 0 的代码 → 留痕即可。
+    - ``clamped``：有锚点但账单**缺赎回/转出流水**（单侧流水缺陷），按期末锚点反推的
+      中间余额会为负 → 写 0 兜底留痕（设计 D12）。
+    - ``interest``：**账单内建立持仓**（该代码首行即买入）的代码出现**部分超卖**（赎回把
+      已跟踪持仓卖穿）→ 超出部分 = 累计利息，在赎回当日实现（设计 D15）。期初不得因此
+      抬高（否则利息被算成初始资产，当次超卖的盈利被抹掉）。
+      （[省心投] 申购自 D14 起转 CASH 资金行，不再进入货基推演。）
+
+    期初口径：
+    - 首行即买入（持仓在本账单内建立）→ 期初 0；后续任何负余额都是利息/缺失流水。
+    - 首行即赎回（账单期前已持有）→ 有锚点按 ``锚点 − 累计净额`` 反推；无锚点按
+      ``-min(累计净额)`` 下界（D10）。这两种情况下负数都是「期初估值不足」，不是利息。
+    """
+    codes = _money_fund_codes(rows)
+    if not codes:
+        return {}, set(), set(), set()
+    ordered = sorted(rows, key=lambda row: (row.trade_date, row.line_no))
+    # 第一遍：期初 0 推演，记录各代码的累计净额与最小余额。
+    running: dict[str, int] = dict.fromkeys(codes, 0)
+    min_running: dict[str, int] = dict.fromkeys(codes, 0)
+    first_row: dict[str, ParsedRow] = {}
+    for row in ordered:
+        if row.security_code not in codes:
+            continue
+        first_row.setdefault(row.security_code, row)
+        running[row.security_code] += _money_fund_row_delta(row)
+        min_running[row.security_code] = min(
+            min_running[row.security_code], running[row.security_code]
+        )
+    # 首行即买入 → 持仓在本账单内建立，期初必为 0（不能把利息当初始资产）。
+    built_in_bill = {code for code, row in first_row.items() if _money_fund_row_delta(row) > 0}
+    opening: dict[str, int] = {}
+    for code in codes:
+        if code in built_in_bill:
+            opening[code] = 0
+        elif code in anchors:
+            opening[code] = anchors[code] - running[code]
+        else:
+            opening[code] = -min_running[code] if min_running[code] < 0 else 0
+    missing = {code for code in codes if code not in anchors}
+    inferred = {code: opening[code] for code in missing if opening[code] > 0}
+    zero = {code for code in missing if opening[code] <= 0}
+    balance = dict(opening)
+    clamped: set[str] = set()
+    interest: set[str] = set()
+    last_row: dict[str, ParsedRow] = {}
+    for row in ordered:
+        code = row.security_code
+        if code not in codes:
+            continue
+        balance[code] += _money_fund_row_delta(row)
+        stored = balance[code]
+        if stored < 0:
+            if code in built_in_bill:
+                # 部分超卖：赎回把已跟踪持仓卖穿 → 超出部分是利息，当日实现；累计归零。
+                interest.add(code)
+                balance[code] = 0
+            else:
+                # 缺流水导致的反推负余额：写 0（不修改累计值，期末仍落在锚点上）。
+                clamped.add(code)
+            stored = 0
+        row.money_fund_balance_units = stored
+        last_row[code] = row
+    # 锚点校准：末行余额对齐「基金持仓」期末参考市值（差额记在末行当日，不进期初）。
+    for code, row in last_row.items():
+        anchor = anchors.get(code)
+        if anchor is None or int(row.money_fund_balance_units or 0) == anchor:
+            continue
+        row.money_fund_balance_units = max(0, anchor)
+    return inferred, zero, clamped, interest
+
+
+def _money_fund_row_delta(row: ParsedRow) -> int:
+    """货基行的余额增量（金额分）：卖出取负，其余（含红利再投）取正。"""
+    shares = -row.quantity_units if row.side == Side.SELL.value else row.quantity_units
+    return _share_value_units(shares, row.price_units or _ONE_PRICE_UNITS)
 
 
 @dataclass(slots=True)
@@ -280,6 +515,21 @@ def _build_candidate(
     if balance_text:
         cash_balance_units = _units(balance_text, Money)
 
+    # 「[省心投]红利发放」：省心投账户内部的份额红利通知（金额恒 0），与主账户资金
+    # 无关——不论金额字段形态一律直接隔离（设计 D14），不进明细。
+    if normalize_summary(value("summary")) == _SXT_DIVIDEND_SUMMARY:
+        raise _RowError(QuarantineReason.ZERO_AMOUNT_INFO)
+
+    # 「申购中签/新股入账/托管转出」等纯通知行：无发生金额且无资金余额 → 隔离为
+    # ZERO_AMOUNT_INFO，不进明细（否则会形成无意义持仓/回合噪音，如中签通知行使
+    # 持仓形成日早于真实缴款日）。同类摘要但有金额的行（真实缴款）不受影响。
+    if (
+        amount_units == 0
+        and cash_balance_units is None
+        and _is_zero_amount_info_summary(value("summary"))
+    ):
+        raise _RowError(QuarantineReason.ZERO_AMOUNT_INFO)
+
     # 五个金额字段（佣金/印花税/其他费/发生金额/资金余额）全为 0：没有资金流语义
     # （典型是货基份额再投、转托管确认等噪音行），不入明细，隔离为 INVALID_AMOUNT。
     # 资金余额列缺失（None）不算 0，交后续对账按 MISSING_CASH_BALANCE 降级处理。
@@ -298,6 +548,15 @@ def _build_candidate(
     account_masked = value("account") or None
     # 非交易行证券名称为空时，用摘要填充（如「银行转存」），避免默认成 CASH 无法辨识业务。
     security_name = value("security_name") or (summary or "资金业务" if code == "CASH" else code)
+    # 「[省心投]申购确认」视同银行转出（设计 D14）：主账户资金流出到省心投投顾账户，
+    # 但转出动作不在账单留记录，申购确认行本身就是转出证据。转 CASH 资金行（与
+    # 「银行转取」同构）：无份额语义（qty/price 清零，原始值留 raw 可溯源）、不进持仓、
+    # 不打货基余额；发生金额（负值）即主账户流出额，分类走 transfer（sys_sxt_out）。
+    if summary is not None and normalize_summary(summary) == _SXT_SUBSCRIBE_SUMMARY:
+        code = "CASH"
+        security_name = summary
+        quantity_units = 0
+        price_units = 0
 
     row = ParsedRow(
         line_no=line_no,
@@ -384,6 +643,8 @@ def parse_bill(
     quarantined: list[QuarantineCandidate] = []
     derived_count = 0
     unsigned_amount_count = 0
+    # 流水明细以「合计」行收尾；其后的持仓区块用于货币基金余额锚点（见 §5.3）。
+    stop_row_index: int | None = None
 
     for offset, row in enumerate(data_rows):
         line_no = header_idx + offset + 2
@@ -396,6 +657,7 @@ def parse_bill(
             and trade_date_idx < len(row)
             and normalize_header(row[trade_date_idx]) == "合计"
         ):
+            stop_row_index = header_idx + offset + 1
             break
         raw = {header: (row[i] if i < len(row) else "") for i, header in enumerate(headers)}
         # 把账号列明文替换成 MD5 摘要：隔离区 raw 和预览 columns_detail.sample
@@ -454,6 +716,23 @@ def parse_bill(
 
     if "cash_balance" not in field_headers:
         warnings.append(WarningCode.MISSING_CASH_BALANCE)
+    # 货币基金余额：按份额累计推演；若账单含「基金持仓」区块，用其参考市值作期末锚点
+    # 反推期初（设计 §5.3）。无锚点且账单内有净赎回的代码按「-min(累计净额)」反推期初下界
+    # （赎回行自证期初持仓），其余无锚点代码期初按 0；均写 assumptions 留痕，不伪造余额。
+    fund_rows = raw_rows[stop_row_index + 1 :] if stop_row_index is not None else []
+    fund_anchors = _read_fund_holding_anchors(fund_rows, _money_fund_codes(rows))
+    mf_inferred, mf_zero, mf_clamped, mf_interest = _apply_money_fund_balances(rows, fund_anchors)
+    if mf_zero:
+        assumptions["money_fund_opening_zero"] = sorted(mf_zero)
+    if mf_inferred:
+        assumptions["money_fund_opening_inferred"] = {
+            code: mf_inferred[code] for code in sorted(mf_inferred)
+        }
+    if mf_clamped:
+        assumptions["money_fund_balance_clamped"] = sorted(mf_clamped)
+    if mf_interest:
+        # 部分超卖 = 累计利息在赎回当日实现（设计 D15）：不抬高期初，避免利息被算成初始资产。
+        assumptions["money_fund_oversell_interest"] = sorted(mf_interest)
     if rows and rows[0].side != "buy":
         warnings.append(WarningCode.FIRST_ROW_NOT_BUY)
     if any(q.reason_code == QuarantineReason.DUPLICATE_IN_FILE.value for q in quarantined):
@@ -463,6 +742,12 @@ def parse_bill(
     if unsigned_amount_count:
         # 毛额列 + 方向 unknown：资金流向不可判定，金额保守置 0，不伪造正负号。
         assumptions["amount_unsigned_rows"] = unsigned_amount_count
+    # 可转债口径留痕：数量单位是手（1 手 = 10 张）、价格是单张金额，「qty × 10 ×
+    # 单张价」应与 |发生金额| 大致相等；偏差超容差说明券商口径异常，WARN 不阻断。
+    cbond_inconsistent = sum(1 for row in rows if _is_cbond_amount_inconsistent(row))
+    if cbond_inconsistent:
+        warnings.append(WarningCode.CBOND_AMOUNT_INCONSISTENT)
+        assumptions["cbond_amount_inconsistent_rows"] = cbond_inconsistent
 
     return ParsedBill(
         rows=rows,

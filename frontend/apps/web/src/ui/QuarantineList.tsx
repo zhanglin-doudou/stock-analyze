@@ -3,13 +3,13 @@ import type { QuarantineItem, QuarantinePage } from "@sa/api-client";
 import { api } from "../client";
 import { Cursor } from "./Cursor";
 import { ProblemView } from "./Problem";
-import { Table, type Column } from "./Table";
+import { DataTable, type DataTableColumn } from "./DataTable";
 
 export interface QuarantineListProps {
   batchId: string;
 }
 
-const columns: Array<Column<QuarantineItem>> = [
+const columns: Array<DataTableColumn<QuarantineItem>> = [
   { key: "line", header: "#", render: (row) => row.line_no ?? "—" },
   { key: "date", header: "日期", render: (row) => row.raw.date ?? "" },
   { key: "code", header: "代码", render: (row) => row.raw.security_code ?? "" },
@@ -45,11 +45,13 @@ export function QuarantineList({ batchId }: QuarantineListProps) {
     <div>
       <h3>隔离区（未分类行）</h3>
       {error ? <ProblemView error={error} onRetry={() => void load()} /> : null}
-      <Table
+      <DataTable
+        caption="隔离区行"
         columns={columns}
         rows={page?.items ?? []}
         rowKey={(row) => `${row.line_no ?? "x"}-${row.reason_code}`}
-        emptyText={loading ? "加载中…" : "隔离区为空"}
+        loading={loading && page == null}
+        emptyText="隔离区为空"
       />
       {page ? (
         <Cursor

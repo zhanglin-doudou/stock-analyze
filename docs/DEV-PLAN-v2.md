@@ -35,7 +35,7 @@
 | 能力 | 本地验证方式 | 是否需外部依赖 |
 |---|---|---|
 | 注册/登录/刷新/PAT | `curl` + pytest 验收套件 | 无 |
-| **多租户越权** | `make seed-tenants` 造 A/B/admin，A 的 token 打 B 的资源断言 404 | 无 |
+| **多租户越权** | `make seed-tenants` 造体验账号+B/admin，A 的 token 打 B 的资源断言 404 | 无 |
 | 账单解析/预览/去重/撤销 | `fixtures/market/*`（合成账单/行情）+ 断言行数 | 无 |
 | 口径指标（回合/净值/费用/行为） | `fixtures/market/` 冻结快照 + `FrozenClock` → 期望值写死 | 无 |
 | 异步任务/进度/取消 | 本地 worker + 轮询/SSE | 无 |
@@ -95,16 +95,16 @@ verify-p1     verify-p2     verify-p3     smoke+drill
 ```bash
 make dev            # 起 PG 容器 + api(热重载) + worker + web
 make migrate        # 建 3 个 schema + 表 + RLS
-make seed-tenants   # 造 A/B/admin 三个账号 + 各自账单
+make seed-tenants   # 造固定体验账号 1234@dev.com + A/B/admin + 各自账单
 make verify-p1      # 一期全部断言
 
 # 手工走查
 open http://localhost:5173
-# 1) 用 a@demo.example.com 登录（密码 Demo!Passw0rd2026）
+# 1) 用 1234@dev.com 登录（密码 1234）
 # 2) 上传 fixtures/market/bill_huatai.xlsx → 预览显示识别列/行数/隔离数与实际一致
 # 3) 确认导入 → 任务进度 → 流水列表出现数据
 # 4) 点「撤销本次导入」→ 列表行数回到导入前
-# 5) 换 b@demo.example.com 登录 → 看不到 A 的任何数据（越权拦在 404）
+# 5) 换 b@demo.example.com 登录 → 看不到 1234@dev.com 的任何数据（越权拦在 404）
 # 6) curl 用 A 的 PAT 调 B 的资源 → 404
 ```
 

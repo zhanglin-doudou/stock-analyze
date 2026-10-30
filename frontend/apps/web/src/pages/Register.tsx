@@ -20,8 +20,15 @@ export function Register() {
     event.preventDefault();
     if (password !== confirmPassword) {
       setError({
+        type: "about:blank",
+        title: "Password mismatch",
+        status: 400,
+        detail: "两次输入的密码不一致",
         code: "PASSWORD_MISMATCH",
         user_message: "两次输入的密码不一致",
+        what_to_do: "请重新输入两次相同的密码。",
+        retryable: false,
+        request_id: "",
       });
       return;
     }

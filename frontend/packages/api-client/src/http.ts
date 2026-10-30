@@ -6,6 +6,7 @@
 import type {
   AssetBuildAccepted,
   AssetBuildIn,
+  AssetChart,
   AssetPage,
   AuthTokens,
   BatchList,
@@ -636,6 +637,13 @@ export function createClient(options: ClientOptions) {
           status: query.status,
           sort: query.sort,
         },
+      }).then((r) => r.data);
+    },
+    /** API-085：资产日线 chart-ready 视图（只读；归一化序列由后端生成）。 */
+    chart(limit = 200) {
+      return send<AssetChart>({
+        path: "/assets/chart",
+        query: { limit },
       }).then((r) => r.data);
     },
     /** API-082：触发资产表构建（异步 202；body 缺省等价 `{"mode":"auto"}`）。 */

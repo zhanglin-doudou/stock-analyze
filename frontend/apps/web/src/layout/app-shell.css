@@ -1,0 +1,350 @@
+/*
+ * Phase 1b · AppShell 样式（只消费 styles/tokens.css 变量）
+ * 旧页面仍使用 styles.css；本文件只负责外壳，不覆盖页面级类名。
+ */
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.skip-link {
+  position: fixed;
+  top: -48px;
+  left: var(--s2);
+  z-index: var(--z-toast);
+  padding: 8px 14px;
+  border-radius: var(--r-sm);
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-size: var(--fs-sm);
+  text-decoration: none;
+  transition: top var(--dur) var(--ease);
+}
+
+.skip-link:focus {
+  top: var(--s2);
+}
+
+.app-shell {
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* ── 左侧图标栏 ─────────────────────────────── */
+.shell-rail {
+  position: fixed;
+  inset: 0 auto 0 0;
+  z-index: var(--z-rail);
+  width: var(--rail-width);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  background: var(--surface);
+  border-right: 1px solid var(--line);
+}
+
+.shell-brand {
+  width: 100%;
+  height: var(--topbar-h);
+  display: grid;
+  place-items: center;
+  border-bottom: 1px solid var(--line);
+  flex: none;
+}
+
+.shell-brand-mark {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--text);
+  border-radius: 50%;
+  font-family: var(--font-display);
+  font-size: 15px;
+  line-height: 1;
+  color: var(--text);
+}
+
+.shell-nav {
+  width: 100%;
+  padding: var(--s3) 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.shell-nav-group {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: var(--s2) 0;
+}
+
+.shell-nav-group + .shell-nav-group {
+  border-top: 1px solid var(--line);
+  margin-top: var(--s1);
+  padding-top: var(--s3);
+}
+
+.shell-nav-link {
+  position: relative;
+  width: 48px;
+  height: 44px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--faint);
+  cursor: pointer;
+  transition: color var(--dur) var(--ease), background var(--dur) var(--ease);
+}
+
+.shell-nav-link:hover {
+  color: var(--text);
+  background: var(--accent-soft);
+}
+
+.shell-nav-link.is-active {
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.shell-nav-link.is-active::before {
+  content: "";
+  position: absolute;
+  left: -14px;
+  top: 10px;
+  bottom: 10px;
+  width: 2px;
+  border-radius: 1px;
+  background: var(--accent);
+}
+
+.shell-nav-link:focus-visible,
+.shell-logout:focus-visible,
+.shell-command:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.shell-rail-spacer {
+  flex: 1;
+}
+
+.shell-nav-settings {
+  border-top: 1px solid var(--line);
+  width: 100%;
+  margin-top: 0;
+  padding-bottom: var(--s2);
+}
+
+.shell-logout {
+  margin-bottom: var(--s4);
+}
+
+/* ── 顶栏 ──────────────────────────────────── */
+.shell-main {
+  margin-left: var(--rail-width);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.shell-topbar {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-topbar);
+  height: var(--topbar-h);
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  padding: 0 var(--gutter);
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+
+.shell-crumb {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.shell-crumb-root {
+  color: var(--muted);
+}
+
+.shell-crumb-sep {
+  color: var(--faint);
+}
+
+.shell-crumb-current {
+  color: var(--text);
+  font-weight: var(--fw-medium);
+  letter-spacing: 0.04em;
+}
+
+.shell-topbar-grow {
+  flex: 1;
+}
+
+.shell-command {
+  height: var(--control-h);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: 0 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  color: var(--faint);
+  font: inherit;
+  font-size: var(--fs-xs);
+  cursor: not-allowed;
+  opacity: 0.75;
+}
+
+.shell-command kbd {
+  font-family: var(--font-ui);
+  font-size: 10px;
+  padding: 0 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  color: var(--muted);
+}
+
+.shell-command-text {
+  color: var(--muted);
+}
+
+.shell-tag {
+  font-size: 9px;
+  letter-spacing: 0.06em;
+  color: var(--faint);
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  padding: 0 5px;
+  line-height: 15px;
+}
+
+.shell-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.shell-status-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--status-ok);
+  box-shadow: 0 0 0 3px var(--status-ok-soft);
+}
+
+/* ── 内容区 ────────────────────────────────── */
+.shell-content {
+  flex: 1;
+  width: 100%;
+  max-width: var(--content-max);
+  margin: 0 auto;
+  padding: var(--s7) var(--gutter) var(--s7);
+}
+
+.shell-loading {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+/* 专注模式：隐藏图标栏，内容占满宽度（仍保留顶栏与退出按钮） */
+.app-shell[data-focus="true"] .shell-rail {
+  display: none;
+}
+
+.app-shell[data-focus="true"] .shell-main {
+  margin-left: 0;
+}
+
+/* ── 平板（iPad 横/竖）───────────────────────── */
+@media (max-width: 1279px) {
+  .shell-rail {
+    width: var(--rail-width-compact);
+  }
+
+  .shell-main {
+    margin-left: var(--rail-width-compact);
+  }
+
+  .shell-topbar {
+    height: 58px;
+    padding: 0 var(--s6);
+  }
+
+  .shell-content {
+    padding: var(--s6) var(--s6) var(--s7);
+  }
+
+  .shell-brand {
+    height: 58px;
+  }
+
+  .shell-brand-mark {
+    width: 28px;
+    height: 28px;
+    font-size: 13px;
+  }
+
+  .shell-nav-link {
+    width: 46px;
+  }
+
+  .shell-nav-link.is-active::before {
+    left: -9px;
+  }
+
+  .shell-command-text,
+  .shell-tag {
+    display: none;
+  }
+}
+
+@media (max-width: 767px) {
+  .shell-command {
+    display: none;
+  }
+
+  .shell-topbar {
+    padding: 0 var(--s4);
+  }
+
+  .shell-content {
+    padding: var(--s5) var(--s4) var(--s6);
+  }
+
+  .shell-status {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shell-nav-link {
+    transition: none;
+  }
+}

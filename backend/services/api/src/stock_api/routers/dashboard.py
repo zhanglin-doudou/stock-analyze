@@ -48,6 +48,24 @@ def _ratio(value: int | None) -> str | None:
     return None if value is None else str(Ratio(value))
 
 
+def _money_display(value: int | None) -> str | None:
+    """金额 → 千分位展示串（展示层格式化；raw 定点串仍保留）。"""
+    if value is None:
+        return None
+    text = str(Money(value))
+    sign = ""
+    if text.startswith("-"):
+        sign, text = "-", text[1:]
+    whole, _, fraction = text.partition(".")
+    groups: list[str] = []
+    while len(whole) > 3:
+        groups.insert(0, whole[-3:])
+        whole = whole[:-3]
+    groups.insert(0, whole)
+    grouped = ",".join(groups)
+    return f"{sign}{grouped}.{fraction}" if fraction else f"{sign}{grouped}"
+
+
 def _round_out(dto: Any) -> DashboardRoundOut:
     return DashboardRoundOut(
         round_id=dto.round_id,
@@ -58,6 +76,7 @@ def _round_out(dto: Any) -> DashboardRoundOut:
         return_rate=str(Ratio(dto.return_rate_units)),
         return_rate_pct=_pct_2dp(dto.return_rate_units) or "0.00%",
         holding_days=dto.holding_days,
+        pnl_display=_money_display(dto.pnl_units),
     )
 
 
@@ -84,17 +103,38 @@ def _to_out(result: Any) -> DashboardOut:
                     cost=_money(item.cost_units) or "0.00",
                     market_value=_money(item.market_value_units),
                     weight_pct=_ratio(item.weight_ratio_units),
+                    cost_display=_money_display(item.cost_units),
+                    market_value_display=_money_display(item.market_value_units),
+                    weight_display=_pct_2dp(item.weight_ratio_units),
                 )
                 for item in asset.holdings
             ],
             market_value=_money(asset.market_value_units),
             cash=_money(asset.cash_units),
+            money_fund=_money(asset.money_fund_units),
+            balance=(
+                None
+                if asset.cash_units is None or asset.money_fund_units is None
+                else _money(asset.cash_units + asset.money_fund_units)
+            ),
             total_assets=_money(asset.total_assets_units),
             position_pct=_pct_2dp(asset.position_ratio_units),
             total_profit=_money(asset.total_profit_units),
             max_invested_cost=_money(asset.max_invested_cost_units),
             max_cost_return_pct=_pct_2dp(asset.max_cost_return_ratio_units),
             total_fees=_money(asset.total_fees_units),
+            market_value_display=_money_display(asset.market_value_units),
+            cash_display=_money_display(asset.cash_units),
+            money_fund_display=_money_display(asset.money_fund_units),
+            balance_display=(
+                None
+                if asset.cash_units is None or asset.money_fund_units is None
+                else _money_display(asset.cash_units + asset.money_fund_units)
+            ),
+            total_assets_display=_money_display(asset.total_assets_units),
+            total_profit_display=_money_display(asset.total_profit_units),
+            max_invested_cost_display=_money_display(asset.max_invested_cost_units),
+            total_fees_display=_money_display(asset.total_fees_units),
         ),
         history_overview=DashboardHistoryOverviewOut(
             status=history.status,
@@ -107,6 +147,7 @@ def _to_out(result: Any) -> DashboardOut:
             loss_pct=_pct_2dp(history.loss_ratio_units),
             flat_pct=_pct_2dp(history.flat_ratio_units),
             max_profit=_money(history.max_profit_units),
+            max_profit_display=_money_display(history.max_profit_units),
             max_profit_round=(
                 None if history.max_profit_round is None else _round_out(history.max_profit_round)
             ),

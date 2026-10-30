@@ -31,9 +31,13 @@ from stock_core.fifo import EventKind, FifoEvent, build_rounds
 from stock_core.fifo import Round as FifoRound
 from stock_ledger.models import Trade
 from stock_platform.jobs import JobQueue
+from stock_platform.obs import get_logger
 
+from stock_review.application.bond_alias import build_bond_alias, canonical_code
 from stock_review.models import Round, RoundBuildState
 from stock_review.repositories.rounds import FillInput, RoundInput, RoundRepository
+
+log = get_logger("stock_review.rebuild")
 
 # 安全回看天数：覆盖「一次卖出可能消耗很久之前买入的 lot」的最坏情况。
 # 400 自然日 ≈ 275 交易日，足以覆盖「持有超过一年」的常规持仓。
@@ -95,7 +99,11 @@ def _kind_for(trade: Trade) -> EventKind:
     return _KIND_BY_CATEGORY.get(category, EventKind.OTHER)
 
 
-def trades_to_events(trades: list[Trade] | tuple[Trade, ...]) -> list[FifoEvent]:
+def trades_to_events(
+    trades: list[Trade] | tuple[Trade, ...],
+    *,
+    bond_alias: dict[str, str] | None = None,
+) -> list[FifoEvent]:
     """ledger Trade → `FifoEvent` 的纯映射（不碰 session、不读系统时间）。
 
     口径：
@@ -103,8 +111,17 @@ def trades_to_events(trades: list[Trade] | tuple[Trade, ...]) -> list[FifoEvent]
     - `dividend_tax_units` 保持 0：红利税是独立 `category=fee` 行（bridge 计入 fees），
       DIVIDEND 的 `amount_units` 已是税后净额，不重复扣税；
     - 送转：`quantity_units` = 新增股数、`ratio_units` = 0（引擎按数量直接加股，成本不变）；
-    - `line_no` 空值按 0 处理（稳定序需要 int）。
+    - `line_no` 空值按 0 处理（稳定序需要 int）；
+    - 可转债发债代码按 `bond_alias` 归一到上市代码（未传时从本批 trades 派生），
+      申购缴款与上市卖出进入同一 FIFO 组（设计 D3）。
+    - 货基行（`money_fund_balance_units` 非空）打 `allow_oversell`：红利发放行隔离未入账，
+      赎回略多于申购的部分按利息零成本计收益，不报超卖（引擎口径）。
     """
+    alias = (
+        bond_alias
+        if bond_alias is not None
+        else build_bond_alias((t.security_code, t.security_name) for t in trades)[0]
+    )
     events: list[FifoEvent] = []
     for trade in trades:
         events.append(
@@ -112,7 +129,7 @@ def trades_to_events(trades: list[Trade] | tuple[Trade, ...]) -> list[FifoEvent]
                 trade_id=trade.id,
                 trade_date=trade.trade_date,
                 kind=_kind_for(trade),
-                security_code=trade.security_code,
+                security_code=canonical_code(alias, trade.security_code),
                 security_name=trade.security_name,
                 quantity_units=trade.quantity_units,
                 price_units=trade.price_units,
@@ -124,6 +141,7 @@ def trades_to_events(trades: list[Trade] | tuple[Trade, ...]) -> list[FifoEvent]
                 ratio_units=0,
                 line_no=trade.line_no or 0,
                 summary=trade.summary or "",
+                allow_oversell=trade.money_fund_balance_units is not None,
             )
         )
     return events
@@ -187,6 +205,29 @@ async def _load_trades(
         stmt = stmt.where(Trade.security_code.in_(codes))
     stmt = stmt.order_by(Trade.trade_date, Trade.line_no, Trade.id)
     return list(await session.scalars(stmt))
+
+
+async def _load_bond_alias(
+    session: AsyncSession, user_id: uuid.UUID
+) -> tuple[dict[str, str], list[str]]:
+    """从该用户全部未删除明细的 (代码, 名称) 派生可转债发债→上市代码别名（设计 D3）。
+
+    period 重建必须先拿别名再扩脏证券集合：只按脏代码加载会漏掉发债代码的申购
+    缴款行（如卖出 113xxx 时漏掉 754019 的买入），导致超卖误判。
+    """
+    stmt = (
+        select(Trade.security_code, Trade.security_name)
+        .where(Trade.user_id == user_id, Trade.deleted_at.is_(None))
+        .distinct()
+    )
+    alias, unresolved = build_bond_alias(list(await session.execute(stmt)))
+    if unresolved:
+        log.warning(
+            "rebuild.bond_alias_unresolved",
+            user_id=str(user_id),
+            codes=unresolved,
+        )
+    return alias, unresolved
 
 
 async def _dirty_securities(
@@ -310,10 +351,11 @@ async def rebuild_rounds_for_user(
     repo = RoundRepository(session)
     window_from: date | None = None
     window_to: date | None = None
+    bond_alias, _unresolved = await _load_bond_alias(session, user_id)
 
     if scope == "full":
         trades = await _load_trades(session, user_id)
-        securities = sorted({trade.security_code for trade in trades})
+        securities = sorted({canonical_code(bond_alias, trade.security_code) for trade in trades})
         await repo.delete_all(user_id)
     else:
         if period_start is None or period_end is None:
@@ -331,11 +373,17 @@ async def rebuild_rounds_for_user(
             period_end=period_end,
             window_from=window_from,
         )
-        securities = sorted(dirty)
+        # 脏代码归一到 canonical，再反向扩出别名源（发债代码）：加载/删除都按扩后集合，
+        # 回合落库用 canonical 代码。
+        canonical_dirty = {canonical_code(bond_alias, code) for code in dirty}
+        load_codes = set(canonical_dirty) | {
+            source for source, target in bond_alias.items() if target in canonical_dirty
+        }
+        securities = sorted(load_codes)
         trades = await _load_trades(session, user_id, codes=securities)
         await repo.delete_for_securities(user_id, securities)
 
-    result = build_rounds(trades_to_events(trades))
+    result = build_rounds(trades_to_events(trades, bond_alias=bond_alias))
     rounds = [_round_input(user_id, item, rebuilt_at) for item in result.rounds]
     await repo.insert_batch(user_id, rounds)
     rounds_count = await repo.count(user_id)

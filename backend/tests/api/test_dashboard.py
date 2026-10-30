@@ -350,13 +350,32 @@ async def test_api_084_happy_path_two_sections(
     assert asset["status"] == "ok"
     assert asset["market_value"] == "170620.00"
     assert asset["cash"] == "-70000.00"
+    assert asset["money_fund"] == "0.00"
+    assert asset["balance"] == "-70000.00"
     assert asset["total_assets"] == "100620.00"
     assert asset["position_pct"] == "169.57%"
     assert asset["total_profit"] == "620.00"
     assert asset["max_invested_cost"] == "170000.00"
     assert asset["max_cost_return_pct"] == "0.36%"
     assert asset["total_fees"] == "0.00"
-    for field in ("market_value", "cash", "total_assets", "total_profit", "max_invested_cost"):
+    # 2026-10-28（Phase 3）：后端补展示串（千分位）；raw 定点串保留兼容。
+    assert asset["market_value_display"] == "170,620.00"
+    assert asset["cash_display"] == "-70,000.00"
+    assert asset["money_fund_display"] == "0.00"
+    assert asset["balance_display"] == "-70,000.00"
+    assert asset["total_assets_display"] == "100,620.00"
+    assert asset["total_profit_display"] == "620.00"
+    assert asset["max_invested_cost_display"] == "170,000.00"
+    assert asset["total_fees_display"] == "0.00"
+    for field in (
+        "market_value",
+        "cash",
+        "money_fund",
+        "balance",
+        "total_assets",
+        "total_profit",
+        "max_invested_cost",
+    ):
         assert _MONEY_RE.match(asset[field]), (field, asset[field])
     assert _PCT_RE.match(asset["position_pct"])
 
@@ -368,6 +387,9 @@ async def test_api_084_happy_path_two_sections(
     assert holding["cost"] == "170000.00"
     assert holding["market_value"] == "170620.00"
     assert holding["weight_pct"] == "1.00000000"
+    assert holding["cost_display"] == "170,000.00"
+    assert holding["market_value_display"] == "170,620.00"
+    assert holding["weight_display"] == "100.00%"
     assert _QTY_RE.match(holding["quantity"])
     assert _RATIO_RE.match(holding["weight_pct"])
     # DASH-02：持仓市值合计 == headline 市值
@@ -383,7 +405,9 @@ async def test_api_084_happy_path_two_sections(
     assert history["win_pct"] == "66.67%"
     assert history["loss_pct"] == "33.33%"
     assert history["max_profit"] == "2000.00"
+    assert history["max_profit_display"] == "2,000.00"
     assert history["max_profit_round"]["security_code"] == "600519"
+    assert history["max_profit_round"]["pnl_display"] == "2,000.00"
     assert history["max_profit_cost_pct"] == "1.18%"
     assert [item["security_code"] for item in history["top_rounds"]] == [
         "600519",
@@ -433,6 +457,8 @@ async def test_api_084_not_built_is_missing(dashboard_client: Any, account_facto
     for field in (
         "market_value",
         "cash",
+        "money_fund",
+        "balance",
         "total_assets",
         "position_pct",
         "total_profit",
@@ -479,6 +505,8 @@ async def test_api_084_blocked_has_no_numbers(
     for field in (
         "market_value",
         "cash",
+        "money_fund",
+        "balance",
         "total_assets",
         "position_pct",
         "total_profit",

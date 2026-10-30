@@ -1,7 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import {
+  type AssetChart,
   type DashboardOut,
   type DashboardRoundOut,
   type MetricBatch,
@@ -14,11 +16,13 @@ vi.mock("../client", () => ({
   api: {
     dashboard: { get: vi.fn() },
     metrics: { batch: vi.fn() },
+    assets: { chart: vi.fn() },
   },
 }));
 
 const getDashboard = vi.mocked(api.dashboard.get);
 const batchMetrics = vi.mocked(api.metrics.batch);
+const getAssetChart = vi.mocked(api.assets.chart);
 
 function makeRound(overrides: Partial<DashboardRoundOut> = {}): DashboardRoundOut {
   return {
@@ -27,6 +31,7 @@ function makeRound(overrides: Partial<DashboardRoundOut> = {}): DashboardRoundOu
     security_name: "贵州茅台",
     close_date: "2026-06-10",
     pnl: "2000.00",
+    pnl_display: "2,000.00",
     return_rate: "0.10000000",
     return_rate_pct: "10.00%",
     holding_days: 5,
@@ -52,16 +57,29 @@ function makeDashboard(overrides: Partial<DashboardOut> = {}): DashboardOut {
           cost: "170000.00",
           market_value: "170620.00",
           weight_pct: "1.00000000",
+          cost_display: "170,000.00",
+          market_value_display: "170,620.00",
+          weight_display: "100.00%",
         },
       ],
       market_value: "170620.00",
       cash: "-70000.00",
+      money_fund: "20000.00",
+      balance: "-50000.00",
       total_assets: "100620.00",
       position_pct: "169.57%",
       total_profit: "620.00",
       max_invested_cost: "170000.00",
       max_cost_return_pct: "0.36%",
       total_fees: "0.00",
+      market_value_display: "170,620.00",
+      cash_display: "-70,000.00",
+      money_fund_display: "20,000.00",
+      balance_display: "-50,000.00",
+      total_assets_display: "100,620.00",
+      total_profit_display: "620.00",
+      max_invested_cost_display: "170,000.00",
+      total_fees_display: "0.00",
     },
     history_overview: {
       status: "ok",
@@ -74,6 +92,7 @@ function makeDashboard(overrides: Partial<DashboardOut> = {}): DashboardOut {
       loss_pct: "33.33%",
       flat_pct: null,
       max_profit: "2000.00",
+      max_profit_display: "2,000.00",
       max_profit_round: makeRound(),
       max_profit_cost_pct: "1.18%",
       top_rounds: [
@@ -132,6 +151,8 @@ function missingDashboard(): DashboardOut {
       holdings: [],
       market_value: null,
       cash: null,
+      money_fund: null,
+      balance: null,
       total_assets: null,
       position_pct: null,
       total_profit: null,
@@ -204,11 +225,39 @@ function makeMetricBatch(): MetricBatch {
   };
 }
 
+function makeAssetChart(): AssetChart {
+  return {
+    points: [
+      {
+        date: "2026-06-29",
+        v: "0.0000",
+        label: "06-29",
+        amount_label: "100000.00",
+      },
+      {
+        date: "2026-06-30",
+        v: "1.0000",
+        label: "06-30",
+        amount_label: "100620.00",
+      },
+    ],
+    n_points: 2,
+    build_state: "current",
+    definition_version: "1.0",
+    data_as_of: "2026-09-30",
+  };
+}
+
 function renderPage(): ReturnType<typeof render> {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
   return render(
-    <MemoryRouter initialEntries={["/dashboard"]}>
-      <Dashboard />
-    </MemoryRouter>,
+    <QueryClientProvider client={client}>
+      <MemoryRouter initialEntries={["/dashboard"]}>
+        <Dashboard />
+      </MemoryRouter>
+    </QueryClientProvider>,
   );
 }
 
@@ -216,6 +265,7 @@ beforeEach(() => {
   vi.clearAllMocks();
   getDashboard.mockResolvedValue(makeDashboard());
   batchMetrics.mockResolvedValue(makeMetricBatch());
+  getAssetChart.mockResolvedValue(makeAssetChart());
 });
 
 afterEach(cleanup);
@@ -226,10 +276,14 @@ describe("Dashboard 看板", () => {
 
     expect(await screen.findByTestId("asset-overview")).toBeTruthy();
     expect(screen.getByTestId("history-overview")).toBeTruthy();
+    // Phase 1c：总资产日线来自 /assets（真实数据，几何由 charts/geometry 完成）
+    expect(await screen.findByRole("img", { name: /总资产曲线/ })).toBeTruthy();
+    // Phase 4c：图表提供可展开数据表替代
+    expect(screen.getByText(/查看数据表/)).toBeTruthy();
 
     for (const testId of [
       "kpi-market-value",
-      "kpi-cash",
+      "kpi-balance",
       "kpi-position",
       "kpi-total-profit",
       "kpi-max-invested-cost",
@@ -246,14 +300,14 @@ describe("Dashboard 看板", () => {
       expect(screen.getByTestId(testId), testId).toBeTruthy();
     }
 
-    expect(screen.getByTestId("kpi-market-value").textContent).toContain("170620.00");
+    expect(screen.getByTestId("kpi-market-value").textContent).toContain("170,620.00");
     expect(screen.getByTestId("kpi-position").textContent).toContain("169.57%");
     expect(screen.getByTestId("kpi-total-profit").textContent).toContain("620.00");
     expect(screen.getByTestId("kpi-max-cost-return").textContent).toContain("0.36%");
     expect(screen.getByTestId("kpi-closed-securities").textContent).toContain("3");
     expect(screen.getByTestId("kpi-win-count").textContent).toContain("2");
     expect(screen.getByTestId("kpi-win-pct").textContent).toContain("66.67%");
-    expect(screen.getByTestId("kpi-max-profit").textContent).toContain("2000.00");
+    expect(screen.getByTestId("kpi-max-profit").textContent).toContain("2,000.00");
     expect(screen.getByTestId("kpi-max-profit-cost").textContent).toContain("1.18%");
     expect(screen.getByTestId("kpi-max-drawdown").textContent).toContain("0.00%");
     expect(screen.getByTestId("kpi-max-drawdown").textContent).toContain("92");

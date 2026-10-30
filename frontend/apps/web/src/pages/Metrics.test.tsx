@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import type { Job, JobAccepted, JobEvent, JobPage, MetricBatch, MetricItem } from "@sa/api-client";
+import { currentMonth } from "../lib/date";
 import { Metrics } from "./Metrics";
 import { api } from "../client";
 
@@ -25,7 +26,7 @@ const getJob = vi.mocked(api.jobs.get);
 const jobEvents = vi.mocked(api.jobs.events);
 const rebuildPeriod = vi.mocked(api.jobs.rebuildPeriod);
 
-const CURRENT_MONTH = new Date().toISOString().slice(0, 7);
+const CURRENT_MONTH = currentMonth();
 
 function makeItem(overrides: Partial<MetricItem> = {}): MetricItem {
   return {

@@ -25,6 +25,8 @@ from stock_contracts.clock import Clock
 from stock_core.stats.drawdown import DrawdownFamily, drawdown_family
 from stock_ledger.models import Trade
 from stock_ledger.repositories.trades import TradeRepository
+from stock_platform.obs import get_logger
+from stock_platform.symbols import is_bond
 
 from stock_review.application.assets import (
     STATE_BLOCKED,
@@ -32,12 +34,17 @@ from stock_review.application.assets import (
     STATE_STALE,
     get_asset_build_state,
 )
+from stock_review.application.bond_alias import build_bond_alias, canonical_code
 from stock_review.application.bridge import bridge_for_period
 from stock_review.application.valuation import (
+    bond_face_divisors,
+    bond_value_units,
     category,
     close_on_or_before,
     holding_delta,
+    is_money_fund_row,
     load_prices,
+    new_stock_pending_codes,
 )
 from stock_review.metrics.defs._common import fee_breakdown
 from stock_review.metrics.views import TradeView
@@ -47,6 +54,8 @@ from stock_review.repositories.rounds import RoundRepository
 
 if TYPE_CHECKING:
     from stock_platform.ports import MarketDataSource
+
+log = get_logger("stock_review.dashboard")
 
 DASHBOARD_VERSION = "1.0"
 HOLDINGS_MAX = 200
@@ -143,6 +152,7 @@ class DashboardAssetOverview:
     holdings: list[DashboardHolding]
     market_value_units: int | None
     cash_units: int | None
+    money_fund_units: int | None
     total_assets_units: int | None
     position_ratio_units: int | None
     total_profit_units: int | None
@@ -228,12 +238,21 @@ async def _holdings_at(
     *,
     as_of: date,
     market_data: MarketDataSource,
-) -> tuple[list[DashboardHolding], list[str], bool]:
-    """按资产表同一成本模型（移动平均）重建 ``as_of`` 收盘持仓。
+) -> tuple[list[DashboardHolding], list[str], list[str], bool]:
+    """按资产表同一口径重建 ``as_of`` 收盘持仓。
 
-    返回 ``(holdings, 缺价标的, 是否截断)``；成本与 ``asset_daily.holding_cost`` 同源：
-    买入/配股/打新累加 ``-amount``，卖出按数量比例结转。
+    与 ``asset_daily`` 必须逐项对齐，否则会出现「持仓市值合计与快照不一致」的假告警：
+    * 货基行不进持仓、不请求行情（货基已计入 ``money_fund_units`` 余额）；
+    * 可转债发债代码归一到上市代码（发债代码永无行情）；
+    * 债券按面值换算系数估值（``bond_value_units``），可转债固定 1 手 = 10 张；
+    * 债券 / 待上市新股缺行情时按买入成本兜底，不算「缺行情」。
+
+    返回 ``(holdings, 缺价标的, 成本兜底标的, 是否截断)``；成本与
+    ``asset_daily.holding_cost`` 同源：买入/配股/打新累加 ``-amount``，卖出按数量比例结转。
     """
+    bond_alias, _unresolved = build_bond_alias(
+        (trade.security_code, trade.security_name) for trade in trades
+    )
     holdings: dict[str, int] = {}
     cost_basis: dict[str, int] = {}
     names: dict[str, str] = {}
@@ -241,11 +260,15 @@ async def _holdings_at(
     for trade in trades:
         if trade.trade_date > as_of:
             break
-        code = (trade.security_code or "").strip()
-        if not code:
+        raw_code = (trade.security_code or "").strip()
+        if not raw_code:
             continue
+        # 货基：余额口径资产，不进持仓，也不请求行情（否则必然缺行情）。
+        if is_money_fund_row(trade):
+            continue
+        code = canonical_code(bond_alias, raw_code)
         trade_category = category(trade)
-        delta = holding_delta(trade_category, trade.quantity_units)
+        delta = holding_delta(trade_category, trade.quantity_units, amount_units=trade.amount_units)
         if delta:
             holdings[code] = holdings.get(code, 0) + delta
             names[code] = trade.security_name or code
@@ -259,24 +282,40 @@ async def _holdings_at(
 
     held = {code: qty for code, qty in holdings.items() if qty != 0}
     if not held:
-        return [], [], False
+        return [], [], [], False
 
     symbols = sorted(held)
+    # 只读缓存取价：与 asset_daily 快照同价，避免盘中补拉造成市值漂移。
     ladder, _causes = await load_prices(
         market_data,
         symbols,
         as_of - timedelta(days=PRICE_WINDOW_DAYS),
         as_of,
+        cached_only=True,
     )
+    # 债券面值换算系数（成交金额反推；可转债固定 1 手 = 10 张）与待上市新股集合。
+    bond_divisors = bond_face_divisors([trade for trade in trades if trade.trade_date <= as_of])
+    pending_new_stock = {
+        canonical_code(bond_alias, code) for code in new_stock_pending_codes(trades)
+    }
 
     rows: list[tuple[int, DashboardHolding]] = []
     missing_prices: list[str] = []
+    cost_fallback: list[str] = []
     for code in symbols:
         quantity = held[code]
         close = close_on_or_before(ladder, code, as_of)
         if close is None:
-            missing_prices.append(code)
-            market_value = None
+            # 债券 / 待上市新股缺行情 → 按买入成本兜底（与资产表 degraded 口径一致）。
+            cost = max(0, cost_basis.get(code, 0))
+            if cost and (is_bond(code) or code in pending_new_stock):
+                cost_fallback.append(code)
+                market_value = cost
+            else:
+                missing_prices.append(code)
+                market_value = None
+        elif is_bond(code):
+            market_value = bond_value_units(code, quantity, close, bond_divisors)
         else:
             market_value = quantity * close // 100_000_000
         rows.append(
@@ -315,7 +354,7 @@ async def _holdings_at(
 
     weighted.sort(key=lambda item: (-(item.market_value_units or 0), item.security_code))
     truncated = len(weighted) > HOLDINGS_MAX
-    return weighted[:HOLDINGS_MAX], missing_prices, truncated
+    return weighted[:HOLDINGS_MAX], missing_prices, cost_fallback, truncated
 
 
 def _drawdown_segments(
@@ -323,8 +362,9 @@ def _drawdown_segments(
 ) -> tuple[list[tuple[list[date], list[int]]], bool, int]:
     """把资产序列切成连续有效段：``(segments, has_gaps, valid_obs)``。
 
-    只接受 ``status=ok`` 且 ``daily_return`` 非 NULL；blocked/degraded/NULL 行以及
-    日期不连续（缺一天）都会断链，绝不跨断链拼接。
+    接受 ``status=ok/degraded`` 且 ``daily_return`` 非 NULL；degraded 行代表估值降级
+    （如新股待上市按成本、债券缺行情按成本），日收益仍然有效，不应断链。只有
+    blocked/NULL 行以及日期不连续（缺一天）才会断链，绝不跨断链拼接。
 
     序列**开头**的不可用行不算断链：首日 `prev_total=0`，日收益在数学上无法定义
     （锚点行），它是回撤序列的起点而非缺口。只有出现过有效观测之后的中途不可用行
@@ -338,7 +378,7 @@ def _drawdown_segments(
     valid_obs = 0
 
     for row in series:
-        usable = row.status == "ok" and row.daily_return_units is not None
+        usable = row.status in {"ok", "degraded"} and row.daily_return_units is not None
         if not usable:
             # 已开始观测后出现不可用行 → 断链；序列开头的锚点行按起点处理。
             if valid_obs:
@@ -473,7 +513,7 @@ def _max_drawdown(
             DashboardMissing(
                 field="history_overview.max_drawdown",
                 code=MISSING_MDD_GAPS,
-                reason="历史资产序列存在阻断/降级/缺日，回撤按最长连续有效段计算。",
+                reason="历史资产序列存在阻断/缺日，回撤按最长连续有效段计算。",
                 what_to_do="修复阻断日期后重新构建资产表可得到完整回撤。",
             )
         )
@@ -603,14 +643,16 @@ async def build_dashboard(
         holdings: list[DashboardHolding] = []
         market_value_units = None
         cash_units = None
+        money_fund_units = None
         total_assets_units = None
         position_ratio_units = None
     else:
-        holdings, missing_prices, truncated = await _holdings_at(
+        holdings, missing_prices, cost_fallback, truncated = await _holdings_at(
             trades, as_of=latest.trade_date, market_data=market_data
         )
         market_value_units = latest.market_value_units
         cash_units = latest.cash_units
+        money_fund_units = latest.money_fund_units
         total_assets_units = latest.total_assets_units
         position_ratio_units = _ratio_units(market_value_units, total_assets_units)
         if truncated:
@@ -631,8 +673,26 @@ async def build_dashboard(
                     what_to_do="检查行情数据覆盖后重新构建资产表。",
                 )
             )
+        # 监控点：看板持仓降级时输出原因（缺行情 / 成本兜底 + 资产行自身原因），
+        # 便于不回库直接定位（如货基误进持仓、发债代码未归并、待上市新股）。
+        if missing_prices or cost_fallback:
+            log.warning(
+                "dashboard.holdings_degraded",
+                user_id=str(user_id),
+                as_of=latest.trade_date.isoformat(),
+                asset_status=latest.status,
+                asset_status_reason=latest.status_reason,
+                missing_price_symbols=missing_prices,
+                cost_fallback_symbols=cost_fallback,
+            )
         holdings_total = sum(item.market_value_units or 0 for item in holdings)
-        if not missing_prices and abs(holdings_total - market_value_units) > 1:
+        # stale 时快照落后于当前流水/行情：holdings 是按最新输入重算的，与旧快照本就
+        # 不可比；统一由 DASHBOARD_STALE 提示，不叠加伪「市值不一致」错误。
+        if (
+            build_view.state != STATE_STALE
+            and not missing_prices
+            and abs(holdings_total - market_value_units) > 1
+        ):
             missing.append(
                 DashboardMissing(
                     field="asset_overview.holdings",
@@ -695,7 +755,9 @@ async def build_dashboard(
             )
         )
 
-    degraded_asset = any(row.status != "ok" for row in series) or any(
+    # 只看最新快照的估值状态：历史行降级（新股按成本、债券缺行情）不应把当前资产概览
+    # 标成 degraded，也不应影响回撤/总收益。
+    degraded_asset = (latest is not None and latest.status != "ok") or any(
         item.code in {MISSING_HOLDINGS_MISMATCH, MISSING_TOTAL_PROFIT} for item in missing
     )
     if build_view.state == STATE_BLOCKED or (latest is not None and latest.status == "blocked"):
@@ -780,6 +842,7 @@ async def build_dashboard(
             holdings=holdings,
             market_value_units=market_value_units,
             cash_units=cash_units,
+            money_fund_units=money_fund_units,
             total_assets_units=total_assets_units,
             position_ratio_units=position_ratio_units,
             total_profit_units=total_profit_units,

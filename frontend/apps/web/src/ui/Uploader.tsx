@@ -14,6 +14,7 @@ export function Uploader({ accept = ".csv,.xls,.xlsx", disabled, onFile }: Uploa
     <div className="uploader">
       <input
         ref={inputRef}
+        className="uploader-input"
         type="file"
         accept={accept}
         disabled={disabled}
@@ -25,7 +26,17 @@ export function Uploader({ accept = ".csv,.xls,.xlsx", disabled, onFile }: Uploa
           }
         }}
       />
-      <span className="muted">{name ? `已选择：${name}` : "支持 .xls/.xlsx/.csv，≤20MB"}</span>
+      <button
+        className="uploader-btn"
+        type="button"
+        disabled={disabled}
+        onClick={() => inputRef.current?.click()}
+      >
+        选择账单文件
+      </button>
+      <span className="uploader-name">
+        {name ? `已选择：${name}` : "支持 .xls/.xlsx/.csv，≤20MB"}
+      </span>
     </div>
   );
 }

@@ -210,11 +210,15 @@ async def test_money_fund_bill_imports_with_zero_amount_quarantine(
     assert redeem["category"] == "sell"
     assert redeem["summary_code"] == "sys_redeem"
     assert redeem["amount"] == "116295.38"
+    # 货基行带余额（份额 × 1.0000）；无持仓锚点且有净赎回 → 期初按 -min(累计净额)
+    # 反推下界（116307.65），余额全程 ≥ 0：赎回后 = 12.27，申购后 = 106720.80。
+    assert redeem["money_fund_balance"] == "12.27"
 
     subscribe = by_summary[("申购确认", "buy")]
     assert subscribe["category"] == "buy"
     assert subscribe["summary_code"] == "sys_fund_buy"
     assert subscribe["amount"] == "-106708.53"
+    assert subscribe["money_fund_balance"] == "106720.80"
 
     assert {item["category"] for item in trades} == {"buy", "sell", "transfer"}
 
@@ -246,7 +250,9 @@ async def test_real_statement_excerpt_quarantine_only_zero_amount(
 
     items = await _quarantine(client, api_prefix, user, accepted["batch_id"])
     assert len(items) == 5
-    assert {item["reason_code"] for item in items} == {"INVALID_AMOUNT"}
+    # 3 条 [省心投]红利发放 → ZERO_AMOUNT_INFO（设计 D14）；转托管确认 + 证券清理全零
+    # → INVALID_AMOUNT。
+    assert {item["reason_code"] for item in items} == {"INVALID_AMOUNT", "ZERO_AMOUNT_INFO"}
     assert {item["line_no"] for item in items} == {17, 18, 19, 20, 25}
     # 持仓/声明区块（夹具第 27 行起）不应出现在隔离区。
     assert all(item["line_no"] < 27 for item in items)
@@ -255,15 +261,20 @@ async def test_real_statement_excerpt_quarantine_only_zero_amount(
     assert len(trades) == 5
     assert all(item["category"] for item in trades)
     by_summary = {item["summary"]: item for item in trades}
-    assert by_summary["[省心投]申\n购确认"]["category"] == "buy"
+    # [省心投]申购确认视同银行转出（设计 D14）：category=transfer，CASH 占位、方向 buy。
+    assert by_summary["[省心投]申\n购确认"]["category"] == "transfer"
+    assert by_summary["[省心投]申\n购确认"]["security_code"] == "CASH"
     assert by_summary["新股申购确\n认缴款"]["category"] == "new_stock"
     assert by_summary["[省心投]申\n购确认"]["side"] == "buy"
     assert {item["category"] for item in trades} == {
-        "buy",
         "sell",
         "transfer",
         "new_stock",
     }
+    # 基金持仓区块是期末锚点：940018 赎回后余额 = 参考市值 51859.86；省心投申购行已转
+    # CASH 资金行，不再产生货基余额。
+    balances = {item["money_fund_balance"] for item in trades if item["money_fund_balance"]}
+    assert balances == {"51859.86"}
 
 
 async def test_unknown_summary_preview_equals_commit_quarantine(

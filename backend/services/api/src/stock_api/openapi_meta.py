@@ -83,6 +83,8 @@ MONEY_FIELDS = frozenset(
         "max_invested_cost",
         "total_fees",
         "max_profit",
+        # 2026-10-28（API-085）：图表点附带的展示金额串
+        "amount_label",
     }
 )
 PRICE_FIELDS = frozenset({"price", "unit_nav"})
@@ -646,6 +648,20 @@ OPERATION_META: dict[str, dict[str, Any]] = {
             "MULTIPLE_CREDENTIALS",
             "ADMIN_CANNOT_READ_TRADES",
             "UNKNOWN_QUERY_PARAM",
+        ],
+    },
+    "getAssetsChart": {
+        "api_id": "API-085",
+        "scope": "read",
+        "idempotent": False,
+        "async": False,
+        "error_codes": [
+            "TOKEN_EXPIRED",
+            "TOKEN_REVOKED",
+            "MULTIPLE_CREDENTIALS",
+            "ADMIN_CANNOT_READ_TRADES",
+            "UNKNOWN_QUERY_PARAM",
+            "VALIDATION_ERROR",
         ],
     },
     "listJobs": {
@@ -1313,6 +1329,29 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
             },
         }
     },
+    # 2026-10-28（API-085）：资产日线 chart-ready 视图；v 为后端归一化字符串。
+    "getAssetsChart": {
+        "200": {
+            "points": [
+                {
+                    "date": "2026-06-29",
+                    "v": "0.0000",
+                    "label": "06-29",
+                    "amount_label": "100000.00",
+                },
+                {
+                    "date": "2026-06-30",
+                    "v": "1.0000",
+                    "label": "06-30",
+                    "amount_label": "100620.00",
+                },
+            ],
+            "n_points": 2,
+            "build_state": "current",
+            "definition_version": "1.0",
+            "data_as_of": _DATE,
+        }
+    },
     # Period2-12（API-084）：两板块聚合；blocked/missing 字段显式 null（示例取全可用态）。
     "getDashboard": {
         "200": {
@@ -1332,6 +1371,9 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
                         "cost": "150000.00",
                         "market_value": "160000.00",
                         "weight_pct": "1.00000000",
+                        "cost_display": "150,000.00",
+                        "market_value_display": "160,000.00",
+                        "weight_display": "100.00%",
                     }
                 ],
                 "market_value": "160000.00",
@@ -1354,6 +1396,7 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
                 "loss_pct": "33.33%",
                 "flat_pct": "0.00%",
                 "max_profit": "12000.00",
+                "max_profit_display": "12,000.00",
                 "max_profit_round": {
                     "round_id": "rnd_" + _ID_SUFFIX,
                     "security_code": "600519",
@@ -1363,6 +1406,7 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
                     "return_rate": "0.08000000",
                     "return_rate_pct": "8.00%",
                     "holding_days": 21,
+                    "pnl_display": "12,000.00",
                 },
                 "max_profit_cost_pct": "7.06%",
                 "top_rounds": [],

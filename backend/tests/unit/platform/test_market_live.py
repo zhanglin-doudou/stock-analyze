@@ -51,16 +51,27 @@ class _FakeAkshare:
         tx_handler: Any | None = None,
         fund_em_handler: Any | None = None,
         fund_sina_handler: Any | None = None,
+        bond_handler: Any | None = None,
+        cov_bond_handler: Any | None = None,
     ) -> None:
         # stock_zh_a_hist（东财，中文列名）/ stock_zh_a_daily（新浪，英文列名）/
-        # stock_zh_a_hist_tx（腾讯，英文列名）/ fund_etf_hist_em / fund_etf_hist_sina
-        # 是真实 akshare 里的独立接口，这里允许测试分别注入。
+        # stock_zh_a_hist_tx（腾讯，英文列名）/ fund_etf_hist_em / fund_etf_hist_sina /
+        # bond_zh_hs_daily（国债/企业债）/ bond_zh_hs_cov_daily（可转债）是真实 akshare
+        # 里的独立接口，这里允许测试分别注入。
         # tx 默认跟随 sina（保持既有「东财挂→兜底也挂」测试的调用计数语义）。
         self.stock_zh_a_hist = handler
         self.stock_zh_a_daily = sina_handler if sina_handler is not None else handler
         self.stock_zh_a_hist_tx = tx_handler if tx_handler is not None else self.stock_zh_a_daily
         self.fund_etf_hist_em = fund_em_handler if fund_em_handler is not None else handler
         self.fund_etf_hist_sina = fund_sina_handler if fund_sina_handler is not None else handler
+        self.bond_zh_hs_daily = bond_handler if bond_handler is not None else _bond_unexpected
+        self.bond_zh_hs_cov_daily = (
+            cov_bond_handler if cov_bond_handler is not None else _bond_unexpected
+        )
+
+
+def _bond_unexpected(**_kwargs: Any) -> _Frame:
+    raise AssertionError("未注入债券接口不应被调用")
 
 
 def _sina_fallback_transient(**_kwargs: Any) -> _Frame:
@@ -99,6 +110,8 @@ def _source(
     tx_handler: Any | None = None,
     fund_em_handler: Any | None = None,
     fund_sina_handler: Any | None = None,
+    bond_handler: Any | None = None,
+    cov_bond_handler: Any | None = None,
     **overrides: Any,
 ) -> Any:
     monkeypatch.setattr(
@@ -110,6 +123,8 @@ def _source(
             tx_handler=tx_handler,
             fund_em_handler=fund_em_handler,
             fund_sina_handler=fund_sina_handler,
+            bond_handler=bond_handler,
+            cov_bond_handler=cov_bond_handler,
         ),
     )
     return market_live.AkshareMarketDataSource(_settings(**overrides), _clock())
@@ -191,7 +206,25 @@ def test_validate_symbols_accepts_fund_prefixes(symbol: str) -> None:
     assert market_live.validate_symbols([symbol]) == (symbol,)
 
 
-@pytest.mark.parametrize("symbol", ["113001", "900901", "200002", "830799"])
+@pytest.mark.parametrize(
+    "symbol",
+    [
+        "019547",  # 沪国债
+        "010107",  # 沪国债
+        "112172",  # 深企业债
+        "122317",  # 沪公司债
+        "100303",  # 深国债（部分老代码）
+        "113050",  # 沪可转债
+        "110038",  # 沪可转债
+        "118003",  # 沪科创板可转债
+        "128136",  # 深可转债
+    ],
+)
+def test_validate_symbols_accepts_bond_prefixes(symbol: str) -> None:
+    assert market_live.validate_symbols([symbol]) == (symbol,)
+
+
+@pytest.mark.parametrize("symbol", ["900901", "200002", "830799"])
 def test_validate_symbols_rejects_unsupported_products(symbol: str) -> None:
     with pytest.raises(ApiError) as caught:
         market_live.validate_symbols([symbol])
@@ -300,7 +333,7 @@ async def test_empty_frame_returns_empty_sequence(monkeypatch: pytest.MonkeyPatc
 async def test_unsupported_symbol_does_not_call_akshare(monkeypatch: pytest.MonkeyPatch) -> None:
     source = _source(_noop_handler, monkeypatch)
     with pytest.raises(ApiError) as caught:
-        await source.get_daily_bars(["113001"], date(2021, 10, 1), date(2021, 10, 31))
+        await source.get_daily_bars(["830799"], date(2021, 10, 1), date(2021, 10, 31))
     assert caught.value.code is ErrorCode.NOT_FOUND
 
 
@@ -381,6 +414,69 @@ async def test_fund_sina_fallback_filters_full_history(monkeypatch: pytest.Monke
     # 窗口首根保留全序列派生的真实收益：4.0→4.1 = +2.5%
     assert bars[0].return_units == 2_500_000
     assert bars[1].return_units == -2_439_024  # 4.1→4.0 = -2.439024%（ROUND_HALF_UP）
+
+
+async def test_bond_routes_to_bond_interface_and_filters_window(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """国债走 `bond_zh_hs_daily`（无起止参数 → 全量返回本地过滤），returns 全序列派生。"""
+
+    def bond(**kwargs: Any) -> _Frame:
+        assert kwargs == {"symbol": "sh019547"}
+        return _Frame(
+            [
+                {"date": date(2021, 10, 27), "close": 99.0},
+                {"date": date(2021, 10, 28), "close": 100.0},
+                {"date": date(2021, 10, 29), "close": 101.0},
+                {"date": date(2021, 11, 1), "close": 102.0},
+            ]
+        )
+
+    source = _source(_noop_handler, monkeypatch, bond_handler=bond)
+    bars = await source.get_daily_bars(["019547"], date(2021, 10, 28), date(2021, 10, 29))
+    assert [bar.trade_date for bar in bars] == [date(2021, 10, 28), date(2021, 10, 29)]
+    # 窗口首根仍保留全序列派生的真实收益：99→100 = +1.0101%
+    assert bars[0].return_units == 1_010_101
+    assert bars[1].return_units == 1_000_000  # 100→101 = +1%
+
+
+async def test_convertible_bond_routes_to_cov_interface(monkeypatch: pytest.MonkeyPatch) -> None:
+    """可转债走 `bond_zh_hs_cov_daily`（不是 `bond_zh_hs_daily`）。"""
+
+    def cov(**kwargs: Any) -> _Frame:
+        assert kwargs == {"symbol": "sh113050"}
+        return _Frame([{"date": date(2021, 10, 28), "close": 120.0}])
+
+    source = _source(_noop_handler, monkeypatch, cov_bond_handler=cov)
+    bars = await source.get_daily_bars(["113050"], date(2021, 10, 1), date(2021, 10, 31))
+    assert [bar.trade_date for bar in bars] == [date(2021, 10, 28)]
+    assert bars[0].close_units == 120_000_000
+
+
+async def test_star_market_convertible_bond_routes_sh_cov(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """科创板可转债（沪 118 开头）同样走 `bond_zh_hs_cov_daily`，且交易所前缀为 sh。"""
+
+    def cov(**kwargs: Any) -> _Frame:
+        assert kwargs == {"symbol": "sh118003"}
+        return _Frame([{"date": date(2021, 10, 28), "close": 130.0}])
+
+    source = _source(_noop_handler, monkeypatch, cov_bond_handler=cov)
+    bars = await source.get_daily_bars(["118003"], date(2021, 10, 1), date(2021, 10, 31))
+    assert [bar.trade_date for bar in bars] == [date(2021, 10, 28)]
+    assert bars[0].close_units == 130_000_000
+
+
+async def test_bond_unknown_code_maps_to_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    """akshare 对不存在代码抛 `KeyError('date')` → 映射为空结果（走负缓存），不抛 API 错。"""
+
+    def bond(**_kwargs: Any) -> _Frame:
+        raise KeyError("date")
+
+    source = _source(_noop_handler, monkeypatch, bond_handler=bond)
+    bars = await source.get_daily_bars(["019999"], date(2021, 10, 1), date(2021, 10, 31))
+    assert list(bars) == []
 
 
 async def test_delisted_stock_falls_back_to_tx(monkeypatch: pytest.MonkeyPatch) -> None:

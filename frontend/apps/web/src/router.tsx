@@ -1,20 +1,10 @@
-import type { ReactElement } from "react";
-import { Link, Navigate, Outlet, createBrowserRouter, useNavigate } from "react-router-dom";
-import { clearSession, useIsAuthenticated } from "./store/session";
-import { Assets } from "./pages/Assets";
+import { lazy, type ReactElement } from "react";
+import { Navigate, createBrowserRouter } from "react-router-dom";
+import { AppShell } from "./layout/AppShell";
+import { useIsAuthenticated } from "./store/session";
 import { FeaturePlaceholder } from "./pages/ComingSoon";
-import { Dashboard } from "./pages/Dashboard";
-import { Import } from "./pages/Import";
-import { Imports } from "./pages/Imports";
 import { Login } from "./pages/Login";
-import { MetricDetail } from "./pages/MetricDetail";
-import { Metrics } from "./pages/Metrics";
-import { Nav } from "./pages/Nav";
 import { Register } from "./pages/Register";
-import { RoundDetail } from "./pages/RoundDetail";
-import { Rounds } from "./pages/Rounds";
-import { Settings } from "./pages/Settings";
-import { Trades } from "./pages/Trades";
 
 /** 登录守卫：无 token → 跳 /login。导出供路由测试直接渲染。 */
 export function RequireAuth({ children }: { children: ReactElement }): ReactElement {
@@ -23,41 +13,27 @@ export function RequireAuth({ children }: { children: ReactElement }): ReactElem
   return children;
 }
 
-/** 应用外壳（顶部导航 + 内容区）。导出供测试断言导航与登录守卫。 */
+/** 应用外壳（Phase 1b 起为 AppShell）。导出供测试断言导航与登录守卫。 */
 export function Layout(): ReactElement {
-  const navigate = useNavigate();
-  return (
-    <div className="app">
-      <header className="app-header">
-        <strong>交易复盘</strong>
-        <nav className="app-nav">
-          <Link to="/dashboard">看板</Link>
-          <Link to="/trades">交易流水</Link>
-          <Link to="/rounds">回合</Link>
-          <Link to="/nav">净值</Link>
-          <Link to="/assets">资产</Link>
-          <Link to="/metrics">指标</Link>
-          <Link to="/import">导入</Link>
-          <Link to="/imports">导入记录</Link>
-          <Link to="/settings">设置</Link>
-        </nav>
-        <button
-          className="btn btn-ghost"
-          type="button"
-          onClick={() => {
-            clearSession();
-            navigate("/login", { replace: true });
-          }}
-        >
-          登出
-        </button>
-      </header>
-      <main className="app-main">
-        <Outlet />
-      </main>
-    </div>
-  );
+  return <AppShell />;
 }
+
+// 页面级 code-splitting：登录后页面按需加载，首屏只保留外壳与当前路由。
+const Dashboard = lazy(() => import("./pages/Dashboard").then((m) => ({ default: m.Dashboard })));
+const Trades = lazy(() => import("./pages/Trades").then((m) => ({ default: m.Trades })));
+const Rounds = lazy(() => import("./pages/Rounds").then((m) => ({ default: m.Rounds })));
+const RoundDetail = lazy(() =>
+  import("./pages/RoundDetail").then((m) => ({ default: m.RoundDetail })),
+);
+const NavPage = lazy(() => import("./pages/Nav").then((m) => ({ default: m.Nav })));
+const Assets = lazy(() => import("./pages/Assets").then((m) => ({ default: m.Assets })));
+const Metrics = lazy(() => import("./pages/Metrics").then((m) => ({ default: m.Metrics })));
+const MetricDetail = lazy(() =>
+  import("./pages/MetricDetail").then((m) => ({ default: m.MetricDetail })),
+);
+const Import = lazy(() => import("./pages/Import").then((m) => ({ default: m.Import })));
+const Imports = lazy(() => import("./pages/Imports").then((m) => ({ default: m.Imports })));
+const Settings = lazy(() => import("./pages/Settings").then((m) => ({ default: m.Settings })));
 
 export const router = createBrowserRouter([
   { path: "/login", element: <Login /> },
@@ -75,7 +51,7 @@ export const router = createBrowserRouter([
       { path: "trades", element: <Trades /> },
       { path: "rounds", element: <Rounds /> },
       { path: "rounds/:roundId", element: <RoundDetail /> },
-      { path: "nav", element: <Nav /> },
+      { path: "nav", element: <NavPage /> },
       { path: "assets", element: <Assets /> },
       { path: "metrics", element: <Metrics /> },
       { path: "metrics/:metricId", element: <MetricDetail /> },

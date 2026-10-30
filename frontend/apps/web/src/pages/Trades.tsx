@@ -3,7 +3,7 @@ import { newIdempotencyKey, type Trade, type TradePage } from "@sa/api-client";
 import { api } from "../client";
 import { Cursor } from "../ui/Cursor";
 import { ProblemView } from "../ui/Problem";
-import { Table, type Column } from "../ui/Table";
+import { DataTable, type DataTableColumn } from "../ui/DataTable";
 
 interface EditState {
   tradeId: string;
@@ -87,19 +87,44 @@ export function Trades() {
     }
   }
 
-  const columns: Array<Column<Trade>> = [
-    { key: "date", header: "业务日", render: (row) => row.trade_date },
-    { key: "code", header: "代码", render: (row) => `${row.security_code} ${row.security_name ?? ""}`.trim() },
-    { key: "side", header: "方向", render: (row) => row.side },
-    { key: "quantity", header: "数量", render: (row) => row.quantity },
-    { key: "price", header: "价格", render: (row) => row.price },
-    { key: "amount", header: "金额", render: (row) => row.amount },
-    { key: "cash_balance", header: "现金余额", render: (row) => row.cash_balance },
-    { key: "version", header: "版本", render: (row) => row.version },
-    { key: "deleted", header: "状态", render: (row) => (row.deleted_at ? `已删除 ${row.deleted_at}` : "正常") },
+  const columns: Array<DataTableColumn<Trade>> = [
+    { key: "date", header: "业务日", priority: 1, render: (row) => row.trade_date },
+    {
+      key: "code",
+      header: "代码",
+      priority: 1,
+      render: (row) => `${row.security_code} ${row.security_name ?? ""}`.trim(),
+    },
+    { key: "side", header: "方向", priority: 1, render: (row) => row.side },
+    { key: "quantity", header: "数量", priority: 2, align: "right", render: (row) => row.quantity },
+    { key: "price", header: "价格", priority: 2, align: "right", render: (row) => row.price },
+    { key: "amount", header: "金额", priority: 2, align: "right", render: (row) => row.amount },
+    {
+      key: "cash_balance",
+      header: "现金余额",
+      priority: 3,
+      align: "right",
+      render: (row) => row.cash_balance,
+    },
+    {
+      key: "money_fund_balance",
+      header: "货币基金余额",
+      priority: 3,
+      align: "right",
+      render: (row) => row.money_fund_balance,
+    },
+    { key: "version", header: "版本", priority: 3, align: "right", render: (row) => row.version },
+    {
+      key: "deleted",
+      header: "状态",
+      priority: 2,
+      render: (row) => (row.deleted_at ? `已删除 ${row.deleted_at}` : "正常"),
+    },
     {
       key: "actions",
       header: "操作",
+      priority: 1,
+      align: "right",
       render: (row) => (
         <div className="row-actions">
           {row.deleted_at ? (
@@ -178,11 +203,13 @@ export function Trades() {
         </div>
       ) : null}
 
-      <Table
+      <DataTable
+        caption="交易流水列表"
         columns={columns}
         rows={page?.items ?? []}
         rowKey={(row) => row.trade_id}
-        emptyText={loading ? "加载中…" : "没有流水；先去「导入」上传账单"}
+        loading={loading && page == null}
+        emptyText="没有流水；先去「导入」上传账单"
       />
 
       {page ? (

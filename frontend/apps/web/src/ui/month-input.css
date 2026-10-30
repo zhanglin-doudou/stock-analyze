@@ -1,0 +1,32 @@
+/* Phase 4c · 月份输入（原生 + iPadOS 降级） */
+
+.month-input {
+  height: var(--control-h);
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.month-fallback {
+  display: inline-flex;
+  gap: var(--s2);
+}
+
+.month-select {
+  height: var(--control-h);
+  padding: 0 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.month-input:focus-visible,
+.month-select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}

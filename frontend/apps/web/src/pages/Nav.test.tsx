@@ -66,9 +66,9 @@ function makeNav(overrides: Partial<NavResult> = {}): NavResult {
   };
 }
 
-function renderPage(): ReturnType<typeof render> {
+function renderPage(initialEntries: string[] = ["/nav"]): ReturnType<typeof render> {
   return render(
-    <MemoryRouter initialEntries={["/nav"]}>
+    <MemoryRouter initialEntries={initialEntries}>
       <Nav />
     </MemoryRouter>,
   );
@@ -226,9 +226,10 @@ describe("Nav 净值与收益页", () => {
   });
 
   it("月份格式非法时本地拦截，不发请求", async () => {
-    renderPage();
+    // jsdom 的 input[type=month] 会拒绝非法值，直接通过 URL 注入非法 period
+    // 才能覆盖 Nav.tsx 的本地格式校验分支（原 fireEvent.change 在 jsdom 下不生效，基线红灯）。
+    renderPage(["/nav?period=2026-6"]);
 
-    fireEvent.change(screen.getByLabelText("月份"), { target: { value: "2026-6" } });
     fireEvent.click(screen.getByRole("button", { name: "构建净值与收益" }));
 
     expect(await screen.findByText(/月份格式应为 YYYY-MM/)).toBeTruthy();

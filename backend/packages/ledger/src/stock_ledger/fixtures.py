@@ -159,8 +159,9 @@ def _to_xlsx_bytes(rows: list[list[str]]) -> bytes:
                 # openpyxl 在 save() 时会把 modified 覆盖成当前时间，必须最后再钉死。
                 data = re.sub(
                     rb"<dcterms:modified[^>]*>.*?</dcterms:modified>",
-                    b'<dcterms:modified xsi:type="dcterms:W3CDTF">'
-                    b"2026-01-01T00:00:00Z</dcterms:modified>",
+                    b'<dcterms:modified xmlns:dcterms="http://purl.org/dc/terms/" '
+                    b'xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" '
+                    b'xsi:type="dcterms:W3CDTF">2026-01-01T00:00:00Z</dcterms:modified>',
                     data,
                 )
             target.writestr(entry, data)
