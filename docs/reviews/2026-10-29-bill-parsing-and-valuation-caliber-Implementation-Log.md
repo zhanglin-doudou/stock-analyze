@@ -381,3 +381,123 @@ def _money_fund_row_delta(row: ParsedRow) -> int:
 
 - 账单期前已持有股票卖出无期初 lot → 超卖 data_error（同第四篇 §20，属既有「期初持仓锚点」缺失问题）。
 - 货基余额「0 兜底」只解决**账单单侧流水缺陷**；若后续补导完整流水，重建即由锚点自然修正。
+
+---
+
+# 第六篇 省心投（基金投顾）流水口径（2026-10-30，设计 D14）
+
+## 26. 问题与根因
+
+用户报告：`1234@dev.com` 在 **2025-04-28** 货基余额错误——账单当日有三笔货基申购
+（004369/016778 各 10000.00、001526 1953.19），资产表货基余额却显示 0；期初货基余额也不对。
+
+根因（真实账单实测确认）：这三笔都是**华泰省心投**（基金投顾）流水——摘要为
+「[省心投]申购确认」。省心投的资金从主账户转到省心投投顾账户，但**转出动作不在账单留记录**：
+账单里只有申购确认行（发生金额为负、资金余额有值），没有任何对应赎回/转回流水。
+旧口径把它当主账户货基申购 → 货基余额推演时「有锚点 − 累计净申购 < 0」（如 004369 锚点
+19.00 vs 累计申购 19990.96），反推期初为不可能负值，D12 钳 0 兜底把申购日余额钳成 0。
+账实语义也错了：钱已离开主账户，但「现金 −10000 + 货基 +10000」让总资产不变。
+
+## 27. 落地内容（对照设计 D14 / §6.4.1）
+
+- `parsers/huatai.py`：
+  - 摘要归一化 == `[省心投]申购确认` → **视同银行转出**：转 CASH 资金行（`code=CASH`、
+    `security_name=摘要原文`、qty/price 清零、原始值留 `raw` 可溯源），side 保持 buy
+    （资金流出），发生金额（负值）与资金余额原样保留；不进持仓、不打货基余额。
+  - 摘要归一化 == `[省心投]红利发放` → **一律直接隔离** `ZERO_AMOUNT_INFO`（不论金额
+    字段形态；此前依赖「五金额全 0 → INVALID_AMOUNT」兜底，券商填了余额就会漏进来）。
+- `repositories/rules.py`：新增系统规则 `sys_sxt_out`（「[省心投]申购确认→资金划转」，
+  exact、priority 12，高于 `sys_fund_buy` 15）→ `transfer`。`seed_system_rules` 幂等同步。
+- `contracts/enums.py`：`ZERO_AMOUNT_INFO` 注释补「[省心投]红利发放」。
+- 不变项：普通货基「申购确认/红利发放」（无前缀）口径不变；`[省心投]转托管确认` 维持
+  `sys_rehold` → `transfer`；D12 钳 0 兜底保留（对非省心投货基的单侧流水缺陷仍有效）。
+
+## 28. 真实账单端到端验证（普通账户电子对账单_20261020135757.xlsx）
+
+| 项 | 旧口径 | 新口径（D14） |
+|---|---|---|
+| rows / quarantined | 1209 / 714（706 INVALID_AMOUNT + 8） | 1209 / 714（**706 ZERO_AMOUNT_INFO + 8 INVALID_AMOUNT**） |
+| [省心投]申购确认 25 条 | 货基行（buy + 货基余额） | **CASH 资金行**（transfer 语义，负流出，无货基余额） |
+| 2025-04-28 三笔申购 | 货基余额钳 0 | 现金流出 10000.00 / 1953.19 / 10000.00，余额链 11953.19→10000.00→0.00 ✓ |
+| 货基标的 | 19 个（含省心投 18 个） | **只剩 940018**（主账户直持） |
+| `money_fund_*` assumptions | opening_zero / clamped 多项 | **空**（省心投不再触发；940018 锚点反推期初为正） |
+| 分类 | `[省心投]申购确认` → sys_fund_buy/buy | **sys_sxt_out/transfer**；普通「申购确认」仍 sys_fund_buy/buy |
+
+## 29. 测试与门禁（第六篇）
+
+- `test_parser_huatai.py`：真实节选测试按新口径改写（L21 → CASH 行断言；隔离原因按行
+  区分 ZERO_AMOUNT_INFO/INVALID_AMOUNT；202308 退出货基推演）；新增
+  `test_sxt_dividend_quarantined_even_with_cash_balance`（红利发放余额非 0 也隔离）与
+  `test_plain_fund_subscribe_unaffected_by_sxt_caliber`（普通货基申购不受影响）。
+- `test_classification_rules.py` / `test_classification.py`：`[省心投]申购确认` →
+  transfer/sys_sxt_out；隔离原因集合更新。
+- 门禁：`make lint`（ruff+tsc+eslint）、`make typecheck`（mypy strict + import-linter
+  5 kept/0 broken + tsc）、`STOCK_DB_NAME=stock_analyze_test make test-p2` 全绿。
+
+## 30. 遗留（第六篇范围外）
+
+- **存量数据**：已按旧口径入库的批次（如 `1234@dev.com` 既有导入）需 revoke 后重新导入，
+  再重建资产表生效；本次未 bump `ASSET_DEFINITION_VERSION`（trade 行不刷新则重建无变化）。
+- 省心投账户内部的市值/收益不在本系统跟踪范围（账单无数据）；若券商后续提供省心投
+  账户对账单，可作为独立账户导入支持。
+
+---
+
+# 第七篇：货基部分超卖的利息归属（2026-10-30 D15）
+
+## 31. 问题与根因
+
+- 现象：资产表把货币基金**部分超卖**的利息算成了**初始资产**，当日（2026-09-30）没有体现为盈利。
+- 根因：`_apply_money_fund_balances` 对有锚点的货基一律按 **`期初 = 锚点 − 累计净额`** 反推。
+  真实账单里 940018 的持仓是**本账单内首笔买入才建立**的（2026-09-23 买入 116295.38），
+  锚点 51859.86、累计净额 51847.59 → 期初被反推成 **12.27**——这 12.27 实为
+  **2026-09-30 赎回 106720.80 > 已跟踪余额 106708.53 的差额（累计利息）**，却被当成账单期前就存在的本金。
+- 结果：资产表期初虚增 12.27，9-30 赎回日的 `daily_pnl` 少了这 12.27（利息被"前置"成初始资产）。
+
+## 32. 落地内容（对照设计 D15 / §6.4.2）
+
+- `parsers/huatai.py::_apply_money_fund_balances`（返回值 3 元组 → 4 元组，新增 `interest`）：
+  1. **首行即买入 → 期初 0**：`built_in_bill = {code | 首行 _money_fund_row_delta > 0}`，
+     这类标的期初直接判 0，不再走「锚点 − 累计净额」。
+  2. **部分超卖 = 利息当日实现**：`stored < 0` 且 `code ∈ built_in_bill` → 记入 `interest`、
+     余额写 0（累计归零）；非 `built_in_bill` 仍按 D12 走 `clamped`（钳 0 兜底）。
+  3. **末行锚点校准**：最后一行余额直接对齐「基金持仓」参考市值（差额记末行当日，不进期初）。
+- `parse_bill`：新增 `assumptions["money_fund_oversell_interest"] = sorted(codes)`；
+  原 `money_fund_balance_clamped` / `money_fund_opening_*` 语义不变（仅适用范围收窄）。
+- `review` 层（`assets.compute_daily_valuations` / `valuation.initial_money_fund_balances`）
+  **无需改动**：期初 0 + 赎回日余额 0，`daily_pnl = total − cashflow − prev_total` 自然得到 +12.27。
+
+## 33. 真实账单端到端验证（普通账户电子对账单_20261020135757.xlsx）
+
+解析 + 本机 `market.daily_bar`（adjust=''）+ `bond_alias`（754019→113708）内存重放资产表：
+
+| 日期 | 货基余额 | 说明 |
+|---|---|---|
+| 2026-09-23 | 116295.38 | 首行买入建仓，期初 0（不再 +12.27） |
+| 2026-09-29 | 106708.53 | 赎回 116295.38 → 0，再申购 106708.53 |
+| 2026-09-30 | 0.00 | 赎回 106720.80 卖穿 → **当日货基贡献 +12.27**（利息实现） |
+| 2026-10-19 | 51859.86 | 末行 = 基金持仓锚点（无需校准） |
+
+- `assumptions["money_fund_oversell_interest"] == ["940018"]`。
+- 9-30 全账户 `daily_pnl = −2048.45`（含股票行情波动；货基部分单独核算为 +12.27）。
+- 对照前期：旧口径同日 pnl 会少 12.27、期初多 12.27。
+
+## 34. 测试与门禁（第七篇）
+
+- `test_parser_huatai.py`：删除 D12 时代 `test_money_fund_negative_reverse_balance_clamped_to_zero`，
+  新增 `test_money_fund_oversell_interest_realized_on_redemption_date`（超卖 → `interest`、
+  `clamped` 为空、余额归零）与 `test_money_fund_missing_redemptions_snaps_last_row_to_anchor`
+  （buy-first 缺赎回 → 末行对齐锚点、不算利息）。63 passed。
+- `test_assets_application.py`：新增
+  `test_money_fund_oversell_interest_lands_in_daily_pnl_not_initial_assets`（9-23 建仓、
+  9-30 赎回 1012.27 → `daily_pnl == 12.27`、期初不含利息）。27 passed。
+- 门禁：`make lint`（ruff+tsc+eslint）、`make typecheck`（mypy strict + import-linter
+  5 kept/0 broken + tsc）、`STOCK_DB_NAME=stock_analyze_test make test-p2` 全绿；
+  `api-check` 52 操作、契约快照无漂移。
+
+## 35. 遗留（第七篇范围外）
+
+- **存量数据**：需 revoke 旧批次重新导入（刷新 `money_fund_balance_units`）再重建资产表，
+  否则库内仍是旧余额序列。未 bump `ASSET_DEFINITION_VERSION`（trade 行不变则重建无差异）。
+- 已知取舍：buy-first 且账单**缺赎回流水**（无超卖事件）时，申购按真实金额入账、
+  末行校准到锚点，差额落在末行当日；这是为消除「首行余额钳 0 → 申购日假亏损」而做的选择。
