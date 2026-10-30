@@ -387,6 +387,63 @@ def test_money_fund_balance_counts_into_assets_without_market_request() -> None:
     assert day2["status_reason"] is None
 
 
+def test_money_fund_oversell_interest_lands_in_daily_pnl_not_initial_assets() -> None:
+    """货基部分超卖：超出份额 = 累计利息，必须在赎回当日计收益（设计 D15）。
+
+    真实账单 940018 场景：9-23 申购 1000.00（余额 1000.00）、9-30 赎回 1012.27（余额 0）。
+    多出的 12.27 是万份收益。期初货基余额必须按 0（不能被锚点反推成 12.27），否则利息
+    被算进初始资产、赎回当日 daily_pnl 变成 0。
+    """
+    trades = [
+        _trade(
+            trade_date=date(2026, 9, 1),
+            category="other",
+            amount_units=0,
+            cash_balance_units=cents("1000.00"),
+            line_no=1,
+        ),
+        _trade(
+            trade_date=date(2026, 9, 23),
+            category="buy",
+            security_code="940018",
+            amount_units=-cents("1000.00"),
+            quantity_units=shares("1000"),
+            price_units=price("1.0000"),
+            money_fund_balance_units=cents("1000.00"),
+            line_no=2,
+        ),
+        _trade(
+            trade_date=date(2026, 9, 30),
+            category="sell",
+            side="sell",
+            security_code="940018",
+            amount_units=cents("1012.27"),
+            quantity_units=shares("1012.27"),
+            price_units=price("1.0000"),
+            money_fund_balance_units=cents("0.00"),
+            line_no=3,
+        ),
+    ]
+    result = _run(trades, date(2026, 9, 1), date(2026, 9, 30))
+
+    day1 = _row(result, date(2026, 9, 1))
+    assert day1["money_fund_units"] == 0  # 期初不得凭空多出利息
+    assert day1["total_assets_units"] == cents("1000.00")
+    assert day1["prev_total_assets_units"] == cents("1000.00")
+
+    day2 = _row(result, date(2026, 9, 23))
+    assert day2["money_fund_units"] == cents("1000.00")  # 申购是资产转换，不影响总资产
+    assert day2["total_assets_units"] == cents("1000.00")
+    assert day2["daily_pnl_units"] == 0
+
+    day3 = _row(result, date(2026, 9, 30))
+    assert day3["money_fund_units"] == 0
+    assert day3["cash_units"] == cents("1012.27")
+    assert day3["total_assets_units"] == cents("1012.27")
+    # 超卖利息 12.27 在这里实现（而不是被塞进期初资产）。
+    assert day3["daily_pnl_units"] == cents("12.27")
+
+
 def test_money_fund_negative_balance_is_clamped_not_degraded() -> None:
     """历史入库的负货基余额（账单缺赎回流水）→ 按 0 兜底，不产生降级行。"""
     trades = [

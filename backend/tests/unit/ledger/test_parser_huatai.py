@@ -472,10 +472,18 @@ def test_money_fund_redemption_confirmation_not_quarantined() -> None:
 def test_statement_stops_at_total_row_before_holdings_sections() -> None:
     """流水明细「合计」之后的股票/基金持仓、声明区块不是交易行 → 不进隔离区。"""
     bill = _parse(_STATEMENT_BILL.read_bytes(), file_name=_STATEMENT_BILL.name)
-    # 10 条明细里 5 条五金额全 0（3 条红利再投 + 转托管确认 + 证券清理）→ INVALID_AMOUNT。
+    # 10 条明细隔离 5 条：3 条 [省心投]红利发放 → ZERO_AMOUNT_INFO（省心投账户内部份额
+    # 通知，设计 D14）；转托管确认 + 证券清理五金额全 0 → INVALID_AMOUNT。
     assert len(bill.rows) == 5
     assert [q.line_no for q in bill.quarantined] == [17, 18, 19, 20, 25]
-    assert {q.reason_code for q in bill.quarantined} == {QuarantineReason.INVALID_AMOUNT.value}
+    reason_by_line = {q.line_no: q.reason_code for q in bill.quarantined}
+    assert reason_by_line == {
+        17: QuarantineReason.ZERO_AMOUNT_INFO.value,
+        18: QuarantineReason.ZERO_AMOUNT_INFO.value,
+        19: QuarantineReason.ZERO_AMOUNT_INFO.value,
+        20: QuarantineReason.INVALID_AMOUNT.value,
+        25: QuarantineReason.INVALID_AMOUNT.value,
+    }
     # 「合计」在夹具第 27 行；持仓/声明区一行都不应被解析，更不能当 INVALID_ROW 隔离。
     assert max(row.line_no for row in bill.rows) == 26
     assert all(q.reason_code != QuarantineReason.INVALID_ROW.value for q in bill.quarantined)
@@ -488,6 +496,14 @@ def test_wrapped_summary_newline_normalized_for_side_and_parse() -> None:
     subscribe = by_line[21]
     assert subscribe.summary == "[省心投]申\n购确认"
     assert subscribe.side == "buy"
+    # 「[省心投]申购确认」视同银行转出（设计 D14）：CASH 占位、无份额语义、不打货基
+    # 余额；发生金额（负值流出）与资金余额原样保留，分类走 transfer。
+    assert subscribe.security_code == "CASH"
+    assert subscribe.quantity_units == 0
+    assert subscribe.price_units == 0
+    assert subscribe.amount_units == -10000_00
+    assert subscribe.cash_balance_units == 27196_66
+    assert subscribe.money_fund_balance_units is None
     # 打新缴款摘要同样含「申购确认」，但方向仍是买入（分类由 new_stock 规则兜底）。
     ipo_payment = by_line[23]
     assert ipo_payment.summary == "新股申购确\n认缴款"
@@ -531,9 +547,51 @@ def test_money_fund_balance_anchored_by_fund_holding_section() -> None:
         -by_line[26].quantity_units * by_line[26].price_units // 10**8
     )
     assert opening == 100999_18
-    # 202308 无持仓锚点 → 期初 0，余额 = 买入份额 10000.00。
-    assert by_line[21].money_fund_balance_units == 10000_00
-    assert bill.assumptions["money_fund_opening_zero"] == ["202308"]
+    # [省心投] 申购行已转 CASH 资金行（设计 D14）：202308 不再是货基标的，无余额推演。
+    assert by_line[21].security_code == "CASH"
+    assert by_line[21].money_fund_balance_units is None
+    assert "money_fund_opening_zero" not in bill.assumptions
+
+
+def test_sxt_dividend_quarantined_even_with_cash_balance() -> None:
+    """「[省心投]红利发放」不论金额字段形态一律隔离（设计 D14）：资金余额非 0 也不例外。"""
+    row = _buy_row(
+        证券代码="004262",
+        证券名称="招商招禧宝货币B",
+        买卖标志="",
+        摘要="[省心投]红\n利发放",
+        成交数量="0.37",
+        成交价格="1.000",
+        成交金额="0.00",
+        佣金="0.00",
+        印花税="0.00",
+        其他费="0.00",
+        资金余额="27196.66",
+    )
+    bill = _parse(_xlsx(_HEADERS, [row]))
+    assert bill.rows == []
+    assert len(bill.quarantined) == 1
+    assert bill.quarantined[0].reason_code == QuarantineReason.ZERO_AMOUNT_INFO.value
+
+
+def test_plain_fund_subscribe_unaffected_by_sxt_caliber() -> None:
+    """普通货基「申购确认」（无 [省心投] 前缀）不受 D14 影响：仍是货基买入 + 余额推演。"""
+    row = _buy_row(
+        证券代码="940018",
+        证券名称="华泰紫金天天发货币",
+        买卖标志="",
+        摘要="申购确认",
+        成交数量="10000.00",
+        成交价格="1.000",
+        成交金额="-10000.00",
+        资金余额="10000.00",
+    )
+    bill = _parse(_xlsx(_HEADERS, [row]))
+    assert len(bill.rows) == 1
+    parsed = bill.rows[0]
+    assert parsed.security_code == "940018"
+    assert parsed.side == "buy"
+    assert parsed.money_fund_balance_units == 10000_00
 
 
 def _mf_row(
@@ -563,23 +621,44 @@ def _mf_row(
     )
 
 
-def test_money_fund_negative_reverse_balance_clamped_to_zero() -> None:
-    """账单缺赎回/转出流水：按期末锚点回推的中间余额为负 → 写 0（期末仍落锚点）。
+def test_money_fund_oversell_interest_realized_on_redemption_date() -> None:
+    """部分超卖：赎回把账单内建立的持仓卖穿，超出部分 = 累计利息，在赎回当日实现（D15）。
 
-    复现 2026-10-29 用户账单（[省心投] 只列申购、无赎回流水）：004369 两笔申购累计
-    19990.96，基金持仓表期末仅 19.00 → 锚点反推期初 = -19971.96，第一行余额 -9971.96。
+    真实账单 940018 场景：账单内先申购（2026-09-23）建立持仓，随后赎回金额略大于持仓
+    （多出的 12.27 是万份收益累计）。若按「锚点 − 累计净额」反推期初，这 12.27 会被算进
+    初始资产，资产表就看不到当次超卖的盈利。
+    """
+    rows = [
+        _mf_row(1, date(2026, 9, 23), "940018", "buy", quantity_units=116_295_38_00),
+        _mf_row(2, date(2026, 9, 30), "940018", "sell", quantity_units=116_307_65_00),
+    ]
+    inferred, zero, clamped, interest = _apply_money_fund_balances(rows, {})
+    assert inferred == {}
+    assert zero == {"940018"}  # 期初 0（持仓在账单内建立）
+    assert clamped == set()
+    assert interest == {"940018"}
+    assert rows[0].money_fund_balance_units == 116_295_38  # 申购后余额 = 买入份额
+    assert rows[1].money_fund_balance_units == 0  # 超卖后余额 0，超出 12.27 当日计收益
+
+
+def test_money_fund_missing_redemptions_snaps_last_row_to_anchor() -> None:
+    """账单只列申购、无赎回流水：期初 0 正向累计，末行余额校准到「基金持仓」锚点。
+
+    两笔申购累计 19990.96，基金持仓表期末仅 19.00（赎回流水缺失）→ 申购按真实资产入账
+    （不再把期初算成不可能的负值、也不把申购日余额钳成 0），差额记在末行当日。
     """
     rows = [
         _mf_row(1, date(2025, 4, 28), "004369", "buy", quantity_units=10_000_00_00),
         _mf_row(2, date(2025, 12, 15), "004369", "buy", quantity_units=9_990_96_00),
     ]
-    inferred, zero, clamped = _apply_money_fund_balances(rows, {"004369": 1_900})
+    inferred, zero, clamped, interest = _apply_money_fund_balances(rows, {"004369": 1_900})
 
     assert inferred == {}
     assert zero == set()
-    assert clamped == {"004369"}
-    assert rows[0].money_fund_balance_units == 0  # 负余额写 0 兜底
-    assert rows[1].money_fund_balance_units == 1_900  # 期末仍等于基金持仓锚点
+    assert clamped == set()  # 期初 0 正向累计，中间余额不为负
+    assert interest == set()  # 全程只有申购，没有超卖
+    assert rows[0].money_fund_balance_units == 10_000_00  # 申购是真实资产，不计入期初
+    assert rows[1].money_fund_balance_units == 1_900  # 末行锚定「基金持仓」期末参考市值
 
 
 def test_money_fund_recognized_by_price_one_and_zero_fees() -> None:

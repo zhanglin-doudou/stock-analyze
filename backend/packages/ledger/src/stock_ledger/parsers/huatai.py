@@ -124,6 +124,12 @@ def _money_fund_codes(rows: list[ParsedRow]) -> set[str]:
 
 # 零金额信息行（纯通知，无资金意义）：申购中签/新股入账/托管转出/托管转入。
 _ZERO_AMOUNT_INFO_KEYWORDS: tuple[str, ...] = ("申购中签", "新股入账", "托管转出", "托管转入")
+# 省心投（华泰基金投顾）摘要（归一化后精确匹配，2026-10-30 用户确认口径，设计 D14）：
+# 资金在主账户与省心投投顾账户之间划转，但**转出动作不在账单留记录**——账单里只有
+# 「[省心投]申购确认」（主账户资金流出买省心投货基）与「[省心投]红利发放」（省心投
+# 账户内部的份额红利通知，金额恒 0，与主账户资金无关）。
+_SXT_SUBSCRIBE_SUMMARY = "[省心投]申购确认"
+_SXT_DIVIDEND_SUMMARY = "[省心投]红利发放"
 # 可转债：数量单位是手（1 手 = 10 张），成交/行情价格是单张金额。
 _CBOND_LOT_SIZE = 10
 # 「qty × 10 × 单张价 ≈ |amount|」容差（amount 含费用，对齐估值反推的 2% 口径）。
@@ -228,53 +234,83 @@ def _read_fund_holding_anchors(rows: list[list[str]], codes: set[str]) -> dict[s
 
 def _apply_money_fund_balances(
     rows: list[ParsedRow], anchors: dict[str, int]
-) -> tuple[dict[str, int], set[str], set[str]]:
+) -> tuple[dict[str, int], set[str], set[str], set[str]]:
     """按余额累计（+ 账单「基金持仓」期末锚点反推期初）逐行写货币基金余额。
 
     全部在**金额标度（分）**上运行：份额增量先按「份额 × 单位净值(1.0000)」换算成金额，
-    避免 Qty(scale=4) 与 Money(scale=2) 混算。返回 ``(inferred, zero, clamped)``：
+    避免 Qty(scale=4) 与 Money(scale=2) 混算。返回 ``(inferred, zero, clamped, interest)``：
 
-    - ``inferred``：无锚点但账单内出现净赎回（余额会为负）的代码 → 期初按下界反推
-      ``-min(累计净额)``。赎回行本身就是期初持仓的证据（不可能赎回没有的份额），
-      这是账单自证的下界推断而非伪造；余额全程 ≥ 0。
-    - ``zero``：无锚点且余额天然非负（如只有申购）的代码 → 期初按 0，留痕即可。
-    - ``clamped``：有锚点但账单**缺赎回/转出流水**（如 [省心投] 只列申购），按期末锚点
-      反推的中间余额会为负；余额定义上不可能为负 → 写 0 兜底留痕（设计 D12）。
+    - ``inferred``：无锚点且期初按赎回行自证为正（下界 ``-min(累计净额)``）的代码 → 留痕。
+    - ``zero``：无锚点且期初为 0 的代码 → 留痕即可。
+    - ``clamped``：有锚点但账单**缺赎回/转出流水**（单侧流水缺陷），按期末锚点反推的
+      中间余额会为负 → 写 0 兜底留痕（设计 D12）。
+    - ``interest``：**账单内建立持仓**（该代码首行即买入）的代码出现**部分超卖**（赎回把
+      已跟踪持仓卖穿）→ 超出部分 = 累计利息，在赎回当日实现（设计 D15）。期初不得因此
+      抬高（否则利息被算成初始资产，当次超卖的盈利被抹掉）。
+      （[省心投] 申购自 D14 起转 CASH 资金行，不再进入货基推演。）
+
+    期初口径：
+    - 首行即买入（持仓在本账单内建立）→ 期初 0；后续任何负余额都是利息/缺失流水。
+    - 首行即赎回（账单期前已持有）→ 有锚点按 ``锚点 − 累计净额`` 反推；无锚点按
+      ``-min(累计净额)`` 下界（D10）。这两种情况下负数都是「期初估值不足」，不是利息。
     """
     codes = _money_fund_codes(rows)
     if not codes:
-        return {}, set(), set()
+        return {}, set(), set(), set()
     ordered = sorted(rows, key=lambda row: (row.trade_date, row.line_no))
     # 第一遍：期初 0 推演，记录各代码的累计净额与最小余额。
     running: dict[str, int] = dict.fromkeys(codes, 0)
     min_running: dict[str, int] = dict.fromkeys(codes, 0)
+    first_row: dict[str, ParsedRow] = {}
     for row in ordered:
         if row.security_code not in codes:
             continue
+        first_row.setdefault(row.security_code, row)
         running[row.security_code] += _money_fund_row_delta(row)
         min_running[row.security_code] = min(
             min_running[row.security_code], running[row.security_code]
         )
-    missing = {code for code in codes if code not in anchors}
-    inferred = {code: -min_running[code] for code in missing if min_running[code] < 0}
-    zero = {code for code in missing if min_running[code] >= 0}
-    # 期初余额：有锚点 = 锚点金额 − 账单内净增量；无锚点 = 反推下界（或 0）。
+    # 首行即买入 → 持仓在本账单内建立，期初必为 0（不能把利息当初始资产）。
+    built_in_bill = {code for code, row in first_row.items() if _money_fund_row_delta(row) > 0}
     opening: dict[str, int] = {}
     for code in codes:
-        opening[code] = anchors[code] - running[code] if code in anchors else inferred.get(code, 0)
+        if code in built_in_bill:
+            opening[code] = 0
+        elif code in anchors:
+            opening[code] = anchors[code] - running[code]
+        else:
+            opening[code] = -min_running[code] if min_running[code] < 0 else 0
+    missing = {code for code in codes if code not in anchors}
+    inferred = {code: opening[code] for code in missing if opening[code] > 0}
+    zero = {code for code in missing if opening[code] <= 0}
     balance = dict(opening)
     clamped: set[str] = set()
+    interest: set[str] = set()
+    last_row: dict[str, ParsedRow] = {}
     for row in ordered:
-        if row.security_code not in codes:
+        code = row.security_code
+        if code not in codes:
             continue
-        balance[row.security_code] += _money_fund_row_delta(row)
-        stored = balance[row.security_code]
+        balance[code] += _money_fund_row_delta(row)
+        stored = balance[code]
         if stored < 0:
-            # 缺流水导致的反推负余额：写 0（不修改累计值，期末仍落在锚点上）。
-            clamped.add(row.security_code)
+            if code in built_in_bill:
+                # 部分超卖：赎回把已跟踪持仓卖穿 → 超出部分是利息，当日实现；累计归零。
+                interest.add(code)
+                balance[code] = 0
+            else:
+                # 缺流水导致的反推负余额：写 0（不修改累计值，期末仍落在锚点上）。
+                clamped.add(code)
             stored = 0
         row.money_fund_balance_units = stored
-    return inferred, zero, clamped
+        last_row[code] = row
+    # 锚点校准：末行余额对齐「基金持仓」期末参考市值（差额记在末行当日，不进期初）。
+    for code, row in last_row.items():
+        anchor = anchors.get(code)
+        if anchor is None or int(row.money_fund_balance_units or 0) == anchor:
+            continue
+        row.money_fund_balance_units = max(0, anchor)
+    return inferred, zero, clamped, interest
 
 
 def _money_fund_row_delta(row: ParsedRow) -> int:
@@ -479,6 +515,11 @@ def _build_candidate(
     if balance_text:
         cash_balance_units = _units(balance_text, Money)
 
+    # 「[省心投]红利发放」：省心投账户内部的份额红利通知（金额恒 0），与主账户资金
+    # 无关——不论金额字段形态一律直接隔离（设计 D14），不进明细。
+    if normalize_summary(value("summary")) == _SXT_DIVIDEND_SUMMARY:
+        raise _RowError(QuarantineReason.ZERO_AMOUNT_INFO)
+
     # 「申购中签/新股入账/托管转出」等纯通知行：无发生金额且无资金余额 → 隔离为
     # ZERO_AMOUNT_INFO，不进明细（否则会形成无意义持仓/回合噪音，如中签通知行使
     # 持仓形成日早于真实缴款日）。同类摘要但有金额的行（真实缴款）不受影响。
@@ -507,6 +548,15 @@ def _build_candidate(
     account_masked = value("account") or None
     # 非交易行证券名称为空时，用摘要填充（如「银行转存」），避免默认成 CASH 无法辨识业务。
     security_name = value("security_name") or (summary or "资金业务" if code == "CASH" else code)
+    # 「[省心投]申购确认」视同银行转出（设计 D14）：主账户资金流出到省心投投顾账户，
+    # 但转出动作不在账单留记录，申购确认行本身就是转出证据。转 CASH 资金行（与
+    # 「银行转取」同构）：无份额语义（qty/price 清零，原始值留 raw 可溯源）、不进持仓、
+    # 不打货基余额；发生金额（负值）即主账户流出额，分类走 transfer（sys_sxt_out）。
+    if summary is not None and normalize_summary(summary) == _SXT_SUBSCRIBE_SUMMARY:
+        code = "CASH"
+        security_name = summary
+        quantity_units = 0
+        price_units = 0
 
     row = ParsedRow(
         line_no=line_no,
@@ -671,7 +721,7 @@ def parse_bill(
     # （赎回行自证期初持仓），其余无锚点代码期初按 0；均写 assumptions 留痕，不伪造余额。
     fund_rows = raw_rows[stop_row_index + 1 :] if stop_row_index is not None else []
     fund_anchors = _read_fund_holding_anchors(fund_rows, _money_fund_codes(rows))
-    mf_inferred, mf_zero, mf_clamped = _apply_money_fund_balances(rows, fund_anchors)
+    mf_inferred, mf_zero, mf_clamped, mf_interest = _apply_money_fund_balances(rows, fund_anchors)
     if mf_zero:
         assumptions["money_fund_opening_zero"] = sorted(mf_zero)
     if mf_inferred:
@@ -680,6 +730,9 @@ def parse_bill(
         }
     if mf_clamped:
         assumptions["money_fund_balance_clamped"] = sorted(mf_clamped)
+    if mf_interest:
+        # 部分超卖 = 累计利息在赎回当日实现（设计 D15）：不抬高期初，避免利息被算成初始资产。
+        assumptions["money_fund_oversell_interest"] = sorted(mf_interest)
     if rows and rows[0].side != "buy":
         warnings.append(WarningCode.FIRST_ROW_NOT_BUY)
     if any(q.reason_code == QuarantineReason.DUPLICATE_IN_FILE.value for q in quarantined):
