@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
-import re
 import time
 import uuid
 from collections.abc import AsyncIterator
@@ -25,6 +24,7 @@ from stock_platform.jobs import JobQueue
 from stock_platform.models import Job
 from stock_platform.obs import get_logger
 from stock_platform.tenant import TenantContext
+from stock_review.metrics.context import parse_period_label
 
 from stock_api.deps import AppState, get_state, get_tenant
 from stock_api.routing import StrictQueryRoute
@@ -39,19 +39,15 @@ SSE_KEEPALIVE_SECONDS = 15.0
 
 _JOBS_PREFIX = "/api/v1/jobs"
 _ENDPOINT_REBUILD_PERIOD = "POST /jobs/rebuild-period"
-_PERIOD_RE = re.compile(r"^(\d{4})-(\d{2})$")
 
 
 def _validate_period(period: str, *, today: date) -> None:
-    """YYYY-MM 且不是未来月份；非法 → 422 INVALID_PERIOD。"""
-    matched = _PERIOD_RE.match(period)
-    if matched is None:
-        raise ApiError(ErrorCode.INVALID_PERIOD, detail=f"period 必须是 YYYY-MM: {period}")
-    year, month = int(matched.group(1)), int(matched.group(2))
-    if not 1 <= month <= 12:
-        raise ApiError(ErrorCode.INVALID_PERIOD, detail=f"period 月份非法: {period}")
-    if date(year, month, 1) > today.replace(day=1):
-        raise ApiError(ErrorCode.INVALID_PERIOD, detail=f"period 不能是未来月份: {period}")
+    """period token（`YYYY-MM` / `YYYY` / `YYYY-MM-DD..YYYY-MM-DD`）；非法 → 422 INVALID_PERIOD。
+
+    与指标层同一解析口径（`stock_review.metrics.context.parse_period_label`），
+    避免两处正则漂移。
+    """
+    parse_period_label(period, today=today)
 
 
 def _to_out(job: Job) -> JobOut:

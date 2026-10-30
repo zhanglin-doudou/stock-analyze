@@ -451,9 +451,12 @@ class RebuildRoundsIn(StrictModel):
 
 
 class RebuildPeriodIn(StrictModel):
-    """API-083：按月一键构建编排（rounds → assets → nav → metrics）。"""
+    """API-083：一键构建编排（rounds → assets → nav → metrics）。
 
-    period: str = Field(min_length=7, max_length=7)
+    `period` 支持三种 token：`YYYY-MM`（月）/ `YYYY`（年）/ `YYYY-MM-DD..YYYY-MM-DD`（自定义区间）。
+    """
+
+    period: str = Field(min_length=4, max_length=23)
     include_exploratory: bool = False
 
 
@@ -811,7 +814,7 @@ class DashboardHistoryOverviewOut(StrictModel):
 
 
 class DashboardLinksOut(StrictModel):
-    """下钻/占位页链接（旧五卡按 `legacy_period` 懒加载）。"""
+    """下钻/占位页链接（年度指标按 `metrics_period` 懒加载）。"""
 
     assets: str
     rounds: str
@@ -827,6 +830,9 @@ class DashboardOut(StrictModel):
     as_of: date
     data_as_of: date | None = None
     legacy_period: str
+    metrics_period: str
+    metrics_period_start: date
+    metrics_period_end: date
     status: DashboardStatus
     build_state: Literal["missing", "current", "stale", "blocked"]
     definition_version: str

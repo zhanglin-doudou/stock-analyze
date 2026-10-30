@@ -3,7 +3,8 @@
 口径（docs/architecture/2026-10-28-dashboard.md）：
 * 资产概览 headline = 最新 ``asset_daily`` 行（``trade_date <= today``），**不自动构建**；
 * 历史概览 = 全历史：已平仓回合计数/最赚最亏 + ``asset_daily`` 日收益的回撤；
-* 旧五卡是月度口径，这里只返回 ``legacy_period``（最近有流水/回合的月份），不内嵌指标；
+* 年度指标区间 = ``as_of`` 所在年份年初 → ``as_of``（低频投资者月度样本不足，
+  看板改用年度口径）；``legacy_period`` 保留（最近有流水/回合的月份）兼容旧前端；
 * 所有金额/比率保持标度整数，格式化只在 API 边界做；blocked/missing 一律 ``None``，
   绝不用 0 冒充缺失。
 
@@ -187,6 +188,9 @@ class DashboardResult:
     as_of: date
     data_as_of: date | None
     legacy_period: str
+    metrics_period: str
+    metrics_period_start: date
+    metrics_period_end: date
     status: str
     build_state: str
     definition_version: str
@@ -219,6 +223,11 @@ def _legacy_period(trades: list[Trade], rounds: list[Round], clock: Clock) -> st
     )
     latest = max(candidates) if candidates else clock.today()
     return f"{latest.year:04d}-{latest.month:02d}"
+
+
+def _annual_period(as_of: date) -> tuple[str, date, date]:
+    """看板年度指标区间：`as_of` 所在年份 1/1 → `as_of`（闭区间）。"""
+    return f"{as_of.year:04d}", date(as_of.year, 1, 1), as_of
 
 
 def _round_brief(round_: Round) -> DashboardRoundBrief:
@@ -587,8 +596,10 @@ async def build_dashboard(
     )
     rounds = await RoundRepository(session).closed_rounds(user_id)
 
-    as_of = latest.trade_date if latest is not None else today
+    fallback_as_of = build_view.data_as_of if isinstance(build_view.data_as_of, date) else today
+    as_of = latest.trade_date if latest is not None else fallback_as_of
     legacy_period = _legacy_period(trades, rounds, clock)
+    metrics_period, metrics_period_start, metrics_period_end = _annual_period(as_of)
     missing: list[DashboardMissing] = []
 
     # ── 资产概览 ─────────────────────────────────────────────
@@ -834,6 +845,9 @@ async def build_dashboard(
         as_of=as_of,
         data_as_of=build_view.data_as_of,
         legacy_period=legacy_period,
+        metrics_period=metrics_period,
+        metrics_period_start=metrics_period_start,
+        metrics_period_end=metrics_period_end,
         status=overall,
         build_state=build_view.state,
         definition_version=definition_version,

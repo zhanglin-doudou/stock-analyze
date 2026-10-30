@@ -40,6 +40,7 @@ from stock_review.metrics.datasets import (
     metric_symbols,
 )
 from stock_review.metrics.engine import (
+    CacheKey,
     MetricOutcome,
     evaluate_metrics,
 )
@@ -90,6 +91,7 @@ class BatchResult:
     items: list[MetricOutcome]
     all_outcomes: list[MetricOutcome]
     etag: str
+    cacheable: bool = True
 
 
 @dataclass(slots=True)
@@ -234,6 +236,7 @@ async def _build_context(
         bars=views.bars,
         benchmark_series=views.benchmark,
         calendar=views.calendar,
+        period_kind=period.kind,
         flags=dict(views.flags),
         upstream={},
         fingerprints=dict(views.fingerprints),
@@ -399,11 +402,13 @@ async def batch_metrics(
     )
 
     repository = MetricResultRepository(session)
-    cached = await repository.rows_for_period(
-        user_id,
-        period=resolved.label,
-        metric_ids=[definition.id for definition in executing],
-    )
+    cached: dict[CacheKey, Any] = {}
+    if resolved.cacheable:
+        cached = await repository.rows_for_period(
+            user_id,
+            period=resolved.label,
+            metric_ids=[definition.id for definition in executing],
+        )
     outcomes = evaluate_metrics(
         executing,
         ctx,
@@ -417,7 +422,7 @@ async def batch_metrics(
         items,
         benchmark=selected_benchmark,
         registry=active_registry,
-        fallback_as_of=resolved.end,
+        fallback_as_of=min(resolved.end, clock.today()),
     )
     etag_value = etag or _item_etag_payload(
         "metrics",
@@ -439,6 +444,7 @@ async def batch_metrics(
         items=list(items),
         all_outcomes=list(outcomes),
         etag=etag_value,
+        cacheable=resolved.cacheable,
     )
 
 
@@ -476,9 +482,18 @@ async def detail_metric(
 
 
 async def persist_safely(
-    session: AsyncSession, user_id: uuid.UUID, outcomes: Sequence[MetricOutcome]
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    outcomes: Sequence[MetricOutcome],
+    *,
+    cacheable: bool = True,
 ) -> int:
-    """逐指标 savepoint 写回；失败只记日志，不影响响应（E-01）。"""
+    """逐指标 savepoint 写回；失败只记日志，不影响响应（E-01）。
+
+    `cacheable=False`（自定义区间）不落库，避免无界缓存。
+    """
+    if not cacheable:
+        return 0
     repository = MetricResultRepository(session)
     written = 0
     for outcome in outcomes:

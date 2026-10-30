@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import type { Job, JobAccepted, JobEvent, JobPage, MetricBatch, MetricItem } from "@sa/api-client";
-import { latestCompletedMonth } from "../lib/date";
+import { currentYearToken } from "../lib/date";
 import { Metrics } from "./Metrics";
 import { api } from "../client";
 
@@ -26,14 +26,14 @@ const getJob = vi.mocked(api.jobs.get);
 const jobEvents = vi.mocked(api.jobs.events);
 const rebuildPeriod = vi.mocked(api.jobs.rebuildPeriod);
 
-const CURRENT_MONTH = latestCompletedMonth();
+const CURRENT_PERIOD = currentYearToken();
 
 function makeItem(overrides: Partial<MetricItem> = {}): MetricItem {
   return {
     metric_id: "perf.pnl_ratio",
     definition_version: "1.0",
     domain: "perf",
-    period: CURRENT_MONTH,
+    period: CURRENT_PERIOD,
     status: "ok",
     sample_status: "ok",
     reason: null,
@@ -59,7 +59,7 @@ function makeItem(overrides: Partial<MetricItem> = {}): MetricItem {
       },
       verdict: { level: "neutral", label: "中性", rationale: "经验区间判定" },
       bands: null,
-      window: { kind: "month", label: CURRENT_MONTH },
+      window: { kind: "year", label: CURRENT_PERIOD },
       interpretation: {
         fact: "盈亏比 1.50000000；n=4。",
         meaning: "样本不足，仅展示原始值。",
@@ -73,7 +73,7 @@ function makeItem(overrides: Partial<MetricItem> = {}): MetricItem {
 
 function makeBatch(overrides: Partial<MetricBatch> = {}): MetricBatch {
   return {
-    period: CURRENT_MONTH,
+    period: CURRENT_PERIOD,
     data_as_of: "2026-06-30",
     definition_version: "1.0",
     assumptions: {},
@@ -162,7 +162,7 @@ describe("Metrics 指标页（API-083）", () => {
     vi.clearAllMocks();
   });
 
-  it("进入页面按当月加载指标并渲染值/状态/原因", async () => {
+  it("进入页面按今年加载指标并渲染值/状态/原因", async () => {
     render(
       <MemoryRouter>
         <Metrics />
@@ -170,7 +170,7 @@ describe("Metrics 指标页（API-083）", () => {
     );
     await waitFor(() => expect(batchMetrics).toHaveBeenCalled());
     expect(batchMetrics).toHaveBeenCalledWith({
-      period: CURRENT_MONTH,
+      period: CURRENT_PERIOD,
       include_exploratory: false,
     });
     await screen.findByText("perf.pnl_ratio");
@@ -193,7 +193,7 @@ describe("Metrics 指标页（API-083）", () => {
     fireEvent.click(screen.getByRole("button", { name: "构建复盘数据" }));
     await waitFor(() => expect(rebuildPeriod).toHaveBeenCalled());
     const [body, key] = rebuildPeriod.mock.calls[0]!;
-    expect(body).toEqual({ period: CURRENT_MONTH, include_exploratory: false });
+    expect(body).toEqual({ period: CURRENT_PERIOD, include_exploratory: false });
     expect(typeof key).toBe("string");
     expect(key.length).toBeGreaterThanOrEqual(16);
 
@@ -213,7 +213,7 @@ describe("Metrics 指标页（API-083）", () => {
     fireEvent.click(screen.getByRole("checkbox"));
     await waitFor(() =>
       expect(batchMetrics).toHaveBeenLastCalledWith({
-        period: CURRENT_MONTH,
+        period: CURRENT_PERIOD,
         include_exploratory: true,
       }),
     );

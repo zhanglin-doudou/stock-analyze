@@ -31,7 +31,7 @@
 | **D-08** | Dashboard 数据获取方式 | **新增 `GET /api/v1/dashboard`（API-084）聚合请求字段 + 当前持仓 + 最赚最亏**；旧子块补充指标仍由现有 `/metrics` 获取（前端只展示） | ① 前端拼 `/nav`+`/assets`+`/rounds`+`/metrics`（计算/一致性在前端，违反零口径）；② 扩展 `/assets`（语义混杂） | 新端点让 §1.3 的 15 项字段有唯一来源；旧指标保持现有 API |
 | **D-09** | 当前快照取哪天/是否自动构建 | **只读最新 `asset_daily` 行**（`trade_date ≤ today`），不自动触发构建；**API-084 自身不写任何表**；旧子块按需懒加载，`/nav`/`/metrics` 的既有 GET 物化写不隐瞒；`asset_build.state` 为 `stale/missing/blocked` 时显示状态与"去构建"链接（跳 `/assets`，不自动 job） | ① Dashboard 自动触发 rebuild（有副作用/慢）；② 用实时期末估值（与资产表可能分叉）；③ 首屏同时调 `/nav`+`/metrics`（触发写） | 首屏只调 API-084；数据可能滞后但显式披露；既有 GET 写副作用另行标注 |
 | **D-10** | 图表/可视化依赖 | v1 **不新增图表库**；用 CSS 进度条/文字/简单内联 SVG；ECharts 留到后续（PRD 有要求但当前未依赖） | ① 引入 ECharts（体积/测试成本）；② 不做任何可视化 | 影响"净值曲线"旧卡；可先放占位/后续补 |
-| **D-11** | 旧五卡用哪个 period | **API-084 返回 `legacy_period`（最近有流水/回合的月份；demo=2026-06）**；旧子块所有 `/metrics`、`/nav` 请求显式带该 period；全历史 headline 标注"全历史" | ① 默认当月（demo 全空）；② 用户自选；③ 不显示旧五卡 | 解决同页三套时间口径；history headline 与旧子块明确分开 |
+| **D-11** | 旧五卡用哪个 period | **2026-10-30 修订：指标子块改为年度口径**——API-084 返回 `metrics_period`（`as_of` 所在自然年，如 `2026`）、`metrics_period_start`（1/1）、`metrics_period_end`（=as_of），前端按此自动请求 `/metrics?period={metrics_period}`（低频操作者月度样本不足）；`legacy_period`（最近有流水/回合的月份）保留给归因占位链接；全历史 headline 标注"全历史" | ① 默认当月（demo 全空）；② 用户自选；③ 不显示旧五卡 | 解决同页三套时间口径；history headline 与指标子块（年度）明确分开 |
 | **D-12** | 状态分类法 | **拆两轴**：`build_state`（missing/current/stale/blocked，来自 `asset_build_state`）与 `data_status`（ok/degraded/blocked/insufficient/missing，来自行/指标）；页面状态优先级 `blocked > missing > insufficient > stale > degraded > ok` | 单轴混用（现状评审发现矛盾） | 前后端/测试按两轴映射；避免 stale 与 blocked 冲突 |
 | **D-13** | 缺失清单口径 | 每项给"是否阻塞本任务验收 / 本次是否修 / SKIP 依据 / 占位入口"；G8 红灯、D-19、前端工具链/夹具缺口全部列入 | 只列 API/页面 | 验收可逐项核对，不把"暂停"误判为完成 |
 
@@ -114,7 +114,7 @@
 
 ## 2. 与既有验收的合并矩阵
 
-> **窗口约定（评审 P0-1）**：旧五卡是**月度**口径，必须显式用 `legacy_period`；资产概览 headline 是**最新快照**；历史概览是**全历史**。三种窗口在页面标题/子块上分别标注，禁止混用。
+> **窗口约定（评审 P0-1，2026-10-30 修订）**：指标子块是**年度**口径（`metrics_period`：`as_of` 所在年 1/1 → `as_of`），由 API-084 显式返回并自动加载；资产概览 headline 是**最新快照**；历史概览是**全历史**。三种窗口在页面标题/子块上分别标注，禁止混用。`legacy_period` 仅保留给归因占位链接。
 
 | 旧验收项（DEV-PLAN §3.1 / PRD FR-D1 / Period2-12） | 新位置 | 处理 |
 |---|---|---|
@@ -482,12 +482,12 @@ printf 'SKIP: %s\n' "${SKIPS[@]}"
 1. 打开 `http://localhost:5173/dashboard`：
    - 存在 `data-testid="asset-overview"` / `history-overview`，无第三 section；
    - A1~A7、H1~H8（§1.3）逐项与 `/api/v1/dashboard` 字段相等；`data-value` 逐字符；
-   - 子块显示 `legacy_period=2026-06` 标签；不显示当前月空数据。
+   - 指标子块显示 `metrics_period=2026`（年度：2026-01-01 → as_of）标签并自动加载；`legacy_period` 只用于归因占位链接。
 2. 状态：
    - 正常/`stale`：数字可读 + 黄提示；
    - `blocked`/`missing`：该 section DOM 无金额/百分比，显示原因 + `what_to_do`；
    - 用 pytest 的 blocked fixture（见 §8）验证，不依赖不存在的 `make demo-broken`。
-3. 旧五卡：资产子块有净值 summary/费用/对账横幅；历史子块有四数字（带 n/CI/可信度）/行为/最赚最亏；数字与 `legacy_period` 的 `/metrics`/`/nav` 一致。
+3. 指标子块：年度指标卡按 `metrics_period` 自动加载（年度区间 1/1→as_of 标签），资产子块有净值 summary/费用/对账横幅（`legacy_period`）；历史子块有四数字（带 n/CI/可信度）/行为/最赚最亏。
 4. 下钻：点胜率 → `/metrics/perf.win_rate?period=2026-06`（不再用不支持 query 的 `/rounds?status`）；点最赚/最亏行 → `/rounds/{round_id}`。
 5. 占位入口：Dashboard 按钮 → `/reports`、`/exports`、`/attribution` 占位页（`coming-soon`，`data-dependency` 标明 Period2-09/10/08）；无 `<a download>`、无 job、无假数字；从占位页可返回看板。
 6. 缺失项：按 §7 清单核对；`SKIP` 输出必须列出。
@@ -506,7 +506,7 @@ printf 'SKIP: %s\n' "${SKIPS[@]}"
 | DASH-08 | 无 token 401；admin 403 `ADMIN_CANNOT_READ_TRADES`；B 的 200 响应不含 A 的 `security_code/金额/UUID`；B 无数据 200+missing（不是 404） |
 | DASH-09 | API p95 ≤300ms 目标（5 万行夹具为后续性能任务；未建夹具时标 SKIP，不伪通过）；首屏只调 `/dashboard`，旧子块懒加载 |
 | DASH-10 | `/reports`、`/exports`、`/attribution` 占位页用 **RTL 路由渲染**断言 `coming-soon`、`data-dependency`、无下载/job；`curl` 200 不作为证据 |
-| DASH-11 | 旧子块数字与 `/metrics?period=legacy_period&ids=...`、`/nav?period=legacy_period` 逐项一致（仅 `status=ok` 字段） |
+| DASH-11 | 指标子块数值与 `/metrics?period={metrics_period}&ids=...` 逐项一致（`metrics_period` 年 1/1→as_of，仅 `status=ok` 字段）；`/nav`、对账横幅仍用 `legacy_period` |
 | DASH-12 | 两轴状态映射/未知枚举兜底；`badge-stale/missing/insufficient` 有样式 |
 | DASH-13 | API-084 在 Catalog/OpenAPI/OPERATION_META/gate 计数/隔离矩阵/手写客户端全部登记；无契约漂移 |
 
@@ -528,7 +528,7 @@ printf 'SKIP: %s\n' "${SKIPS[@]}"
 | 8 | 基准数据源/`BenchmarkProvider` | `/nav` beta/alpha 为 null；market_live 拒 hs300_tr；无基准序列 | 是（旧卡①不可满足） | 否 | 资产子块"基准暂不可用"占位 | 缺失 §7.1 |
 | 9 | 对账数据/横幅 | API-026/027 已有，前端无；Dashboard 需读取 | 否（可本任务做） | **是**（读取+横幅） | 无 | Period2-12 |
 | 10 | 可信度标签/下钻 | 指标有 n/CI/sample_status；详情页已有 explain | 否 | **是**（子块+详情链接） | `/metrics/:id` | Period2-12 |
-| 11 | 月度旧卡 period | `/metrics` 默认当月；demo 为 2026-06 | **是** | **是**（`legacy_period`） | 子块标签 | 评审 P0-1 |
+| 11 | 指标子块 period | 2026-10-30：指标子块改年度口径 | 否 | **是**（`metrics_period` 后端返回 + 前端自动加载） | 子块标签"年度指标（YYYY）" | 低频操作者月度样本不足 |
 | 12 | 年化 bp | 无独立字段；fee/fee_breakeven 不等价 | 否 | 否 | 费用子块"暂缺" | 评审 P0-7 |
 
 ### 7.2 前端页面/入口

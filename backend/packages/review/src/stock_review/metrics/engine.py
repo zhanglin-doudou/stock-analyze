@@ -42,7 +42,25 @@ INSUFFICIENT_SAMPLE_STATUS = "insufficient"
 OK_SAMPLE_STATUS = "ok"
 BLOCKED_SAMPLE_STATUS = "blocked"
 
+# period token 种类 → assumptions 里的 period_basis（口径自描述，参与 inputs_hash）。
+PERIOD_BASIS: dict[str, str] = {
+    "month": "natural_month",
+    "year": "natural_year",
+    "custom": "custom_range",
+}
+
 CacheKey = tuple[str, str, str]
+
+
+def _period_kind(ctx: MetricContext) -> str:
+    return str(getattr(ctx, "period_kind", "month") or "month")
+
+
+def _scope(definition: MetricDef, ctx: MetricContext) -> dict[str, str]:
+    """def 的静态 scope + 本次 period 种类（月/年/自定义）。"""
+    scope = definition.scope.to_dict()
+    scope["period"] = _period_kind(ctx)
+    return scope
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,7 +146,7 @@ def _base_assumptions(ctx: MetricContext) -> dict[str, Any]:
         "A": A_SHUFFLE_DAYS,
         "engine_version": ENGINE_VERSION,
         "calendar": getattr(ctx.calendar, "assumption", "weekday_proxy"),
-        "period_basis": "natural_month",
+        "period_basis": PERIOD_BASIS.get(_period_kind(ctx), "natural_month"),
         "adjust": "raw",
     }
     if ctx.benchmark is not None:
@@ -207,7 +225,7 @@ def _cached_outcome(
         metric_id=definition.id,
         definition_version=definition.definition_version,
         domain=definition.domain,
-        scope=definition.scope.to_dict(),
+        scope=_scope(definition, ctx),
         period=ctx.period,
         params=params,
         params_hash=params_fingerprint,
@@ -244,7 +262,7 @@ def _blocked_outcome(
         metric_id=definition.id,
         definition_version=definition.definition_version,
         domain=definition.domain,
-        scope=definition.scope.to_dict(),
+        scope=_scope(definition, ctx),
         period=ctx.period,
         params=params,
         params_hash=params_fingerprint,
@@ -386,7 +404,7 @@ def evaluate_metrics(
             metric_id=definition.id,
             definition_version=definition.definition_version,
             domain=definition.domain,
-            scope=definition.scope.to_dict(),
+            scope=_scope(definition, ctx),
             period=ctx.period,
             params=params,
             params_hash=params_fingerprint,

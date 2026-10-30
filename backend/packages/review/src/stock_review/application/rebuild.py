@@ -14,7 +14,6 @@
 
 from __future__ import annotations
 
-import calendar
 import hashlib
 import uuid
 from dataclasses import asdict, dataclass
@@ -34,6 +33,7 @@ from stock_platform.jobs import JobQueue
 from stock_platform.obs import get_logger
 
 from stock_review.application.bond_alias import build_bond_alias, canonical_code
+from stock_review.metrics.context import parse_period_label
 from stock_review.models import Round, RoundBuildState
 from stock_review.repositories.rounds import FillInput, RoundInput, RoundRepository
 
@@ -412,17 +412,13 @@ async def rebuild_rounds_for_user(
     )
 
 
-def parse_period(period: str) -> tuple[date, date]:
-    """`YYYY-MM` → (月初, 月末)；非法格式抛 `INVALID_PERIOD`。"""
-    try:
-        year_text, month_text = period.strip().split("-", 1)
-        year, month = int(year_text), int(month_text)
-        if year < 1970 or not 1 <= month <= 12:
-            raise ValueError
-    except (AttributeError, TypeError, ValueError) as exc:
-        raise ApiError(ErrorCode.INVALID_PERIOD, detail=f"period 非法: {period!r}") from exc
-    last_day = calendar.monthrange(year, month)[1]
-    return date(year, month, 1), date(year, month, last_day)
+def parse_period(period: str, *, today: date) -> tuple[date, date]:
+    """period token（`YYYY-MM` / `YYYY` / `YYYY-MM-DD..YYYY-MM-DD`）→ (start, end) 闭区间。
+
+    解析口径与指标层同源（`metrics.context.parse_period_label`），非法一律 `INVALID_PERIOD`。
+    """
+    resolved = parse_period_label(period, today=today)
+    return resolved.start, resolved.end
 
 
 def _jsonable(value: Any) -> Any:
@@ -449,8 +445,11 @@ async def rebuild_rounds_job(
     if scope == "period":
         period = str(params.get("period") or "")
         if not period:
-            raise ApiError(ErrorCode.INVALID_PERIOD, detail="scope=period 需要 period(YYYY-MM)")
-        period_start, period_end = parse_period(period)
+            raise ApiError(
+                ErrorCode.INVALID_PERIOD,
+                detail="scope=period 需要 period(YYYY-MM / YYYY / YYYY-MM-DD..YYYY-MM-DD)",
+            )
+        period_start, period_end = parse_period(period, today=clock.today())
 
     await queue.progress(session, job_id, percent=10, stage="recomputing", message=None)
     if await queue.is_cancel_requested(session, job_id):

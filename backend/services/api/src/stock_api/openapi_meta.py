@@ -1371,6 +1371,9 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
             "as_of": "2026-06-30",
             "data_as_of": _DATE,
             "legacy_period": "2026-06",
+            "metrics_period": "2026",
+            "metrics_period_start": "2026-01-01",
+            "metrics_period_end": "2026-06-30",
             "status": "ok",
             "build_state": "current",
             "definition_version": "1.0",
@@ -1441,7 +1444,7 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
             "links": {
                 "assets": "/assets",
                 "rounds": "/rounds",
-                "metrics": "/metrics?period=2026-06",
+                "metrics": "/metrics?period=2026",
                 "reports": "/reports",
                 "exports": "/exports",
                 "attribution": "/attribution?period=2026-06",

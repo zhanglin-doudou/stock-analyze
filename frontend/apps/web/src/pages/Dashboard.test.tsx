@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import {
@@ -44,6 +44,9 @@ function makeDashboard(overrides: Partial<DashboardOut> = {}): DashboardOut {
     as_of: "2026-07-01",
     data_as_of: "2026-09-30",
     legacy_period: "2026-06",
+    metrics_period: "2026",
+    metrics_period_start: "2026-01-01",
+    metrics_period_end: "2026-07-01",
     status: "ok",
     build_state: "current",
     definition_version: "1.0",
@@ -201,7 +204,7 @@ function missingDashboard(): DashboardOut {
 
 function makeMetricBatch(): MetricBatch {
   return {
-    period: "2026-06",
+    period: "2026",
     definition_version: "1.0",
     data_as_of: "2026-06-30",
     assumptions: {},
@@ -210,7 +213,7 @@ function makeMetricBatch(): MetricBatch {
         metric_id: "perf.total_return",
         definition_version: "1.0",
         domain: "perf",
-        period: "2026-06",
+        period: "2026",
         status: "ok",
         sample_status: "ok",
         reason: null,
@@ -328,12 +331,12 @@ describe("Dashboard 看板", () => {
     expect(screen.getByTestId("link-attribution").getAttribute("href")).toBe(
       "/attribution?period=2026-06",
     );
-    expect(screen.getByTestId("link-legacy-metrics").getAttribute("href")).toBe(
-      "/metrics?period=2026-06",
+    expect(screen.getByTestId("link-annual-metrics").getAttribute("href")).toBe(
+      "/metrics?period=2026",
     );
 
-    // 旧五卡按需加载：进入页面不触发 metrics 请求。
-    expect(batchMetrics).not.toHaveBeenCalled();
+    // 年度指标自动加载（metrics_period = 今年），无需手动点击。
+    await waitFor(() => expect(batchMetrics).toHaveBeenCalledWith({ period: "2026" }));
     expect(screen.queryByTestId("missing-list")).toBeNull();
   });
 
@@ -359,17 +362,15 @@ describe("Dashboard 看板", () => {
     expect(screen.getByTestId("kpi-max-drawdown").textContent).toContain("阻断");
   });
 
-  it("FT-03 旧五卡按需加载：点击后用 legacy_period 请求并原样展示 value", async () => {
+  it("FT-03 年度指标自动加载：用 metrics_period 请求并原样展示 value", async () => {
     renderPage();
     await screen.findByTestId("asset-overview");
 
-    fireEvent.click(screen.getByRole("button", { name: "加载月度指标" }));
-
-    await waitFor(() => expect(batchMetrics).toHaveBeenCalledWith({ period: "2026-06" }));
+    await waitFor(() => expect(batchMetrics).toHaveBeenCalledWith({ period: "2026" }));
     expect(await screen.findByText("perf.total_return")).toBeTruthy();
-    const legacy = screen.getByTestId("legacy-metrics");
-    expect(legacy.textContent).toContain("12.34");
-    expect(legacy.textContent).toContain("元");
+    const annual = screen.getByTestId("annual-metrics");
+    expect(annual.textContent).toContain("12.34");
+    expect(annual.textContent).toContain("元");
   });
 
   it("FT-04 零口径：源码不含 Number/parseFloat/parseInt/toFixed", () => {

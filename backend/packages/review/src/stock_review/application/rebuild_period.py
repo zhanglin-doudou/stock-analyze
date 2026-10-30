@@ -1,10 +1,12 @@
-"""按月一键构建编排（API-083）：rounds → assets → nav → metrics。
+"""一键构建编排（API-083）：rounds → assets → nav → metrics。
 
+- period token 支持 `YYYY-MM`（月）/ `YYYY`（年）/ `YYYY-MM-DD..YYYY-MM-DD`（自定义区间）；
 - 单 job 单事务（runner `tenant_tx`）：任一阶段失败整体回滚，重跑即阶段级恢复
   （rounds 确定性 ID 删后重插、assets 指纹/水位线增量、nav UPSERT、metrics UPSERT）；
 - 阶段间检查取消标记（API-064 检查点语义），progress 单调不减；
 - metrics 阶段消费同一事务内的 asset_daily/nav —— 与 /nav 同一资产口径；
-- 物化含 blocked/stale 状态行（`persist_outcome(force=True)`），非 ok 不硬算数值。
+- 物化含 blocked/stale 状态行（`persist_outcome(force=True)`），非 ok 不硬算数值；
+  自定义区间不落 `metric_result`（无界缓存）。
 """
 
 from __future__ import annotations
@@ -25,6 +27,7 @@ from stock_review.application.assets import build_assets
 from stock_review.application.metrics import batch_metrics
 from stock_review.application.nav import compute_and_store_nav
 from stock_review.application.rebuild import parse_period, rebuild_rounds_for_user
+from stock_review.metrics.context import period_is_cacheable
 from stock_review.metrics.persist import persist_outcome
 from stock_review.repositories.metrics import MetricResultRepository
 
@@ -52,8 +55,12 @@ async def rebuild_period_job(
     include_exploratory = bool(params.get("include_exploratory", False))
     rf_annual = Decimal(str(params.get("rf_annual") or "0.015"))
     if not period:
-        raise ApiError(ErrorCode.INVALID_PERIOD, detail="rebuild_period 需要 period(YYYY-MM)")
-    period_start, period_end = parse_period(period)
+        raise ApiError(
+            ErrorCode.INVALID_PERIOD,
+            detail="rebuild_period 需要 period(YYYY-MM / YYYY / YYYY-MM-DD..YYYY-MM-DD)",
+        )
+    period_start, period_end = parse_period(period, today=clock.today())
+    cacheable = period_is_cacheable(period)
 
     async def cancel_checkpoint() -> bool:
         if await queue.is_cancel_requested(session, job_id):
@@ -131,6 +138,8 @@ async def rebuild_period_job(
     statuses: dict[str, int] = {}
     for outcome in batch.all_outcomes:
         statuses[outcome.status] = statuses.get(outcome.status, 0) + 1
+        if not cacheable:
+            continue
         try:
             async with session.begin_nested():
                 if await persist_outcome(repository, user_id, outcome, force=True):

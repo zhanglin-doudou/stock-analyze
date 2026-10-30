@@ -187,7 +187,7 @@ export interface paths {
         };
         /**
          * Get Dashboard Endpoint
-         * @description API-084：Dashboard 两板块聚合（只读；旧五卡按 legacy_period 懒加载）。
+         * @description API-084：Dashboard 两板块聚合（只读；年度指标按 metrics_period 懒加载）。
          */
         get: operations["getDashboard"];
         put?: never;
@@ -1463,7 +1463,7 @@ export interface components {
         };
         /**
          * DashboardLinksOut
-         * @description 下钻/占位页链接（旧五卡按 `legacy_period` 懒加载）。
+         * @description 下钻/占位页链接（年度指标按 `metrics_period` 懒加载）。
          */
         DashboardLinksOut: {
             /** Assets */
@@ -1558,6 +1558,18 @@ export interface components {
             /** Legacy Period */
             legacy_period: string;
             links: components["schemas"]["DashboardLinksOut"];
+            /** Metrics Period */
+            metrics_period: string;
+            /**
+             * Metrics Period End
+             * Format: date
+             */
+            metrics_period_end: string;
+            /**
+             * Metrics Period Start
+             * Format: date
+             */
+            metrics_period_start: string;
             /** Missing */
             missing: components["schemas"]["DashboardMissingOut"][];
             /**
@@ -2433,7 +2445,9 @@ export interface components {
         };
         /**
          * RebuildPeriodIn
-         * @description API-083：按月一键构建编排（rounds → assets → nav → metrics）。
+         * @description API-083：一键构建编排（rounds → assets → nav → metrics）。
+         *
+         *     `period` 支持三种 token：`YYYY-MM`（月）/ `YYYY`（年）/ `YYYY-MM-DD..YYYY-MM-DD`（自定义区间）。
          */
         RebuildPeriodIn: {
             /**

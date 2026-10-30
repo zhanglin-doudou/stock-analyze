@@ -185,6 +185,9 @@ class MetricContext(Protocol):
     def period_end(self) -> date: ...
 
     @property
+    def period_kind(self) -> str: ...
+
+    @property
     def as_of(self) -> date: ...
 
     @property

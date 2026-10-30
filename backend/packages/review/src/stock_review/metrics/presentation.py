@@ -397,13 +397,17 @@ def build_presentation(
     )
     progress = _progress(outcome, definition, lang)
     verdict = _verdict(outcome, sem, lang)
+    period_kind = str(outcome.scope.get("period", "month"))
     window = (
         {
             "kind": "trailing_60td",
             "label": "截至期末 60 个交易日" if lang == "zh" else "trailing 60 trading days",
         }
         if definition.sample_policy.min_trading_days > 0
-        else {"kind": "month", "label": outcome.period}
+        else {
+            "kind": {"month": "month", "year": "year"}.get(period_kind, "custom_range"),
+            "label": outcome.period,
+        }
     )
     bands = None
     if sem.bands:

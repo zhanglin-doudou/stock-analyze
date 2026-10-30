@@ -2,8 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useParams, useSearchParams } from "react-router-dom";
 import type { MetricDrilldown, MetricDrilldownItem, MetricExplain } from "@sa/api-client";
 import { api } from "../client";
-import { latestCompletedMonth } from "../lib/date";
-import { MonthInput } from "../ui/MonthInput";
+import { currentYearToken } from "../lib/date";
+import { PeriodInput } from "../ui/PeriodInput";
 import { ProblemView } from "../ui/Problem";
 import { DataTable, type DataTableColumn } from "../ui/DataTable";
 import "./detail.css";
@@ -33,7 +33,7 @@ function drilldownValue(item: MetricDrilldownItem): string {
 export function MetricDetail() {
   const { metricId = "" } = useParams();
   const [searchParams, setSearchParams] = useSearchParams();
-  const period = searchParams.get("period") ?? latestCompletedMonth();
+  const period = searchParams.get("period") ?? currentYearToken();
   const [explain, setExplain] = useState<MetricExplain | null>(null);
   const [drilldown, setDrilldown] = useState<MetricDrilldown | null>(null);
   const [loading, setLoading] = useState(false);
@@ -111,8 +111,8 @@ export function MetricDetail() {
       <div className="detail-toolbar">
         <div className="row-actions">
           <label>
-            月份{" "}
-            <MonthInput
+            期间{" "}
+            <PeriodInput
               value={period}
               onChange={(value) => setSearchParams({ period: value })}
             />

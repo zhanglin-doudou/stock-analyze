@@ -344,6 +344,9 @@ async def test_api_084_happy_path_two_sections(
     assert body["as_of"] == "2026-07-01"
     assert body["data_as_of"] == "2026-09-30"
     assert body["legacy_period"] == "2026-06"
+    assert body["metrics_period"] == "2026"
+    assert body["metrics_period_start"] == "2026-01-01"
+    assert body["metrics_period_end"] == "2026-07-01"
     assert body["missing"] == []
 
     asset = body["asset_overview"]
@@ -428,7 +431,7 @@ async def test_api_084_happy_path_two_sections(
     assert body["links"] == {
         "assets": "/assets",
         "rounds": "/rounds",
-        "metrics": "/metrics?period=2026-06",
+        "metrics": "/metrics?period=2026",
         "reports": "/reports",
         "exports": "/exports",
         "attribution": "/attribution?period=2026-06",
@@ -450,6 +453,9 @@ async def test_api_084_not_built_is_missing(dashboard_client: Any, account_facto
     assert body["build_state"] == "missing"
     assert body["data_as_of"] is None
     assert body["legacy_period"] == "2026-07"
+    assert body["metrics_period"] == "2026"
+    assert body["metrics_period_start"] == "2026-01-01"
+    assert body["metrics_period_end"] == "2026-07-01"
 
     asset = body["asset_overview"]
     assert asset["status"] == "missing"

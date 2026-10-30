@@ -28,6 +28,7 @@ from stock_review.application.metrics import (
     persist_safely,
 )
 from stock_review.metrics.base import METRIC_ID_PATTERN, format_units
+from stock_review.metrics.context import period_is_cacheable
 from stock_review.metrics.engine import MetricOutcome
 from stock_review.metrics.presentation import build_presentation
 
@@ -190,7 +191,7 @@ async def metrics_batch_endpoint(
             include_exploratory=include_exploratory,
             etag=etag_value,
         )
-        await persist_safely(session, user_id, result.all_outcomes)
+        await persist_safely(session, user_id, result.all_outcomes, cacheable=result.cacheable)
 
     response.headers["ETag"] = etag_header
     return MetricBatchOut(
@@ -370,7 +371,7 @@ async def metrics_detail_endpoint(
         etag_header = f'W/"{etag}"'
         if _if_none_match_hit(request.headers.get("if-none-match"), etag):
             return Response(status_code=304, headers={"ETag": etag_header})
-        await persist_safely(session, user_id, [outcome])
+        await persist_safely(session, user_id, [outcome], cacheable=period_is_cacheable(period))
 
     response.headers["ETag"] = etag_header
     return _item_out(outcome)

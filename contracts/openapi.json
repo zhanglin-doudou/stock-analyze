@@ -1443,7 +1443,7 @@
       },
       "DashboardLinksOut": {
         "additionalProperties": false,
-        "description": "下钻/占位页链接（旧五卡按 `legacy_period` 懒加载）。",
+        "description": "下钻/占位页链接（年度指标按 `metrics_period` 懒加载）。",
         "properties": {
           "assets": {
             "title": "Assets",
@@ -1694,6 +1694,20 @@
           "links": {
             "$ref": "#/components/schemas/DashboardLinksOut"
           },
+          "metrics_period": {
+            "title": "Metrics Period",
+            "type": "string"
+          },
+          "metrics_period_end": {
+            "format": "date",
+            "title": "Metrics Period End",
+            "type": "string"
+          },
+          "metrics_period_start": {
+            "format": "date",
+            "title": "Metrics Period Start",
+            "type": "string"
+          },
           "missing": {
             "items": {
               "$ref": "#/components/schemas/DashboardMissingOut"
@@ -1717,6 +1731,9 @@
         "required": [
           "as_of",
           "legacy_period",
+          "metrics_period",
+          "metrics_period_start",
+          "metrics_period_end",
           "status",
           "build_state",
           "definition_version",
@@ -4087,7 +4104,7 @@
       },
       "RebuildPeriodIn": {
         "additionalProperties": false,
-        "description": "API-083：按月一键构建编排（rounds → assets → nav → metrics）。",
+        "description": "API-083：一键构建编排（rounds → assets → nav → metrics）。\n\n`period` 支持三种 token：`YYYY-MM`（月）/ `YYYY`（年）/ `YYYY-MM-DD..YYYY-MM-DD`（自定义区间）。",
         "properties": {
           "include_exploratory": {
             "default": false,
@@ -4095,8 +4112,8 @@
             "type": "boolean"
           },
           "period": {
-            "maxLength": 7,
-            "minLength": 7,
+            "maxLength": 23,
+            "minLength": 4,
             "title": "Period",
             "type": "string"
           }
@@ -7087,7 +7104,7 @@
     },
     "/api/v1/dashboard": {
       "get": {
-        "description": "API-084：Dashboard 两板块聚合（只读；旧五卡按 legacy_period 懒加载）。",
+        "description": "API-084：Dashboard 两板块聚合（只读；年度指标按 metrics_period 懒加载）。",
         "operationId": "getDashboard",
         "parameters": [
           {
@@ -7207,10 +7224,13 @@
                     "assets": "/assets",
                     "attribution": "/attribution?period=2026-06",
                     "exports": "/exports",
-                    "metrics": "/metrics?period=2026-06",
+                    "metrics": "/metrics?period=2026",
                     "reports": "/reports",
                     "rounds": "/rounds"
                   },
+                  "metrics_period": "2026",
+                  "metrics_period_end": "2026-06-30",
+                  "metrics_period_start": "2026-01-01",
                   "missing": [],
                   "status": "ok"
                 },
