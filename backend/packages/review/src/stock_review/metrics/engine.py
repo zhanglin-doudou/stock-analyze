@@ -8,6 +8,7 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date, datetime
@@ -41,6 +42,8 @@ PENDING_SAMPLE_STATUS = "pending_window"
 INSUFFICIENT_SAMPLE_STATUS = "insufficient"
 OK_SAMPLE_STATUS = "ok"
 BLOCKED_SAMPLE_STATUS = "blocked"
+
+logger = logging.getLogger(__name__)
 
 # period token 种类 → assumptions 里的 period_basis（口径自描述，参与 inputs_hash）。
 PERIOD_BASIS: dict[str, str] = {
@@ -347,6 +350,17 @@ def evaluate_metrics(
         )
 
         decision = decide(definition, ctx)
+        if decision.status != STATUS_OK:
+            log = (
+                logger.warning if decision.status in (STATUS_BLOCKED, STATUS_STALE) else logger.info
+            )
+            log(
+                "metric gated: metric=%s period=%s status=%s reason=%s",
+                definition.id,
+                ctx.period,
+                decision.status,
+                decision.reason,
+            )
         if decision.status in (STATUS_BLOCKED, STATUS_STALE):
             outcome = _blocked_outcome(
                 definition,
@@ -383,7 +397,16 @@ def evaluate_metrics(
             continue
 
         bound = cast(MetricContext, _ParamsContext(ctx, params["params"]))
-        value = definition.compute(bound)
+        try:
+            value = definition.compute(bound)
+        except Exception:
+            logger.exception(
+                "metric compute failed: metric=%s period=%s user=%s",
+                definition.id,
+                ctx.period,
+                ctx.user_id,
+            )
+            raise
         assert_no_status_leak(value)
         sample_status = _sample_status(definition, value, ctx)
         status = decision.status

@@ -147,6 +147,27 @@ async def rebuild_period_job(
         except Exception:
             logger.warning("rebuild_period persist failed: %s", outcome.metric_id, exc_info=True)
 
+    logger.info(
+        "rebuild_period metrics: job=%s period=%s computed=%d persisted=%d statuses=%s",
+        job_id,
+        period,
+        len(batch.all_outcomes),
+        persisted,
+        statuses,
+    )
+    degraded_outcomes = [
+        f"{outcome.metric_id}:{outcome.status}:{outcome.reason}"
+        for outcome in batch.all_outcomes
+        if outcome.status != "ok" or outcome.sample_status != "ok"
+    ]
+    if degraded_outcomes:
+        logger.warning(
+            "rebuild_period metrics non-ok: job=%s period=%s details=%s",
+            job_id,
+            period,
+            degraded_outcomes,
+        )
+
     result: dict[str, Any] = {
         "period": period,
         "include_exploratory": include_exploratory,

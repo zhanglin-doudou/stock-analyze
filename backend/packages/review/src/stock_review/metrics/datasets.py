@@ -6,7 +6,9 @@
 
 from __future__ import annotations
 
+import logging
 import uuid
+from collections.abc import Sequence
 from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
@@ -34,7 +36,12 @@ from stock_review.models import AssetBuildState, AssetDaily, Round, RoundFill
 from stock_review.repositories.metrics import MetricDatasetRepository
 
 DEFAULT_BENCHMARK = "hs300_tr"
+# 组合日收益越界阈值（标度 1e8）：|日收益| > 100% 基本是标度/桥接错误。
 _SCALE_RATIO_BOUND = 10**8
+# 回合收益越界阈值（标度 1e8）：新股首日/借壳/多年长持可合法超过 100%（如 IPO 4 日 +153%），
+# 只有 |回合收益| > 100 倍才判定为标度污染。阈值过紧会让一个合法极端回合污染整批指标
+# （data_out_of_range 是全局 flag，2026-10-30 线上事故：单只新股致年度 10/10 指标 unreliable）。
+_ROUND_RETURN_BOUND = 10**10
 # 风险/择时指标需要「截至期末的滚动窗口」而不是自然月内样本：资产日视图向前多取
 # 120 自然日（≈80 个交易日），供 beta 的 60TD 配对与 drawdown 的 60TD 窗口使用。
 _ASSET_LOOKBACK_DAYS = 120
@@ -44,6 +51,36 @@ _ASSET_LOOKBACK_DAYS = 120
 BAR_FORWARD_DAYS = 120
 # 伪代码/非证券行：不参与行情请求（CASH 是现金余额占位，货基由 money_fund 列标记）。
 _PSEUDO_CODES = frozenset({"CASH"})
+
+logger = logging.getLogger(__name__)
+
+
+def out_of_range_rows(
+    rounds_raw: Sequence[Round], asset_period_raw: Sequence[AssetDaily]
+) -> tuple[str, ...]:
+    """返回触发 data_out_of_range 的行级明细（供日志/排障）；空 tuple = 未越界。
+
+    判定分两级：回合收益用 `_ROUND_RETURN_BOUND`（合法极端收益不误伤），
+    组合日收益用 `_SCALE_RATIO_BOUND`（单日 ±100% 基本是数据错误）。
+    """
+    rows: list[str] = []
+    for round_row in rounds_raw:
+        if abs(round_row.return_rate_units) > _ROUND_RETURN_BOUND:
+            rows.append(
+                f"round {round_row.security_code} {round_row.open_date}~{round_row.close_date} "
+                f"return_rate_units={round_row.return_rate_units}"
+            )
+    for asset_row in asset_period_raw:
+        if (
+            asset_row.daily_return_units is not None
+            and abs(asset_row.daily_return_units) > _SCALE_RATIO_BOUND
+        ):
+            rows.append(
+                f"asset_daily {asset_row.trade_date} daily_return_units={asset_row.daily_return_units}"
+            )
+    return tuple(rows)
+
+
 # live 模式下总收益指数暂以对应 ETF 作为代理（akshare 无 hs300_tr 全收益序列）；
 # replay 模式保留原 symbol，避免破坏回放夹具。接入正式全收益指数后删除本表。
 _BENCHMARK_LIVE_PROXY: dict[str, str] = {
@@ -382,12 +419,15 @@ async def load_viewset(
     fingerprints["calendar"] = inputs_hash({"dataset": "calendar", "assumption": "weekday_proxy"})
 
     # ── 门禁 flags（§6.3）──────────────────────────────────
-    ratio_out_of_range = any(
-        abs(row.return_rate_units) > _SCALE_RATIO_BOUND for row in rounds_raw
-    ) or any(
-        row.daily_return_units is not None and abs(row.daily_return_units) > _SCALE_RATIO_BOUND
-        for row in asset_period_raw
-    )
+    out_of_range = out_of_range_rows(rounds_raw, asset_period_raw)
+    if out_of_range:
+        logger.warning(
+            "metrics viewset data_out_of_range: user=%s period=%s~%s rows=%s",
+            user_id,
+            period_start,
+            period_end,
+            list(out_of_range),
+        )
     density = (
         (Decimal(bar_observed_days) / Decimal(calendar_days.trading_days))
         if calendar_days.trading_days
@@ -400,13 +440,22 @@ async def load_viewset(
         "asset_build_blocked": asset_build.state == "blocked",
         "asset_build_stale": asset_build.state == "stale",
         "market_asof_lag": bool(market_as_of is not None and market_as_of < min(today, period_end)),
-        "data_out_of_range": ratio_out_of_range,
+        "data_out_of_range": bool(out_of_range),
         "bar_density_low": bool(density < Decimal("0.8")),
         # 部分标的缺行情：不阻断（指标按可得样本算，n 体现覆盖），留 flag 供排障/文案。
         "bars_partial": bool(bars_missing_symbols) and not bars_missing,
         "degraded_rows": any(row.status in {"degraded", "blocked"} for row in asset_period_raw),
         "recon_blocked": any(row.status == "blocked" for row in asset_period_raw),
     }
+    active_flags = sorted(name for name, on in flags.items() if on)
+    if active_flags:
+        logger.info(
+            "metrics viewset flags: user=%s period=%s~%s flags=%s",
+            user_id,
+            period_start,
+            period_end,
+            active_flags,
+        )
 
     return ViewSet(
         rounds=tuple(_round_view(row) for row in rounds_raw),
@@ -425,4 +474,4 @@ async def load_viewset(
     )
 
 
-__all__ = ["DEFAULT_BENCHMARK", "load_viewset"]
+__all__ = ["DEFAULT_BENCHMARK", "load_viewset", "out_of_range_rows"]

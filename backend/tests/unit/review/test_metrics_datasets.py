@@ -21,6 +21,7 @@ from stock_review.metrics.datasets import (
     _bars_for_symbols,
     benchmark_fetch_symbol,
     metric_symbols,
+    out_of_range_rows,
 )
 from stock_review.metrics.defs._common import asset_days_window
 from stock_review.metrics.gate import decide
@@ -147,3 +148,39 @@ def test_bar_density_low_does_not_penalize_asset_only_metric() -> None:
         make_context(flags={"bar_density_low": True}),
     )
     assert decision.status == "ok"
+
+
+# ── data_out_of_range 行级判定 ──────────────────────────────
+
+
+def _round_return(units: int) -> SimpleNamespace:
+    return SimpleNamespace(
+        security_code="001237",
+        open_date=date(2026, 5, 18),
+        close_date=date(2026, 5, 22),
+        return_rate_units=units,
+    )
+
+
+def _asset_day_return(units: int | None) -> SimpleNamespace:
+    return SimpleNamespace(trade_date=date(2026, 10, 30), daily_return_units=units)
+
+
+def test_out_of_range_allows_legitimate_extreme_round_return() -> None:
+    # 新股上市 4 日 +153%（合法极端收益，data_error=false）不得污染整批指标。
+    assert out_of_range_rows([_round_return(153_315_096)], []) == ()
+    # 恰好 100 倍（1e10）不算越界（严格大于才触发）。
+    assert out_of_range_rows([_round_return(10**10)], []) == ()
+
+
+def test_out_of_range_flags_round_scale_corruption() -> None:
+    rows = out_of_range_rows([_round_return(10**10 + 1)], [])
+    assert len(rows) == 1
+    assert "001237" in rows[0] and "return_rate_units" in rows[0]
+
+
+def test_out_of_range_flags_daily_return_over_100pct() -> None:
+    # 组合单日收益 |r|>100% 基本是桥接/标度错误，维持紧阈值。
+    assert out_of_range_rows([], [_asset_day_return(100_000_001)]) != ()
+    assert out_of_range_rows([], [_asset_day_return(100_000_000)]) == ()
+    assert out_of_range_rows([], [_asset_day_return(None)]) == ()
