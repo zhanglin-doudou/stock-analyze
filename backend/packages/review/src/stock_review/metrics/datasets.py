@@ -19,7 +19,7 @@ from stock_contracts.errors import ApiError, ErrorCode
 from stock_platform.ports import MarketDataSource
 from stock_platform.symbols import classify_symbol
 
-from stock_review.application.assets import ASSET_DEFINITION_VERSION
+from stock_review.application.assets import ASSET_DEFINITION_VERSION, latest_workday
 from stock_review.application.bond_alias import build_bond_alias, canonical_code
 from stock_review.metrics.views import (
     AssetBuildView,
@@ -199,11 +199,13 @@ def _asset_build_view(
             definition_version=state.definition_version if state is not None else None,
             last_built_through=None,
         )
+    # 与 GET /assets 的状态判定同口径（assets.py rule 6/7）：周六/周日不判 stale——
+    # 资产表周末不写行，last_built_through 停在周五；行情覆盖日同理对齐工作日。
     stale = (
         state.definition_version != ASSET_DEFINITION_VERSION
         or state.data_as_of is None
-        or (market_as_of is not None and market_as_of > state.data_as_of)
-        or today > state.last_built_through
+        or (market_as_of is not None and latest_workday(market_as_of) > state.data_as_of)
+        or latest_workday(today) > state.last_built_through
     )
     return AssetBuildView(
         state="stale" if stale else "current",
@@ -439,7 +441,11 @@ async def load_viewset(
         "asset_build_missing": asset_build.state == "missing",
         "asset_build_blocked": asset_build.state == "blocked",
         "asset_build_stale": asset_build.state == "stale",
-        "market_asof_lag": bool(market_as_of is not None and market_as_of < min(today, period_end)),
+        # 阈值对齐工作日：周末/节假日行情不会前进，周五缓存不应在周六判 lag。
+        "market_asof_lag": bool(
+            market_as_of is not None
+            and latest_workday(market_as_of) < latest_workday(min(today, period_end))
+        ),
         "data_out_of_range": bool(out_of_range),
         "bar_density_low": bool(density < Decimal("0.8")),
         # 部分标的缺行情：不阻断（指标按可得样本算，n 体现覆盖），留 flag 供排障/文案。

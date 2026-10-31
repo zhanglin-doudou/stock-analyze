@@ -580,8 +580,11 @@ def _symbols(live: list[Trade], bond_alias: dict[str, str] | None = None) -> lis
     )
 
 
-def _latest_workday(day: date) -> date:
-    """最近工作日（周六/周日回退到周五）；资产表周末不写行。"""
+def latest_workday(day: date) -> date:
+    """最近工作日（周六/周日回退到周五）；资产表周末不写行。
+
+    构建终点、状态判定（本模块与 metrics 门禁）共用，保证「周末不判 stale」口径一致。
+    """
     while day.weekday() >= 5:
         day -= timedelta(days=1)
     return day
@@ -651,7 +654,7 @@ async def build_assets(
     start = min(trade.trade_date for trade in live)
     # 资产表只在工作日写行（周六/周日跳过，设计 §5.3）：末行日期对齐到最近工作日，
     # 避免水位线停在周末导致下次增量「窗口前一日本无行」而误触发全量。
-    end = _latest_workday(clock.today())
+    end = latest_workday(clock.today())
 
     # 可转债发债→上市代码别名（设计 D3）：回合/持仓/行情请求统一用 canonical 代码。
     bond_alias, bond_alias_unresolved = build_bond_alias(
@@ -1069,7 +1072,7 @@ async def _build_state_view(
         base.has_new_market_data = True
         return base
     # 7) 有新工作日；周六/周日不判 stale（资产表周末不写行）。
-    if _latest_workday(clock.today()) > state.last_built_through:
+    if latest_workday(clock.today()) > state.last_built_through:
         base.state = STATE_STALE
     return base
 

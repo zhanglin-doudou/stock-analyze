@@ -17,7 +17,9 @@ from types import SimpleNamespace
 import pytest
 from stock_contracts.errors import ApiError, ErrorCode
 from stock_platform.ports import Bar, MarketCapabilities
+from stock_review.application.assets import ASSET_DEFINITION_VERSION
 from stock_review.metrics.datasets import (
+    _asset_build_view,
     _bars_for_symbols,
     benchmark_fetch_symbol,
     metric_symbols,
@@ -129,6 +131,42 @@ def test_asset_days_window_takes_last_n_weekdays_including_weekend_rows() -> Non
     assert len(weekdays) == 60
     assert window[0].trade_date <= weekdays[0].trade_date
     assert window[-1].trade_date == rows[-1].trade_date
+
+
+# ── asset_build 状态判定：周末不误判 stale ────────────────────
+
+
+def _build_state(*, data_as_of: date, last_built_through: date) -> SimpleNamespace:
+    return SimpleNamespace(
+        definition_version=ASSET_DEFINITION_VERSION,
+        data_as_of=data_as_of,
+        last_built_through=last_built_through,
+        updated_at=None,
+        version=1,
+        last_status="ok",
+    )
+
+
+def test_asset_build_view_current_on_weekend() -> None:
+    """周六查询：last_built_through/data_as_of 停在周五，与 GET /assets 同口径不判 stale。"""
+    state = _build_state(data_as_of=date(2026, 10, 30), last_built_through=date(2026, 10, 30))
+    for today in (date(2026, 10, 31), date(2026, 11, 1)):  # 周六 / 周日
+        view = _asset_build_view(state, market_as_of=date(2026, 10, 30), today=today)
+        assert view.state == "current", today
+
+
+def test_asset_build_view_stale_when_new_workday_or_market_ahead() -> None:
+    state = _build_state(data_as_of=date(2026, 10, 30), last_built_through=date(2026, 10, 30))
+    # 周一（下一个工作日）未重建 → stale。
+    assert (
+        _asset_build_view(state, market_as_of=date(2026, 10, 30), today=date(2026, 11, 2)).state
+        == "stale"
+    )
+    # 行情覆盖日前进到下一交易日 → stale。
+    assert (
+        _asset_build_view(state, market_as_of=date(2026, 11, 2), today=date(2026, 10, 30)).state
+        == "stale"
+    )
 
 
 # ── 门禁：bar_density 不误伤资产日指标 ───────────────────────
