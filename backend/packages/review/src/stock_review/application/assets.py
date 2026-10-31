@@ -31,6 +31,7 @@ from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from stock_contracts.clock import Clock
 from stock_contracts.enums import JobStatus
@@ -38,6 +39,7 @@ from stock_contracts.errors import ApiError, ErrorCode
 from stock_core.fifo import build_rounds
 from stock_ledger.models import Trade
 from stock_platform.jobs import JobQueue
+from stock_platform.market_models import DailyBar
 from stock_platform.obs import get_logger
 from stock_platform.ports import MarketDataSource
 from stock_platform.symbols import is_convertible_bond
@@ -578,6 +580,29 @@ def _symbols(live: list[Trade], bond_alias: dict[str, str] | None = None) -> lis
     )
 
 
+def _latest_workday(day: date) -> date:
+    """最近工作日（周六/周日回退到周五）；资产表周末不写行。"""
+    while day.weekday() >= 5:
+        day -= timedelta(days=1)
+    return day
+
+
+async def _market_as_of(session: AsyncSession, market_data: MarketDataSource, clock: Clock) -> date:
+    """行情覆盖日（构建与状态判定必须同口径，跨进程一致）。
+
+    live+缓存模式（`CachedMarketDataSource`）的端口 `as_of` 是**进程内近似值**
+    （未读过 bar 时退化为业务今天），API 与 worker 会得到不同结果；权威覆盖在
+    `market.daily_bar` 的最大交易日。replay / 纯透传 live 没有本地缓存，直接用端口值。
+    """
+    if getattr(market_data, "get_cached_bars", None) is not None:
+        latest = await session.scalar(
+            select(func.max(DailyBar.trade_date)).where(DailyBar.trade_date <= clock.today())
+        )
+        if latest is not None:
+            return latest
+    return market_data.as_of
+
+
 async def build_assets(
     session: AsyncSession,
     *,
@@ -626,9 +651,7 @@ async def build_assets(
     start = min(trade.trade_date for trade in live)
     # 资产表只在工作日写行（周六/周日跳过，设计 §5.3）：末行日期对齐到最近工作日，
     # 避免水位线停在周末导致下次增量「窗口前一日本无行」而误触发全量。
-    end = clock.today()
-    while end.weekday() >= 5:
-        end -= timedelta(days=1)
+    end = _latest_workday(clock.today())
 
     # 可转债发债→上市代码别名（设计 D3）：回合/持仓/行情请求统一用 canonical 代码。
     bond_alias, bond_alias_unresolved = build_bond_alias(
@@ -669,7 +692,7 @@ async def build_assets(
     fifo_result = build_rounds(trades_to_events(live, bond_alias=bond_alias))
     fifo_error_codes: set[str] = {e.security_code for e in fifo_result.data_errors}
     fifo_error_now = bool(fifo_error_codes)
-    market_as_of = market_data.as_of
+    market_as_of = await _market_as_of(session, market_data, clock)
     market_changed = state is not None and state.data_as_of != market_as_of
 
     # 3) 全量判定（§6.2）：任何无法安全定位的变更都收敛到全量。
@@ -987,6 +1010,7 @@ def _missing_state(definition_version: str) -> AssetBuildState:
 
 async def _build_state_view(
     repo: AssetRepository,
+    session: AsyncSession,
     *,
     user_id: uuid.UUID,
     clock: Clock,
@@ -1038,12 +1062,14 @@ async def _build_state_view(
         base.state = STATE_STALE
         return base
     # 6) 行情前进 → stale（并标记 has_new_market_data）。
-    if state.data_as_of is None or market_data.as_of > state.data_as_of:
+    #    行情覆盖日与构建同口径（live+缓存读 market.daily_bar，避免进程内近似值误判）。
+    market_as_of = await _market_as_of(session, market_data, clock)
+    if state.data_as_of is None or market_as_of > state.data_as_of:
         base.state = STATE_STALE
         base.has_new_market_data = True
         return base
-    # 7) 有新自然日。
-    if clock.today() > state.last_built_through:
+    # 7) 有新工作日；周六/周日不判 stale（资产表周末不写行）。
+    if _latest_workday(clock.today()) > state.last_built_through:
         base.state = STATE_STALE
     return base
 
@@ -1076,7 +1102,7 @@ async def list_assets(
         sort=sort,
     )
     build = await _build_state_view(
-        repo, user_id=user_id, clock=clock, market_data=market_data, state=state
+        repo, session, user_id=user_id, clock=clock, market_data=market_data, state=state
     )
     return [_to_point(row) for row in rows], next_cursor, build
 
@@ -1093,7 +1119,7 @@ async def get_asset_build_state(
     state = await repo.get_state(user_id)
     definition_version = state.definition_version if state is not None else ASSET_DEFINITION_VERSION
     build = await _build_state_view(
-        repo, user_id=user_id, clock=clock, market_data=market_data, state=state
+        repo, session, user_id=user_id, clock=clock, market_data=market_data, state=state
     )
     return build, definition_version
 

@@ -278,6 +278,50 @@ async def _restore(
         )
 
 
+async def _seed_market_bar(
+    engine: AsyncEngine, symbol: str, trade_date: date, close_units: int
+) -> None:
+    """写入一条 live 行情缓存（`market.daily_bar` 无 RLS，owner 直写；幂等 upsert）。"""
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                "insert into market.daily_bar "
+                "(symbol, adjust, trade_date, close_units, return_units, source, pulled_at) "
+                "values (:symbol, '', :trade_date, :close_units, 0, 'live', :pulled_at) "
+                "on conflict (symbol, adjust, trade_date) "
+                "do update set close_units = excluded.close_units, source = 'live'"
+            ),
+            {
+                "symbol": symbol,
+                "trade_date": trade_date,
+                "close_units": close_units,
+                "pulled_at": datetime.fromisoformat("2026-06-30T08:00:00+00:00"),
+            },
+        )
+
+
+class _CacheBackedMarket:
+    """模拟 live+缓存行情源：端口 `as_of` 是进程内近似值（未读过 bar 时退化为业务今天）。
+
+    真实问题：worker 构建前读过行情（as_of=覆盖日），API 状态查询没读（as_of=今天），
+    两端近似值不同 → 旧口径持续性误判 stale。权威覆盖在 `market.daily_bar`。
+    """
+
+    def __init__(self, inner: Any, *, as_of: date) -> None:
+        self._inner = inner
+        self.as_of = as_of
+
+    @property
+    def capabilities(self) -> Any:
+        return self._inner.capabilities
+
+    async def get_daily_bars(self, symbols: Any, start: date, end: date) -> Any:
+        return await self._inner.get_daily_bars(symbols, start, end)
+
+    async def get_cached_bars(self, symbols: Any, start: date, end: date) -> Any:
+        return await self._inner.get_daily_bars(symbols, start, end)
+
+
 # ── 构建 / 读取辅助 ───────────────────────────────────────
 
 
@@ -1012,6 +1056,71 @@ async def test_list_assets_state_chain_and_pagination(
     assert empty_points == []
     assert missing_build.state == "missing"
     assert missing_build.rows_count == 0
+
+
+async def test_state_current_on_weekend_after_build(
+    owner_engine: AsyncEngine, app_db: Database, replay_market: Any
+) -> None:
+    """周末构建后 last_built_through=周五；周六/周日再查不得误判 stale。"""
+    user_id = await _insert_user(owner_engine)
+    await _seed_baseline(owner_engine, user_id)
+    saturday = FrozenClock("2026-07-04T12:00:00+08:00")
+    await _build(app_db, user_id, replay_market, clock=saturday)
+
+    for clock in (saturday, FrozenClock("2026-07-05T12:00:00+08:00")):
+        async with app_db.tenant_tx(user_id) as session:
+            _, _, build = await list_assets(
+                session,
+                user_id=user_id,
+                clock=clock,
+                market_data=replay_market,
+                limit=10,
+                cursor=None,
+                date_from=None,
+                date_to=None,
+                status=None,
+            )
+        assert build.state == "current", clock.now()
+        assert build.last_built_through == date(2026, 7, 3)
+
+
+async def test_state_uses_authoritative_cache_coverage_for_live_source(
+    owner_engine: AsyncEngine, app_db: Database, replay_market: Any
+) -> None:
+    """live 缓存源的 `as_of` 是进程内近似值：构建与状态判定必须同口径（读缓存覆盖日）。
+
+    复放「API 一直待更新、点构建也不变」：worker 构建前读过行情（近似 as_of=覆盖日），
+    API 状态查询没读过（近似 as_of=业务今天）→ 旧实现误判 stale；权威覆盖在
+    `market.daily_bar` 最大交易日。
+    """
+    user_id = await _insert_user(owner_engine)
+    await _seed_baseline(owner_engine, user_id)
+    # 权威覆盖取全表 max：market 不在全局清表范围，先清掉其他用例残留再播种。
+    async with owner_engine.begin() as conn:
+        await conn.execute(text("TRUNCATE market.daily_bar RESTART IDENTITY"))
+    await _seed_market_bar(owner_engine, "600519", date(2026, 6, 30), price("1700.00"))
+
+    # worker：构建前已读过行情，近似值 = 实际覆盖日。
+    builder_market = _CacheBackedMarket(replay_market, as_of=date(2026, 6, 30))
+    await _build(app_db, user_id, builder_market)
+
+    # API：进程内未读过行情，近似值退化为「业务今天」（2026-07-01）。
+    api_market = _CacheBackedMarket(replay_market, as_of=date(2026, 7, 1))
+    async with app_db.tenant_tx(user_id) as session:
+        _, _, build = await list_assets(
+            session,
+            user_id=user_id,
+            clock=CLOCK,
+            market_data=api_market,
+            limit=10,
+            cursor=None,
+            date_from=None,
+            date_to=None,
+            status=None,
+        )
+    assert build.state == "current"
+    assert build.has_new_market_data is False
+    assert build.data_as_of == date(2026, 6, 30)
 
 
 async def test_global_blocked_state(

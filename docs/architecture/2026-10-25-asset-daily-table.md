@@ -182,7 +182,7 @@ GRANT SELECT ON ... TO stock_backup;
 ### 5.1 时间与范围
 - 业务日：`clock.today()`（Asia/Shanghai）。
 - 起点 `start_date`：全部**未软删**流水 `min(trade_date)`；无流水 → 不建行。
-- 终点 `end_date`：`clock.today()`（D7）**对齐到工作日**——若今天是周六/周日，回退到最近的周五（避免水位线停在无行日期）。行情 `market_data.as_of` 只用于：
+- 终点 `end_date`：`clock.today()`（D7）**对齐到工作日**——若今天是周六/周日，回退到最近的周五（避免水位线停在无行日期）。行情覆盖日（`data_as_of` 血缘 / degraded 判定）与构建、状态判定同口径：live+缓存取 `market.daily_bar` 最大交易日（`≤ clock.today()`），replay / 纯透传 live 取端口 `as_of`。它用于：
   - `data_as_of` 血缘留痕；
   - 日期 > `as_of` 且持仓数 > 0 → 该行 `degraded`（原因"行情未覆盖，按最近收盘估值"）；纯现金行不降级。
   - 不再用 `end = min(today, as_of)`，避免 live 多进程 as_of 回退导致水位线振荡/`delete_after` 反复删补。
@@ -440,7 +440,7 @@ await repo.update_state_cas(                       # WHERE version=:expected
   3. `last_built_through IS NULL`（无流水/全部软删）→ `missing`；
   4. `state.definition_version != 当前版本` → `stale`；
   5. 当前指纹 `(count, Σversion, max(updated_at))`（**含软删**）与 state 不一致 → `stale`；
-  6. 当前 `market_data.as_of > state.data_as_of` → `stale`（`has_new_market_data=true`）；
+  6. 当前行情覆盖日 > `state.data_as_of` → `stale`（`has_new_market_data=true`）。覆盖日与构建同口径：live+缓存读 `market.daily_bar` 最大交易日（`≤ clock.today()`），其余用端口 `as_of`——**不能用端口 `as_of` 直接比**，它是进程内近似值（API 未读过行情时退化为业务今天，会与 worker 持久化的覆盖日不一致，导致「一直待更新」）；
   7. `clock.today()` 的**下一个工作日** > `state.last_built_through` → `stale`（有新工作日；周六/周日不判 stale）；
   8. 否则 `current`。
 - 错误：401 `TOKEN_EXPIRED`（现状不返回 `WWW-Authenticate`，见 §11）；admin 403；400 `INVALID_CURSOR`/`UNKNOWN_QUERY_PARAM`/`INVALID_SORT_FIELD`；422 `INVALID_PERIOD`（from>to）/`VALIDATION_ERROR`（status 非法、日期格式由 FastAPI 解析失败）。
