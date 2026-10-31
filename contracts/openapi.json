@@ -996,7 +996,7 @@
       },
       "DashboardAssetOverviewOut": {
         "additionalProperties": false,
-        "description": "资产概览：当前快照（最新资产日）+ 全历史峰值成本/总收益/费用。",
+        "description": "资产概览：当前快照（最新资产日）+ 峰值转入成本/总收益/费用。\n\n`max_invested_cost` 语义为**银证转账峰值转入成本**（累计净转入的峰值），\n`max_cost_return_pct` = 总收益 / 峰值转入成本（字段名保留以兼容旧客户端）。",
         "properties": {
           "balance": {
             "anyOf": [
@@ -1225,7 +1225,7 @@
       },
       "DashboardHistoryOverviewOut": {
         "additionalProperties": false,
-        "description": "历史概览：全历史已平仓计数/最赚最亏 + 最大回撤。",
+        "description": "历史概览：全历史已平仓计数/最赚最亏/持仓时长 Top3/交易次数 Top3 + 最大回撤。",
         "properties": {
           "bottom_rounds": {
             "items": {
@@ -1330,11 +1330,25 @@
             "title": "Status",
             "type": "string"
           },
+          "top_holding_rounds": {
+            "items": {
+              "$ref": "#/components/schemas/DashboardRoundOut"
+            },
+            "title": "Top Holding Rounds",
+            "type": "array"
+          },
           "top_rounds": {
             "items": {
               "$ref": "#/components/schemas/DashboardRoundOut"
             },
             "title": "Top Rounds",
+            "type": "array"
+          },
+          "top_trade_counts": {
+            "items": {
+              "$ref": "#/components/schemas/DashboardTradeCountOut"
+            },
+            "title": "Top Trade Counts",
             "type": "array"
           },
           "win_count": {
@@ -1362,6 +1376,8 @@
           "flat_count",
           "top_rounds",
           "bottom_rounds",
+          "top_holding_rounds",
+          "top_trade_counts",
           "max_drawdown"
         ],
         "title": "DashboardHistoryOverviewOut",
@@ -1818,6 +1834,31 @@
           "holding_days"
         ],
         "title": "DashboardRoundOut",
+        "type": "object"
+      },
+      "DashboardTradeCountOut": {
+        "additionalProperties": false,
+        "description": "交易次数 Top3 的一行（按证券代码聚合的流水笔数）。",
+        "properties": {
+          "security_code": {
+            "title": "Security Code",
+            "type": "string"
+          },
+          "security_name": {
+            "title": "Security Name",
+            "type": "string"
+          },
+          "trade_count": {
+            "title": "Trade Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "security_code",
+          "security_name",
+          "trade_count"
+        ],
+        "title": "DashboardTradeCountOut",
         "type": "object"
       },
       "Error": {
@@ -7191,7 +7232,19 @@
                   "data_as_of": "2026-09-30",
                   "definition_version": "1.0",
                   "history_overview": {
-                    "bottom_rounds": [],
+                    "bottom_rounds": [
+                      {
+                        "close_date": "2026-06-18",
+                        "holding_days": 21,
+                        "pnl": "12000.00",
+                        "pnl_display": "12,000.00",
+                        "return_rate": "0.08000000",
+                        "return_rate_pct": "8.00%",
+                        "round_id": "rnd_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                        "security_code": "600519",
+                        "security_name": "贵州茅台"
+                      }
+                    ],
                     "closed_round_count": 12,
                     "closed_security_count": 6,
                     "flat_count": 0,
@@ -7225,7 +7278,39 @@
                       "security_name": "贵州茅台"
                     },
                     "status": "ok",
-                    "top_rounds": [],
+                    "top_holding_rounds": [
+                      {
+                        "close_date": "2026-06-18",
+                        "holding_days": 21,
+                        "pnl": "12000.00",
+                        "pnl_display": "12,000.00",
+                        "return_rate": "0.08000000",
+                        "return_rate_pct": "8.00%",
+                        "round_id": "rnd_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                        "security_code": "600519",
+                        "security_name": "贵州茅台"
+                      }
+                    ],
+                    "top_rounds": [
+                      {
+                        "close_date": "2026-06-18",
+                        "holding_days": 21,
+                        "pnl": "12000.00",
+                        "pnl_display": "12,000.00",
+                        "return_rate": "0.08000000",
+                        "return_rate_pct": "8.00%",
+                        "round_id": "rnd_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                        "security_code": "600519",
+                        "security_name": "贵州茅台"
+                      }
+                    ],
+                    "top_trade_counts": [
+                      {
+                        "security_code": "600519",
+                        "security_name": "贵州茅台",
+                        "trade_count": 7
+                      }
+                    ],
                     "win_count": 8,
                     "win_pct": "66.67%"
                   },

@@ -257,11 +257,11 @@ async def test_api_083_happy_orchestration(
     assert result["rounds"]["rounds_total"] == 1
     assert result["rounds"]["rounds_open"] == 1
 
-    # 阶段②assets：首次构建 full，05-29..07-01 共 34 行
+    # 阶段②assets：首次构建 full，05-29..07-01 的工作日共 24 行（周末不写行）
     assert set(result["assets"]) == {"mode", "rows_written", "status", "data_as_of"}
     assert result["assets"]["mode"] == "full"
     assert result["assets"]["status"] == "ok"
-    assert result["assets"]["rows_written"] == 34
+    assert result["assets"]["rows_written"] == 24
     assert result["assets"]["data_as_of"] == "2026-09-30"
 
     # 阶段③nav：消费同事务 asset_daily

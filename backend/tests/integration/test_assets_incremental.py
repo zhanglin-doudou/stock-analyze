@@ -116,6 +116,17 @@ def shares(value: str) -> int:
     return int(Decimal(value) * Decimal(10**4))
 
 
+def workdays(start: date, end: date) -> int:
+    """闭区间 [start, end] 内的工作日数（资产表周末不写行）。"""
+    count = 0
+    day = start
+    while day <= end:
+        if day.weekday() < 5:
+            count += 1
+        day += timedelta(days=1)
+    return count
+
+
 # ── 造数（owner）──────────────────────────────────────────
 
 
@@ -460,7 +471,8 @@ async def test_incremental_minimal_window_writes(
     rebuild_from = second.rebuild_from
     # 安全窗：end=07-01，窗口起点 max(start, end-44)=05-18。
     assert rebuild_from == date(2026, 5, 18)
-    assert second.rows_written == (date(2026, 7, 1) - rebuild_from).days + 1
+    # 周末不写行：窗口内只写工作日。
+    assert second.rows_written == workdays(rebuild_from, date(2026, 7, 1))
 
     rows_after = await _rows(app_db, user_id)
     # 窗口外的旧行存在且 rebuilt_at 未被改写。
@@ -662,7 +674,7 @@ async def test_clock_rollback_triggers_full_and_trims_rows(
     assert summary.mode == "full"
     rows = await _rows(app_db, user_id)
     assert rows[-1].trade_date == date(2026, 6, 15)
-    assert len(rows) == (date(2026, 6, 15) - date(2025, 12, 31)).days + 1
+    assert len(rows) == workdays(date(2025, 12, 31), date(2026, 6, 15))
     state = await _state(app_db, user_id)
     assert state is not None
     assert state.last_built_through == date(2026, 6, 15)
@@ -915,7 +927,7 @@ async def test_list_assets_state_chain_and_pagination(
         )
     assert build.state == "current"
     assert build.last_status == "ok"
-    assert build.definition_version == "1.6"
+    assert build.definition_version == "1.7"
     assert build.data_as_of == replay_market.as_of
     assert build.rows_count > 0
     assert [point.trade_date for point in points] == sorted(
@@ -1093,7 +1105,7 @@ async def test_list_assets_missing_after_empty_build_hides_state_fields(
     assert build.status_reason is None
     assert build.data_as_of is None
     assert build.has_new_market_data is False
-    assert build.definition_version == "1.6"
+    assert build.definition_version == "1.7"
 
 
 # ── worker handler：progress / result / 取消 ─────────────

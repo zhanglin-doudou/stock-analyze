@@ -10,7 +10,7 @@
 
 | # | 决策点 | 推荐方案（v1.0 已按此设计） | 备选 | 影响 |
 |---|---|---|---|---|
-| D1 | 表粒度 | **每日总资产快照**：每个自然日一行 | 日期 × 证券明细行 | 列表/回撤只需总资产序列；明细留作后续 `asset_daily_holding` |
+| D1 | 表粒度 | **每日总资产快照**：每个**工作日**（周一至周五）一行；周六/周日不写行（2026-10-31 修订） | 日期 × 证券明细行 | 列表/回撤只需总资产序列；明细留作后续 `asset_daily_holding` |
 | D2 | 存储 | **新建 `review.asset_daily`**；`nav_daily` 不动 | 扩 nav_daily | nav_daily 按月稀疏、由 `GET /nav` 隐式写入，不适合全历史增量 |
 | D3 | 与净值关系 | 抽共享估值原语；nav 行为不变；**同值回归测试** | 复制两套逻辑 | 避免口径漂移 |
 | D4 | 构建方式 | `POST /assets/build` → **202 异步 job**；`GET /assets` 纯读 | 同步 200 | 异步需给 worker 装配行情端口（见 D11） |
@@ -33,7 +33,7 @@
 - `review.nav_daily`（迁移 `0004_review_nav`）：`GET /nav`（API-032）按 `YYYY-MM` **同步计算并 upsert** 净值/日收益/总资产/现金流/份额；行只出现在「有流水的日期 + 期末」（稀疏），一次只覆盖一个月。
 - `review.round` / `round_build_state`（迁移 `0003_review_rounds`）：`POST /jobs/rebuild-rounds`（API-028）异步重建，脏窗口增量 + 400 天安全回看；worker handler 在 `backend/services/worker/src/stock_worker/handlers.py`。
 - 行情端口 `MarketDataSource`（`as_of` / `get_daily_bars`）与 replay 夹具 `fixtures/market/quotes.json`（`as_of=2026-09-30`，**月频** bar）。
-- 资产估值口径（现金 + 持仓 × 收盘、外部现金流、含费成本）已在 `stock_review/application/nav.py` 实现，但没有全历史、逐自然日、可增量维护的资产序列表。
+- 资产估值口径（现金 + 持仓 × 收盘、外部现金流、含费成本）已在 `stock_review/application/nav.py` 实现，但没有全历史、逐工作日、可增量维护的资产序列表。
 
 ### 1.2 目标
 1. 新增全历史每日资产快照表，作为「资产变化」与后续回撤族（MDD/持续期/恢复期/水下占比/Ulcer/Calmar，PRD A18）的唯一数据源。
@@ -82,13 +82,13 @@
 
 ### 4.1 `review.asset_daily`（每日资产快照）
 
-一行 = 某用户某自然日收盘后状态。主键确定性：`ast_` + `sha256(user_id|trade_date)[:32]`。
+一行 = 某用户某**工作日**收盘后状态（周六/周日不写行）。主键确定性：`ast_` + `sha256(user_id|trade_date)[:32]`。
 
 | 列 | 类型 | 空 | 单位/口径 | 说明 |
 |---|---|---|---|---|
 | `id` | `String(40)` PK | 否 | — | `ast_<32hex>` |
 | `user_id` | `UUID` FK→`platform.user.id` CASCADE | 否 | — | 租户键（RLS） |
-| `trade_date` | `Date` | 否 | Asia/Shanghai 业务日 | 自然日，连续 |
+| `trade_date` | `Date` | 否 | Asia/Shanghai 业务日 | 工作日（周一至周五），连续；周六/周日无行 |
 | `cash_units` | `BigInteger` | 否 | 金额 scale=2 | 当日有余额行取**当日最后一笔**；否则前日现金 + Σ当日 `amount_units` |
 | `market_value_units` | `BigInteger` | 否 | 金额 scale=2 | **逐标的 floor**：`Σ(qty_units * close_units // 1e8)`；超卖日可为负（D8） |
 | `total_assets_units` | `BigInteger` | 否 | 金额 scale=2 | `cash + market`（DB CHECK） |
@@ -96,7 +96,7 @@
 | `unrealized_pnl_units` | `BigInteger` | 否 | 金额 scale=2 | `market_value - holding_cost`（可为负） |
 | `holding_count` | `Integer` | 否 | 个 | 收盘后 `quantity_units != 0` 的标的数；≥0；**blocked 行强制 0**（硬阻断不输出持仓明细，即使语义上有持仓） |
 | `cashflow_units` | `BigInteger` | 否 | 金额 scale=2 | `category=transfer` 的 `amount_units` 之和 |
-| `prev_total_assets_units` | `BigInteger` | 是 | 金额 scale=2 | **严格上一自然日**的总资产；上一日为 blocked → NULL；首行取期初现金锚点 |
+| `prev_total_assets_units` | `BigInteger` | 是 | 金额 scale=2 | **上一已写工作日**的总资产；上一工作日为 blocked → NULL；首行取期初现金锚点 |
 | `daily_pnl_units` | `BigInteger` | 是 | 金额 scale=2 | `total - cashflow - prev_total`；prev 为 NULL 时 NULL |
 | `daily_return_units` | `BigInteger` | 是 | 比率 scale=8 | `daily_pnl / prev_total`，**Decimal + ROUND_HALF_UP**（与 core nav 一致）；仅 `prev_total>0`；否则 NULL |
 | `status` | `String(16)` | 否 | 枚举 text | `ok` / `blocked` / `degraded` |
@@ -120,7 +120,7 @@
 |---|---|---|---|
 | `user_id` | `UUID` FK CASCADE PK | 否 | 一用户一行 |
 | `start_date` | `Date` | 是 | 历史起点（最早未软删流水日） |
-| `last_built_through` | `Date` | 是 | 已构建到的最后自然日；全局 blocked/无数据时 NULL |
+| `last_built_through` | `Date` | 是 | 已构建到的最后**工作日**；全局 blocked/无数据时 NULL |
 | `last_built_at` | `DateTime(tz)` | 是 | 最近一次构建/检查完成时刻（no-op 也更新；配合 `last_mode=noop` 可区分） |
 | `last_trade_updated_at` | `DateTime(tz)` | 是 | 构建读取的**全部流水（含软删）** `max(updated_at)` 快照 |
 | `last_trade_count` | `BigInteger` | 是 | 同上快照的 `COUNT(*)`（变更指纹 1） |
@@ -182,11 +182,11 @@ GRANT SELECT ON ... TO stock_backup;
 ### 5.1 时间与范围
 - 业务日：`clock.today()`（Asia/Shanghai）。
 - 起点 `start_date`：全部**未软删**流水 `min(trade_date)`；无流水 → 不建行。
-- 终点 `end_date = clock.today()`（D7）。行情 `market_data.as_of` 只用于：
+- 终点 `end_date`：`clock.today()`（D7）**对齐到工作日**——若今天是周六/周日，回退到最近的周五（避免水位线停在无行日期）。行情 `market_data.as_of` 只用于：
   - `data_as_of` 血缘留痕；
   - 日期 > `as_of` 且持仓数 > 0 → 该行 `degraded`（原因"行情未覆盖，按最近收盘估值"）；纯现金行不降级。
   - 不再用 `end = min(today, as_of)`，避免 live 多进程 as_of 回退导致水位线振荡/`delete_after` 反复删补。
-- 行粒度：`[start, end]` **每个自然日一行**（含周末/节假日，价格 carry-forward，现金不变）。
+- 行粒度：`[start, end]` **每个工作日一行**（周一至周五；周六/周日跳过，价格 carry-forward，现金不变）。周末发生的银证转账并入下一交易日现金流（`cashflow_units` 与 `daily_pnl` 同口径）。
 - 价格阶梯：`[rebuild_from - 45 天, end]`（全量时 `[start - 45, end]`）的 bars，取"当日或之前最近收盘价"（复用 `_PRICE_LOOKBACK=45` 行为）。
 
 ### 5.2 期初锚点与初始持仓
@@ -209,7 +209,7 @@ GRANT SELECT ON ... TO stock_backup;
    - `degraded`：`fifo_error_now=True`（全历史任一回合 `data_error`，**全局**，与 nav 一致，所有非 blocked 行）；或日期 > `as_of` 且有持仓。
    - `ok`：其余。
    - **FIFO 异常集合变化**（`last_fifo_error` 与当前不同）必须触发全量重建，否则增量只会改窗口、旧行状态会与新行不一致；`status_reason` 写"FIFO 数据异常（超卖等）"。
-7. 日盈亏：`daily_pnl = total - cashflow - prev_total`；`prev_total` 取上一自然日非 blocked 总资产（上一日 blocked → NULL；首行取期初锚点）；`daily_return = Decimal(daily_pnl)/Decimal(prev_total) → scale 8 ROUND_HALF_UP`，仅 `prev_total>0`。
+7. 日盈亏：`daily_pnl = total - cashflow - prev_total`；`prev_total` 取**上一已写工作日**的非 blocked 总资产（上一工作日 blocked → NULL；首行取期初锚点）；周末现金流已并入本日 `cashflow`。`daily_return = Decimal(daily_pnl)/Decimal(prev_total) → scale 8 ROUND_HALF_UP`，仅 `prev_total>0`。
 8. 整体 `last_status`：全局 blocked → `blocked`；否则有任一非 ok 行 → `degraded`；否则 `ok`。
 
 ### 5.4 与 nav / TWR 的关系
@@ -246,6 +246,8 @@ if not live:
 
 start = min(t.trade_date for t in live)
 end = clock.today()
+while end.weekday() >= 5:              # 周六/周日不写行：终点回退到最近工作日
+    end -= timedelta(days=1)
 if end < start:                       # 未来日期流水/时钟回拨
     await repo.delete_all(user_id)
     await repo.reset_state(user_id, rows=0, through=None, start=None, status="ok")
@@ -303,8 +305,10 @@ first_balance_date = min((t.trade_date for t in live if t.cash_balance_units is 
 if (not full and first_balance_date is not None and start < first_balance_date
         and rebuild_from <= first_balance_date):
     full = True
-# 增量时窗口前一日必须已有落库行（用于 prev_total）；缺失 → 全量兜底（必须在拉行情前修正窗口）
-prev_row = await repo.get_row(user_id, rebuild_from - 1) if rebuild_from > start else None
+# 增量时窗口前一日（最近已写行）必须存在，用于 prev_total；缺失 → 全量兜底
+# 周末不写行，rebuild_from 可能为周一（前一日是周日无行）→ 必须用「之前最近的已写行」
+prev_row = await repo.latest(user_id, definition_version=VERSION, on_or_before=rebuild_from - 1) \
+    if rebuild_from > start else None
 if rebuild_from > start and prev_row is None:
     full = True
     rebuild_from = start
@@ -353,7 +357,8 @@ await repo.update_state_cas(                       # WHERE version=:expected
 9. **状态 CAS**：`UPDATE ... WHERE user_id=:uid AND version=:expected`；0 行 → `VERSION_CONFLICT`（job 失败可重试）；无 state 时 insert。
 10. **行情 as_of 变化**：即使 end 未前进也要重算窗口（否则旧 `date > as_of` 的 degraded 行永远修不回来）；as_of 跨度超过 45 天 → 全量。
 11. **FIFO 异常集合**：`last_fifo_error` 变化 → 全量；保证"全局 degraded"在增量后与全量等价（IT-01）。
-12. **整体状态**：写完后 `EXISTS(status != 'ok')` 决定 `last_status`（有逐日 blocked/degraded → degraded），不要仅看本次窗口。
+12. **周末不写行（定义版本 1.7）**：`compute_daily_valuations` 跳过 `weekday>=5` 的日期；周末 `transfer` 现金流累加到 `pending_cashflow`，写入下一个工作日行；写行后清零。`prev_total` 取"上一已写工作日"；增量窗口前置行用 `repo.latest(on_or_before=rebuild_from-1)`（`rebuild_from` 为周一时前一日是周日无行，不能用精确日期查询）。
+13. **整体状态**：写完后 `EXISTS(status != 'ok')` 决定 `last_status`（有逐日 blocked/degraded → degraded），不要仅看本次窗口。
 
 ### 6.4 边界行为表
 
@@ -370,7 +375,7 @@ await repo.update_state_cas(                       # WHERE version=:expected
 | `end < start`（未来流水） | — | — | 清空，state through/start=NULL，rows=0 |
 | 无现金锚点 | 全量尝试 | start | 不写行，state blocked |
 | `definition_version` 升级 | 是 | start | 全量替换版本 |
-| 行情前进（end 前进） | 否 | 安全窗 | 补齐新日期 |
+| 行情前进（end 前进） | 否 | 安全窗 | 补齐新工作日 |
 | 行情 as_of 变化但 end 未前进 | 否 | 安全窗 | 重算窗口，修复 `date > as_of` 的 degraded 行 |
 | FIFO 异常集合变化 | **是** | start | 全量，保证全表 degraded 一致 |
 | 行情修正（45 天内、且 end 前进） | 否 | 安全窗 | 吸收 |
@@ -436,7 +441,7 @@ await repo.update_state_cas(                       # WHERE version=:expected
   4. `state.definition_version != 当前版本` → `stale`；
   5. 当前指纹 `(count, Σversion, max(updated_at))`（**含软删**）与 state 不一致 → `stale`；
   6. 当前 `market_data.as_of > state.data_as_of` → `stale`（`has_new_market_data=true`）；
-  7. `clock.today() > state.last_built_through` → `stale`（有新自然日）；
+  7. `clock.today()` 的**下一个工作日** > `state.last_built_through` → `stale`（有新工作日；周六/周日不判 stale）；
   8. 否则 `current`。
 - 错误：401 `TOKEN_EXPIRED`（现状不返回 `WWW-Authenticate`，见 §11）；admin 403；400 `INVALID_CURSOR`/`UNKNOWN_QUERY_PARAM`/`INVALID_SORT_FIELD`；422 `INVALID_PERIOD`（from>to）/`VALIDATION_ERROR`（status 非法、日期格式由 FastAPI 解析失败）。
 
@@ -529,14 +534,14 @@ await repo.update_state_cas(                       # WHERE version=:expected
 | UT-05 | 银证转账 | transfer +50000 | cashflow=50000；pnl 不含该 50000 |
 | UT-06 | 送转/配股 | bonus 零金额正数量；rights 负金额 | bonus 加数量不改成本；rights 加数量且成本 += -amount |
 | UT-07 | 余额覆盖优先 + 已知限制 | 同日多笔含余额行；余额行之后仍有 amount | 现金取当日最后一笔余额；**记录**"其后 amount 被覆盖"的既有简化（v1 不修，用例固定行为） |
-| UT-08 | 周末/节假日 carry-forward | 跨周末持仓 | 非交易日行用最近收盘；日期连续 |
+| UT-08 | 周末不写行 + 现金流并入 | 周末（周六/周日）发生 transfer，跨周末持仓 | 周末**无行**；周末 transfer 并入下一工作日 `cashflow`；工作日行用最近收盘；相邻工作日连续（跳过周末） |
 | UT-09 | 缺行情 → blocked | 持有 `999999`（无 bar） | 受影响日 blocked；DB 数值=0、API=null；原因含代码；不 500 |
 | UT-10 | 缺现金锚点 → 全局 blocked | 全部 `cash_balance=NULL` | 0 行；state.last_status=blocked、through=NULL、start_date 按 reset_state 清空、status_reason 非空；恢复后旧 reason 清空 |
 | UT-11 | back_solved 锚点 | 首行即买入，余额 -70000、amount -170000 | initial_cash=100000；assumption=back_solved；首日 pnl 正确 |
 | UT-12 | 超卖 → degraded + 负市值 | 卖出数量 > 持仓 | 负 qty/market_value；status=degraded；不触发 CHECK 失败 |
 | UT-13 | 日收益边界 | prev_total=0/负；blocked 次日 | return=NULL；blocked 次日 pnl/return=NULL，再下一日恢复 |
 | UT-14 | 确定性 | 同输入/clock 跑两次 | 行/ID/值/status/status_reason/rebuilt_at 完全一致；**排除** `created_at/updated_at`（server_default） |
-| UT-15 | 自然日行数/连续性 | 2026-01-01~01-31 | 31 行，无洞；`count(*)==rows_count` |
+| UT-15 | 工作日行数/连续性 | 2026-01-01~01-31 | 23 行（1 月工作日数），无工作日缺行；`count(*)==rows_count` |
 | UT-16 | 金额守恒（property） | hypothesis 随机流水 | 任意行 `total=cash+market`；非 blocked `pnl=total-cashflow-prev`；成本/浮盈关系成立 |
 | UT-17 | 成本守恒 | 随机买卖/送转 | `unrealized=market-cost`；cost ≥ 0；qty=0 时 cost=0 |
 | UT-18 | 行情失败分类 | stub 行情源（非 replay 夹具） | 逐标的降级 blocked，不整段失败；文案含三类后缀 |
@@ -577,7 +582,7 @@ await repo.update_state_cas(                       # WHERE version=:expected
 | AT-13 | 单飞 | 不同 key 发两次 auto（首个待执行）→ 同一 job_id + `X-Job-Reused`；auto 运行中发 full（第三个 key）→ 409 `JOB_ALREADY_RUNNING` |
 | AT-14 | 越权 | read PAT → 403 `INSUFFICIENT_SCOPE`；admin → 403 `ADMIN_CANNOT_READ_TRADES`；无 token → 401；跨用户 job 不可见（复用 jobs 404） |
 | AT-15 | 校验/配额 | 缺 `Idempotency-Key` → 422；`mode=bad` → 422；预置 4 个**不同 scope**的活跃 job（同 scope 会先撞单飞 409）→ 429 `QUOTA_EXCEEDED`（不承诺 Retry-After） |
-| AT-16 | 增量摘要 | 长历史（>45 天）首次 full → 追加流水 → auto：`build.last_mode=incremental`、`last_rows_written == end - last_rebuild_from + 1`、`last_rows_written < build.rows_count`；owner 读 job.result 断言 `rows_written/rows_total`；与 full 结果逐行相等（IT-01） |
+| AT-16 | 增量摘要 | 长历史（>45 天）首次 full → 追加流水 → auto：`build.last_mode=incremental`、`last_rows_written == workdays(last_rebuild_from, end)`（窗口内工作日数）、`last_rows_written < build.rows_count`；owner 读 job.result 断言 `rows_written/rows_total`；与 full 结果逐行相等（IT-01） |
 | AT-17 | 修正/撤销 | 改旧流水（version>1）→ auto 触发 full 摘要；结果与 full 相等；无残留旧值 |
 | AT-18 | 无数据/无锚点 | 无流水 → 202/succeeded、owner 读 job.result.rows_total=0；无锚点 → `build.last_status=blocked`、无行 |
 | AT-19 | 幂等语义 | ① 同 key 第二次 → 同 body/job_id + 重放头；② owner 断言 `expires_at≈created_at+24h`；③ 跨用户同 key 互不影响（**不**断言 24h 后失效，现状无过期过滤） |
@@ -590,7 +595,7 @@ await repo.update_state_cas(                       # WHERE version=:expected
 | ID | 场景 | 断言 |
 |---|---|---|
 | IT-01 | 增量 == 全量 | 对同一最终数据状态：路径 A 全量；路径 B 旧数据 build→改数据→auto；比较**行字段**（trade_date/cash/market/total/cost/unrealized/holding_count/cashflow/prev/daily_pnl/daily_return/status/status_reason/definition_version；**排除** rebuilt_at/created_at/updated_at）与 **state 字段**（start_date/last_built_through/last_trade_updated_at/count/version_sum/data_as_of/assumption/last_status/last_fifo_error/status_reason/definition_version/rows_count；**排除 `updated_at/created_at` 与** last_built_at/version/last_mode/last_rebuild_from/last_rows_written）；canary：改坏一行 total 必须失败、只改 rebuilt_at 必须不失败 |
-| IT-02 | 最小写入 | 历史跨度 >45 天；两次构建间 `FrozenClock.advance(days=1)`；断言存在 `trade_date < rebuild_from` 的行且其 `rebuilt_at` 不变；`rows_written == end - rebuild_from + 1` |
+| IT-02 | 最小写入 | 历史跨度 >45 天；两次构建间 `FrozenClock.advance(days=1)`；断言存在 `trade_date < rebuild_from` 的行且其 `rebuilt_at` 不变；`rows_written == workdays(rebuild_from, end)` |
 | IT-03 | no-op | clock/as_of/数据不变连点两次：第二次 `last_mode=noop`、rows_written=0；数据/水位线/指纹/through/rows_count 不变；除 `last_built_at/last_mode/last_rows_written/last_rebuild_from` 外，`version/updated_at` 也会变，断言时排除 |
 | IT-04 | 旧流水修正 | 改半年前买入（version>1）→ auto 触发 full，结果与 full 相同；旧日期行不再含该流水 |
 | IT-05 | 撤销/软删/恢复 | 撤销批次→auto；恢复行→auto；结果与 full 相同；行数/值回退；恢复后重新出现 |
@@ -723,7 +728,7 @@ await repo.update_state_cas(                       # WHERE version=:expected
 
 | 概念 | `nav_daily` | `asset_daily`（本表） |
 |---|---|---|
-| 行粒度 | 有流水日 + 期末（按月稀疏） | 每个自然日（全历史连续） |
+| 行粒度 | 有流水日 + 期末（按月稀疏） | 每个工作日（全历史连续，跳过周六/周日） |
 | 写入触发 | `GET /nav` 同步计算 | `POST /assets/build` 异步 job |
 | 总资产 | `total_value_units` | `total_assets_units`（同口径） |
 | 现金/市值/成本/浮盈 | 不落库 | 落库 |

@@ -18,7 +18,7 @@ from __future__ import annotations
 
 import re
 import uuid
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -283,7 +283,7 @@ async def test_api_081_happy_path_oracle(
     assert items, "构建后应至少一行"
     dates = [item["date"] for item in items]
     assert dates == sorted(dates, reverse=True), "默认应按 trade_date 倒序"
-    assert body["definition_version"] == "1.6"
+    assert body["definition_version"] == "1.7"
     assert body["data_as_of"] == _MARKET_AS_OF
 
     row = next(item for item in items if item["date"] == "2026-06-30")
@@ -318,12 +318,15 @@ async def test_api_081_happy_path_oracle(
     assert build["last_built_at"] is not None
     assert build["assumption"] == "back_solved"
     assert build["has_new_market_data"] is False
-    # 2026-05-29 .. 2026-07-01 每个自然日一行
-    expected_days = (date(2026, 7, 1) - date(2026, 5, 29)).days + 1
+    # 2026-05-29 .. 2026-07-01：周末不写行，只统计工作日。
+    span = (date(2026, 7, 1) - date(2026, 5, 29)).days + 1
+    expected_days = sum(
+        1 for offset in range(span) if (date(2026, 5, 29) + timedelta(days=offset)).weekday() < 5
+    )
     assert build["rows_count"] == expected_days
     assert len(items) == expected_days
     assert build["last_rows_written"] == expected_days
-    assert build["definition_version"] == "1.6"
+    assert build["definition_version"] == "1.7"
 
 
 # ── AT-02 未构建 / AT-10 全局 blocked ───────────────────────
@@ -344,7 +347,7 @@ async def test_api_081_not_built_returns_missing(
     assert build["last_mode"] is None
     assert build["last_built_through"] is None
     assert build["has_new_market_data"] is False
-    assert body["definition_version"] == "1.6"
+    assert body["definition_version"] == "1.7"
     assert body["data_as_of"] is None
     assert await _count_rows(owner_engine, user_id=acc.user_id) == 0
 

@@ -751,6 +751,14 @@ class DashboardRoundOut(StrictModel):
     pnl_display: str | None = None
 
 
+class DashboardTradeCountOut(StrictModel):
+    """交易次数 Top3 的一行（按证券代码聚合的流水笔数）。"""
+
+    security_code: str
+    security_name: str
+    trade_count: int
+
+
 class DashboardMaxDrawdownOut(StrictModel):
     """历史最大回撤区间；insufficient/blocked 时 mdd_pct 显式 null。"""
 
@@ -767,7 +775,11 @@ class DashboardMaxDrawdownOut(StrictModel):
 
 
 class DashboardAssetOverviewOut(StrictModel):
-    """资产概览：当前快照（最新资产日）+ 全历史峰值成本/总收益/费用。"""
+    """资产概览：当前快照（最新资产日）+ 峰值转入成本/总收益/费用。
+
+    `max_invested_cost` 语义为**银证转账峰值转入成本**（累计净转入的峰值），
+    `max_cost_return_pct` = 总收益 / 峰值转入成本（字段名保留以兼容旧客户端）。
+    """
 
     status: DashboardStatus
     holdings: list[DashboardHoldingOut]
@@ -794,7 +806,7 @@ class DashboardAssetOverviewOut(StrictModel):
 
 
 class DashboardHistoryOverviewOut(StrictModel):
-    """历史概览：全历史已平仓计数/最赚最亏 + 最大回撤。"""
+    """历史概览：全历史已平仓计数/最赚最亏/持仓时长 Top3/交易次数 Top3 + 最大回撤。"""
 
     status: DashboardStatus
     closed_security_count: int
@@ -811,6 +823,8 @@ class DashboardHistoryOverviewOut(StrictModel):
     max_profit_cost_pct: str | None = None
     top_rounds: list[DashboardRoundOut]
     bottom_rounds: list[DashboardRoundOut]
+    top_holding_rounds: list[DashboardRoundOut]
+    top_trade_counts: list[DashboardTradeCountOut]
     max_drawdown: DashboardMaxDrawdownOut
 
 

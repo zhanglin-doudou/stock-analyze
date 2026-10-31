@@ -1425,8 +1425,48 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
                     "pnl_display": "12,000.00",
                 },
                 "max_profit_cost_pct": "7.06%",
-                "top_rounds": [],
-                "bottom_rounds": [],
+                "top_rounds": [
+                    {
+                        "round_id": "rnd_" + _ID_SUFFIX,
+                        "security_code": "600519",
+                        "security_name": "贵州茅台",
+                        "close_date": "2026-06-18",
+                        "pnl": "12000.00",
+                        "return_rate": "0.08000000",
+                        "return_rate_pct": "8.00%",
+                        "holding_days": 21,
+                        "pnl_display": "12,000.00",
+                    }
+                ],
+                "bottom_rounds": [
+                    {
+                        "round_id": "rnd_" + _ID_SUFFIX,
+                        "security_code": "600519",
+                        "security_name": "贵州茅台",
+                        "close_date": "2026-06-18",
+                        "pnl": "12000.00",
+                        "return_rate": "0.08000000",
+                        "return_rate_pct": "8.00%",
+                        "holding_days": 21,
+                        "pnl_display": "12,000.00",
+                    }
+                ],
+                "top_holding_rounds": [
+                    {
+                        "round_id": "rnd_" + _ID_SUFFIX,
+                        "security_code": "600519",
+                        "security_name": "贵州茅台",
+                        "close_date": "2026-06-18",
+                        "pnl": "12000.00",
+                        "return_rate": "0.08000000",
+                        "return_rate_pct": "8.00%",
+                        "holding_days": 21,
+                        "pnl_display": "12,000.00",
+                    }
+                ],
+                "top_trade_counts": [
+                    {"security_code": "600519", "security_name": "贵州茅台", "trade_count": 7}
+                ],
                 "max_drawdown": {
                     "from_date": "2026-05-12",
                     "to_date": "2026-05-28",

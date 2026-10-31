@@ -38,6 +38,7 @@ from stock_review.application.assets import (
 from stock_review.application.bond_alias import build_bond_alias, canonical_code
 from stock_review.application.bridge import bridge_for_period
 from stock_review.application.valuation import (
+    CASHFLOW_CATEGORIES,
     bond_face_divisors,
     bond_value_units,
     category,
@@ -132,6 +133,15 @@ class DashboardRoundBrief:
 
 
 @dataclass(slots=True, frozen=True)
+class DashboardTradeCountBrief:
+    """交易次数 Top3 的一行（按证券代码聚合的流水笔数，已平仓与否无关）。"""
+
+    security_code: str
+    security_name: str
+    trade_count: int
+
+
+@dataclass(slots=True, frozen=True)
 class DashboardMaxDrawdown:
     """全历史最大回撤区间（有效段内；blocked/degraded 不跨断链拼接）。"""
 
@@ -178,6 +188,9 @@ class DashboardHistoryOverview:
     max_profit_cost_ratio_units: int | None
     top_rounds: list[DashboardRoundBrief]
     bottom_rounds: list[DashboardRoundBrief]
+    # 持仓时长 Top3（已平仓回合按 holding_days 降序）与交易次数 Top3（按证券代码聚合）。
+    top_holding_rounds: list[DashboardRoundBrief]
+    top_trade_counts: list[DashboardTradeCountBrief]
     max_drawdown: DashboardMaxDrawdown
 
 
@@ -207,6 +220,20 @@ def _ratio_units(numerator: int, denominator: int) -> int | None:
         return None
     value = (Decimal(numerator) / Decimal(denominator)).scaleb(8)
     return int(value.to_integral_value(rounding=ROUND_HALF_UP))
+
+
+def _peak_transfer_cost(trades: list[Trade]) -> int | None:
+    """银证转账峰值转入成本：累计净转入（转入 + / 转出 -）的历史峰值。
+
+    峰值 <= 0（从未净转入）→ None，不伪造 0；收益率分母统一用它。
+    """
+    running = 0
+    peak = 0
+    for trade in trades:
+        if category(trade) == "transfer":
+            running += trade.amount_units
+            peak = max(peak, running)
+    return peak if peak > 0 else None
 
 
 def _overall_status(*statuses: str) -> str:
@@ -366,6 +393,14 @@ async def _holdings_at(
     return weighted[:HOLDINGS_MAX], missing_prices, cost_fallback, truncated
 
 
+def _next_workday(day: date) -> date:
+    """下一个应写资产行的日期（跳过周六/周日，与资产表口径一致）。"""
+    nxt = day + timedelta(days=1)
+    while nxt.weekday() >= 5:
+        nxt += timedelta(days=1)
+    return nxt
+
+
 def _drawdown_segments(
     series: list[AssetDaily],
 ) -> tuple[list[tuple[list[date], list[int]]], bool, int]:
@@ -397,7 +432,7 @@ def _drawdown_segments(
                     dates, returns = [], []
             previous = None
             continue
-        if previous is not None and row.trade_date != previous + timedelta(days=1):
+        if previous is not None and row.trade_date != _next_workday(previous):
             has_gaps = True
             if dates:
                 segments.append((dates, returns))
@@ -443,6 +478,24 @@ def _max_drawdown(
         )
 
     if valid_obs < MDD_MIN_OBS:
+        insufficient_missing = [
+            DashboardMissing(
+                field="history_overview.max_drawdown",
+                code=MISSING_MDD_INSUFFICIENT,
+                reason=f"有效观测仅 {valid_obs} 天，不足 {MDD_MIN_OBS} 天，不冒充历史回撤。",
+                what_to_do="补充更长历史账单或等待资产表积累更多交易日。",
+            )
+        ]
+        if has_gaps:
+            # 观测不足与断链是两件事：断链原因必须暴露（否则修完样本量仍会撞上断链）。
+            insufficient_missing.append(
+                DashboardMissing(
+                    field="history_overview.max_drawdown",
+                    code=MISSING_MDD_GAPS,
+                    reason="历史资产序列存在阻断/缺日，回撤按最长连续有效段计算。",
+                    what_to_do="修复阻断日期后重新构建资产表可得到完整回撤。",
+                )
+            )
         return (
             DashboardMaxDrawdown(
                 from_date=None,
@@ -456,14 +509,7 @@ def _max_drawdown(
                 sample_status=STATUS_INSUFFICIENT,
                 reason=f"有效观测 {valid_obs} 天 < {MDD_MIN_OBS} 天门槛",
             ),
-            [
-                DashboardMissing(
-                    field="history_overview.max_drawdown",
-                    code=MISSING_MDD_INSUFFICIENT,
-                    reason=f"有效观测仅 {valid_obs} 天，不足 {MDD_MIN_OBS} 天，不冒充历史回撤。",
-                    what_to_do="补充更长历史账单或等待资产表积累更多交易日。",
-                )
-            ],
+            insufficient_missing,
             has_gaps,
         )
 
@@ -634,19 +680,16 @@ async def build_dashboard(
             )
         )
 
-    max_invested: int | None = None
-    for row in series:
-        if row.status == "blocked":
-            continue
-        if max_invested is None or row.holding_cost_units > max_invested:
-            max_invested = row.holding_cost_units
+    # 峰值转入成本 = 银证转账累计净转入的历史峰值（原「历史峰值持仓成本」口径已弃用）；
+    # 峰值成本收益率 = 当前收益额 / 峰值转入成本。
+    max_invested = _peak_transfer_cost(trades)
     if max_invested is None:
         missing.append(
             DashboardMissing(
                 field="asset_overview.max_invested_cost",
                 code=MISSING_MAX_INVESTED,
-                reason="没有非阻断的持仓成本记录。",
-                what_to_do="构建资产表并修复阻断日期。",
+                reason="没有银证转账转入记录，无法计算峰值转入成本。",
+                what_to_do="导入含银证转账流水的账单后重新构建资产表。",
             )
         )
 
@@ -817,6 +860,37 @@ async def build_dashboard(
         _ratio_units(max_profit, max_invested) if max_profit is not None and max_invested else None
     )
 
+    # 持仓时长 Top3：已平仓回合按持有天数降序（同长按平仓日/回合 id 稳定排序）。
+    top_holding_rounds = [
+        _round_brief(item)
+        for item in sorted(
+            rounds,
+            key=lambda item: (-item.holding_days, item.close_date or item.open_date, item.id),
+        )[:3]
+    ]
+
+    # 交易次数 Top3：按证券代码（可转债归并上市代码）聚合流水笔数；现金类/货基不计。
+    bond_alias, _unresolved = build_bond_alias(
+        (trade.security_code, trade.security_name) for trade in trades
+    )
+    trade_counts: dict[str, int] = {}
+    trade_names: dict[str, str] = {}
+    for trade in trades:
+        code = canonical_code(bond_alias, trade.security_code)
+        if not code or is_money_fund_row(trade) or category(trade) in CASHFLOW_CATEGORIES:
+            continue
+        trade_counts[code] = trade_counts.get(code, 0) + 1
+        if code not in trade_names and trade.security_name:
+            trade_names[code] = trade.security_name
+    top_trade_counts = [
+        DashboardTradeCountBrief(
+            security_code=code,
+            security_name=trade_names.get(code, code),
+            trade_count=count,
+        )
+        for code, count in sorted(trade_counts.items(), key=lambda item: (-item[1], item[0]))[:3]
+    ]
+
     max_drawdown, mdd_missing, mdd_gaps = _max_drawdown(series)
     missing.extend(mdd_missing)
 
@@ -879,6 +953,8 @@ async def build_dashboard(
             max_profit_cost_ratio_units=max_profit_cost,
             top_rounds=top_rounds,
             bottom_rounds=bottom_rounds,
+            top_holding_rounds=top_holding_rounds,
+            top_trade_counts=top_trade_counts,
             max_drawdown=max_drawdown,
         ),
         missing=missing,
@@ -926,5 +1002,6 @@ __all__ = [
     "DashboardMissing",
     "DashboardResult",
     "DashboardRoundBrief",
+    "DashboardTradeCountBrief",
     "build_dashboard",
 ]

@@ -72,8 +72,8 @@ function makeDashboard(overrides: Partial<DashboardOut> = {}): DashboardOut {
       total_assets: "100620.00",
       position_pct: "169.57%",
       total_profit: "620.00",
-      max_invested_cost: "170000.00",
-      max_cost_return_pct: "0.36%",
+      max_invested_cost: "100000.00",
+      max_cost_return_pct: "0.62%",
       total_fees: "0.00",
       market_value_display: "170,620.00",
       cash_display: "-70,000.00",
@@ -81,7 +81,7 @@ function makeDashboard(overrides: Partial<DashboardOut> = {}): DashboardOut {
       balance_display: "-50,000.00",
       total_assets_display: "100,620.00",
       total_profit_display: "620.00",
-      max_invested_cost_display: "170,000.00",
+      max_invested_cost_display: "100,000.00",
       total_fees_display: "0.00",
     },
     history_overview: {
@@ -97,10 +97,31 @@ function makeDashboard(overrides: Partial<DashboardOut> = {}): DashboardOut {
       max_profit: "2000.00",
       max_profit_display: "2,000.00",
       max_profit_round: makeRound(),
-      max_profit_cost_pct: "1.18%",
+      max_profit_cost_pct: "2.00%",
       top_rounds: [
         makeRound(),
         makeRound({ round_id: "rnd_000001", security_code: "000001", security_name: "平安银行", pnl: "1000.00" }),
+      ],
+      top_holding_rounds: [
+        makeRound({ round_id: "rnd_600519", holding_days: 120 }),
+        makeRound({
+          round_id: "rnd_000001",
+          security_code: "000001",
+          security_name: "平安银行",
+          holding_days: 90,
+        }),
+        makeRound({
+          round_id: "rnd_000858",
+          security_code: "000858",
+          security_name: "五粮液",
+          holding_days: 60,
+          pnl: "-500.00",
+          return_rate_pct: "-5.00%",
+        }),
+      ],
+      top_trade_counts: [
+        { security_code: "600519", security_name: "贵州茅台", trade_count: 7 },
+        { security_code: "000001", security_name: "平安银行", trade_count: 4 },
       ],
       bottom_rounds: [
         makeRound({
@@ -177,6 +198,8 @@ function missingDashboard(): DashboardOut {
       max_profit_round: null,
       max_profit_cost_pct: null,
       top_rounds: [],
+      top_holding_rounds: [],
+      top_trade_counts: [],
       bottom_rounds: [],
       max_drawdown: {
         from_date: null,
@@ -306,20 +329,27 @@ describe("Dashboard 看板", () => {
     expect(screen.getByTestId("kpi-market-value").textContent).toContain("170,620.00");
     expect(screen.getByTestId("kpi-position").textContent).toContain("169.57%");
     expect(screen.getByTestId("kpi-total-profit").textContent).toContain("620.00");
-    expect(screen.getByTestId("kpi-max-cost-return").textContent).toContain("0.36%");
+    expect(screen.getByTestId("kpi-max-cost-return").textContent).toContain("0.62%");
     expect(screen.getByTestId("kpi-closed-securities").textContent).toContain("3");
     expect(screen.getByTestId("kpi-win-count").textContent).toContain("2");
     expect(screen.getByTestId("kpi-win-pct").textContent).toContain("66.67%");
     expect(screen.getByTestId("kpi-max-profit").textContent).toContain("2,000.00");
-    expect(screen.getByTestId("kpi-max-profit-cost").textContent).toContain("1.18%");
+    expect(screen.getByTestId("kpi-max-profit-cost").textContent).toContain("2.00%");
     expect(screen.getByTestId("kpi-max-drawdown").textContent).toContain("0.00%");
     expect(screen.getByTestId("kpi-max-drawdown").textContent).toContain("92");
 
     expect(screen.getByTestId("holding-row-600519").textContent).toContain("贵州茅台");
     expect(screen.getByTestId("holding-row-600519").textContent).toContain("100.0000");
-    expect(screen.getByTestId("max-profit-round")).toBeTruthy();
     expect(screen.getByTestId("top-round-rnd_600519")).toBeTruthy();
     expect(screen.getByTestId("bottom-round-rnd_000858")).toBeTruthy();
+
+    // 持仓时长 Top3 / 交易次数 Top3（两列布局）
+    expect(screen.getByTestId("top-holding-duration")).toBeTruthy();
+    expect(screen.getByTestId("top-trade-count")).toBeTruthy();
+    expect(screen.getByTestId("top-holding-rnd_600519").textContent).toContain("持有 120 天");
+    expect(screen.getByTestId("top-holding-rnd_000001").textContent).toContain("持有 90 天");
+    expect(screen.getByTestId("top-trade-600519").textContent).toContain("7 笔");
+    expect(screen.getByTestId("top-trade-000001").textContent).toContain("4 笔");
 
     expect(screen.getByTestId("dashboard-meta").textContent).toContain("最新");
     expect(screen.getByTestId("dashboard-meta").textContent).toContain("正常");

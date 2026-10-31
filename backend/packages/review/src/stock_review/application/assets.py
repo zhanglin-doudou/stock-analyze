@@ -77,7 +77,9 @@ log = get_logger("stock_review.assets")
 #      资产表同口径（货基不进持仓、可转债代码归并、债券/待上市新股按成本兜底）。
 # 1.6：新股按认购成本兜底 / 可转债按买入价兜底 → 不再 degraded（视为正常估值），
 #      新增 remark 列标注「当日资产含可转债」；仅非可转债按成本兜底仍 degraded。
-ASSET_DEFINITION_VERSION = "1.6"
+# 1.7：周六/周日不写资产行（A 股无交易，去除周末噪声行）；周末银证转账并入下一交易日
+#      现金流，prev_total 取上一已写工作日。
+ASSET_DEFINITION_VERSION = "1.7"
 # 安全窗：每次有新数据/脏流水/行情 as_of 变化时重算最近 45 天。
 SAFETY_DAYS = 45
 # 水位线重叠窗：PG `now()` = 事务开始时间，覆盖「长事务晚提交」竞态。
@@ -274,8 +276,9 @@ def compute_daily_valuations(
 
     逐日推演口径见设计 §5.3：现金（余额行覆盖优先）/ 持仓数量 / 含费成本 / 外部现金流 /
     逐标的 floor 市值；缺行情 → 该日 blocked（数值 0、prev/pnl/return NULL）；FIFO 异常或
-    `date > as_of` 且仍有持仓 → degraded（按最近收盘估值）。`prev_total` 取**严格上一自然日**
-    非 blocked 总资产，首行取期初现金锚点；`rebuild_from > start` 时首行用落库的 `prev_row`。
+    `date > as_of` 且仍有持仓 → degraded（按最近收盘估值）。**周六/周日不写行**（A 股无交易），
+    周末的外部现金流并入下一交易日；`prev_total` 取上一**已写工作日**的非 blocked 总资产，
+    全量首行取期初现金锚点，增量首行用落库的 `prev_row`。
     持仓/成本/货基键按 `bond_alias` 归一为上市代码（发债代码不请求行情，设计 D3）。
     """
     alias = bond_alias or {}
@@ -294,9 +297,13 @@ def compute_daily_valuations(
     money_fund: dict[str, int] = dict(initial_money_fund)
     holdings: dict[str, int] = {}
     cost_basis: dict[str, int] = {}
-    # 上一自然日的非 blocked 总资产；None 表示首日之前或上一日 blocked。
+    # 上一**已写入行**（跳过周末后即上一交易日）的非 blocked 总资产；
+    # None 表示首日之前或上一行 blocked。
     prior_total: int | None = None
     rows: list[dict[str, object]] = []
+    window_started = False
+    # 周末不写行，但周末发生的银证转账仍需计入下一交易日的当日现金流。
+    pending_cashflow = 0
 
     cursor_date = start
     while cursor_date <= end:
@@ -336,6 +343,12 @@ def compute_daily_valuations(
             cash_units = balance_override
         else:
             cash_units += day_cash_delta
+        pending_cashflow += cashflow_units
+
+        # 周六/周日不写资产行（A 股无交易，避免周末噪声行）；周末流水并入下一交易日。
+        if cursor_date.weekday() >= 5:
+            cursor_date += timedelta(days=1)
+            continue
 
         market_value_units, missing, bond_fallback, _new_stock_fallback = total_market_value(
             holdings,
@@ -368,7 +381,10 @@ def compute_daily_valuations(
                         rebuilt_at=rebuilt_at,
                     )
                 )
+                # 窗口首行即 blocked：后续行 prev_total 必须为 NULL（链路在此断开）。
+                window_started = True
             prior_total = None
+            pending_cashflow = 0
             cursor_date += timedelta(days=1)
             continue
 
@@ -393,18 +409,20 @@ def compute_daily_valuations(
             else None
         )
 
-        # prev_total：首行取期初锚点；否则严格上一自然日（上一日 blocked → NULL）。
+        # prev_total：首行取期初锚点；否则取上一**已写入行**（周末已跳过；上一行 blocked → NULL）。
         # 增量窗口首行用落库的 prev_row（窗口外行不重写，但必须与旧行衔接）。
         if cursor_date >= rebuild_from:
-            effective_prev = (
-                prev_row_total(prev_row, cursor_date, start, rebuild_from, initial_total)
-                if cursor_date == rebuild_from
-                else prior_total
-            )
+            if not window_started:
+                effective_prev = prev_row_total(
+                    prev_row, cursor_date, start, rebuild_from, initial_total
+                )
+                window_started = True
+            else:
+                effective_prev = prior_total
             daily_pnl_units = (
                 None
                 if effective_prev is None
-                else total_assets_units - cashflow_units - effective_prev
+                else total_assets_units - pending_cashflow - effective_prev
             )
             daily_return_units = (
                 None
@@ -423,7 +441,7 @@ def compute_daily_valuations(
                     "holding_cost_units": holding_cost_units,
                     "unrealized_pnl_units": unrealized_pnl_units,
                     "holding_count": nonzero_holdings,
-                    "cashflow_units": cashflow_units,
+                    "cashflow_units": pending_cashflow,
                     "prev_total_assets_units": effective_prev,
                     "daily_pnl_units": daily_pnl_units,
                     "daily_return_units": daily_return_units,
@@ -436,6 +454,7 @@ def compute_daily_valuations(
             )
 
         prior_total = total_assets_units
+        pending_cashflow = 0
         cursor_date += timedelta(days=1)
 
     return _DailyValuations(rows=rows, global_blocked=False, global_reason=None)
@@ -448,10 +467,15 @@ def prev_row_total(
     rebuild_from: date,
     initial_total: int,
 ) -> int | None:
-    """增量窗口首行的 `prev_total`：首行取期初锚点（现金 + 货基），否则落库上一日行。"""
-    if trade_date == start:
+    """窗口首行的 `prev_total`：全量取期初锚点，增量衔接窗口外上一已写行。
+
+    周末不写行，因此窗口首行可能是 `rebuild_from` 之后的第一个工作日；
+    全量（`rebuild_from <= start`）一律取期初锚点，增量取落库的 `prev_row`
+    （上一行 blocked → NULL，链路断开）。
+    """
+    if rebuild_from <= start:
         return initial_total
-    if rebuild_from > start and trade_date == rebuild_from:
+    if trade_date >= rebuild_from:
         if prev_row is None or prev_row.status == ROW_STATUS_BLOCKED:
             return None
         return prev_row.total_assets_units
@@ -600,7 +624,11 @@ async def build_assets(
         )
 
     start = min(trade.trade_date for trade in live)
+    # 资产表只在工作日写行（周六/周日跳过，设计 §5.3）：末行日期对齐到最近工作日，
+    # 避免水位线停在周末导致下次增量「窗口前一日本无行」而误触发全量。
     end = clock.today()
+    while end.weekday() >= 5:
+        end -= timedelta(days=1)
 
     # 可转债发债→上市代码别名（设计 D3）：回合/持仓/行情请求统一用 canonical 代码。
     bond_alias, bond_alias_unresolved = build_bond_alias(
@@ -730,9 +758,14 @@ async def build_assets(
         rebuild_from = start
 
     # 5) 增量窗口前一日必须有落库行（提供 prev_total）；缺失 → 全量兜底。
+    #    周末不写行，窗口边界可能落在周六/周日，因此取「rebuild_from 之前最近的已写行」。
     prev_row: AssetDaily | None = None
     if not full and rebuild_from > start:
-        prev_row = await repo.get_row(user_id, rebuild_from - timedelta(days=1))
+        prev_row = await repo.latest(
+            user_id,
+            definition_version=ASSET_DEFINITION_VERSION,
+            on_or_before=rebuild_from - timedelta(days=1),
+        )
         if prev_row is None:
             full = True
             rebuild_from = start

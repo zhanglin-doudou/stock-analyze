@@ -1353,7 +1353,10 @@ export interface components {
         };
         /**
          * DashboardAssetOverviewOut
-         * @description 资产概览：当前快照（最新资产日）+ 全历史峰值成本/总收益/费用。
+         * @description 资产概览：当前快照（最新资产日）+ 峰值转入成本/总收益/费用。
+         *
+         *     `max_invested_cost` 语义为**银证转账峰值转入成本**（累计净转入的峰值），
+         *     `max_cost_return_pct` = 总收益 / 峰值转入成本（字段名保留以兼容旧客户端）。
          */
         DashboardAssetOverviewOut: {
             /** Balance */
@@ -1402,7 +1405,7 @@ export interface components {
         };
         /**
          * DashboardHistoryOverviewOut
-         * @description 历史概览：全历史已平仓计数/最赚最亏 + 最大回撤。
+         * @description 历史概览：全历史已平仓计数/最赚最亏/持仓时长 Top3/交易次数 Top3 + 最大回撤。
          */
         DashboardHistoryOverviewOut: {
             /** Bottom Rounds */
@@ -1432,8 +1435,12 @@ export interface components {
              * @enum {string}
              */
             status: "ok" | "degraded" | "stale" | "blocked" | "missing" | "insufficient";
+            /** Top Holding Rounds */
+            top_holding_rounds: components["schemas"]["DashboardRoundOut"][];
             /** Top Rounds */
             top_rounds: components["schemas"]["DashboardRoundOut"][];
+            /** Top Trade Counts */
+            top_trade_counts: components["schemas"]["DashboardTradeCountOut"][];
             /** Win Count */
             win_count: number;
             /** Win Pct */
@@ -1606,6 +1613,18 @@ export interface components {
             security_code: string;
             /** Security Name */
             security_name: string;
+        };
+        /**
+         * DashboardTradeCountOut
+         * @description 交易次数 Top3 的一行（按证券代码聚合的流水笔数）。
+         */
+        DashboardTradeCountOut: {
+            /** Security Code */
+            security_code: string;
+            /** Security Name */
+            security_name: string;
+            /** Trade Count */
+            trade_count: number;
         };
         /** @description RFC 7807 问题详情 + 平台扩展字段（code/user_message/what_to_do/retryable/request_id/errors），对应 Content-Type: application/problem+json。 */
         Error: {

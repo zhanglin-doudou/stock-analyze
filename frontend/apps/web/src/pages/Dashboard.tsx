@@ -1,7 +1,13 @@
 import { type CSSProperties, type ReactElement, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import type { DashboardOut, DashboardRoundOut, MetricBatch, MetricItem } from "@sa/api-client";
+import type {
+  DashboardOut,
+  DashboardRoundOut,
+  DashboardTradeCountOut,
+  MetricBatch,
+  MetricItem,
+} from "@sa/api-client";
 import { api } from "../client";
 import { TrendChart } from "../charts/TrendChart";
 import { ProblemView } from "../ui/Problem";
@@ -84,6 +90,17 @@ function RoundRow({ round, testPrefix }: { round: DashboardRoundOut; testPrefix:
       <span className="dash-round-meta">
         {round.return_rate_pct} · {round.close_date} · 持有 {round.holding_days} 天
       </span>
+    </li>
+  );
+}
+
+function TradeCountRow({ item }: { item: DashboardTradeCountOut }): ReactElement {
+  return (
+    <li data-testid={`top-trade-${item.security_code}`} className="dash-round">
+      <span className="dash-round-name">
+        {item.security_name}（{item.security_code}）
+      </span>
+      <strong className="num">{item.trade_count} 笔</strong>
     </li>
   );
 }
@@ -310,7 +327,7 @@ export function Dashboard(): ReactElement {
             </span>
           </div>
           <p className="dash-hero-note">
-            历史峰值持仓成本{" "}
+            银证转账峰值转入成本{" "}
             {displayValue(shown(asset.max_invested_cost_display, asset.max_invested_cost))} · 总费用{" "}
             {displayValue(shown(asset.total_fees_display, asset.total_fees))}
           </p>
@@ -330,7 +347,7 @@ export function Dashboard(): ReactElement {
             </span>
           </div>
           <Kpi
-            label="历史峰值持仓成本"
+            label="银证转账峰值转入成本"
             value={shown(asset.max_invested_cost_display, asset.max_invested_cost)}
             testId="kpi-max-invested-cost"
           />
@@ -544,16 +561,41 @@ export function Dashboard(): ReactElement {
         </section>
       </div>
 
-      {history.max_profit_round ? (
-        <section className="dash-panel" data-testid="max-profit-round">
+      {/* 持仓时长 Top3 / 交易次数 Top3（两列布局） */}
+      <div className="dash-grid">
+        <section className="dash-panel" data-testid="top-holding-duration">
           <div className="dash-panel-head">
-            <h2>最大单笔收益</h2>
+            <h2>持仓时长 Top3</h2>
+            <div className="dash-grow" />
+            <span className="dash-panel-meta">已平仓</span>
           </div>
-          <ul className="dash-rounds">
-            <RoundRow round={history.max_profit_round} testPrefix="max-profit" />
-          </ul>
+          {history.top_holding_rounds.length === 0 ? (
+            <p className="dash-muted">暂无已平仓回合。</p>
+          ) : (
+            <ul className="dash-rounds">
+              {history.top_holding_rounds.map((round) => (
+                <RoundRow key={round.round_id} round={round} testPrefix="top-holding" />
+              ))}
+            </ul>
+          )}
         </section>
-      ) : null}
+        <section className="dash-panel" data-testid="top-trade-count">
+          <div className="dash-panel-head">
+            <h2>交易次数 Top3</h2>
+            <div className="dash-grow" />
+            <span className="dash-panel-meta">按证券代码聚合</span>
+          </div>
+          {history.top_trade_counts.length === 0 ? (
+            <p className="dash-muted">暂无交易流水。</p>
+          ) : (
+            <ul className="dash-rounds">
+              {history.top_trade_counts.map((item) => (
+                <TradeCountRow key={item.security_code} item={item} />
+              ))}
+            </ul>
+          )}
+        </section>
+      </div>
 
       <AnnualMetrics
         period={data.metrics_period}

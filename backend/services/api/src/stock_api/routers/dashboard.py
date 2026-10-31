@@ -28,6 +28,7 @@ from stock_api.schemas import (
     DashboardMissingOut,
     DashboardOut,
     DashboardRoundOut,
+    DashboardTradeCountOut,
 )
 
 router = APIRouter(tags=["dashboard"], route_class=StrictQueryRoute)
@@ -158,6 +159,15 @@ def _to_out(result: Any) -> DashboardOut:
             max_profit_cost_pct=_pct_2dp(history.max_profit_cost_ratio_units),
             top_rounds=[_round_out(item) for item in history.top_rounds],
             bottom_rounds=[_round_out(item) for item in history.bottom_rounds],
+            top_holding_rounds=[_round_out(item) for item in history.top_holding_rounds],
+            top_trade_counts=[
+                DashboardTradeCountOut(
+                    security_code=item.security_code,
+                    security_name=item.security_name,
+                    trade_count=item.trade_count,
+                )
+                for item in history.top_trade_counts
+            ],
             max_drawdown=DashboardMaxDrawdownOut(
                 from_date=drawdown.from_date,
                 to_date=drawdown.to_date,

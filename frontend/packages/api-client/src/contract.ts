@@ -120,6 +120,7 @@ export type DashboardAssetOverviewOut = ApiSchemas["DashboardAssetOverviewOut"];
 export type DashboardHistoryOverviewOut = ApiSchemas["DashboardHistoryOverviewOut"];
 export type DashboardHoldingOut = ApiSchemas["DashboardHoldingOut"];
 export type DashboardRoundOut = ApiSchemas["DashboardRoundOut"];
+export type DashboardTradeCountOut = ApiSchemas["DashboardTradeCountOut"];
 export type DashboardMaxDrawdownOut = ApiSchemas["DashboardMaxDrawdownOut"];
 export type DashboardMissingOut = ApiSchemas["DashboardMissingOut"];
 

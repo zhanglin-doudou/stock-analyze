@@ -134,20 +134,20 @@ async def _seed_trade(
 
 
 async def _seed_happy_chain(engine: AsyncEngine, *, user_id: uuid.UUID) -> None:
-    """04-01 现金锚点 100000.00（0 金额利息行）+ 06-30 买入 100@1700（余额 -70000）。
+    """04-01 银证转入 100000.00 + 06-30 买入 100@1700（余额 -70000）。
 
-    锚点用 0 金额利息行而非 `other`：桥接把区间内 `other` 现金流视为"未分类"并整体
-    degraded（D-02），会让 `total_profit` 置 null；利息行 0 金额不触发降级。
+    锚点用 `transfer`：看板「峰值转入成本」= 银证转账累计净额峰值（100000.00），
+    作为 `max_cost_return_pct` / `max_profit_cost_pct` 的分母。
     """
     await _seed_trade(
         engine,
         user_id=user_id,
         trade_date=date(2026, 4, 1),
-        amount_units=0,
+        amount_units=100_000_00,
         cash_balance_units=100_000_00,
-        category="interest",
+        category="transfer",
         security_code="",
-        summary="利息归本",
+        summary="银行转证券",
     )
     await _seed_trade(
         engine,
@@ -277,13 +277,14 @@ async def _seed_no_anchor(engine: AsyncEngine, *, user_id: uuid.UUID) -> None:
 async def _seed_rounds(engine: AsyncEngine, *, user_id: uuid.UUID) -> None:
     """3 笔已平仓（2 盈 1 亏，3 只股票）：600519 +2000、000001 +1000、000858 -500。"""
     now = datetime(2026, 6, 30, 15, 0, tzinfo=UTC)
+    # holding_days 刻意错开，持仓时长 Top3 才有确定顺序（600519 > 000001 > 000858）。
     specs = [
-        ("600519", "贵州茅台", 200_000),
-        ("000001", "平安银行", 100_000),
-        ("000858", "五粮液", -50_000),
+        ("600519", "贵州茅台", 200_000, 120),
+        ("000001", "平安银行", 100_000, 90),
+        ("000858", "五粮液", -50_000, 60),
     ]
     async with AsyncSession(engine) as session:
-        for code, name, pnl in specs:
+        for code, name, pnl, holding_days in specs:
             session.add(
                 Round(
                     id=f"rnd_{uuid.uuid4().hex[:12]}",
@@ -301,7 +302,7 @@ async def _seed_rounds(engine: AsyncEngine, *, user_id: uuid.UUID) -> None:
                     dividend_units=0,
                     pnl_units=pnl,
                     return_rate_units=10_000_000 if pnl > 0 else -5_000_000,
-                    holding_days=5,
+                    holding_days=holding_days,
                     data_error=False,
                     oversell_units=0,
                     fills_count=1,
@@ -358,8 +359,10 @@ async def test_api_084_happy_path_two_sections(
     assert asset["total_assets"] == "100620.00"
     assert asset["position_pct"] == "169.57%"
     assert asset["total_profit"] == "620.00"
-    assert asset["max_invested_cost"] == "170000.00"
-    assert asset["max_cost_return_pct"] == "0.36%"
+    # 峰值转入成本 = 银证转账累计净额峰值（04-01 转入 100000.00）。
+    assert asset["max_invested_cost"] == "100000.00"
+    # 峰值成本收益率 = 当前收益额 / 峰值转入成本 = 620 / 100000。
+    assert asset["max_cost_return_pct"] == "0.62%"
     assert asset["total_fees"] == "0.00"
     # 2026-10-28（Phase 3）：后端补展示串（千分位）；raw 定点串保留兼容。
     assert asset["market_value_display"] == "170,620.00"
@@ -368,7 +371,7 @@ async def test_api_084_happy_path_two_sections(
     assert asset["balance_display"] == "-70,000.00"
     assert asset["total_assets_display"] == "100,620.00"
     assert asset["total_profit_display"] == "620.00"
-    assert asset["max_invested_cost_display"] == "170,000.00"
+    assert asset["max_invested_cost_display"] == "100,000.00"
     assert asset["total_fees_display"] == "0.00"
     for field in (
         "market_value",
@@ -411,13 +414,24 @@ async def test_api_084_happy_path_two_sections(
     assert history["max_profit_display"] == "2,000.00"
     assert history["max_profit_round"]["security_code"] == "600519"
     assert history["max_profit_round"]["pnl_display"] == "2,000.00"
-    assert history["max_profit_cost_pct"] == "1.18%"
+    assert history["max_profit_cost_pct"] == "2.00%"
     assert [item["security_code"] for item in history["top_rounds"]] == [
         "600519",
         "000001",
         "000858",
     ]
     assert history["bottom_rounds"][0]["security_code"] == "000858"
+    # 持仓时长 Top3：按 holding_days 降序（120/90/60）。
+    assert [item["security_code"] for item in history["top_holding_rounds"]] == [
+        "600519",
+        "000001",
+        "000858",
+    ]
+    assert [item["holding_days"] for item in history["top_holding_rounds"]] == [120, 90, 60]
+    # 交易次数 Top3：按证券代码聚合流水笔数（现金/转账/货基不计入）。
+    assert history["top_trade_counts"] == [
+        {"security_code": "600519", "security_name": "600519", "trade_count": 1}
+    ]
     assert _PCT_RE.match(history["win_pct"])
     assert _PCT_RE.match(history["max_profit_cost_pct"])
 
@@ -578,8 +592,8 @@ async def test_api_084_leading_anchor_null_return_is_not_a_gap(
     drawdown = body["history_overview"]["max_drawdown"]
     assert drawdown["sample_status"] == "ok"
     assert drawdown["mdd_pct"] == "0.00%"
-    # 92 个自然日 − 首日锚点 1 天 = 91 个有效观测
-    assert drawdown["n_obs"] == 91
+    # 04-01..07-01 共 66 个工作日行 − 首日锚点 1 行 = 65 个有效观测（周末不写行）。
+    assert drawdown["n_obs"] == 65
 
 
 async def test_api_084_interior_null_return_still_reports_gaps(
@@ -602,13 +616,15 @@ async def test_api_084_interior_null_return_still_reports_gaps(
     assert _find(body["missing"], "DASHBOARD_MDD_GAPS") is not None
     assert body["asset_overview"]["status"] == "ok"
     assert body["history_overview"]["status"] == "degraded"
-    assert body["status"] == "degraded"
+    # 断链是 history 层降级；有效观测也因周末不写行降到 54 天（<60）→ 顶层 insufficient。
+    assert body["status"] == "insufficient"
 
     drawdown = body["history_overview"]["max_drawdown"]
-    assert drawdown["sample_status"] == "ok"
-    assert drawdown["mdd_pct"] == "0.00%"
-    # 92 天 − 首日锚点 1 天 − 中途空档 17 天 = 74 个有效观测
-    assert drawdown["n_obs"] == 74
+    assert drawdown["sample_status"] == "insufficient"
+    assert drawdown["mdd_pct"] is None
+    # 04-01..07-01 共 66 个工作日行 − 首日锚点 1 行 − 中途空档 11 行 = 54 个有效观测。
+    assert drawdown["n_obs"] == 54
+    assert _find(body["missing"], "DASHBOARD_MDD_INSUFFICIENT") is not None
 
 
 # ── 隔离 / admin / 未认证 ───────────────────────────────────

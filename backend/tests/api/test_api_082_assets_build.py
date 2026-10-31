@@ -7,7 +7,7 @@
 * 单飞：不同 key 同参复用（`X-Job-Reused`）；auto 运行中发 full → 409 `JOB_ALREADY_RUNNING`；
 * 校验：缺/短 `Idempotency-Key` → 422、`mode=bad` → 422、4 个活跃任务后 → 429 `QUOTA_EXCEEDED`；
 * 越权：read PAT → 403 INSUFFICIENT_SCOPE、admin → 403 ADMIN_CANNOT_READ_TRADES、无 token 401；
-* 增量摘要：`last_mode=incremental`、`last_rows_written == end - last_rebuild_from + 1 < rows_count`，
+* 增量摘要：`last_mode=incremental`、`last_rows_written == 窗口内工作日数 < rows_count`，
   owner 直读 `platform.job.result` 校验键值，且增量结果与强制 full **逐行相等**；
 * 无数据 / 无锚点：rows_count=0；无锚点时 build.state=blocked；
 * job/SSE 契约：终态 `succeeded`/`stage=done`、`GET /jobs` 不扩 result 字段、SSE stage 合法且单调。
@@ -20,7 +20,7 @@ from __future__ import annotations
 import itertools
 import re
 import uuid
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 
 import httpx
@@ -99,6 +99,17 @@ async def _drain_worker(
 
 def _idem_key() -> str:
     return f"assets-{uuid.uuid4().hex}"
+
+
+def _workdays(start: date, end: date) -> int:
+    """闭区间 [start, end] 内的工作日数（资产表周末不写行）。"""
+    count = 0
+    day = start
+    while day <= end:
+        if day.weekday() < 5:
+            count += 1
+        day += timedelta(days=1)
+    return count
 
 
 async def _post_build(
@@ -297,7 +308,9 @@ async def test_api_082_happy_first_build(
     assert result["status"] == "ok"
     assert result["assumption"] == "back_solved"
     assert result["built_through"] == "2026-07-01"
-    assert result["rows_written"] == result["rows_total"] == 34
+    # 05-29 起（含）→ 07-01：周末不写行，只统计工作日。
+    expected_rows = _workdays(date(2026, 5, 29), date(2026, 7, 1))
+    assert result["rows_written"] == result["rows_total"] == expected_rows
 
     job_detail = await assets_client.get(f"/api/v1/jobs/{job_id}", headers=acc.headers)
     assert job_detail.status_code == 200
@@ -312,9 +325,9 @@ async def test_api_082_happy_first_build(
     assert body["items"], "drain 后应可见新行"
     build = body["build"]
     assert build["last_mode"] == "full"
-    assert build["last_rows_written"] == 34
+    assert build["last_rows_written"] == expected_rows
     assert build["last_built_through"] == "2026-07-01"
-    assert build["rows_count"] == 34
+    assert build["rows_count"] == expected_rows
     assert build["state"] == "current"
     assert body["data_as_of"] == "2026-09-30"
 
@@ -519,8 +532,8 @@ async def test_api_082_incremental_summary_equals_full(
     first_result = await _job_row(owner_engine, first_job)
     assert first_result is not None and isinstance(first_result["result"], dict)
     rows_total = first_result["result"]["rows_total"]
-    expected_total = (date(2026, 7, 1) - date(2026, 3, 1)).days + 1
-    assert rows_total == expected_total == 123
+    expected_total = _workdays(date(2026, 3, 1), date(2026, 7, 1))
+    assert rows_total == expected_total
 
     before = await assets_client.get("/api/v1/assets", params={"limit": 200}, headers=acc.headers)
     assert before.status_code == 200
@@ -552,8 +565,9 @@ async def test_api_082_incremental_summary_equals_full(
     result = job["result"]
     assert result["mode"] == "incremental"
     assert result["rebuild_from"] == "2026-05-18"
-    # 安全窗 45 天：recuild_from = end - 44 → rows_written = 45
-    assert result["rows_written"] == (date(2026, 7, 1) - date(2026, 5, 18)).days + 1 == 45
+    # 安全窗 45 天（calendar 口径）：rebuild_from = end - 44；窗口内只写工作日。
+    expected_incremental = _workdays(date(2026, 5, 18), date(2026, 7, 1))
+    assert result["rows_written"] == expected_incremental
     assert result["rows_total"] == rows_total
     assert result["built_through"] == "2026-07-01"
 
@@ -562,7 +576,7 @@ async def test_api_082_incremental_summary_equals_full(
     build = body["build"]
     assert build["last_mode"] == "incremental"
     assert build["last_rebuild_from"] == "2026-05-18"
-    assert build["last_rows_written"] == 45
+    assert build["last_rows_written"] == expected_incremental
     assert build["last_rows_written"] < build["rows_count"] == rows_total
     rows_incremental = body["items"]
     assert len(rows_incremental) == rows_total
