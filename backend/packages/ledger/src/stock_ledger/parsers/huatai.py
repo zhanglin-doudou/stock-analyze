@@ -265,7 +265,8 @@ def _share_only_money_fund_row(
         return None
     if quantity_units == 0:
         return None
-    # 「非交易过户确认」当前实测为货基份额转出（同日另有资金上账行）；
+    # 「非交易过户确认」当前实测为货基份额转出（同日另有「资管转让资金上账」资金行；
+    # 与资金行配对时在 D16 改写中被剔除，防份额重复扣减）；
     # 「红利发放」为份额转入。份额符号不可靠，按摘要语义定方向。
     if summary == "非交易过户确认":
         side = Side.SELL.value
@@ -392,6 +393,68 @@ def _money_fund_row_delta(row: ParsedRow) -> int:
     """货基行的余额增量（金额分）：卖出取负，其余（含红利再投）取正。"""
     shares = -row.quantity_units if row.side == Side.SELL.value else row.quantity_units
     return _share_value_units(shares, row.price_units or _ONE_PRICE_UNITS)
+
+
+# 「资管转让资金上账」（归一化后精确匹配，设计 D16）：华泰把货基（天天发）赎回拆成两行——
+# 资金腿「资管转让资金上账」（无代码 CASH 资金行，+金额）与份额腿「非交易过户确认」
+# （零金额份额转出，仅供余额推演）。资金腿若按银证转入（transfer）入账：桥接外部现金流
+# 虚增 → 累计收益少算；FIFO 没有对应赎回 → 幽灵 lot 虚增持仓成本；资产表在资金到账日
+# 现金与货基重复计。还原为货基赎回行后，分类/FIFO/桥接/资产表全部走既有口径自闭合。
+_ASSET_TRANSFER_IN_SUMMARY = "资管转让资金上账"
+
+
+def _rewrite_asset_transfer_as_fund_redemption(
+    rows: list[ParsedRow], share_only_rows: list[ParsedRow]
+) -> list[int]:
+    """把「资管转让资金上账」CASH 资金行原地改写为货基赎回行（设计 D16）。
+
+    - 仅当账单内可唯一识别一只货基（含份额行在内 `_money_fund_codes` 恰好 1 个代码）
+      才改写；无法唯一归属时保持 CASH 划转口径（安全兜底，不猜代码）；
+    - 改写：code/name 取货基，qty = 金额（单位净值恒 1.0000，1 元 = 1 份），price = 1.0，
+      摘要改写为「赎回确认」（分类规则据此落 sell；原始摘要与代码留 `raw` 可溯源）；
+    - 配对的「非交易过户确认」份额腿（份额价值 == 某改写行金额）从余额推演中剔除，
+      避免份额被重复扣减（改写行的份额增量已承担该扣减）。
+
+    返回被改写行的 line_no 列表（调用方写 assumptions 留痕）。
+    """
+    fund_codes = _money_fund_codes([*rows, *share_only_rows])
+    if len(fund_codes) != 1:
+        return []
+    code = next(iter(fund_codes))
+    name = next(
+        (row.security_name for row in [*rows, *share_only_rows] if row.security_code == code),
+        code,
+    )
+    rewritten: list[int] = []
+    redeemed_amounts: list[int] = []  # 改写行金额（分），用于配对份额腿
+    for row in rows:
+        if row.security_code != "CASH" or row.amount_units <= 0:
+            continue
+        if normalize_summary(row.summary or "") != _ASSET_TRANSFER_IN_SUMMARY:
+            continue
+        row.security_code = code
+        row.security_name = name
+        # 货基单位净值恒 1.0000：1 元 = 1 份；Money(scale=2) × 100 = Qty(scale=4)。
+        row.quantity_units = row.amount_units * 100
+        row.price_units = _ONE_PRICE_UNITS
+        row.summary = "赎回确认"
+        rewritten.append(row.line_no)
+        redeemed_amounts.append(row.amount_units)
+    if not rewritten:
+        return []
+    kept_share_only: list[ParsedRow] = []
+    for share_row in share_only_rows:
+        share_value = _share_value_units(share_row.quantity_units, share_row.price_units)
+        if (
+            share_row.security_code == code
+            and normalize_summary(share_row.summary or "") == "非交易过户确认"
+            and share_value in redeemed_amounts
+        ):
+            redeemed_amounts.remove(share_value)
+            continue
+        kept_share_only.append(share_row)
+    share_only_rows[:] = kept_share_only
+    return rewritten
 
 
 @dataclass(slots=True)
@@ -788,6 +851,12 @@ def parse_bill(
         seen_full.add(cand.raw_values)
         kept.append(cand)
 
+    # 「资管转让资金上账」还原为货基赎回行（设计 D16）：必须在 occurrence/dedupe_key
+    # 计算之前改写，标的/数量/价格变化才会进入去重键；配对份额腿同步剔除。
+    asset_transfer_rewritten = _rewrite_asset_transfer_as_fund_redemption(
+        [cand.parsed for cand in kept], share_only_rows
+    )
+
     counts: dict[str, int] = {}
     rows: list[ParsedRow] = []
     for cand in kept:
@@ -824,6 +893,9 @@ def parse_bill(
         assumptions["money_fund_oversell_interest"] = sorted(mf_interest)
     if share_only_rows:
         assumptions["money_fund_balance_only_rows"] = sorted(row.line_no for row in share_only_rows)
+    if asset_transfer_rewritten:
+        # 设计 D16：被还原为货基赎回行的「资管转让资金上账」行号留痕（原始摘要留 raw）。
+        assumptions["asset_transfer_fund_redemption_rows"] = asset_transfer_rewritten
     if rows and rows[0].side != "buy":
         warnings.append(WarningCode.FIRST_ROW_NOT_BUY)
     if any(q.reason_code == QuarantineReason.DUPLICATE_IN_FILE.value for q in quarantined):

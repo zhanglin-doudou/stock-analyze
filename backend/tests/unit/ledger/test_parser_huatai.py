@@ -1082,3 +1082,116 @@ def test_money_fund_zero_amount_share_rows_adjust_balance_only() -> None:
     assert by_line[4].money_fund_balance_units == 0
     assert bill.assumptions["money_fund_balance_only_rows"] == [3, 5]
     assert "money_fund_oversell_interest" not in bill.assumptions
+
+
+def _asset_transfer_in_row(*, amount: str, balance: str) -> list[str]:
+    """无证券代码的「资管转让资金上账」资金行（真实账单形态：代码/名称/买卖标志全空）。"""
+    return [
+        "20261026",
+        "",
+        "",
+        "",
+        "0.00",
+        "0.000",
+        amount,
+        "0.00",
+        "0.00",
+        "0.00",
+        balance,
+        "资管转让资\n金上账",
+    ]
+
+
+def test_asset_transfer_in_rewritten_as_fund_redemption() -> None:
+    """设计 D16：「资管转让资金上账」+ 配对「非交易过户确认」→ 还原为货基赎回行。"""
+    rows = [
+        _money_row(
+            line_date="20261023",
+            code="940018",
+            name="华泰紫金天天发货币",
+            quantity="189263.56",
+            amount="-189263.56",
+            balance="101.05",
+            summary="申购确认",
+        ),
+        _asset_transfer_in_row(amount="179999.00", balance="180100.05"),
+        _money_row(
+            line_date="20261026",
+            code="940018",
+            name="华泰紫金天天发货币",
+            quantity="9264.56",
+            amount="9264.56",
+            balance="4811.86",
+            summary="赎回确认",
+        ),
+        _money_row(
+            line_date="20261027",
+            code="940018",
+            name="华泰紫金天天发货币",
+            quantity="179999",
+            amount="0.00",
+            balance="0.00",
+            summary="非交易过户\n确认",
+        ),
+        _money_row(
+            line_date="20261027",
+            code="940018",
+            name="华泰紫金天天发货币",
+            quantity="1414.19",
+            amount="-1414.19",
+            balance="101.15",
+            summary="申购确认",
+        ),
+    ]
+    bill = _parse(_xlsx(_HEADERS, rows))
+    by_line = {row.line_no: row for row in bill.rows}
+    converted = by_line[3]
+    # 资金腿改写为货基赎回行：code/name 取货基，qty = 金额（1 元 = 1 份），price = 1.0。
+    assert converted.security_code == "940018"
+    assert converted.security_name == "华泰紫金天天发货币"
+    assert converted.side == "sell"
+    assert converted.amount_units == 179999_00
+    assert converted.quantity_units == 1_799_990_000
+    assert converted.price_units == 1_000_000
+    assert converted.summary == "赎回确认"
+    assert converted.cash_balance_units == 180100_05
+    # 余额推演：改写行自身承担份额扣减（189263.56 − 179999.00 = 9264.56）；
+    # 配对份额腿已剔除，不参与推演（否则会重复扣减）。
+    assert converted.money_fund_balance_units == 9264_56
+    assert by_line[4].money_fund_balance_units == 0
+    assert by_line[6].money_fund_balance_units == 1414_19
+    assert bill.assumptions["asset_transfer_fund_redemption_rows"] == [3]
+    assert "money_fund_balance_only_rows" not in bill.assumptions
+    assert "money_fund_oversell_interest" not in bill.assumptions
+
+
+def test_asset_transfer_in_kept_as_cash_when_fund_ambiguous() -> None:
+    """账单里有多只货基、无法唯一归属时，保持 CASH 划转口径（D16 安全兜底）。"""
+    rows = [
+        _money_row(
+            line_date="20261023",
+            code="940018",
+            name="华泰紫金天天发货币",
+            quantity="100",
+            amount="-100.00",
+            balance="900.00",
+            summary="申购确认",
+        ),
+        _money_row(
+            line_date="20261023",
+            code="000001",
+            name="某某货币",
+            quantity="100",
+            amount="-100.00",
+            balance="800.00",
+            summary="申购确认",
+        ),
+        _asset_transfer_in_row(amount="179999.00", balance="180100.05"),
+    ]
+    bill = _parse(_xlsx(_HEADERS, rows))
+    by_line = {row.line_no: row for row in bill.rows}
+    row = by_line[4]
+    assert row.security_code == "CASH"
+    assert row.quantity_units == 0
+    assert row.summary == "资管转让资\n金上账"
+    assert "asset_transfer_fund_redemption_rows" not in bill.assumptions
