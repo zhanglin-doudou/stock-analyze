@@ -1359,6 +1359,10 @@ export interface components {
          *     `max_cost_return_pct` = 总收益 / 峰值转入成本（字段名保留以兼容旧客户端）。
          */
         DashboardAssetOverviewOut: {
+            /** Annualized Return */
+            annualized_return?: string | null;
+            /** Annualized Return Pct */
+            annualized_return_pct?: string | null;
             /** Balance */
             balance?: string | null;
             /** Balance Display */
@@ -1537,7 +1541,7 @@ export interface components {
              * Code
              * @enum {string}
              */
-            code: "DASHBOARD_ASSET_MISSING" | "DASHBOARD_ASSET_BLOCKED" | "DASHBOARD_STALE" | "DASHBOARD_TOTAL_PROFIT_UNAVAILABLE" | "DASHBOARD_MAX_INVESTED_COST_MISSING" | "DASHBOARD_MDD_INSUFFICIENT" | "DASHBOARD_MDD_UNRELIABLE" | "DASHBOARD_MDD_GAPS" | "DASHBOARD_HOLDINGS_TRUNCATED" | "DASHBOARD_HOLDING_PRICE_MISSING" | "DASHBOARD_HOLDINGS_MISMATCH" | "DASHBOARD_NO_CLOSED_ROUNDS" | "DASHBOARD_BILL_RANGE_MISSING" | "DASHBOARD_INITIAL_CAPITAL_MISSING";
+            code: "DASHBOARD_ASSET_MISSING" | "DASHBOARD_ASSET_BLOCKED" | "DASHBOARD_STALE" | "DASHBOARD_TOTAL_PROFIT_UNAVAILABLE" | "DASHBOARD_MAX_INVESTED_COST_MISSING" | "DASHBOARD_MDD_INSUFFICIENT" | "DASHBOARD_MDD_UNRELIABLE" | "DASHBOARD_MDD_GAPS" | "DASHBOARD_HOLDINGS_TRUNCATED" | "DASHBOARD_HOLDING_PRICE_MISSING" | "DASHBOARD_HOLDINGS_MISMATCH" | "DASHBOARD_NO_CLOSED_ROUNDS" | "DASHBOARD_BILL_RANGE_MISSING" | "DASHBOARD_INITIAL_CAPITAL_MISSING" | "DASHBOARD_ANNUALIZED_RETURN_UNAVAILABLE";
             /** Field */
             field: string;
             /** Reason */

@@ -998,6 +998,28 @@
         "additionalProperties": false,
         "description": "资产概览：当前快照（最新资产日）+ 峰值转入成本/总收益/费用。\n\n`max_invested_cost` 语义为**银证转账峰值转入成本**（累计净转入的峰值），\n`max_cost_return_pct` = 总收益 / 峰值转入成本（字段名保留以兼容旧客户端）。",
         "properties": {
+          "annualized_return": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Annualized Return"
+          },
+          "annualized_return_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Annualized Return Pct"
+          },
           "balance": {
             "anyOf": [
               {
@@ -1683,7 +1705,8 @@
               "DASHBOARD_HOLDINGS_MISMATCH",
               "DASHBOARD_NO_CLOSED_ROUNDS",
               "DASHBOARD_BILL_RANGE_MISSING",
-              "DASHBOARD_INITIAL_CAPITAL_MISSING"
+              "DASHBOARD_INITIAL_CAPITAL_MISSING",
+              "DASHBOARD_ANNUALIZED_RETURN_UNAVAILABLE"
             ],
             "title": "Code",
             "type": "string"

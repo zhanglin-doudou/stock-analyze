@@ -711,6 +711,7 @@ DashboardMissingCode = Literal[
     "DASHBOARD_NO_CLOSED_ROUNDS",
     "DASHBOARD_BILL_RANGE_MISSING",
     "DASHBOARD_INITIAL_CAPITAL_MISSING",
+    "DASHBOARD_ANNUALIZED_RETURN_UNAVAILABLE",
 ]
 
 
@@ -807,6 +808,9 @@ class DashboardAssetOverviewOut(StrictModel):
     bill_end_date: date | None = None
     initial_capital: str | None = None
     initial_capital_display: str | None = None
+    # 全历史年化 TWR（时间加权；scale=8 小数串 + 两位百分比展示）。
+    annualized_return: str | None = None
+    annualized_return_pct: str | None = None
     # 后端已格式化的展示串（千分位金额）；前端优先使用，raw 保留兼容。
     market_value_display: str | None = None
     cash_display: str | None = None

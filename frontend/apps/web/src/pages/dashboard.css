@@ -255,12 +255,6 @@
   border-left: 1px solid var(--line);
 }
 
-/* 7 个迷你指标：最后一项整行，避免 2 列网格出现空位 */
-.dash-mini .dash-kpi:last-child {
-  grid-column: 1 / -1;
-  border-left: 0;
-}
-
 .dash-kpi-label {
   font-size: var(--fs-xs);
   color: var(--muted);

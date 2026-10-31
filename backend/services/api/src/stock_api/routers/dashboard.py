@@ -132,6 +132,8 @@ def _to_out(result: Any) -> DashboardOut:
             bill_end_date=asset.bill_end_date,
             initial_capital=_money(asset.initial_capital_units),
             initial_capital_display=_money_display(asset.initial_capital_units),
+            annualized_return=_ratio(asset.annualized_return_ratio_units),
+            annualized_return_pct=_pct_2dp(asset.annualized_return_ratio_units),
             market_value_display=_money_display(asset.market_value_units),
             cash_display=_money_display(asset.cash_units),
             money_fund_display=_money_display(asset.money_fund_units),

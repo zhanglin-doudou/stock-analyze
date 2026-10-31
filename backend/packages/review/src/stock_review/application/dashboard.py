@@ -97,6 +97,7 @@ MISSING_HOLDINGS_MISMATCH = "DASHBOARD_HOLDINGS_MISMATCH"
 MISSING_NO_CLOSED_ROUNDS = "DASHBOARD_NO_CLOSED_ROUNDS"
 MISSING_BILL_RANGE = "DASHBOARD_BILL_RANGE_MISSING"
 MISSING_INITIAL_CAPITAL = "DASHBOARD_INITIAL_CAPITAL_MISSING"
+MISSING_ANNUALIZED_RETURN = "DASHBOARD_ANNUALIZED_RETURN_UNAVAILABLE"
 
 
 @dataclass(slots=True, frozen=True)
@@ -180,6 +181,8 @@ class DashboardAssetOverview:
     bill_start_date: date | None
     bill_end_date: date | None
     initial_capital_units: int | None
+    # 全历史年化 TWR（最长连续有效段复利累计后按自然日年化；scale=8）。
+    annualized_return_ratio_units: int | None
 
 
 @dataclass(slots=True, frozen=True)
@@ -627,6 +630,27 @@ def _max_drawdown(
     )
 
 
+def _annualized_twr(series: list[AssetDaily]) -> int | None:
+    """全历史年化 TWR（时间加权，正确处理资金进出）。
+
+    取最长连续有效段（与回撤同口径：ok/degraded 且日收益非 NULL），把逐日收益
+    复利累计后按自然日年化。无断链时用整条序列起止（含首日锚点），有断链时用
+    最长有效段起止。有效观测 < 2 或跨度 <= 0 → None（不伪造 0）。
+    """
+    segments, has_gaps, _valid = _drawdown_segments(series)
+    if not segments:
+        return None
+    dates, returns = max(segments, key=lambda item: len(item[1]))
+    if len(returns) < 2:
+        return None
+    start = series[0].trade_date if (not has_gaps and len(segments) == 1) else dates[0]
+    natural_days = (dates[-1] - start).days
+    if natural_days <= 0:
+        return None
+    family = drawdown_family(returns, natural_days=natural_days)
+    return family.twr_annual_units
+
+
 async def build_dashboard(
     session: AsyncSession,
     *,
@@ -826,6 +850,18 @@ async def build_dashboard(
             )
         )
 
+    # 全历史年化 TWR：资产表有效日收益复利累计后按自然日年化（正确处理出入金）。
+    annualized_return_units = None if asset_blocked else _annualized_twr(series)
+    if annualized_return_units is None:
+        missing.append(
+            DashboardMissing(
+                field="asset_overview.annualized_return",
+                code=MISSING_ANNUALIZED_RETURN,
+                reason="资产表有效观测不足或存在阻断，无法计算年化收益率。",
+                what_to_do="补充更长历史账单并构建资产表后重试。",
+            )
+        )
+
     max_cost_return = (
         _ratio_units(total_profit_units, max_invested)
         if total_profit_units is not None and max_invested
@@ -1006,6 +1042,7 @@ async def build_dashboard(
             bill_start_date=bill_start_date,
             bill_end_date=bill_end_date,
             initial_capital_units=initial_capital_units,
+            annualized_return_ratio_units=annualized_return_units,
         ),
         history=DashboardHistoryOverview(
             status=history_status,

@@ -382,6 +382,11 @@ export function Dashboard(): ReactElement {
             value={shown(asset.total_fees_display, asset.total_fees)}
             testId="kpi-total-fees"
           />
+          <Kpi
+            label="年化收益率"
+            value={asset.annualized_return_pct}
+            testId="kpi-annualized-return"
+          />
         </div>
       </section>
 

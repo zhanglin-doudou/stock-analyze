@@ -370,6 +370,11 @@ async def test_api_084_happy_path_two_sections(
     # 期初资金 = 桥接 initial_cash + initial_open_cost（04-01 转入日反推期初现金 0）。
     assert asset["initial_capital"] == "0.00"
     assert asset["initial_capital_display"] == "0.00"
+    # 年化 TWR：资产表有效日收益复利累计后按自然日年化（非空且为定点/百分比串）。
+    assert asset["annualized_return"] is not None
+    assert _RATIO_RE.match(asset["annualized_return"])
+    assert asset["annualized_return_pct"] is not None
+    assert _PCT_RE.match(asset["annualized_return_pct"])
     # 2026-10-28（Phase 3）：后端补展示串（千分位）；raw 定点串保留兼容。
     assert asset["market_value_display"] == "170,620.00"
     assert asset["cash_display"] == "-70,000.00"

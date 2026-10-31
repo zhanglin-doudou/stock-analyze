@@ -79,6 +79,8 @@ function makeDashboard(overrides: Partial<DashboardOut> = {}): DashboardOut {
       bill_end_date: "2026-06-30",
       initial_capital: "100000.00",
       initial_capital_display: "100,000.00",
+      annualized_return: "0.01234567",
+      annualized_return_pct: "1.23%",
       market_value_display: "170,620.00",
       cash_display: "-70,000.00",
       money_fund_display: "20,000.00",
@@ -211,6 +213,8 @@ function missingDashboard(): DashboardOut {
       bill_end_date: null,
       initial_capital: null,
       initial_capital_display: null,
+      annualized_return: null,
+      annualized_return_pct: null,
     },
     history_overview: {
       status: "missing",
@@ -387,6 +391,7 @@ describe("Dashboard 看板", () => {
     expect(screen.getByTestId("kpi-bill-range").textContent).toContain("2026-04-01");
     expect(screen.getByTestId("kpi-bill-range").textContent).toContain("2026-06-30");
     expect(screen.getByTestId("kpi-initial-capital").textContent).toContain("100,000.00");
+    expect(screen.getByTestId("kpi-annualized-return").textContent).toContain("1.23%");
 
     expect(screen.getByTestId("dashboard-meta").textContent).toContain("最新");
     expect(screen.getByTestId("dashboard-meta").textContent).toContain("正常");
@@ -419,6 +424,7 @@ describe("Dashboard 看板", () => {
     expect(screen.getByTestId("kpi-win-pct").textContent).toContain("—");
     expect(screen.getByTestId("kpi-bill-range").textContent).toContain("—");
     expect(screen.getByTestId("kpi-initial-capital").textContent).toContain("—");
+    expect(screen.getByTestId("kpi-annualized-return").textContent).toContain("—");
     expect(screen.getByText(/没有持仓/)).toBeTruthy();
 
     expect(screen.getByTestId("dashboard-meta").textContent).toContain("未构建");
