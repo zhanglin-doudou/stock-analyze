@@ -128,6 +128,10 @@ def _to_out(result: Any) -> DashboardOut:
             max_invested_cost=_money(asset.max_invested_cost_units),
             max_cost_return_pct=_pct_2dp(asset.max_cost_return_ratio_units),
             total_fees=_money(asset.total_fees_units),
+            bill_start_date=asset.bill_start_date,
+            bill_end_date=asset.bill_end_date,
+            initial_capital=_money(asset.initial_capital_units),
+            initial_capital_display=_money_display(asset.initial_capital_units),
             market_value_display=_money_display(asset.market_value_units),
             cash_display=_money_display(asset.cash_units),
             money_fund_display=_money_display(asset.money_fund_units),
@@ -164,7 +168,13 @@ def _to_out(result: Any) -> DashboardOut:
                 DashboardTradeCountOut(
                     security_code=item.security_code,
                     security_name=item.security_name,
+                    buy_count=item.buy_count,
+                    sell_count=item.sell_count,
                     trade_count=item.trade_count,
+                    pnl=_money(item.pnl_units),
+                    pnl_display=_money_display(item.pnl_units),
+                    total_fees=_money(item.total_fees_units) or "0.00",
+                    total_fees_display=_money_display(item.total_fees_units),
                 )
                 for item in history.top_trade_counts
             ],

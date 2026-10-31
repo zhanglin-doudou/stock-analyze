@@ -709,6 +709,8 @@ DashboardMissingCode = Literal[
     "DASHBOARD_HOLDING_PRICE_MISSING",
     "DASHBOARD_HOLDINGS_MISMATCH",
     "DASHBOARD_NO_CLOSED_ROUNDS",
+    "DASHBOARD_BILL_RANGE_MISSING",
+    "DASHBOARD_INITIAL_CAPITAL_MISSING",
 ]
 
 
@@ -752,11 +754,17 @@ class DashboardRoundOut(StrictModel):
 
 
 class DashboardTradeCountOut(StrictModel):
-    """交易次数 Top3 的一行（按证券代码聚合的流水笔数）。"""
+    """交易次数 Top3 的一行（流水 buy/sell 行数 + 个股累计收益/总费用）。"""
 
     security_code: str
     security_name: str
+    buy_count: int
+    sell_count: int
     trade_count: int
+    pnl: str | None = None
+    pnl_display: str | None = None
+    total_fees: str
+    total_fees_display: str | None = None
 
 
 class DashboardMaxDrawdownOut(StrictModel):
@@ -794,6 +802,11 @@ class DashboardAssetOverviewOut(StrictModel):
     max_invested_cost: str | None = None
     max_cost_return_pct: str | None = None
     total_fees: str | None = None
+    # 账单覆盖区间（首末流水日）与桥接期初资金（期初现金 + 期初持仓成本）。
+    bill_start_date: date | None = None
+    bill_end_date: date | None = None
+    initial_capital: str | None = None
+    initial_capital_display: str | None = None
     # 后端已格式化的展示串（千分位金额）；前端优先使用，raw 保留兼容。
     market_value_display: str | None = None
     cash_display: str | None = None

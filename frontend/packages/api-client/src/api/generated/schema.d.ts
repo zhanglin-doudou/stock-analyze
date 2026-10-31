@@ -1363,12 +1363,20 @@ export interface components {
             balance?: string | null;
             /** Balance Display */
             balance_display?: string | null;
+            /** Bill End Date */
+            bill_end_date?: string | null;
+            /** Bill Start Date */
+            bill_start_date?: string | null;
             /** Cash */
             cash?: string | null;
             /** Cash Display */
             cash_display?: string | null;
             /** Holdings */
             holdings: components["schemas"]["DashboardHoldingOut"][];
+            /** Initial Capital */
+            initial_capital?: string | null;
+            /** Initial Capital Display */
+            initial_capital_display?: string | null;
             /** Market Value */
             market_value?: string | null;
             /** Market Value Display */
@@ -1529,7 +1537,7 @@ export interface components {
              * Code
              * @enum {string}
              */
-            code: "DASHBOARD_ASSET_MISSING" | "DASHBOARD_ASSET_BLOCKED" | "DASHBOARD_STALE" | "DASHBOARD_TOTAL_PROFIT_UNAVAILABLE" | "DASHBOARD_MAX_INVESTED_COST_MISSING" | "DASHBOARD_MDD_INSUFFICIENT" | "DASHBOARD_MDD_UNRELIABLE" | "DASHBOARD_MDD_GAPS" | "DASHBOARD_HOLDINGS_TRUNCATED" | "DASHBOARD_HOLDING_PRICE_MISSING" | "DASHBOARD_HOLDINGS_MISMATCH" | "DASHBOARD_NO_CLOSED_ROUNDS";
+            code: "DASHBOARD_ASSET_MISSING" | "DASHBOARD_ASSET_BLOCKED" | "DASHBOARD_STALE" | "DASHBOARD_TOTAL_PROFIT_UNAVAILABLE" | "DASHBOARD_MAX_INVESTED_COST_MISSING" | "DASHBOARD_MDD_INSUFFICIENT" | "DASHBOARD_MDD_UNRELIABLE" | "DASHBOARD_MDD_GAPS" | "DASHBOARD_HOLDINGS_TRUNCATED" | "DASHBOARD_HOLDING_PRICE_MISSING" | "DASHBOARD_HOLDINGS_MISMATCH" | "DASHBOARD_NO_CLOSED_ROUNDS" | "DASHBOARD_BILL_RANGE_MISSING" | "DASHBOARD_INITIAL_CAPITAL_MISSING";
             /** Field */
             field: string;
             /** Reason */
@@ -1616,13 +1624,25 @@ export interface components {
         };
         /**
          * DashboardTradeCountOut
-         * @description 交易次数 Top3 的一行（按证券代码聚合的流水笔数）。
+         * @description 交易次数 Top3 的一行（流水 buy/sell 行数 + 个股累计收益/总费用）。
          */
         DashboardTradeCountOut: {
+            /** Buy Count */
+            buy_count: number;
+            /** Pnl */
+            pnl?: string | null;
+            /** Pnl Display */
+            pnl_display?: string | null;
             /** Security Code */
             security_code: string;
             /** Security Name */
             security_name: string;
+            /** Sell Count */
+            sell_count: number;
+            /** Total Fees */
+            total_fees: string;
+            /** Total Fees Display */
+            total_fees_display?: string | null;
             /** Trade Count */
             trade_count: number;
         };

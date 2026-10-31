@@ -99,8 +99,10 @@
 | H6 | 历史最大收益额 | `history_overview.max_profit` | 历史最大单笔收益 | `kpi-max-profit` | 全历史 closed rounds max pnl |
 | H7 | 最大收益额/最大成本比率 | `history_overview.max_profit_cost_pct` | 最大收益/峰值成本 | `kpi-max-profit-cost` | H6/A6（D-03） |
 | H8 | 最大回撤时间段 + 回撤收益率 | `history_overview.max_drawdown.{from,to,duration_days,mdd_pct}` | 最大回撤区间/幅度 | `kpi-max-drawdown` | 全历史 asset_daily 日收益（D-05） |
+| A8 | 账单起止时间 | `asset_overview.bill_start_date` → `bill_end_date` | 账单 起始 → 截止 | `kpi-bill-range` | 全历史流水首/末交易日（D-20） |
+| A9 | 初始资金 | `asset_overview.initial_capital` | 初始资金 | `kpi-initial-capital` | 桥接期初现金 + 期初持仓成本（D-20） |
 
-**额外展示（不计入 15 项，但页面/旧验收需要）**：`total_assets`、`closed_round_count`、`flat_count/win_bar_pct...`、`max_profit_round`、`top_rounds/bottom_rounds`、`recovery_days/censored`、`legacy_period`、`missing[]`、`status/data_as_of`。这些字段的产生和验收单独列在 §7/§8；DASH-01 只断言上表 15 行 + 额外字段不缺失/类型正确。
+**额外展示（不计入 15 项，但页面/旧验收需要）**：`total_assets`、`closed_round_count`、`flat_count/win_bar_pct...`、`max_profit_round`、`top_rounds/bottom_rounds`、`recovery_days/censored`、`legacy_period`、`missing[]`、`status/data_as_of`。**A8/A9 为评审后追加的用户字段（原 15 项之外），展示于「总资产」下方一行**；这些字段的产生和验收单独列在 §7/§8；DASH-01 只断言上表 15 行 + A8/A9 + 额外字段不缺失/类型正确。
 
 ### 1.4 非目标
 
@@ -151,6 +153,8 @@
 | `max_invested_cost` | **银证转账峰值转入成本**：`max(Σ 银证转账 amount_units)`（`category=transfer`，转入 + / 转出 −，累计净转入的历史峰值；≤0 → null + missing） | CNY 2 位 | 无转账流水/峰值 ≤0 → null（`DASHBOARD_MAX_INVESTED_COST_MISSING`） |
 | `max_cost_return_pct` | `total_profit / max_invested_cost`（峰值转入成本） | `"6.86%"` | 分母 0/null → null |
 | `total_fees` | 全历史 `fee_breakdown(trades_until_A)` 的 `fee_amount`（佣金+印花税+其他费+独立费用行） | CNY 2 位 | 无流水 → `"0.00"`；**不存在"费用列缺失"状态**（三列 NOT NULL default 0），若解析警告缺列则 `degraded` |
+| `bill_start_date` / `bill_end_date` | 全历史流水的首/末 `trade_date`（D-20；流水一次加载至 `today`） | date | 无流水 → null（`DASHBOARD_BILL_RANGE_MISSING`） |
+| `initial_capital` | `B.initial_cash + B.initial_open_cost`（桥接期初资金，D-20；与 `total_profit` 同源） | CNY 2 位 | B blocked → null（`DASHBOARD_INITIAL_CAPITAL_MISSING`）；A 缺失/blocked → null |
 | `weight_pct`（持仓行） | `holding.market_value / Σholdings.market_value` | `"100.00%"` | 无持仓/总市值 0 → null；行内权重和≈100%（按后端 2 位舍入容差 `n×0.5bp`） |
 | `settlement_status` / `reconciliation` | 对账横幅数据（API-026） | 对象 | 无对账数据 → 隐藏 |
 
@@ -176,7 +180,7 @@
 | `max_profit_round` | `{round_id, security_code, security_name, close_date, pnl, return_rate}`；并列取 `close_date,id` 最早 | 对象 | null |
 | `max_profit_cost_pct` | `max_profit / max_invested_cost`（D-03；分母为银证转账峰值转入成本） | `"13.89%"` | 分母 0/null → null |
 | `top_holding_rounds` | R 按 `holding_days DESC, close_date, id` 取 3；含 `round_id/security_code/security_name/close_date/pnl/return_rate_pct/holding_days` | 数组 | 不足 3 条返回现有条目；R 空 → `[]` |
-| `top_trade_counts` | 全历史流水按 `security_code`（可转债归并上市代码）聚合笔数，排除货币基金与现金类（`CASHFLOW_CATEGORIES`）；按 `count DESC, code` 取 3；含 `security_code/security_name/trade_count` | 数组 | 无流水 → `[]` |
+| `top_trade_counts` | 全历史流水按 `security_code`（可转债归并上市代码）聚合：`buy` 行 + `sell` 行分别计一次交易（`trade_count=buy_count+sell_count`），排除货币基金与现金类（`CASHFLOW_CATEGORIES`）；按 `trade_count DESC, code` 取 3。每行含 `security_code/security_name/buy_count/sell_count/trade_count/pnl/total_fees`：`pnl` = 全部回合（含 open 回合已实现卖出部分，`data_error` 剔除）该代码 `pnl_units` 之和；`total_fees` = 该代码流水 `commission+stamp_tax+other_fee` 之和（独立 `fee` 行三列全 0 时取 `abs(amount)`）。**不展示费率**（用户改为展示总费用金额，D-20） | 数组 | 无流水 → `[]`；个股无回合 → `pnl=null` |
 | `top_rounds` / `bottom_rounds` | R 按 `pnl DESC/ASC, close_date, id` 取 3+3；含 `round_id/security_code` 供跳转；`flat` 可入 top/bottom 但标 0 | 数组 | 不足 3 条则返回现有条目，不补空对象 |
 | `max_drawdown.from/to` | 有效日收益序列的峰/谷日期 | date | 无回撤/样本不足 → null |
 | `max_drawdown.duration_days` | `to − from` 自然日（交易观测数另给 `duration_obs`） | int | null |
@@ -255,7 +259,11 @@
     "total_profit": "12345.67",
     "max_invested_cost": "180000.00",
     "max_cost_return_pct": "6.86%",
-    "total_fees": "2345.67"
+    "total_fees": "2345.67",
+    "bill_start_date": "2026-01-02",
+    "bill_end_date": "2026-06-30",
+    "initial_capital": "150000.00",
+    "initial_capital_display": "150,000.00"
   },
   "history_overview": {
     "status": "ok",
@@ -280,7 +288,9 @@
       {"round_id": "rnd_…", "security_code": "600519", "security_name": "…", "close_date": "2026-08-12", "pnl": "25000.00", "return_rate_pct": "25.00%", "holding_days": 120}
     ],
     "top_trade_counts": [
-      {"security_code": "600519", "security_name": "…", "trade_count": 7}
+      {"security_code": "600519", "security_name": "…", "buy_count": 4, "sell_count": 3,
+       "trade_count": 7, "pnl": "2000.00", "pnl_display": "2,000.00",
+       "total_fees": "56.78", "total_fees_display": "56.78"}
     ]
   },
   "links": {"assets": "/assets", "nav": "/nav", "metrics": "/metrics", "rounds": "/rounds"}
@@ -387,7 +397,7 @@ def max_drawdown_window(...) -> DrawdownWindow:
     <DrawdownCard> 时间段 + 回撤收益率 + 恢复 + n/sample_status
     <CredibilityBadges> 每个月度指标显示 n/CI/sample_status（/metrics）
     <HistorySubBlocks lazy> 核心指标（/metrics?period=legacy_period&ids=perf.win_rate,perf.pnl_ratio,perf.holding_days,perf.concentration，标签：本月；带 n/CI）· 行为（behavior.de/turnover/averaging_down/hhi）· 最赚/最亏（dashboard，含 round_id 跳转）
-    <Top3Grid two-column> 持仓时长 Top3（top_holding_rounds：持有天数降序，展示「持有 N 天」）· 交易次数 Top3（top_trade_counts：按证券代码聚合笔数，展示「N 笔」）
+    <Top3Grid two-column> 持仓时长 Top3（top_holding_rounds：持有天数降序，展示「持有 N 天」）· 交易次数 Top3（top_trade_counts：流水 buy/sell 行数，展示「N 笔 / 买 X · 卖 Y · 累计收益 · 总费用」）
   </section>
 </DashboardPage>
 ```
@@ -505,7 +515,7 @@ printf 'SKIP: %s\n' "${SKIPS[@]}"
 
 | ID | 断言 |
 |---|---|
-| DASH-01 | §1.3 的 A1~A7、H1~H8 **逐项**存在；缺失字段为 `null` 且进 `missing[]`（不是用 0 代替） |
+| DASH-01 | §1.3 的 A1~A7/A8/A9、H1~H8 **逐项**存在；缺失字段为 `null` 且进 `missing[]`（不是用 0 代替） |
 | DASH-02 | `Σholdings.weight_pct≈100%`（按后端 2 位舍入，容差 `n×0.5bp`）；`Σholdings.market_value == asset_overview.market_value`（同价格/同日；差>1 分 → degraded） |
 | DASH-03 | `total_profit` 与**独立手算 fixture**（initial_cash/open_cost/flows/other 固定值）一致；不得用生产 bridge 自证；stale/blocked 为 null |
 | DASH-04 | 赢/亏/平计数之和 = `closed_round_count`；占比和=100%（量化容差） |
@@ -575,8 +585,8 @@ printf 'SKIP: %s\n' "${SKIPS[@]}"
 | 层 | 文件 | 用例 |
 |---|---|---|
 | 纯函数 | `backend/tests/unit/core/test_drawdown_window.py` | 无回撤/V 形/单调下跌/未恢复/blocked/异常收益 |
-| 应用 | `backend/tests/unit/review/test_dashboard_application.py` | 15 字段、总收益公式、银证转账峰值转入成本、盈亏占比、Top3（持仓时长/交易次数）、缺失状态、禁写库 |
-| API | `backend/tests/api/test_dashboard.py` | 200/字段格式、空数据 200 missing、blocked 200、**无 token 401、admin 403、B 列表型 200 且无 A 数据**（不是跨租户 404）、无敏感字段、op coverage ≥3 |
+| 应用 | `backend/tests/unit/review/test_dashboard_application.py` | 15 字段、总收益公式、桥接期初资金（A9）、账单起止（A8）、银证转账峰值转入成本、盈亏占比、Top3（持仓时长；交易次数按流水 buy/sell + 个股累计收益/总费用）、缺失状态、禁写库 |
+| API | `backend/tests/api/test_dashboard.py` | 200/字段格式（含账单起止/初始资金、交易次数买卖拆分+个股收益/费用）、空数据 200 missing、blocked 200、**无 token 401、admin 403、B 列表型 200 且无 A 数据**（不是跨租户 404）、无敏感字段、op coverage ≥3 |
 | 隔离 | `backend/tests/isolation/test_isolation_matrix.py` | `LIST_ISOLATION_MATRIX`（B 200 无 A）、`ADMIN_FORBIDDEN`（403）、`UNAUTHENTICATED_MATRIX`（401）；gate-tenant |
 | 契约 | `make api-snapshot/api-check/sdk` + `backend/tests/contract/test_openapi_contract.py` | API-084 在 `OPERATION_META`、422/401/403 错误码、example；契约 operation 数 50→51（或同步集合）；`gate_endpoint_coverage` 84/30 |
 | 性能 | `backend/tests/perf/test_dashboard.py`（或 `make test-perf-api`） | 10 年/5 万行 p95 ≤300ms；无夹具时本任务 SKIP 并列入 §7 |
@@ -646,8 +656,8 @@ printf 'SKIP: %s\n' "${SKIPS[@]}"
 ## 12. 验收 checklist（本任务完成时）
 
 - [ ] API-084 契约登记、OpenAPI/SDK 同步、`api-check` 全绿。
-- [ ] `/dashboard` 两板块，§1.3 的 A1~A7/H1~H8 齐全；A6 展示银证转账峰值转入成本；数字与 API 逐字符一致。
-- [ ] 历史概览「持仓时长 Top3」「交易次数 Top3」两列布局，来自 `top_holding_rounds`/`top_trade_counts`，前端零计算。
+- [ ] `/dashboard` 两板块，§1.3 的 A1~A7/A8/A9/H1~H8 齐全；A6 展示银证转账峰值转入成本；「总资产」下方展示账单起止 + 初始资金；数字与 API 逐字符一致。
+- [ ] 历史概览「持仓时长 Top3」「交易次数 Top3」两列布局，来自 `top_holding_rounds`/`top_trade_counts`，交易次数按流水 buy/sell 分别计数并展示个股累计收益/总费用，前端零计算。
 - [ ] 旧五卡子块按 §2 合并，验收剧本更新；legacy_period=最近数据月。
 - [ ] **blocked/missing 不显示数字；stale 可显示并提示**；无 token 401、admin 403、B 列表 200 无 A 数据。
 - [ ] `/reports`、`/exports`、`/attribution` 占位入口存在；无假下载/假数字。
@@ -676,5 +686,6 @@ printf 'SKIP: %s\n' "${SKIPS[@]}"
 | D-13 | 15 字段/额外字段 | §1.3 表；额外字段单列 | 只保留 15 | 验收可脚本化 |
 | D-14 | 持仓成本/估值来源 | 与 asset_daily 同成本模型；短窗行情 + `holdings_at` | FIFO 全历史回放 | 性能/一致性 |
 | D-15 | 性能 | 单次加载 + DB 聚合；300ms 目标；50k 夹具后续 | 物化/cache/降低夹具 | 是否允许缓存 |
+| D-20 | 账单起止 + 初始资金 + 交易次数 Top3 口径 | 「总资产」下方展示全历史流水首/末交易日 + 桥接期初资金（`initial_cash + initial_open_cost`，与总收益同源）；交易次数按**流水 buy/sell 行数**分别计数，Top3 每行展示该股**全部回合 pnl**（含 open 已实现、剔除 data_error）与**总费用金额**（不做费率）；无流水/无锚点 → `null` + `DASHBOARD_BILL_RANGE_MISSING` / `DASHBOARD_INITIAL_CAPITAL_MISSING` | ① 初始资金=期初现金（遗漏期初持仓成本）；② 交易次数按 Round 行数；③ 展示费率分母（用户改为展示总费用） | 影响 A8/A9 展示口径与 Top3 排序/字段 |
 
 > 若人工未在实现前排板：按推荐实现；涉及口径的 D-01/D-02/D-03/D-05/D-11/D-14 必须在 golden/验收前确认，否则只做占位不出数。**评审 P0 已在本 v0.2 文档修订；P0 关闭条件见交叉评审记录。**

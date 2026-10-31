@@ -218,6 +218,16 @@
   color: var(--text-2);
 }
 
+.dash-hero-bill {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s4);
+  margin-top: var(--s3);
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  font-variant-numeric: tabular-nums;
+}
+
 .dash-hero-note {
   margin: var(--s4) 0 0;
   padding-left: var(--s4);

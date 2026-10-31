@@ -1020,6 +1020,30 @@
             ],
             "title": "Balance Display"
           },
+          "bill_end_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bill End Date"
+          },
+          "bill_start_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bill Start Date"
+          },
           "cash": {
             "anyOf": [
               {
@@ -1048,6 +1072,28 @@
             },
             "title": "Holdings",
             "type": "array"
+          },
+          "initial_capital": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Initial Capital"
+          },
+          "initial_capital_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Initial Capital Display"
           },
           "market_value": {
             "anyOf": [
@@ -1635,7 +1681,9 @@
               "DASHBOARD_HOLDINGS_TRUNCATED",
               "DASHBOARD_HOLDING_PRICE_MISSING",
               "DASHBOARD_HOLDINGS_MISMATCH",
-              "DASHBOARD_NO_CLOSED_ROUNDS"
+              "DASHBOARD_NO_CLOSED_ROUNDS",
+              "DASHBOARD_BILL_RANGE_MISSING",
+              "DASHBOARD_INITIAL_CAPITAL_MISSING"
             ],
             "title": "Code",
             "type": "string"
@@ -1838,8 +1886,34 @@
       },
       "DashboardTradeCountOut": {
         "additionalProperties": false,
-        "description": "交易次数 Top3 的一行（按证券代码聚合的流水笔数）。",
+        "description": "交易次数 Top3 的一行（流水 buy/sell 行数 + 个股累计收益/总费用）。",
         "properties": {
+          "buy_count": {
+            "title": "Buy Count",
+            "type": "integer"
+          },
+          "pnl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pnl"
+          },
+          "pnl_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pnl Display"
+          },
           "security_code": {
             "title": "Security Code",
             "type": "string"
@@ -1847,6 +1921,25 @@
           "security_name": {
             "title": "Security Name",
             "type": "string"
+          },
+          "sell_count": {
+            "title": "Sell Count",
+            "type": "integer"
+          },
+          "total_fees": {
+            "title": "Total Fees",
+            "type": "string"
+          },
+          "total_fees_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Fees Display"
           },
           "trade_count": {
             "title": "Trade Count",
@@ -1856,7 +1949,10 @@
         "required": [
           "security_code",
           "security_name",
-          "trade_count"
+          "buy_count",
+          "sell_count",
+          "trade_count",
+          "total_fees"
         ],
         "title": "DashboardTradeCountOut",
         "type": "object"

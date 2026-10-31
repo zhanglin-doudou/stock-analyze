@@ -101,6 +101,13 @@ function TradeCountRow({ item }: { item: DashboardTradeCountOut }): ReactElement
         {item.security_name}（{item.security_code}）
       </span>
       <strong className="num">{item.trade_count} 笔</strong>
+      <span className="dash-round-meta">
+        买 {item.buy_count} · 卖 {item.sell_count} · 累计收益{" "}
+        <span className={tone(item.pnl_display ?? item.pnl)}>
+          {displayValue(shown(item.pnl_display, item.pnl))}
+        </span>{" "}
+        · 总费用 {displayValue(shown(item.total_fees_display, item.total_fees))}
+      </span>
     </li>
   );
 }
@@ -324,6 +331,15 @@ export function Dashboard(): ReactElement {
             </span>
             <span className={tone(asset.max_cost_return_pct)}>
               峰值成本收益率 {displayValue(asset.max_cost_return_pct)}
+            </span>
+          </div>
+          <div className="dash-hero-bill" data-testid="kpi-bill-range">
+            <span>
+              账单 {asset.bill_start_date ?? "—"} → {asset.bill_end_date ?? "—"}
+            </span>
+            <span data-testid="kpi-initial-capital">
+              初始资金{" "}
+              {displayValue(shown(asset.initial_capital_display, asset.initial_capital))}
             </span>
           </div>
           <p className="dash-hero-note">

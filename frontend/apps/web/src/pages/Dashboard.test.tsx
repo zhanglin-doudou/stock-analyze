@@ -75,6 +75,10 @@ function makeDashboard(overrides: Partial<DashboardOut> = {}): DashboardOut {
       max_invested_cost: "100000.00",
       max_cost_return_pct: "0.62%",
       total_fees: "0.00",
+      bill_start_date: "2026-04-01",
+      bill_end_date: "2026-06-30",
+      initial_capital: "100000.00",
+      initial_capital_display: "100,000.00",
       market_value_display: "170,620.00",
       cash_display: "-70,000.00",
       money_fund_display: "20,000.00",
@@ -120,8 +124,28 @@ function makeDashboard(overrides: Partial<DashboardOut> = {}): DashboardOut {
         }),
       ],
       top_trade_counts: [
-        { security_code: "600519", security_name: "贵州茅台", trade_count: 7 },
-        { security_code: "000001", security_name: "平安银行", trade_count: 4 },
+        {
+          security_code: "600519",
+          security_name: "贵州茅台",
+          buy_count: 4,
+          sell_count: 3,
+          trade_count: 7,
+          pnl: "2000.00",
+          pnl_display: "2,000.00",
+          total_fees: "56.78",
+          total_fees_display: "56.78",
+        },
+        {
+          security_code: "000001",
+          security_name: "平安银行",
+          buy_count: 2,
+          sell_count: 2,
+          trade_count: 4,
+          pnl: "1000.00",
+          pnl_display: "1,000.00",
+          total_fees: "12.00",
+          total_fees_display: "12.00",
+        },
       ],
       bottom_rounds: [
         makeRound({
@@ -183,6 +207,10 @@ function missingDashboard(): DashboardOut {
       max_invested_cost: null,
       max_cost_return_pct: null,
       total_fees: null,
+      bill_start_date: null,
+      bill_end_date: null,
+      initial_capital: null,
+      initial_capital_display: null,
     },
     history_overview: {
       status: "missing",
@@ -350,6 +378,15 @@ describe("Dashboard 看板", () => {
     expect(screen.getByTestId("top-holding-rnd_000001").textContent).toContain("持有 90 天");
     expect(screen.getByTestId("top-trade-600519").textContent).toContain("7 笔");
     expect(screen.getByTestId("top-trade-000001").textContent).toContain("4 笔");
+    expect(screen.getByTestId("top-trade-600519").textContent).toContain("买 4");
+    expect(screen.getByTestId("top-trade-600519").textContent).toContain("卖 3");
+    expect(screen.getByTestId("top-trade-600519").textContent).toContain("2,000.00");
+    expect(screen.getByTestId("top-trade-600519").textContent).toContain("56.78");
+
+    // 总资产下方：账单起止时间 + 初始资金
+    expect(screen.getByTestId("kpi-bill-range").textContent).toContain("2026-04-01");
+    expect(screen.getByTestId("kpi-bill-range").textContent).toContain("2026-06-30");
+    expect(screen.getByTestId("kpi-initial-capital").textContent).toContain("100,000.00");
 
     expect(screen.getByTestId("dashboard-meta").textContent).toContain("最新");
     expect(screen.getByTestId("dashboard-meta").textContent).toContain("正常");
@@ -380,6 +417,8 @@ describe("Dashboard 看板", () => {
     expect(screen.getByTestId("kpi-market-value").textContent).not.toContain("0.00");
     expect(screen.getByTestId("kpi-total-profit").textContent).toContain("—");
     expect(screen.getByTestId("kpi-win-pct").textContent).toContain("—");
+    expect(screen.getByTestId("kpi-bill-range").textContent).toContain("—");
+    expect(screen.getByTestId("kpi-initial-capital").textContent).toContain("—");
     expect(screen.getByText(/没有持仓/)).toBeTruthy();
 
     expect(screen.getByTestId("dashboard-meta").textContent).toContain("未构建");

@@ -364,6 +364,12 @@ async def test_api_084_happy_path_two_sections(
     # 峰值成本收益率 = 当前收益额 / 峰值转入成本 = 620 / 100000。
     assert asset["max_cost_return_pct"] == "0.62%"
     assert asset["total_fees"] == "0.00"
+    # 账单覆盖区间 = 首末流水日（04-01 银证转入 → 06-30 买入）。
+    assert asset["bill_start_date"] == "2026-04-01"
+    assert asset["bill_end_date"] == "2026-06-30"
+    # 期初资金 = 桥接 initial_cash + initial_open_cost（04-01 转入日反推期初现金 0）。
+    assert asset["initial_capital"] == "0.00"
+    assert asset["initial_capital_display"] == "0.00"
     # 2026-10-28（Phase 3）：后端补展示串（千分位）；raw 定点串保留兼容。
     assert asset["market_value_display"] == "170,620.00"
     assert asset["cash_display"] == "-70,000.00"
@@ -428,9 +434,19 @@ async def test_api_084_happy_path_two_sections(
         "000858",
     ]
     assert [item["holding_days"] for item in history["top_holding_rounds"]] == [120, 90, 60]
-    # 交易次数 Top3：按证券代码聚合流水笔数（现金/转账/货基不计入）。
+    # 交易次数 Top3：流水 buy/sell 行数（现金/转账/货基不计入），并聚合个股累计收益/总费用。
     assert history["top_trade_counts"] == [
-        {"security_code": "600519", "security_name": "600519", "trade_count": 1}
+        {
+            "security_code": "600519",
+            "security_name": "600519",
+            "buy_count": 1,
+            "sell_count": 0,
+            "trade_count": 1,
+            "pnl": "2000.00",
+            "pnl_display": "2,000.00",
+            "total_fees": "0.00",
+            "total_fees_display": "0.00",
+        }
     ]
     assert _PCT_RE.match(history["win_pct"])
     assert _PCT_RE.match(history["max_profit_cost_pct"])

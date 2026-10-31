@@ -95,6 +95,8 @@ MISSING_HOLDINGS_TRUNCATED = "DASHBOARD_HOLDINGS_TRUNCATED"
 MISSING_HOLDING_PRICE = "DASHBOARD_HOLDING_PRICE_MISSING"
 MISSING_HOLDINGS_MISMATCH = "DASHBOARD_HOLDINGS_MISMATCH"
 MISSING_NO_CLOSED_ROUNDS = "DASHBOARD_NO_CLOSED_ROUNDS"
+MISSING_BILL_RANGE = "DASHBOARD_BILL_RANGE_MISSING"
+MISSING_INITIAL_CAPITAL = "DASHBOARD_INITIAL_CAPITAL_MISSING"
 
 
 @dataclass(slots=True, frozen=True)
@@ -134,11 +136,15 @@ class DashboardRoundBrief:
 
 @dataclass(slots=True, frozen=True)
 class DashboardTradeCountBrief:
-    """交易次数 Top3 的一行（按证券代码聚合的流水笔数，已平仓与否无关）。"""
+    """交易次数 Top3 的一行（流水 buy/sell 行数 + 个股累计收益/总费用）。"""
 
     security_code: str
     security_name: str
+    buy_count: int
+    sell_count: int
     trade_count: int
+    pnl_units: int | None
+    total_fees_units: int
 
 
 @dataclass(slots=True, frozen=True)
@@ -170,6 +176,10 @@ class DashboardAssetOverview:
     max_invested_cost_units: int | None
     max_cost_return_ratio_units: int | None
     total_fees_units: int | None
+    # 账单覆盖区间与桥接期初资金（initial_cash + initial_open_cost）。
+    bill_start_date: date | None
+    bill_end_date: date | None
+    initial_capital_units: int | None
 
 
 @dataclass(slots=True, frozen=True)
@@ -635,12 +645,9 @@ async def build_dashboard(
         user_id, definition_version=definition_version, on_or_before=today
     )
     series = await asset_repo.series(user_id, definition_version=definition_version)
-    trades = list(
-        await TradeRepository(session).balances_ordered(
-            user_id, period_end=latest.trade_date if latest is not None else today
-        )
-    )
+    trades = list(await TradeRepository(session).balances_ordered(user_id, period_end=today))
     rounds = await RoundRepository(session).closed_rounds(user_id)
+    all_rounds = await RoundRepository(session).all_rounds(user_id)
 
     fallback_as_of = build_view.data_as_of if isinstance(build_view.data_as_of, date) else today
     as_of = latest.trade_date if latest is not None else fallback_as_of
@@ -762,6 +769,7 @@ async def build_dashboard(
         total_fees_units = fee_breakdown(cast("list[TradeView]", trade_slice)).fee_amount
 
     total_profit_units: int | None = None
+    initial_capital_units: int | None = None
     if not asset_blocked and latest is not None and trades:
         bridge = await bridge_for_period(
             session,
@@ -770,6 +778,9 @@ async def build_dashboard(
             period_end=latest.trade_date,
             clock=clock,
         )
+        if bridge.status != STATUS_BLOCKED:
+            # 期初资金 = 期初现金 + 期初持仓成本（与桥接总收益公式同源）。
+            initial_capital_units = bridge.initial_cash_units + bridge.initial_open_cost_units
         bridge_ok = (
             bridge.status == STATUS_OK
             and bridge.balanced
@@ -790,6 +801,28 @@ async def build_dashboard(
                 code=MISSING_TOTAL_PROFIT,
                 reason="全历史桥接不平或资产表过期，不硬算总收益。",
                 what_to_do="到资产页更新资产表；若仍不平，到对账页检查断链。",
+            )
+        )
+
+    # 账单覆盖区间：已导入流水的首末交易日（全历史）。
+    bill_start_date = trades[0].trade_date if trades else None
+    bill_end_date = trades[-1].trade_date if trades else None
+    if bill_start_date is None:
+        missing.append(
+            DashboardMissing(
+                field="asset_overview.bill_range",
+                code=MISSING_BILL_RANGE,
+                reason="暂无账单流水，无法确定账单起止时间。",
+                what_to_do="先到导入页导入账单。",
+            )
+        )
+    if initial_capital_units is None:
+        missing.append(
+            DashboardMissing(
+                field="asset_overview.initial_capital",
+                code=MISSING_INITIAL_CAPITAL,
+                reason="没有可用的期初现金/持仓锚点，无法确定期初资金。",
+                what_to_do="导入含期初余额或银证转账的账单后重新构建资产表。",
             )
         )
 
@@ -869,26 +902,59 @@ async def build_dashboard(
         )[:3]
     ]
 
-    # 交易次数 Top3：按证券代码（可转债归并上市代码）聚合流水笔数；现金类/货基不计。
+    # 交易次数 Top3：按证券代码（可转债归并上市代码）统计流水 buy/sell 行数
+    # （买入/卖出分别计一次交易）；同时聚合个股累计收益（全部回合 pnl）与个股总费用。
+    # 现金类/货基不计。
     bond_alias, _unresolved = build_bond_alias(
         (trade.security_code, trade.security_name) for trade in trades
     )
-    trade_counts: dict[str, int] = {}
+    buy_counts: dict[str, int] = {}
+    sell_counts: dict[str, int] = {}
+    fee_by_code: dict[str, int] = {}
     trade_names: dict[str, str] = {}
     for trade in trades:
         code = canonical_code(bond_alias, trade.security_code)
         if not code or is_money_fund_row(trade) or category(trade) in CASHFLOW_CATEGORIES:
             continue
-        trade_counts[code] = trade_counts.get(code, 0) + 1
         if code not in trade_names and trade.security_name:
             trade_names[code] = trade.security_name
+        trade_category = category(trade)
+        if trade_category == "buy":
+            buy_counts[code] = buy_counts.get(code, 0) + 1
+        elif trade_category == "sell":
+            sell_counts[code] = sell_counts.get(code, 0) + 1
+        fee = trade.commission_units + trade.stamp_tax_units + trade.other_fee_units
+        if trade_category == "fee" and fee == 0:
+            fee = abs(trade.amount_units)
+        fee_by_code[code] = fee_by_code.get(code, 0) + fee
+
+    # 个股累计收益：全部回合（含未平仓回合的已实现卖出部分；data_error 剔除）。
+    pnl_by_code: dict[str, int] = {}
+    for round_ in all_rounds:
+        if round_.data_error:
+            continue
+        pnl_by_code[round_.security_code] = (
+            pnl_by_code.get(round_.security_code, 0) + round_.pnl_units
+        )
+
+    ranked_codes = sorted(
+        (code for code in buy_counts.keys() | sell_counts.keys()),
+        key=lambda code: (
+            -(buy_counts.get(code, 0) + sell_counts.get(code, 0)),
+            code,
+        ),
+    )
     top_trade_counts = [
         DashboardTradeCountBrief(
             security_code=code,
             security_name=trade_names.get(code, code),
-            trade_count=count,
+            buy_count=buy_counts.get(code, 0),
+            sell_count=sell_counts.get(code, 0),
+            trade_count=buy_counts.get(code, 0) + sell_counts.get(code, 0),
+            pnl_units=pnl_by_code.get(code),
+            total_fees_units=fee_by_code.get(code, 0),
         )
-        for code, count in sorted(trade_counts.items(), key=lambda item: (-item[1], item[0]))[:3]
+        for code in ranked_codes[:3]
     ]
 
     max_drawdown, mdd_missing, mdd_gaps = _max_drawdown(series)
@@ -937,6 +1003,9 @@ async def build_dashboard(
             max_invested_cost_units=max_invested,
             max_cost_return_ratio_units=max_cost_return,
             total_fees_units=total_fees_units,
+            bill_start_date=bill_start_date,
+            bill_end_date=bill_end_date,
+            initial_capital_units=initial_capital_units,
         ),
         history=DashboardHistoryOverview(
             status=history_status,
