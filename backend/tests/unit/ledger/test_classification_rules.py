@@ -63,6 +63,7 @@ def _rules() -> list[SummaryRule]:
         ("银行转取", "buy", "transfer", "sys_transfer_out"),
         ("转存管转入", "unknown", "transfer", "sys_custody_in"),
         ("转存管转出", "unknown", "transfer", "sys_custody_out"),
+        ("资管转让资\n金上账", "sell", "transfer", "sys_asset_in"),
     ],
 )
 def test_real_bill_summaries_all_match(summary: str, side: str, category: str, code: str) -> None:
@@ -200,7 +201,13 @@ def test_transfer_rules_reuse_parser_vocabulary() -> None:
     assert [rule.pattern for rule in transfer_rules] == list(TRANSFER_SUMMARY_KEYWORDS)
     parser_keywords = {keyword for keyword, _ in NON_TRADE_SUMMARY_SIDE}
     shared = parser_keywords & set(TRANSFER_SUMMARY_KEYWORDS)
-    assert shared == {"银行转存", "银行转取", "转存管转入", "转存管转出"}
+    assert shared == {
+        "银行转存",
+        "银行转取",
+        "转存管转入",
+        "转存管转出",
+        "资管转让资金上账",
+    }
 
 
 def test_synthetic_fixture_rows_classified_except_intentional_unknown() -> None:
@@ -219,7 +226,7 @@ def test_synthetic_fixture_rows_classified_except_intentional_unknown() -> None:
 
 
 def test_money_fund_fixture_parse_and_classify_zero_quarantine() -> None:
-    """货基账单全链路（解析→分类）：6 行命中、全零红利发放隔离（test-bill.xlsx 回归）。"""
+    """货基账单全链路（解析→分类）：6 行命中、零金额红利只调余额不隔离。"""
     fixture = Path(__file__).parents[2] / "api" / "华泰账单_货基_mock.xlsx"
     bill = parse_bill(
         fixture.read_bytes(),
@@ -229,7 +236,8 @@ def test_money_fund_fixture_parse_and_classify_zero_quarantine() -> None:
         clock=FrozenClock(datetime(2026, 7, 1, 9, 0, tzinfo=UTC)),
     )
     assert len(bill.rows) == 6
-    assert [item.reason_code for item in bill.quarantined] == ["INVALID_AMOUNT"]
+    assert bill.quarantined == []
+    assert bill.assumptions["money_fund_balance_only_rows"] == [19]
 
     rules = _rules()
     categories: dict[str, set[str]] = {}

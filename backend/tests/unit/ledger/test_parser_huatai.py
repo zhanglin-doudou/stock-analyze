@@ -448,9 +448,9 @@ def test_money_fund_redemption_confirmation_not_quarantined() -> None:
     """货币基金账单（无「买卖标志」列）：申赎确认按摘要定方向，赎回确认不能被隔离。"""
     bill = _parse(_FUND_BILL.read_bytes(), file_name=_FUND_BILL.name)
     assert len(bill.rows) == 6
-    # 全零金额的「红利发放」（份额再投）按新规则隔离 INVALID_AMOUNT。
-    assert [q.line_no for q in bill.quarantined] == [19]
-    assert bill.quarantined[0].reason_code == QuarantineReason.INVALID_AMOUNT.value
+    # 全零金额的「红利发放」（份额再投）不再丢弃：只调整货基余额，不进流水/隔离区。
+    assert bill.quarantined == []
+    assert bill.assumptions["money_fund_balance_only_rows"] == [19]
 
     by_line = {row.line_no: row for row in bill.rows}
     redeem = by_line[17]
@@ -524,14 +524,16 @@ def test_money_fund_balance_running_with_opening_inferred_assumption() -> None:
     bill = _parse(_FUND_BILL.read_bytes(), file_name=_FUND_BILL.name)
     by_line = {row.line_no: row for row in bill.rows}
     # 折行名称（华泰紫金天\n天发货币）仍识别为货基；其余股票/转账行为 NULL。
-    # 期初下界 = 116307.65（最小累计净额 -116307.65 的反推），各行余额 = 旧值 + 期初。
-    assert by_line[17].money_fund_balance_units == 12_27
-    assert by_line[18].money_fund_balance_units == 106720_80
+    # 红利发放（line 19）作为零金额份额行参与余额推演但不进流水：
+    # 期初下界 = 116295.38，9/30 卖出后余额仍为 0（而非被卖穿）。
+    assert by_line[17].money_fund_balance_units == 0
+    assert by_line[18].money_fund_balance_units == 106708_53
     assert by_line[20].money_fund_balance_units == 0
     assert by_line[23].money_fund_balance_units == 5668_32
     assert by_line[21].money_fund_balance_units is None
     assert by_line[22].money_fund_balance_units is None
-    assert bill.assumptions["money_fund_opening_inferred"] == {"940018": 116307_65}
+    assert bill.assumptions["money_fund_opening_inferred"] == {"940018": 116295_38}
+    assert bill.assumptions["money_fund_balance_only_rows"] == [19]
     assert "money_fund_opening_zero" not in bill.assumptions
 
 
@@ -938,3 +940,145 @@ def test_non_bond_row_not_checked() -> None:
     """普通股票行不走可转债校验（600519 量价额自洽口径不同）。"""
     bill = _parse(_xlsx(_HEADERS, [_buy_row()]))
     assert WarningCode.CBOND_AMOUNT_INCONSISTENT not in bill.warnings
+
+
+def _money_row(
+    *,
+    line_date: str,
+    code: str,
+    name: str,
+    quantity: str,
+    amount: str,
+    balance: str,
+    summary: str,
+) -> list[str]:
+    return [
+        line_date,
+        code,
+        name,
+        "",
+        quantity,
+        "1.000",
+        amount,
+        "0.00",
+        "0.00",
+        "0.00",
+        balance,
+        summary,
+    ]
+
+
+def test_non_trade_asset_transfer_without_code_is_cash_row() -> None:
+    """无证券代码的「资管转让资金上账」必须按资金行导入，不能 INVALID_ROW 隔离。"""
+    rows = [
+        [
+            "20261026",
+            "",
+            "",
+            "",
+            "0.00",
+            "0.000",
+            "179999.00",
+            "0.00",
+            "0.00",
+            "0.00",
+            "180100.05",
+            "资管转让资\n金上账",
+        ]
+    ]
+    bill = _parse(_xlsx(_HEADERS, rows))
+    assert bill.quarantined == []
+    assert len(bill.rows) == 1
+    row = bill.rows[0]
+    assert row.security_code == "CASH"
+    assert row.side == "sell"
+    assert row.amount_units == 179999_00
+    assert row.cash_balance_units == 180100_05
+
+
+def test_money_fund_same_day_order_follows_excel_rows() -> None:
+    """同日先卖后买必须保持 Excel 行序，不能按 side 重排。"""
+    rows = [
+        _money_row(
+            line_date="20261022",
+            code="940018",
+            name="华泰紫金天天发货币",
+            quantity="1000",
+            amount="-1000.00",
+            balance="9000.00",
+            summary="申购确认",
+        ),
+        _money_row(
+            line_date="20261023",
+            code="940018",
+            name="华泰紫金天天发货币",
+            quantity="500",
+            amount="500.00",
+            balance="9500.00",
+            summary="赎回确认",
+        ),
+        _money_row(
+            line_date="20261023",
+            code="940018",
+            name="华泰紫金天天发货币",
+            quantity="500",
+            amount="-500.00",
+            balance="9000.00",
+            summary="申购确认",
+        ),
+    ]
+    bill = _parse(_xlsx(_HEADERS, rows))
+    by_line = {row.line_no: row for row in bill.rows}
+    assert by_line[3].side == "sell"
+    assert by_line[3].money_fund_balance_units == 500_00
+    assert by_line[4].side == "buy"
+    assert by_line[4].money_fund_balance_units == 1000_00
+    assert "money_fund_oversell_interest" not in bill.assumptions
+
+
+def test_money_fund_zero_amount_share_rows_adjust_balance_only() -> None:
+    """零金额红利/非交易过户行只改货基余额，不生成流水、不触发超卖。"""
+    rows = [
+        _money_row(
+            line_date="20261023",
+            code="940018",
+            name="华泰紫金天天发货币",
+            quantity="1000",
+            amount="-1000.00",
+            balance="9000.00",
+            summary="申购确认",
+        ),
+        _money_row(
+            line_date="20261026",
+            code="940018",
+            name="华泰紫金天天发货币",
+            quantity="600",
+            amount="0.00",
+            balance="0.00",
+            summary="非交易过户\n确认",
+        ),
+        _money_row(
+            line_date="20261026",
+            code="940018",
+            name="华泰紫金天天发货币",
+            quantity="400",
+            amount="400.00",
+            balance="9400.00",
+            summary="赎回确认",
+        ),
+        _money_row(
+            line_date="20261027",
+            code="940018",
+            name="华泰紫金天天发货币",
+            quantity="40.76",
+            amount="0.00",
+            balance="0.00",
+            summary="红利发放",
+        ),
+    ]
+    bill = _parse(_xlsx(_HEADERS, rows))
+    assert len(bill.rows) == 2
+    by_line = {row.line_no: row for row in bill.rows}
+    assert by_line[4].money_fund_balance_units == 0
+    assert bill.assumptions["money_fund_balance_only_rows"] == [3, 5]
+    assert "money_fund_oversell_interest" not in bill.assumptions

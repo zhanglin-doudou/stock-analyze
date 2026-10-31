@@ -182,24 +182,22 @@ async def test_real_bill_all_rows_classified_and_zero_unknown(
 async def test_money_fund_bill_imports_with_zero_amount_quarantine(
     client, api_prefix, user, settings
 ) -> None:
-    """货币基金账单：申赎确认命中规则；全零「红利发放」按 INVALID_AMOUNT 隔离。"""
+    """货币基金账单：申赎确认命中规则；零金额红利只调货基余额、不隔离。"""
     preview = await _preview(
         client, api_prefix, user, _FUND_BILL.read_bytes(), _FUND_BILL.name, _XLSX_CONTENT_TYPE
     )
-    assert preview["estimated"] == {"parsed": 6, "inserted": 6, "skipped": 0, "quarantined": 1}
+    assert preview["estimated"] == {"parsed": 6, "inserted": 6, "skipped": 0, "quarantined": 0}
     assert "UNKNOWN_SUMMARY" not in {warning["code"] for warning in preview["warnings"]}
 
     accepted = await _commit(client, api_prefix, user, preview["preview_id"])
     await _drain_worker(settings)
 
     batch = await _batch(client, api_prefix, user, accepted["batch_id"])
-    assert batch["counts"] == {"parsed": 6, "inserted": 6, "skipped": 0, "quarantined": 1}
+    assert batch["counts"] == {"parsed": 6, "inserted": 6, "skipped": 0, "quarantined": 0}
     assert "UNKNOWN_SUMMARY" not in set(batch["warnings"])
 
     items = await _quarantine(client, api_prefix, user, accepted["batch_id"])
-    assert len(items) == 1
-    assert items[0]["reason_code"] == "INVALID_AMOUNT"
-    assert items[0]["line_no"] == 19
+    assert items == []
 
     trades = await _trades(client, api_prefix, user)
     assert len(trades) == 6
@@ -210,15 +208,15 @@ async def test_money_fund_bill_imports_with_zero_amount_quarantine(
     assert redeem["category"] == "sell"
     assert redeem["summary_code"] == "sys_redeem"
     assert redeem["amount"] == "116295.38"
-    # 货基行带余额（份额 × 1.0000）；无持仓锚点且有净赎回 → 期初按 -min(累计净额)
-    # 反推下界（116307.65），余额全程 ≥ 0：赎回后 = 12.27，申购后 = 106720.80。
-    assert redeem["money_fund_balance"] == "12.27"
+    # 货基行带余额（份额 × 1.0000）；红利发放（零金额份额行）参与余额推演后，
+    # 期初按 -min(累计净额) 反推为 116295.38：赎回后 = 0.00，申购后 = 106708.53。
+    assert redeem["money_fund_balance"] == "0.00"
 
     subscribe = by_summary[("申购确认", "buy")]
     assert subscribe["category"] == "buy"
     assert subscribe["summary_code"] == "sys_fund_buy"
     assert subscribe["amount"] == "-106708.53"
-    assert subscribe["money_fund_balance"] == "106720.80"
+    assert subscribe["money_fund_balance"] == "106708.53"
 
     assert {item["category"] for item in trades} == {"buy", "sell", "transfer"}
 
