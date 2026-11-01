@@ -697,6 +697,10 @@ async def build_assets(
     fifo_error_now = bool(fifo_error_codes)
     market_as_of = await _market_as_of(session, market_data, clock)
     market_changed = state is not None and state.data_as_of != market_as_of
+    # blocked 行是「缺行情占位行」，非终态：其分布可能覆盖历史任意日期，增量 45 天
+    # 窗口无法保证全部重算；且行情补齐可能只补到已被全局 market_as_of 覆盖的日期
+    # （market_as_of 不变 → 看起来无变化）。因此只要表里还有 blocked 行，就必须全量重建。
+    had_blocked = state is not None and await repo.has_blocked_rows(user_id)
 
     # 3) 全量判定（§6.2）：任何无法安全定位的变更都收敛到全量。
     full = (
@@ -707,6 +711,7 @@ async def build_assets(
         or state.last_fifo_error != fifo_error_now
         or start != state.start_date
         or end < state.last_built_through
+        or had_blocked
     )
     if not full and state is not None and market_changed:
         old_as_of = state.data_as_of

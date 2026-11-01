@@ -703,6 +703,48 @@ async def test_as_of_span_over_safety_window_triggers_full(
     assert summary.mode == "full"
 
 
+# ── IT-18：缺行情 blocked 行在补齐行情后必须重算（即使全局 as_of 未前进）────
+
+
+async def test_blocked_rows_rebuilt_after_prices_arrived_without_as_of_change(
+    owner_engine: AsyncEngine, app_db: Database
+) -> None:
+    """复现：缺行情构建出 blocked 行；同步行情后全局 market_as_of 不变（新行情落在已覆盖日），
+    旧实现走 no-op 导致 blocked 行残留、资产表“不更新”。修复：表里有 blocked 行 → 强制全量。
+    """
+    bars = _monthly_bars()
+    user_id = await _insert_user(owner_engine)
+    await _seed_baseline(owner_engine, user_id)
+
+    # 1) 无行情构建：600519 自 2026-03-02 起缺价 → 大量 blocked 行。
+    no_price_market = _StubMarket([], as_of=date(2026, 6, 30))
+    first = await _build(app_db, user_id, no_price_market)
+    assert first.mode == "full"
+    blocked_before = [r for r in await _rows(app_db, user_id) if r.status == "blocked"]
+    assert blocked_before, "基线应因缺行情产生 blocked 行"
+    state_before = await _state(app_db, user_id)
+    assert state_before is not None
+    assert state_before.data_as_of == date(2026, 6, 30)
+
+    # 2) 补齐 600519 行情，但全局 as_of 保持 2026-06-30（新行情落在已覆盖日）。
+    priced_market = _StubMarket(bars, as_of=date(2026, 6, 30))
+    second = await _build(app_db, user_id, priced_market)
+    # 有 blocked 行 → 必须全量重建（不能 no-op / 增量留旧 blocked）。
+    assert second.mode == "full"
+    rows_after = await _rows(app_db, user_id)
+    assert not any(r.status == "blocked" for r in rows_after), "补齐行情后不应再有 blocked 行"
+    # 3) 与直接全量构建逐行相等。
+    user_full = await _insert_user(owner_engine)
+    await _seed_baseline(owner_engine, user_full)
+    await _build(app_db, user_full, _StubMarket(bars, as_of=date(2026, 6, 30)), mode="full")
+    _assert_paths_equal(
+        rows_after,
+        await _rows(app_db, user_full),
+        await _state(app_db, user_id),
+        await _state(app_db, user_full),
+    )  # type: ignore[arg-type]
+
+
 # ── IT-11：end 回退 → 全量 ────────────────────────────────
 
 
