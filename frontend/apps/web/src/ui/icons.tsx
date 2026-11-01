@@ -7,6 +7,7 @@ export type IconName =
   | "nav"
   | "assets"
   | "metrics"
+  | "sectors"
   | "import"
   | "history"
   | "report"
@@ -53,6 +54,13 @@ const PATHS: Record<IconName, ReactNode> = {
     <>
       <path d="M4 15l4-5 3 3 5-7 4 5" />
       <path d="M4 20h16" />
+    </>
+  ),
+  sectors: (
+    <>
+      <rect x="3.5" y="3.5" width="7" height="7" rx="1" />
+      <rect x="13.5" y="3.5" width="7" height="7" rx="1" />
+      <rect x="8.5" y="13.5" width="7" height="7" rx="1" />
     </>
   ),
   import: (

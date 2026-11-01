@@ -254,7 +254,7 @@
 | GET | `/api/v1/openapi.json` | 契约自描述 | P0 |
 | GET | `/api/v1/errors` | 机器可读错误码总表 | P1 |
 
-**规模**：**82 个端点**（API-001~082），覆盖 28 条 FR（权威清单与字段级契约见 [API-Catalog §1](architecture/v2/API-Catalog.md)；覆盖关系见 §19 与 API-Catalog §8）。
+**规模**：**88 个端点**（API-001~088），覆盖 28 条 FR（权威清单与字段级契约见 [API-Catalog §1](architecture/v2/API-Catalog.md)；覆盖关系见 §19 与 API-Catalog §8）。
 
 > 路径约定：本节用**完整路径**；《API-Catalog》§1 省略公共前缀 `/api/v1`（运维端点 `/healthz`、`/readyz`、`/version`、`/metrics` 不在前缀下）。两处端点集合一致，以 API-Catalog 为准。
 
@@ -495,9 +495,9 @@ services/api ─▶ application ─▶ domain ◀── infrastructure
 | RLS | 所有租户表 `ENABLE ROW LEVEL SECURITY`；策略 `USING (user_id = current_setting('app.user_id')::uuid)` | 即使仓储漏过滤也读不到他人数据 |
 | 会话变量 | 每请求事务内 `SET LOCAL app.user_id = :uid`，连接归还前重置 | 防连接池串号（关键安全点） |
 | 管理面 | `platform.user` 等系统表不进租户策略；admin 仅访问系统视图 | 满足"admin 不可读交易明细" |
-| 公共缓存 | `market` schema 两表（`daily_bar` / `pull_range`）无 `user_id`、**不启用 RLS**；行情为公开数据、可再生 | 所有租户共享；写路径仅内部装配（不开放 HTTP 端点） |
+| 公共缓存 | `market` schema 无 `user_id`、**不启用 RLS**：行情两表（`daily_bar` / `pull_range`）+ 板块六表（`sector` / `sector_member` / `benchmark_member` / `sector_bar` / `sector_pull_range` / `sector_sync_state`）；行情/板块均为公开数据、可再生 | 所有租户共享；写路径仅内部装配或 CLI 同步（不开放 HTTP 写端点） |
 
-### 9.2 schema 与表清单（v1 的 31 张 → v2 的 38 张：36 张业务表 + 2 张公共行情缓存表）
+### 9.2 schema 与表清单（v1 的 31 张 → v2 的 44 张：36 张业务表 + 8 张公共缓存表）
 
 **`platform`（系统与多租户）**
 
@@ -522,12 +522,18 @@ services/api ─▶ application ─▶ domain ◀── infrastructure
 
 **`review`**：`round`、`round_fill`、`nav_daily`、`cashflow`、`metric_result`、`metric_dependency`、`attribution`、`report`、`journal_entry`、`behavior_rule`、`alert`（均含 `user_id`）
 
-**`market`（公共行情缓存，无 `user_id`、不启用 RLS，可再生）**
+**`market`（公共行情/板块缓存，无 `user_id`、不启用 RLS，可再生）**
 
 | 表 | 关键列 | 说明 |
 |---|---|---|
 | `daily_bar` | symbol, adjust, trade_date, close_units, return_units, source, pulled_at | 不复权日线缓存（`adjust=''`；PK `(symbol, adjust, trade_date)`） |
 | `pull_range` | id, symbol, adjust, adjust_version, range_start, range_end, data_end, requested_end, complete, bar_count, checksum | 区间覆盖/TTL 判定（区间并集 + 尾部刷新 + 负缓存；`ON CONFLICT` 幂等） |
+| `sector` | taxonomy, sector_code, level, name, parent_code, classification_version, source, is_active, sort_order | 行业树 / 概念目录（`industry_sw` 三级 + `concept_em`） |
+| `sector_member` | taxonomy, sector_code, symbol, effective_from, effective_to, vendor_symbol, observed_at, source | 成分 **SCD2 半开区间** `[effective_from, effective_to)`；行业当前部分唯一索引保证一股最多一个三级行业 |
+| `benchmark_member` | benchmark_id, symbol, effective_from, effective_to, weight_units, weight_as_of, source | 基准成分权重（SCD2；缺失 → `active_*` 为 null，禁止等权近似） |
+| `sector_bar` | taxonomy, sector_code, trade_date, close_units, return_units, source | 板块日线（`*_units` 标度整数） |
+| `sector_pull_range` | id, taxonomy, sector_code, range_start, range_end, data_end, requested_end, complete, bar_count, checksum | 板块同步覆盖区间（幂等 `ON CONFLICT`） |
+| `sector_sync_state` | dataset_key, status, as_of, catalog_as_of, membership_as_of, bar_as_of, weight_as_of, classification_version, entity_count, member_count, checksum, error_detail | 同步水位/状态（CLI `sync-sectors` 写） |
 
 ### 9.3 关键索引与分区
 

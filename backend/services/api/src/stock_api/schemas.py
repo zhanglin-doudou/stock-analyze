@@ -854,6 +854,7 @@ class DashboardLinksOut(StrictModel):
     reports: str
     exports: str
     attribution: str
+    sectors: str
 
 
 class DashboardOut(StrictModel):
@@ -874,6 +875,229 @@ class DashboardOut(StrictModel):
     links: DashboardLinksOut
     assumptions: dict[str, str]
     inputs_hash: str
+
+
+# ── 板块（API-087/088，2026-10-31 sector-data）────────────────
+SectorTaxonomy = Literal["industry", "concept"]
+SectorStatus = Literal["ok", "degraded", "stale", "insufficient", "missing", "blocked"]
+SectorDataState = Literal["current", "stale", "missing"]
+SectorDirection = Literal["over", "under", "flat"]
+SectorMissingCode = Literal[
+    "SECTOR_ASSET_BUILD_MISSING",
+    "SECTOR_ASSET_BUILD_BLOCKED",
+    "SECTOR_ASSET_BUILD_STALE",
+    "SECTOR_DATA_MISSING",
+    "SECTOR_DATA_STALE",
+    "SECTOR_SYNC_FAILED",
+    "SECTOR_MEMBERSHIP_MISSING",
+    "SECTOR_NON_STOCK_HOLDINGS",
+    "SECTOR_NO_STOCK_POSITIONS",
+    "SECTOR_BENCHMARK_WEIGHTS_MISSING",
+    "SECTOR_BENCHMARK_WEIGHTS_STALE",
+    "SECTOR_CONCEPT_MULTI_MEMBERSHIP",
+    "SECTOR_CONCEPT_COVERAGE_LOW",
+    "SECTOR_CONCEPT_HHI_UNAVAILABLE",
+    "SECTOR_HISTORY_NOT_COVERED",
+    "SECTOR_ASSET_MISMATCH",
+    "SECTOR_TRUNCATED",
+    "SECTOR_HOLDING_TRUNCATED",
+    "SECTOR_PRICE_MISSING",
+    "SECTOR_AS_OF_NOT_AVAILABLE",
+]
+
+
+class SectorMissingOut(StrictModel):
+    """200 降级项（字段路径 + 机读码 + 人话 + 可执行指引）。"""
+
+    field: str
+    code: SectorMissingCode
+    reason: str
+    what_to_do: str
+
+
+class SectorPortfolioOut(StrictModel):
+    """持仓口径（金额 2 位、比率 scale=8；行业专属字段在概念请求下为 null）。"""
+
+    total_assets: str | None = None
+    total_assets_display: str | None = None
+    holding_market_value: str | None = None
+    equity_market_value: str | None = None
+    mapped_market_value: str | None = None
+    unclassified_market_value: str | None = None
+    non_stock_market_value: str | None = None
+    coverage: str | None = None
+    coverage_pct: str | None = None
+    coverage_basis: str | None = None
+    equity_position: str | None = None
+    equity_position_pct: str | None = None
+    holding_count: int
+    classified_holding_count: int
+
+
+class SectorRowOut(StrictModel):
+    """板块行：industry 用 weight/active_weight；concept 用 exposure（其余为 null）。"""
+
+    sector_code: str
+    sector_name: str
+    level: int
+    parent_code: str | None = None
+    market_value: str | None = None
+    market_value_display: str | None = None
+    weight: str | None = None
+    weight_pct: str | None = None
+    holding_count: int
+    benchmark_weight: str | None = None
+    benchmark_weight_pct: str | None = None
+    active_weight: str | None = None
+    active_weight_pct: str | None = None
+    direction: SectorDirection | None = None
+    exposure: str | None = None
+    exposure_pct: str | None = None
+    overlap: bool | None = None
+
+
+class SectorOthersOut(StrictModel):
+    """limit 截断后的「其他板块」聚合（industry 带权重；concept 带暴露）。"""
+
+    market_value: str
+    weight: str | None = None
+    weight_pct: str | None = None
+    exposure: str | None = None
+    exposure_pct: str | None = None
+    holding_count: int
+
+
+class SectorUnclassifiedOut(StrictModel):
+    """未分类持仓（正常披露；分母为 equity_market_value）。"""
+
+    market_value: str
+    ratio_of_equity: str | None = None
+    holding_count: int
+    symbols: list[str]
+
+
+class SectorConcentrationOut(StrictModel):
+    """行业集中度（scale=8）；概念请求恒 unavailable。"""
+
+    method: Literal["industry_single_membership", "concept_overlap"]
+    status: str
+    hhi: str | None = None
+    effective_n: str | None = None
+    top1_weight: str | None = None
+    top3_weight: str | None = None
+    benchmark_hhi: str | None = None
+    n_sectors: int
+
+
+class SectorPreferenceItemOut(StrictModel):
+    """板块偏好一项（active_weight scale=8 + 两位百分比 + 方向）。"""
+
+    sector_code: str
+    sector_name: str
+    active_weight: str
+    active_weight_pct: str
+    direction: SectorDirection | None = None
+
+
+class SectorPreferenceOut(StrictModel):
+    """板块主动偏离（Σ|Δ|/2，scale=8）。"""
+
+    deviation: str | None = None
+    max_overweight: SectorPreferenceItemOut | None = None
+    max_underweight: SectorPreferenceItemOut | None = None
+    top_overweight: list[SectorPreferenceItemOut]
+    top_underweight: list[SectorPreferenceItemOut]
+
+
+class SectorConceptTopOut(StrictModel):
+    """概念 TopN（按 exposure 降序，不是 tag_share）。"""
+
+    sector_code: str
+    sector_name: str
+    exposure: str
+    exposure_pct: str
+
+
+class SectorConceptBlockOut(StrictModel):
+    """概念块（多归属；overlap 为 Σexposure 比率，非权重）。"""
+
+    coverage: str
+    coverage_pct: str
+    coverage_basis: str
+    tagged_market_value: str
+    multi_tag_market_value: str
+    multi_tag_pct: str
+    overlap: str
+    hhi_tag: str | None = None
+    top1_concept: SectorConceptTopOut | None = None
+    top5_concepts: list[SectorConceptTopOut]
+    caveat: str | None = None
+
+
+class SectorOverviewLinksOut(StrictModel):
+    dashboard: str
+    sectors: str
+    attribution: str
+
+
+class SectorOverviewOut(StrictModel):
+    """API-087：当前快照的板块配置/偏好/集中度（只读；金额/比率后端格式化）。"""
+
+    as_of: date
+    taxonomy: SectorTaxonomy
+    level: int
+    status: SectorStatus
+    asset_build_state: Literal["missing", "current", "stale", "blocked"]
+    sector_data_state: SectorDataState
+    definition_version: str
+    sector_dataset_version: str | None = None
+    data_as_of: date | None = None
+    sector_data_as_of: date | None = None
+    benchmark_id: str | None = None
+    benchmark_as_of: date | None = None
+    weight_mode: Literal["additive", "overlapping"]
+    portfolio: SectorPortfolioOut
+    sectors: list[SectorRowOut]
+    others: SectorOthersOut | None = None
+    unclassified: SectorUnclassifiedOut | None = None
+    concentration: SectorConcentrationOut
+    preference: SectorPreferenceOut | None = None
+    concept: SectorConceptBlockOut | None = None
+    missing: list[SectorMissingOut]
+    links: SectorOverviewLinksOut
+    assumptions: dict[str, str]
+    inputs_hash: str
+
+
+class SectorCatalogPathOut(StrictModel):
+    sector_code: str
+    sector_name: str
+
+
+class SectorCatalogItemOut(StrictModel):
+    sector_code: str
+    sector_name: str
+    taxonomy: SectorTaxonomy
+    level: int
+    parent_code: str | None = None
+    path: list[SectorCatalogPathOut]
+    member_count: int
+    source: Literal["sw", "em"]
+    classification_version: str
+    is_active: bool
+
+
+class SectorCatalogOut(StrictModel):
+    """API-088：板块目录树（公共数据；未同步 → items=[] + missing）。"""
+
+    as_of: date
+    taxonomy: SectorTaxonomy
+    catalog_version: str | None = None
+    sector_data_state: SectorDataState
+    items: list[SectorCatalogItemOut]
+    next_cursor: str | None = None
+    has_more: bool
+    missing: list[SectorMissingOut]
 
 
 # ── 运维（API-071~076）──────────────────────────────────────

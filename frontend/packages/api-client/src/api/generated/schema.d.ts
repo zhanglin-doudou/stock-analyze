@@ -694,6 +694,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/sectors": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Sectors Endpoint
+         * @description API-088：板块目录树（公共数据、无用户维度；未同步 → 200 + items=[]）。
+         */
+        get: operations["listSectors"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/sectors/overview": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Sectors Overview Endpoint
+         * @description API-087：当前快照的板块配置/偏好/集中度（只读；ETag 命中 → 304）。
+         */
+        get: operations["getSectorsOverview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/summary-rules": {
         parameters: {
             query?: never;
@@ -1499,6 +1539,8 @@ export interface components {
             reports: string;
             /** Rounds */
             rounds: string;
+            /** Sectors */
+            sectors: string;
         };
         /**
          * DashboardMaxDrawdownOut
@@ -2767,6 +2809,368 @@ export interface components {
             items: components["schemas"]["RoundOut"][];
             /** Next Cursor */
             next_cursor?: string | null;
+        };
+        /** SectorCatalogItemOut */
+        SectorCatalogItemOut: {
+            /** Classification Version */
+            classification_version: string;
+            /** Is Active */
+            is_active: boolean;
+            /** Level */
+            level: number;
+            /** Member Count */
+            member_count: number;
+            /** Parent Code */
+            parent_code?: string | null;
+            /** Path */
+            path: components["schemas"]["SectorCatalogPathOut"][];
+            /** Sector Code */
+            sector_code: string;
+            /** Sector Name */
+            sector_name: string;
+            /**
+             * Source
+             * @enum {string}
+             */
+            source: "sw" | "em";
+            /**
+             * Taxonomy
+             * @enum {string}
+             */
+            taxonomy: "industry" | "concept";
+        };
+        /**
+         * SectorCatalogOut
+         * @description API-088：板块目录树（公共数据；未同步 → items=[] + missing）。
+         */
+        SectorCatalogOut: {
+            /**
+             * As Of
+             * Format: date
+             */
+            as_of: string;
+            /** Catalog Version */
+            catalog_version?: string | null;
+            /** Has More */
+            has_more: boolean;
+            /** Items */
+            items: components["schemas"]["SectorCatalogItemOut"][];
+            /** Missing */
+            missing: components["schemas"]["SectorMissingOut"][];
+            /** Next Cursor */
+            next_cursor?: string | null;
+            /**
+             * Sector Data State
+             * @enum {string}
+             */
+            sector_data_state: "current" | "stale" | "missing";
+            /**
+             * Taxonomy
+             * @enum {string}
+             */
+            taxonomy: "industry" | "concept";
+        };
+        /** SectorCatalogPathOut */
+        SectorCatalogPathOut: {
+            /** Sector Code */
+            sector_code: string;
+            /** Sector Name */
+            sector_name: string;
+        };
+        /**
+         * SectorConcentrationOut
+         * @description 行业集中度（scale=8）；概念请求恒 unavailable。
+         */
+        SectorConcentrationOut: {
+            /** Benchmark Hhi */
+            benchmark_hhi?: string | null;
+            /** Effective N */
+            effective_n?: string | null;
+            /** Hhi */
+            hhi?: string | null;
+            /**
+             * Method
+             * @enum {string}
+             */
+            method: "industry_single_membership" | "concept_overlap";
+            /** N Sectors */
+            n_sectors: number;
+            /** Status */
+            status: string;
+            /** Top1 Weight */
+            top1_weight?: string | null;
+            /** Top3 Weight */
+            top3_weight?: string | null;
+        };
+        /**
+         * SectorConceptBlockOut
+         * @description 概念块（多归属；overlap 为 Σexposure 比率，非权重）。
+         */
+        SectorConceptBlockOut: {
+            /** Caveat */
+            caveat?: string | null;
+            /** Coverage */
+            coverage: string;
+            /** Coverage Basis */
+            coverage_basis: string;
+            /** Coverage Pct */
+            coverage_pct: string;
+            /** Hhi Tag */
+            hhi_tag?: string | null;
+            /** Multi Tag Market Value */
+            multi_tag_market_value: string;
+            /** Multi Tag Pct */
+            multi_tag_pct: string;
+            /** Overlap */
+            overlap: string;
+            /** Tagged Market Value */
+            tagged_market_value: string;
+            top1_concept?: components["schemas"]["SectorConceptTopOut"] | null;
+            /** Top5 Concepts */
+            top5_concepts: components["schemas"]["SectorConceptTopOut"][];
+        };
+        /**
+         * SectorConceptTopOut
+         * @description 概念 TopN（按 exposure 降序，不是 tag_share）。
+         */
+        SectorConceptTopOut: {
+            /** Exposure */
+            exposure: string;
+            /** Exposure Pct */
+            exposure_pct: string;
+            /** Sector Code */
+            sector_code: string;
+            /** Sector Name */
+            sector_name: string;
+        };
+        /**
+         * SectorMissingOut
+         * @description 200 降级项（字段路径 + 机读码 + 人话 + 可执行指引）。
+         */
+        SectorMissingOut: {
+            /**
+             * Code
+             * @enum {string}
+             */
+            code: "SECTOR_ASSET_BUILD_MISSING" | "SECTOR_ASSET_BUILD_BLOCKED" | "SECTOR_ASSET_BUILD_STALE" | "SECTOR_DATA_MISSING" | "SECTOR_DATA_STALE" | "SECTOR_SYNC_FAILED" | "SECTOR_MEMBERSHIP_MISSING" | "SECTOR_NON_STOCK_HOLDINGS" | "SECTOR_NO_STOCK_POSITIONS" | "SECTOR_BENCHMARK_WEIGHTS_MISSING" | "SECTOR_BENCHMARK_WEIGHTS_STALE" | "SECTOR_CONCEPT_MULTI_MEMBERSHIP" | "SECTOR_CONCEPT_COVERAGE_LOW" | "SECTOR_CONCEPT_HHI_UNAVAILABLE" | "SECTOR_HISTORY_NOT_COVERED" | "SECTOR_ASSET_MISMATCH" | "SECTOR_TRUNCATED" | "SECTOR_HOLDING_TRUNCATED" | "SECTOR_PRICE_MISSING" | "SECTOR_AS_OF_NOT_AVAILABLE";
+            /** Field */
+            field: string;
+            /** Reason */
+            reason: string;
+            /** What To Do */
+            what_to_do: string;
+        };
+        /**
+         * SectorOthersOut
+         * @description limit 截断后的「其他板块」聚合（industry 带权重；concept 带暴露）。
+         */
+        SectorOthersOut: {
+            /** Exposure */
+            exposure?: string | null;
+            /** Exposure Pct */
+            exposure_pct?: string | null;
+            /** Holding Count */
+            holding_count: number;
+            /** Market Value */
+            market_value: string;
+            /** Weight */
+            weight?: string | null;
+            /** Weight Pct */
+            weight_pct?: string | null;
+        };
+        /** SectorOverviewLinksOut */
+        SectorOverviewLinksOut: {
+            /** Attribution */
+            attribution: string;
+            /** Dashboard */
+            dashboard: string;
+            /** Sectors */
+            sectors: string;
+        };
+        /**
+         * SectorOverviewOut
+         * @description API-087：当前快照的板块配置/偏好/集中度（只读；金额/比率后端格式化）。
+         */
+        SectorOverviewOut: {
+            /**
+             * As Of
+             * Format: date
+             */
+            as_of: string;
+            /**
+             * Asset Build State
+             * @enum {string}
+             */
+            asset_build_state: "missing" | "current" | "stale" | "blocked";
+            /** Assumptions */
+            assumptions: {
+                [key: string]: string;
+            };
+            /** Benchmark As Of */
+            benchmark_as_of?: string | null;
+            /** Benchmark Id */
+            benchmark_id?: string | null;
+            concentration: components["schemas"]["SectorConcentrationOut"];
+            concept?: components["schemas"]["SectorConceptBlockOut"] | null;
+            /** Data As Of */
+            data_as_of?: string | null;
+            /** Definition Version */
+            definition_version: string;
+            /** Inputs Hash */
+            inputs_hash: string;
+            /** Level */
+            level: number;
+            links: components["schemas"]["SectorOverviewLinksOut"];
+            /** Missing */
+            missing: components["schemas"]["SectorMissingOut"][];
+            others?: components["schemas"]["SectorOthersOut"] | null;
+            portfolio: components["schemas"]["SectorPortfolioOut"];
+            preference?: components["schemas"]["SectorPreferenceOut"] | null;
+            /** Sector Data As Of */
+            sector_data_as_of?: string | null;
+            /**
+             * Sector Data State
+             * @enum {string}
+             */
+            sector_data_state: "current" | "stale" | "missing";
+            /** Sector Dataset Version */
+            sector_dataset_version?: string | null;
+            /** Sectors */
+            sectors: components["schemas"]["SectorRowOut"][];
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "degraded" | "stale" | "insufficient" | "missing" | "blocked";
+            /**
+             * Taxonomy
+             * @enum {string}
+             */
+            taxonomy: "industry" | "concept";
+            unclassified?: components["schemas"]["SectorUnclassifiedOut"] | null;
+            /**
+             * Weight Mode
+             * @enum {string}
+             */
+            weight_mode: "additive" | "overlapping";
+        };
+        /**
+         * SectorPortfolioOut
+         * @description 持仓口径（金额 2 位、比率 scale=8；行业专属字段在概念请求下为 null）。
+         */
+        SectorPortfolioOut: {
+            /** Classified Holding Count */
+            classified_holding_count: number;
+            /** Coverage */
+            coverage?: string | null;
+            /** Coverage Basis */
+            coverage_basis?: string | null;
+            /** Coverage Pct */
+            coverage_pct?: string | null;
+            /** Equity Market Value */
+            equity_market_value?: string | null;
+            /** Equity Position */
+            equity_position?: string | null;
+            /** Equity Position Pct */
+            equity_position_pct?: string | null;
+            /** Holding Count */
+            holding_count: number;
+            /** Holding Market Value */
+            holding_market_value?: string | null;
+            /** Mapped Market Value */
+            mapped_market_value?: string | null;
+            /** Non Stock Market Value */
+            non_stock_market_value?: string | null;
+            /** Total Assets */
+            total_assets?: string | null;
+            /** Total Assets Display */
+            total_assets_display?: string | null;
+            /** Unclassified Market Value */
+            unclassified_market_value?: string | null;
+        };
+        /**
+         * SectorPreferenceItemOut
+         * @description 板块偏好一项（active_weight scale=8 + 两位百分比 + 方向）。
+         */
+        SectorPreferenceItemOut: {
+            /** Active Weight */
+            active_weight: string;
+            /** Active Weight Pct */
+            active_weight_pct: string;
+            /** Direction */
+            direction?: ("over" | "under" | "flat") | null;
+            /** Sector Code */
+            sector_code: string;
+            /** Sector Name */
+            sector_name: string;
+        };
+        /**
+         * SectorPreferenceOut
+         * @description 板块主动偏离（Σ|Δ|/2，scale=8）。
+         */
+        SectorPreferenceOut: {
+            /** Deviation */
+            deviation?: string | null;
+            max_overweight?: components["schemas"]["SectorPreferenceItemOut"] | null;
+            max_underweight?: components["schemas"]["SectorPreferenceItemOut"] | null;
+            /** Top Overweight */
+            top_overweight: components["schemas"]["SectorPreferenceItemOut"][];
+            /** Top Underweight */
+            top_underweight: components["schemas"]["SectorPreferenceItemOut"][];
+        };
+        /**
+         * SectorRowOut
+         * @description 板块行：industry 用 weight/active_weight；concept 用 exposure（其余为 null）。
+         */
+        SectorRowOut: {
+            /** Active Weight */
+            active_weight?: string | null;
+            /** Active Weight Pct */
+            active_weight_pct?: string | null;
+            /** Benchmark Weight */
+            benchmark_weight?: string | null;
+            /** Benchmark Weight Pct */
+            benchmark_weight_pct?: string | null;
+            /** Direction */
+            direction?: ("over" | "under" | "flat") | null;
+            /** Exposure */
+            exposure?: string | null;
+            /** Exposure Pct */
+            exposure_pct?: string | null;
+            /** Holding Count */
+            holding_count: number;
+            /** Level */
+            level: number;
+            /** Market Value */
+            market_value?: string | null;
+            /** Market Value Display */
+            market_value_display?: string | null;
+            /** Overlap */
+            overlap?: boolean | null;
+            /** Parent Code */
+            parent_code?: string | null;
+            /** Sector Code */
+            sector_code: string;
+            /** Sector Name */
+            sector_name: string;
+            /** Weight */
+            weight?: string | null;
+            /** Weight Pct */
+            weight_pct?: string | null;
+        };
+        /**
+         * SectorUnclassifiedOut
+         * @description 未分类持仓（正常披露；分母为 equity_market_value）。
+         */
+        SectorUnclassifiedOut: {
+            /** Holding Count */
+            holding_count: number;
+            /** Market Value */
+            market_value: string;
+            /** Ratio Of Equity */
+            ratio_of_equity?: string | null;
+            /** Symbols */
+            symbols: string[];
         };
         /**
          * SummaryRuleCreateIn
@@ -5303,6 +5707,148 @@ export interface operations {
             };
             /** @description 资源不存在 */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listSectors: {
+        parameters: {
+            query?: {
+                taxonomy?: string;
+                level?: number | null;
+                parent?: string | null;
+                q?: string | null;
+                active_only?: boolean;
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SectorCatalogOut"];
+                };
+            };
+            /** @description 请求参数错误 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getSectorsOverview: {
+        parameters: {
+            query?: {
+                as_of?: string | null;
+                taxonomy?: string;
+                level?: number | null;
+                parent?: string | null;
+                benchmark?: string | null;
+                limit?: number;
+            };
+            header?: {
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SectorOverviewOut"];
+                };
+            };
+            /** @description Not Modified（If-None-Match 命中） */
+            304: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 请求参数错误 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

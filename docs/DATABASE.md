@@ -2,14 +2,14 @@
 
 本文是 [README](../README.md) 的数据库专项文档：本地 PostgreSQL 的两种安装方式、三角色模型、迁移执行、日常 SQL 操作与故障排查。
 
-一期 schema 布局（3 个业务 schema + 1 个公共缓存 schema，由 Alembic 迁移 `0001_phase1` 创建；`0002_platform_tenant_rls` 补 platform 租户表 RLS；`0003_review_rounds` 建二期复盘表 round / round_fill / round_build_state 并同批启 RLS；`0004_review_nav` 建 `review.nav_daily`；`0005_market_cache` 建公共行情缓存 schema `market`；`0006_review_asset_daily` 建资产快照 `asset_daily` / 构建水位 `asset_build_state`）：
+一期 schema 布局（3 个业务 schema + 1 个公共缓存 schema，由 Alembic 迁移 `0001_phase1` 创建；`0002_platform_tenant_rls` 补 platform 租户表 RLS；`0003_review_rounds` 建二期复盘表 round / round_fill / round_build_state 并同批启 RLS；`0004_review_nav` 建 `review.nav_daily`；`0005_market_cache` 建公共行情缓存 schema `market`；`0006_review_asset_daily` 建资产快照 `asset_daily` / 构建水位 `asset_build_state`；`0011_market_sectors` 建板块公共缓存 `market.sector` / `sector_member` / `benchmark_member` / `sector_bar` / `sector_pull_range` / `sector_sync_state` 六表（无 RLS、可再生））：
 
 | Schema | 内容 |
 |---|---|
 | `platform` | 用户 / 令牌 / 任务 / 幂等键 / 审计 / 配置等平台表；**租户表 job / idempotency_key / user_setting / outbox_event 启 RLS**，认证/系统表不启（见 §2.1） |
 | `ledger` | 流水 / 批次 / 预览 / 隔离区 / 摘要规则 / 对账（**全部启 RLS**） |
 | `review` | 复盘域（二期已启用）：FIFO 回合 `round`、配对明细 `round_fill`、增量重建水位 `round_build_state`、每日净值 `nav_daily`、每日资产快照 `asset_daily`、资产构建水位 `asset_build_state`（**全部启 RLS**） |
-| `market` | 公共行情缓存（live 模式）：日线 `daily_bar`、区间覆盖 `pull_range`；**公共数据、不启用 RLS**，可再生（丢了可重拉），不进备份/恢复的正确性断言 |
+| `market` | 公共行情/板块缓存（live 模式）：日线 `daily_bar`、区间覆盖 `pull_range`；板块 `sector`（行业树/概念目录）、`sector_member`（SCD2 成分）、`benchmark_member`（基准成分权重）、`sector_bar`（板块日线）、`sector_pull_range`（同步覆盖区间）、`sector_sync_state`（同步水位/状态）；**公共数据、不启用 RLS**，可再生（丢了可重拉），不进备份/恢复的正确性断言 |
 | `delivery` | 交付域（三期启用） |
 
 ---
@@ -120,6 +120,7 @@ uv run alembic -c backend/alembic.ini heads
 - 迁移 `0004_review_nav`（Period2-03）：建 `review.nav_daily`（`UNIQUE(user_id, trade_date)` + 普通索引）+ `tenant_isolation` 策略 + 授权，并把 `platform.schema_version.version` 更新为 `0004_period2_nav`。
 - 迁移 `0005_market_cache`（live 行情）：建 `market` schema + `market.daily_bar` / `market.pull_range` 两表 + 索引 + `GRANT`（`stock_app` DML / `stock_backup` 只读）+ 把 `platform.schema_version.version` 更新为 `0005_market_cache`（`stock_api/version.py::SCHEMA_VERSION` 同步）；downgrade 回 `0004_period2_nav`。行情缓存属于**可再生公共数据**，不进备份/恢复演练的正确性断言。
 - 迁移 `0006_review_asset_daily`（Period2-16 资产表）：建 `review.asset_daily`（`UNIQUE(user_id, trade_date)` + `CHECK(total_assets_units = cash_units + market_value_units)` + `CHECK(holding_count >= 0)`；**不建** `market_value >= 0`，超卖日允许负市值）与 `review.asset_build_state`（每用户一行水位线 + `version` 乐观锁），同批启 RLS + `stock_app` DML / `stock_backup` 只读授权；另在 `ledger.trade` 建 `ix_trade_user_updated_at (user_id, updated_at, trade_date)` 供增量脏查询；`platform.schema_version.version` 更新为 `0006_review_asset_daily`（`stock_api/version.py::SCHEMA_VERSION` 同步）；downgrade 回 `0005_market_cache`（含删索引/策略/两表）。
+- 迁移 `0011_market_sectors`（Period2-17 板块底座，设计 [2026-10-31-sector-data.md](architecture/2026-10-31-sector-data.md)）：建 `market` 板块 6 表 —— `sector`（行业树 / 概念目录）、`sector_member`（SCD2 半开区间 `[effective_from, effective_to)` + 行业当前部分唯一索引兜底"一股最多一个三级行业"）、`benchmark_member`（基准成分权重，`hs300` 等）、`sector_bar`（板块日线）、`sector_pull_range`（同步覆盖区间）、`sector_sync_state`（同步水位/状态）+ 索引 + `GRANT`（`stock_app` DML / `stock_backup` 只读）；`platform.schema_version.version` 更新为 `0011_market_sectors`（`stock_api/version.py::SCHEMA_VERSION` 同步）；downgrade 按 FK 逆序删本迁移 6 表、**不删 `market` schema**（`daily_bar` 仍在用）。板块缓存同属**可再生公共数据**、无 `user_id` / 无 RLS，仅由 CLI `sync-sectors`（`SECTOR_MODE=live`）写入，不进备份/恢复演练的正确性断言。
 - 启动即校验：API 启动时会核对 `platform.schema_version` 与代码版本，不匹配直接拒绝启动——先跑迁移再起服务。
 
 ## 4. 连接与执行 SQL
@@ -246,7 +247,9 @@ RESTART IDENTITY CASCADE;
 TRUNCATE TABLE review.round, review.round_fill, review.round_build_state,
   review.nav_daily, review.asset_daily, review.asset_build_state
 RESTART IDENTITY CASCADE;
-TRUNCATE TABLE market.daily_bar, market.pull_range
+TRUNCATE TABLE market.daily_bar, market.pull_range,
+  market.sector, market.sector_member, market.benchmark_member,
+  market.sector_bar, market.sector_pull_range, market.sector_sync_state
 RESTART IDENTITY CASCADE;
 ```
 

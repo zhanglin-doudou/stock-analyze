@@ -1,0 +1,148 @@
+/*
+ * 板块分析页样式（tokens-only；沿用 dashboard 的通用面板/徽标类）。
+ */
+.sectors {
+  color: var(--text);
+  font-size: var(--fs-body);
+}
+
+.sector-tabs {
+  display: flex;
+  gap: var(--s2);
+  margin-bottom: var(--s4);
+}
+
+.sector-tab,
+.sector-level,
+.sector-back {
+  height: var(--control-h);
+  padding: 0 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text-2);
+  font: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+}
+
+.sector-tab.is-active,
+.sector-level.is-active {
+  border-color: var(--accent);
+  color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.sector-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  margin: var(--s4) 0;
+}
+
+.sector-level {
+  height: 28px;
+  padding: 0 10px;
+  font-size: var(--fs-xs);
+}
+
+.sector-kpis {
+  margin-top: 0;
+}
+
+.sector-pref {
+  margin-top: var(--s4);
+  padding-top: var(--s4);
+  border-top: 1px solid var(--line);
+}
+
+.pref-bar {
+  display: grid;
+  grid-template-columns: minmax(90px, 1fr) 2fr auto;
+  align-items: center;
+  gap: var(--s3);
+  padding: 4px 0;
+  font-size: var(--fs-xs);
+}
+
+.pref-bar-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text);
+}
+
+.pref-bar-track {
+  display: block;
+  height: 4px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+/* 宽度直接复用后端绝对百分比串（如 83.33%）；不做数值换算 */
+.pref-bar-track > i {
+  display: block;
+  height: 100%;
+  width: var(--w);
+  max-width: 100%;
+  background: var(--text-2);
+}
+
+.pref-bar[data-direction="over"] .pref-bar-track > i {
+  background: var(--up);
+}
+
+.pref-bar[data-direction="under"] .pref-bar-track > i {
+  background: var(--down);
+}
+
+.sector-table .sector-expand {
+  width: 20px;
+  height: 20px;
+  margin-right: 6px;
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  background: var(--surface);
+  color: var(--text-2);
+  font: inherit;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.sector-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: var(--s3);
+  margin: 0 0 var(--s3);
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+
+.sector-breadcrumb code {
+  font-family: var(--font-mono);
+  font-size: 11px;
+}
+
+.sector-back {
+  height: 26px;
+  padding: 0 10px;
+  font-size: var(--fs-xs);
+}
+
+.sector-foot {
+  margin: var(--s4) 0 0;
+  padding-top: var(--s3);
+  border-top: 1px solid var(--line);
+  color: var(--faint);
+  font-size: var(--fs-micro);
+}
+
+.caveat {
+  margin: var(--s4) 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line-strong);
+  border-left: 3px solid var(--warn);
+  background: var(--warn-soft);
+  font-size: var(--fs-sm);
+  color: var(--text-2);
+}

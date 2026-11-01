@@ -97,4 +97,5 @@ make test-core     # pytest --cov=stock_core --cov-fail-under=100
 |---|---|
 | `values.py` | Scaled 基类 + Money(2) / Price(6) / Qty(4) / Ratio(8) 四个子类 |
 | `clock.py` | 从 contracts 再导出 Clock / FrozenClock / SystemClock（三行 re-export） |
+| `sector/` | 板块纯函数：`weights.py`（行业权重/主动权重）、`concentration.py`（HHI/TopK/effective_n）、`concepts.py`（概念暴露/重叠/caveat）、`preference.py`（超配/低配）、`grouping.py`（层级聚合）、`status.py`（覆盖率/状态机） |
 | `__init__.py` | 显式 re-export 公共 API |

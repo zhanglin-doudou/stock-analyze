@@ -302,6 +302,29 @@ export type MetricDrilldownItem = NonNullable<MetricDrilldownOut["items"]>[numbe
 export type MetricCatalog = ApiSchemas["MetricCatalogOut"];
 export type MetricCatalogItem = NonNullable<MetricCatalog["items"]>[number];
 
+// 2026-10-31：板块数据接入（API-087/088）
+/** API-087：当前快照的板块配置/偏好/集中度（只读；金额/比率后端格式化）。 */
+export type SectorsOverview = ApiSchemas["SectorOverviewOut"];
+/** 板块行：industry 用 weight/active_weight；concept 用 exposure（其余为 null）。 */
+export type SectorRow = ApiSchemas["SectorRowOut"];
+/** API-088：板块目录树（公共数据；未同步 → items=[] + missing）。 */
+export type SectorCatalogPage = ApiSchemas["SectorCatalogOut"];
+export type SectorCatalogItem = ApiSchemas["SectorCatalogItemOut"];
+export type SectorConcentration = ApiSchemas["SectorConcentrationOut"];
+export type SectorPreference = ApiSchemas["SectorPreferenceOut"];
+export type SectorPreferenceItem = ApiSchemas["SectorPreferenceItemOut"];
+export type SectorConceptBlock = ApiSchemas["SectorConceptBlockOut"];
+export type SectorConceptTop = ApiSchemas["SectorConceptTopOut"];
+export type SectorMissing = ApiSchemas["SectorMissingOut"];
+export type SectorOthers = ApiSchemas["SectorOthersOut"];
+export type SectorUnclassified = ApiSchemas["SectorUnclassifiedOut"];
+export type SectorPortfolio = ApiSchemas["SectorPortfolioOut"];
+export type SectorOverviewLinks = ApiSchemas["SectorOverviewLinksOut"];
+/** 板块分类轴：行业（互斥）/ 概念（多归属）。 */
+export type SectorTaxonomy = SectorsOverview["taxonomy"];
+/** 板块统计轴状态：ok | degraded | stale | insufficient | missing | blocked。 */
+export type SectorStatus = SectorsOverview["status"];
+
 // ── 编译期断言：后端契约变化必须在这里/typecheck 里炸出来 ─────────────────
 
 /** http.ts / UI 读取的核心字段必须仍存在于 generated schema。 */
@@ -438,6 +461,63 @@ export type AssertAssetBuildAcceptedFields = Assert<FieldsPresent<AssetBuildAcce
  * 由手工接口 MetricItem 承载，见上方注释；后端 test_metrics.py 钉住元素形状）。 */
 export type AssertMetricBatchFields = Assert<
   FieldsPresent<MetricBatchOut, "period" | "data_as_of" | "definition_version" | "assumptions" | "items">
+>;
+/** 板块概览读取的字段必须仍存在于契约（后端改名 → tsc 立即失败）。 */
+export type AssertSectorsOverviewFields = Assert<
+  FieldsPresent<
+    SectorsOverview,
+    | "as_of"
+    | "taxonomy"
+    | "level"
+    | "status"
+    | "weight_mode"
+    | "portfolio"
+    | "sectors"
+    | "concentration"
+    | "preference"
+    | "concept"
+    | "others"
+    | "unclassified"
+    | "missing"
+    | "links"
+    | "asset_build_state"
+    | "sector_data_state"
+    | "sector_data_as_of"
+    | "benchmark_id"
+    | "benchmark_as_of"
+    | "data_as_of"
+    | "definition_version"
+    | "inputs_hash"
+    | "assumptions"
+  >
+>;
+export type AssertSectorRowFields = Assert<
+  FieldsPresent<
+    SectorRow,
+    | "sector_code"
+    | "sector_name"
+    | "level"
+    | "holding_count"
+    | "market_value"
+    | "market_value_display"
+    | "weight"
+    | "weight_pct"
+    | "benchmark_weight"
+    | "benchmark_weight_pct"
+    | "active_weight"
+    | "active_weight_pct"
+    | "direction"
+    | "exposure"
+    | "exposure_pct"
+    | "overlap"
+    | "parent_code"
+  >
+>;
+export type AssertSectorCatalogPageFields = Assert<
+  FieldsPresent<
+    SectorCatalogPage,
+    "as_of" | "taxonomy" | "items" | "next_cursor" | "has_more" | "missing" | "sector_data_state" | "catalog_version"
+  >
 >;
 
 

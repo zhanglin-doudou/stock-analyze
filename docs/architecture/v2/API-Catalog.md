@@ -48,7 +48,7 @@
 - ETag `W/"<version>"`（列表含查询指纹），写响应返新 ETag；`If-Match` 不匹配 → 409 `VERSION_CONFLICT`（遵循 PRD FR-L4，不采用 412）。
 - 格式：金额**定点字符串 2 位** `"1234.56"`；价格 6 位、数量 4 位；比率十进制小数；时间 ISO 8601 UTC；业务日 `YYYY-MM-DD`（Asia/Shanghai）；`blocked` 时 `value` **字段缺省**。软删默认过滤 `deleted_at NULL`，`include_deleted=true` 仅本人；注销物理级联删除，审计留事件元数据。
 
-## §1 端点总表（82 个；Path 省略公共前缀 `/api/v1`，标注「根」者不在前缀下）
+## §1 端点总表（88 个；Path 省略公共前缀 `/api/v1`，标注「根」者不在前缀下）
 | API-ID | Method | Path | 用途 | FR | 认证/scope | 幂等 | 同步/异步 | 优先级 | 主要成功码 |
 |---|---|---|---|---|---|---|---|---|---|
 | API-001 | POST | `/auth/register` | 注册账号 | L2 | 公开 | 支持 | 同步 | P0 | 201 |
@@ -137,9 +137,11 @@
 | API-084 | GET | `/dashboard` | Dashboard 两板块聚合（资产概览 + 历史概览） | D1 | read | — | 同步 | P0 | 200 |
 | API-085 | GET | `/assets/chart` | 资产日线 chart-ready 视图（归一化序列+展示标签） | D1 | read | — | 同步 | P0 | 200 |
 | API-086 | GET | `/metrics/catalog` | 18 个指标口径说明书（定义/方向/窗口/经验区间/版本） | D3/R8 | read | — | 同步 | P0 | 200 |
+| API-087 | GET | `/sectors/overview` | 板块概览（行业三级/概念暴露+集中度+偏好） | D1 | read | — | 同步 | P0 | 200 |
+| API-088 | GET | `/sectors` | 板块目录树（行业多级/概念列表，供筛选与钻取） | D1 | read | — | 同步 | P1 | 200 |
 
 ## §2 分域详细契约
-> 下列 32 个端点为**详细契约**；其余 52 个的请求/响应字段以 `openapi/openapi.json` 为准（§1 已登记、§6 已配验收用例）。断言均为可脚本执行：状态码 + 字段值 + 状态迁移 + 副作用。
+> 下列 34 个端点为**详细契约**；其余 54 个的请求/响应字段以 `openapi/openapi.json` 为准（§1 已登记、§6 已配验收用例）。断言均为可脚本执行：状态码 + 字段值 + 状态迁移 + 副作用。
 ### 2.1 认证、导入与流水
 #### API-001 POST /auth/register
 - 用途：注册账号；FR-L2；认证：公开；幂等：支持；同步。
@@ -413,6 +415,21 @@
 - 错误码：NOT_FOUND(404)、MESSAGE_TOO_LONG(422)、RATE_LIMITED(429)、LLM_UNAVAILABLE(503)。
 - 验收断言：① 200 且 answer 非空；② 回答中每个金额都能在 citations 找到来源，且 source_endpoint 可调用返回一致值；③ LLM 关闭（`llm_provider=none`）时金额类问题仍 200 且 answer 金额正确（fallback==true）；④ 出站守卫：测试钩子捕获的出站 payload 不含金额/股东账号；⑤ 跨用户 session → 404。
 
+### 2.5 板块（2026-10-31 新增）
+#### API-087 GET /sectors/overview
+- 用途：板块概览（行业三级市值分布/集中度/偏好偏离；概念多归属暴露）；FR-D1；认证：read；同步、只读。
+- 请求：query `as_of`(可选，默认最新资产日) / `taxonomy`(industry|concept,默认 industry) / `level`(1|2|3，industry；concept=0) / `parent`(父代码) / `benchmark`(默认设置项) / `limit`(1~500,默认 100)。
+- 响应 200：`as_of` / `taxonomy` / `level` / `status`(ok|degraded|stale|insufficient|missing|blocked) / `asset_build_state` / `sector_data_state`(current|stale|missing) / `definition_version` / `sector_dataset_version` / `data_as_of` / `sector_data_as_of` / `benchmark_id` / `benchmark_as_of` / `weight_mode`(additive|overlapping) / `portfolio{total_assets,holding_market_value,equity_market_value,mapped_market_value,unclassified_market_value,non_stock_market_value,coverage,equity_position,holding_count,classified_holding_count,coverage_pct,equity_position_pct,coverage_basis}` / `sectors[]SectorRow` / `others` / `unclassified` / `concentration{method,status,hhi,effective_n,top1_weight,top3_weight,benchmark_hhi,n_sectors}` / `preference{deviation,method,max_overweight,max_underweight,top_overweight[],top_underweight[]}` / `concept{coverage,tagged_market_value,multi_tag_market_value,multi_tag,overlap,hhi_tag,top1_concept,top5_concepts[],caveat}` / `missing[]` / `links{dashboard,sectors,attribution}` / `classification_version` / `inputs_hash` / `assumptions`。
+- 错误码：TOKEN_EXPIRED/TOKEN_REVOKED/MULTIPLE_CREDENTIALS(401)、ADMIN_CANNOT_READ_TRADES(403)、UNKNOWN_QUERY_PARAM(400)、VALIDATION_ERROR(422)、UNKNOWN_BENCHMARK(422)。降级码走 200 `missing[].code`（`SECTOR_*` 20 码，不新增 ErrorCode）。
+- ETag：`W/"<as_of>-<sector_checksum>-<asset_fingerprint>"`；`If-None-Match` 命中 → 304 空 body。
+- 验收断言：① 行业互斥分区 `Σ sector.market_value + unclassified == equity_market_value`，`Σ weight == 1`（差 ≤ n/2 units）；② 概念 `Σ exposure > 1` 时 `caveat` 非空且 `weight_mode=="overlapping"`；③ 未同步 → 200 + `sector_data_state="missing"` + 数字全 `null`；④ `coverage<0.90` → `status="insufficient"` + `hhi=null`；⑤ 未来 `as_of`/`level`/`taxonomy` 非法 → 422；`benchmark=nope` → 422 UNKNOWN_BENCHMARK；⑥ 前后 `job/asset_daily/sector_member` 计数不变（只读）。
+#### API-088 GET /sectors
+- 用途：板块目录树（行业多级/概念列表），供筛选、面包屑、三级钻取与深链参数校验；FR-D1；认证：read；同步、只读、公共数据。
+- 请求：query `taxonomy`(industry|concept,默认 industry) / `level`(1|2|3；concept=0) / `parent`(父代码) / `q`(1~32 名称包含) / `active_only`(默认 true) / `limit`(1~200,默认 50) / `cursor`。
+- 响应 200：`as_of` / `taxonomy` / `catalog_version`(16 hex) / `sector_data_state` / `items[]{sector_code,sector_name,taxonomy,level,parent_code,path[],member_count,source(sw|em),classification_version,is_active}` / `next_cursor` / `has_more` / `missing[]`。
+- 错误码：401、ADMIN_CANNOT_READ_TRADES(403)、UNKNOWN_QUERY_PARAM(400)、VALIDATION_ERROR(422)、INVALID_CURSOR(400)。
+- 验收断言：① 目录未同步 → 200 + `items=[]` + `catalog_version=null` + `SECTOR_DATA_MISSING`；② `items` 按 `(level, sector_code)` 升序，L3 的 `path` 恰 3 层；③ L1/L2 `member_count` 为后代 L3 成分去重求和；④ `is_active=false` 默认不返回；⑤ 损坏 cursor → 400 INVALID_CURSOR；⑥ admin 403、无 token 401。
+
 ## §3 错误码总表
 
 > `GET /api/v1/errors` 返回本表机器可读版本；`code` 发布后不得改名或复用。`SAMPLE_INSUFFICIENT`/`NAV_UNRELIABLE`/`IMPORT_MISSING_CASH_BALANCE` 为 200 降级/警告码。
@@ -535,7 +552,7 @@ data: {"job_id":"job_01J9Z6","status":"succeeded","result_ref":"/api/v1/reports/
 - `Last-Event-ID` 续传：事件 id 为每 job 单调整数，事件存 DB（outbox），重放窗口 5min，不重发重复事件；终态后发 `done`/`error` 并关闭。SSE 只是优化：客户端以 `GET /jobs/{id}` 轮询兜底；跨用户订阅 → 404 且不建立事件流。
 
 ## §6 验收矩阵（端点 100% 有用例）
-> 每 `API-NNN` 对应 `backend/tests/api/test_api_NNN_<slug>.py` + `@pytest.mark.api("API-NNN")`；每端点至少 happy path / 鉴权越权 / 一个错误码三条用例；断言分层：传输（L1）→ 业务值（L2）→ 副作用（L3）。fixture：`fx_base/fx_round30/fx_broken/fx_missing_cash/fx_dup_rows/fx_quarantine/fx_n5/fx_n30/fx_de_pos/fx_single_factor/fx_blocked/fx_version_break/fx_llm_off/fx_alert/fx_share/fx_expired_export/fx_audit/fx_empty`。
+> 每 `API-NNN` 对应 `backend/tests/api/test_api_NNN_<slug>.py` + `@pytest.mark.api("API-NNN")`；每端点至少 happy path / 鉴权越权 / 一个错误码三条用例；断言分层：传输（L1）→ 业务值（L2）→ 副作用（L3）。fixture：`fx_base/fx_round30/fx_broken/fx_missing_cash/fx_dup_rows/fx_quarantine/fx_n5/fx_n30/fx_de_pos/fx_single_factor/fx_blocked/fx_version_break/fx_llm_off/fx_alert/fx_share/fx_expired_export/fx_audit/fx_empty/fx_sector`。
 
 | API-ID | 验收用例名 | 关键断言 | fixture | P |
 |---|---|---|---|---|
@@ -624,6 +641,8 @@ data: {"job_id":"job_01J9Z6","status":"succeeded","result_ref":"/api/v1/reports/
 | API-083 | rebuild_period_orchestration | 202+Location 且 type=rebuild_period；同 key 重放 Idempotency-Replayed、同参 X-Job-Reused、异参 409；drain 后 job.result 四阶段键齐全、metric_result 该 period 恰核心 10 行（include_exploratory=true 则 18 行含 M1）；阶段 rounds→assets→nav→metrics 顺序与 progress 单调；运行中异参 409、可 cancel；缺 key/坏 period 422、read PAT/admin 403；年度 token 落该年 10/18 行、自定义区间 persisted=0 且不落库 | fx_round30 | P0 |
 | API-084 | dashboard_two_sections | 200 且两板块字段齐全；最新资产日=headline、全历史=计数/最赚最亏/回撤；`metrics_period` 为 as_of 所在自然年、`metrics_period_start`=1/1、`metrics_period_end`=as_of（as_of=次年初 → 年度翻到该年）；`links.metrics` 指向年度 token；未构建 asset_overview 全 null+build_state=missing；blocked 快照不输出 0；跨用户 404、admin 403；无写副作用（不建 job/不写表） | fx_round30 | P0 |
 | API-085 | assets_chart_view | 200 且 points 按日期升序、v∈[0,1] 字符串、amount_label 为后端定点串；blocked 行不进入序列；未构建 n_points=0；跨用户空序列、admin 403、无 token 401；limit 0/501→422；只读无副作用 | fx_round30 | P0 |
+| API-087 | sectors_overview | 200 且行业 `Σ market_value + unclassified == equity_market_value`、`Σ weight ≈ 1`；hhi/effective_n/top1/top3 与 golden 一致；概念 `Σ exposure>1` 时 caveat 非空 + weight_mode=overlapping；未同步 200+missing 全 null；coverage<0.90→insufficient+hhi=null；未来 as_of/level/taxonomy→422；benchmark=nope→422 UNKNOWN_BENCHMARK；limit=501→422；admin 403、无 token 401、B 账号隔离；If-None-Match→304 空 body；只读无副作用 | fx_sector | P0 |
+| API-088 | sectors_catalog | 200 且 items 按 (level,sector_code) 升序、L3 path 恰 3 层、L1/L2 member_count 为后代去重求和；未同步 200+items=[]+catalog_version=null+SECTOR_DATA_MISSING；is_active=false 默认不返回；损坏 cursor→400 INVALID_CURSOR；taxonomy/level 非法→422；admin 403、无 token 401 | fx_sector | P1 |
 
 ### 6.1 端到端脚本（5 条，覆盖「注册登录 → PAT → preview → commit → 取指标 → 下载月报」）
 ```bash

@@ -2,9 +2,9 @@
 
 本文档是**本仓 AI 编程助手的第一入口**。任何未阅读本文档就开始编码的 AI 会在 30 秒内踩坑。
 
-## 0. 当前阶段与固定本地账号（2026-10-28）
+## 0. 当前阶段与固定本地账号（2026-10-31）
 
-- **一期**：已完成；**二期核心**（回合、净值、资产、18 指标、Dashboard、API-083 月度编排）已落地/验收；**二期剩余**（归因/月报/导出/设置增强/报告页/verify-p2/零口径 ESLint）暂停，未完成功能只用占位入口，禁止伪造数据/下载。
+- **一期**：已完成；**二期核心**（回合、净值、资产、18 指标、Dashboard、API-083 月度编排、板块数据 API-087/088 + `/sectors`）已落地/验收；**二期剩余**（归因/月报/导出/设置增强/报告页/verify-p2/零口径 ESLint）暂停，未完成功能只用占位入口，禁止伪造数据/下载。
 - **固定本地测试 / 体验账号**：`1234@dev.com` / `1234`（仅本地；由 `make seed-tenants` / `make seed-demo` 创建）。
   - 隔离对照：`a@demo.example.com` / `b@demo.example.com`，管理员：`admin@demo.example.com`；本地 seed 口令统一为 `1234`。
   - `backend/tests/conftest.py` 的 `DEV_EMAIL/DEV_PASSWORD` 即该固定账号；测试和手工验收优先使用它，不要再造临时账号。
@@ -93,6 +93,19 @@ raise ApiError(ErrorCode.NOT_FOUND, detail=f"trade {trade_id} 不存在")
 
 ---
 
+## 板块（sector）口径铁律（2026-10-31，设计 `docs/architecture/2026-10-31-sector-data.md`）
+
+1. **行业与概念必须分开**：行业（同花顺 THS，扁平一级，成员互斥），权重分母是 `E_map`（已映射权益市值），`Σweight≈1`、`Σactive≈0`；概念（多归属）**不可加总**，只输出 `exposure/overlap`，不输出 `weight/active`，`Σexposure>1` 时响应必须带 `caveat`。
+2. **禁止等权近似**：基准成分权重缺失 → `active_*` 全 `null` + `missing[]` 码 `SECTOR_BENCHMARK_WEIGHTS_MISSING`；禁止用等权/总资产分母冒充。
+3. **`market.*` 是公共缓存（无 RLS）**：同步只能走 CLI `sync-sectors`（`SECTOR_MODE=live`），API 读路径只读缓存、请求内不联网；`platform` 仓储 `SectorRepository` 的公共查询不收 `user_id`（这是显式例外，写进 docstring）。
+4. **占位/缺失一律 200 + `missing[]`**：未同步/覆盖不足/历史成分缺失时返回 200 降级，`missing[]` 码是**响应字段**不是 `ErrorCode`；不可用数值显式 `null`，禁止输出 0。
+5. **分类版本与时点**：`classification_version`（默认 `THS`）随响应透出；成分按 SCD2 时点区间读取，缺失即 fail-closed（`not_covered`），禁止 assumed 近似。
+6. **前端零口径**：板块页面只渲染后端 `*_pct`/`*_display`；偏好条宽度用后端绝对百分比串（去符号）作 CSS 宽度，不做 `Number()/parseFloat`。
+
+**live 同步数据源链（`sector_live.py`）**：行业与概念板块统一走同花顺（THS）——目录用 akshare `stock_board_industry_name_ths` / `stock_board_concept_name_ths`；成分股因 akshare 无 THS 成分接口，改为抓取同花顺板块详情页分页表格（`http://q.10jqka.com.cn/{thshy,gn}/detail/code/{code}/page/{n}/`，需 `User-Agent` + `Referer` 头，BeautifulSoup 取 `代码` 列保留前导零）。基准权重仍走 `csindex`。单板成分拉取独立超时+重试，概念板块单板块失败跳过不阻断整批（行业成员互斥校验失败则整批回滚）。
+
+---
+
 ## HITL 升级协议
 升级触发器（任一触发即升级）
 - 歧义（Ambiguity）：指令存在多个同样合理的解释，且选错会造成实际损害。例如“退回这个订单”，但存在两个未结订单，不得猜测。
@@ -160,6 +173,7 @@ make gate-golden-structure # 金标结构门禁（PR 用）
 make api-snapshot         # 新增/改动端点后更新 contracts/openapi.json
 make api-check            # 契约完整性校验
 make sdk                  # 同步前端 TS 类型
+make sync-sectors ARGS='--dry-run'   # 板块同步自检（配置/表检查，不联网不写库）
 ```
 
 > `make verify-p1` 仅覆盖一期；`verify-p2` 尚未提供（Period2-14 暂停）。二期验收使用 `test-p2` + `test-metrics` + 各 gate，并在记录中明确 SKIP。
@@ -170,7 +184,7 @@ make sdk                  # 同步前端 TS 类型
 |---|---|
 | contracts（DTO / 枚举 / 错误码 / 常量 / Clock） | `backend/packages/contracts/AGENTS.md` |
 | core（纯计算 / Scaled 族 / 零 I/O 零时间） | `backend/packages/core/AGENTS.md` |
-| platform（DB / 配置 / JobQueue / 幂等 / TenantContext） | `backend/packages/platform/AGENTS.md` |
+| platform（DB / 配置 / JobQueue / 幂等 / TenantContext / 板块数据源） | `backend/packages/platform/AGENTS.md` |
 | ledger（模型 / 解析器 / application / 仓储） | `backend/packages/ledger/AGENTS.md` |
 | api（router / schema / deps / middlewares） | `backend/services/api/AGENTS.md` |
 | worker（job handler / 心跳 / 租约 / 单飞） | `backend/services/worker/AGENTS.md` |

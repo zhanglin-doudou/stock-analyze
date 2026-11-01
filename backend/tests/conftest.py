@@ -92,7 +92,7 @@ def settings() -> Settings:
     `.env` 被手工改成 live（端到端验证）时，测试套件必须仍然走确定性回放，否则
     全量 API 测试会触发外网取数。联网用例（`@pytest.mark.live`）自己构造 live Settings。
     """
-    return get_settings().model_copy(update={"market_mode": "replay"})
+    return get_settings().model_copy(update={"market_mode": "replay", "sector_mode": "replay"})
 
 
 @pytest_asyncio.fixture
