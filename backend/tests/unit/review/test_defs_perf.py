@@ -240,13 +240,14 @@ def test_fee_breakeven_happy() -> None:
         for i in range(10)
     )
     value = perf_fee_breakeven.DEF.compute(_fee_breakeven_ctx(rows))
-    # D=30 自然日 → annualized_fee = 1000×365/30 = 12167；value = 12167/1000000
-    assert value.value_units == 1216700
+    # 决策 5：期间费用 1000 ÷ 期间平均总资产 1,500,000 = 0.00066667（不年化）。
+    assert value.value_units == 66667
     assert value.n == 10
     decomp = value.decomposition
     assert decomp["fee_amount"] == 1000
+    assert decomp["avg_total_assets"] == 1_500_000
     assert decomp["annualized_fee"] == 12167
-    assert decomp["avg_holding_mv"] == 1000000
+    assert decomp["annualized_fee_ratio"] == 811133
     assert decomp["twr"] == 0
     assert decomp["twr_eaten_pct"] is None  # twr=0 不出
     assert decomp["n_blocked_days"] == 0

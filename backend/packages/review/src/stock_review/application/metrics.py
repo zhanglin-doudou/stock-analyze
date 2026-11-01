@@ -32,17 +32,28 @@ from stock_review.metrics.base import (
     format_units,
 )
 from stock_review.metrics.context import MetricContextData, Period, resolve_period
-from stock_review.metrics.datasets import DEFAULT_BENCHMARK, load_viewset
+from stock_review.metrics.datasets import (
+    DEFAULT_BENCHMARK,
+    bars_window,
+    benchmark_fetch_symbol,
+    load_viewset,
+    metric_symbols,
+)
 from stock_review.metrics.engine import (
+    CacheKey,
     MetricOutcome,
     evaluate_metrics,
 )
 from stock_review.metrics.gate import decide
 from stock_review.metrics.hash import canonical_json, sha256_hex
 from stock_review.metrics.persist import persist_outcome
+from stock_review.metrics.presentation import PRESENTATION_VERSION, SEMANTICS, build_presentation
 from stock_review.metrics.registry import MetricRegistry, build_registry
 from stock_review.metrics.views import ViewSet
-from stock_review.repositories.metrics import MetricResultRepository
+from stock_review.repositories.metrics import (
+    MetricDatasetRepository,
+    MetricResultRepository,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +91,7 @@ class BatchResult:
     items: list[MetricOutcome]
     all_outcomes: list[MetricOutcome]
     etag: str
+    cacheable: bool = True
 
 
 @dataclass(slots=True)
@@ -100,6 +112,7 @@ class ExplainResult:
     what_to_do: str | None
     assumptions: dict[str, Any]
     data_as_of: date
+    presentation: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
@@ -223,6 +236,7 @@ async def _build_context(
         bars=views.bars,
         benchmark_series=views.benchmark,
         calendar=views.calendar,
+        period_kind=period.kind,
         flags=dict(views.flags),
         upstream={},
         fingerprints=dict(views.fingerprints),
@@ -273,6 +287,84 @@ def _top_level(
     return definition_version, data_as_of, assumptions
 
 
+def _asset_build_parts(state: Any) -> dict[str, Any] | None:
+    if state is None:
+        return None
+    return {
+        "updated_at": state.updated_at,
+        "version": state.version,
+        "data_as_of": state.data_as_of,
+        "last_built_through": state.last_built_through,
+        "definition_version": state.definition_version,
+        "last_status": state.last_status,
+    }
+
+
+async def batch_etag(
+    session: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    clock: Clock,
+    market_data: MarketDataSource,
+    rf_annual: Decimal,
+    period: str | None,
+    date_from: date | None,
+    date_to: date | None,
+    benchmark: str | None,
+    ids: Sequence[str] | None,
+    domain: str | None,
+    include_exploratory: bool,
+    registry: MetricRegistry | None = None,
+) -> str:
+    """304 快速路径用的廉价 ETag：只读本地库，不触发任何行情拉取/指标计算。
+
+    指纹覆盖所有会改变响应体的输入：选择参数、注册表版本、流水/回合/资产指纹、
+    本地行情内容、市场模式与业务日。任一变化都会得到新 ETag；相同输入跨请求稳定。
+    """
+    resolved = resolve_period(
+        period=period, date_from=date_from, date_to=date_to, today=clock.today()
+    )
+    active_registry = registry or get_registry()
+    executing, selected_ids = _select_definitions(
+        active_registry, ids=ids, domain=domain, include_exploratory=include_exploratory
+    )
+    selected_benchmark = _resolve_benchmark(benchmark, executing)
+
+    repo = MetricDatasetRepository(session)
+    rounds_raw = await repo.rounds_in_period(user_id, resolved.start, resolved.end)
+    trades_raw = await repo.trades_in_period(user_id, resolved.start, resolved.end)
+    symbols = set(metric_symbols(rounds_raw, trades_raw))
+    if selected_benchmark is not None:
+        symbols.add(benchmark_fetch_symbol(selected_benchmark, market_data))
+    _, bar_end = bars_window(resolved.end, clock.today())
+    bars_fp = await repo.market_bars_fingerprint(tuple(symbols), resolved.start, bar_end)
+
+    payload = {
+        "route": "metrics",
+        "ids": list(selected_ids),
+        "domain": domain,
+        "period": resolved.label,
+        "start": resolved.start,
+        "end": resolved.end,
+        "benchmark": selected_benchmark,
+        "include_exploratory": include_exploratory,
+        "registry_version": active_registry.version,
+        "engine_version": ENGINE_VERSION,
+        "presentation_version": PRESENTATION_VERSION,
+        "today": clock.today(),
+        "rf_annual": rf_annual,
+        "market_mode": market_data.capabilities.mode,
+        "market_as_of": market_data.as_of,
+        "rounds": await repo.rounds_fingerprint_parts(user_id),
+        "fills": await repo.fills_fingerprint_parts(user_id),
+        "trades": await repo.trades_fingerprint_parts(user_id),
+        "asset_daily": await repo.asset_daily_fingerprint_parts(user_id),
+        "asset_build": _asset_build_parts(await repo.asset_build_state(user_id)),
+        "bars": bars_fp,
+    }
+    return sha256_hex(canonical_json(payload))[:16]
+
+
 async def batch_metrics(
     session: AsyncSession,
     *,
@@ -288,6 +380,7 @@ async def batch_metrics(
     domain: str | None,
     include_exploratory: bool,
     registry: MetricRegistry | None = None,
+    etag: str | None = None,
 ) -> BatchResult:
     resolved = resolve_period(
         period=period, date_from=date_from, date_to=date_to, today=clock.today()
@@ -309,11 +402,13 @@ async def batch_metrics(
     )
 
     repository = MetricResultRepository(session)
-    cached = await repository.rows_for_period(
-        user_id,
-        period=resolved.label,
-        metric_ids=[definition.id for definition in executing],
-    )
+    cached: dict[CacheKey, Any] = {}
+    if resolved.cacheable:
+        cached = await repository.rows_for_period(
+            user_id,
+            period=resolved.label,
+            metric_ids=[definition.id for definition in executing],
+        )
     outcomes = evaluate_metrics(
         executing,
         ctx,
@@ -327,9 +422,9 @@ async def batch_metrics(
         items,
         benchmark=selected_benchmark,
         registry=active_registry,
-        fallback_as_of=resolved.end,
+        fallback_as_of=min(resolved.end, clock.today()),
     )
-    etag = _item_etag_payload(
+    etag_value = etag or _item_etag_payload(
         "metrics",
         items,
         {
@@ -348,7 +443,8 @@ async def batch_metrics(
         assumptions=assumptions,
         items=list(items),
         all_outcomes=list(outcomes),
-        etag=etag,
+        etag=etag_value,
+        cacheable=resolved.cacheable,
     )
 
 
@@ -386,9 +482,18 @@ async def detail_metric(
 
 
 async def persist_safely(
-    session: AsyncSession, user_id: uuid.UUID, outcomes: Sequence[MetricOutcome]
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    outcomes: Sequence[MetricOutcome],
+    *,
+    cacheable: bool = True,
 ) -> int:
-    """逐指标 savepoint 写回；失败只记日志，不影响响应（E-01）。"""
+    """逐指标 savepoint 写回；失败只记日志，不影响响应（E-01）。
+
+    `cacheable=False`（自定义区间）不落库，避免无界缓存。
+    """
+    if not cacheable:
+        return 0
     repository = MetricResultRepository(session)
     written = 0
     for outcome in outcomes:
@@ -489,6 +594,7 @@ async def explain_metric(
         what_to_do=what_to_do,
         assumptions=assumptions,
         data_as_of=outcome.data_as_of,
+        presentation=build_presentation(outcome, definition, lang=lang),
     )
 
 
@@ -659,13 +765,62 @@ async def drilldown_metric(
     )
 
 
+def catalog_metrics(registry: MetricRegistry | None = None) -> list[dict[str, Any]]:
+    """18 个指标的口径说明书（API-086）：静态元数据 + 呈现层语义，无 DB/无用户数据。"""
+    active_registry = registry or get_registry()
+    items: list[dict[str, Any]] = []
+    for definition in active_registry.all():
+        sem = SEMANTICS.get(definition.id)
+        display_zh = sem.display_zh if sem else definition.id
+        display_en = sem.display_en if sem else definition.id
+        direction = sem.direction if sem else "neutral"
+        bands: list[dict[str, Any]] | None = None
+        if sem and sem.bands:
+            bands = [
+                {
+                    "level": band.level,
+                    "label": band.label_zh,
+                    "from": format_units(band.low_units, definition.unit, definition.precision),
+                    "to": format_units(band.high_units, definition.unit, definition.precision),
+                }
+                for band in sem.bands
+            ]
+        policy = definition.sample_policy
+        items.append(
+            {
+                "metric_id": definition.id,
+                "display_name": display_zh,
+                "display_name_en": display_en,
+                "domain": definition.domain,
+                "direction": direction,
+                "unit": definition.unit,
+                "precision": definition.precision,
+                "definition_version": definition.definition_version,
+                "scope": definition.scope.to_dict(),
+                "min_n": policy.min_n,
+                "ci_min_n": policy.ci_min_n,
+                "ci": policy.ci,
+                "min_trading_days": policy.min_trading_days,
+                "window_kind": ("trailing_60td" if policy.min_trading_days > 0 else "month"),
+                "bands": bands,
+                "meaning": definition.explain.conclusion_zh,
+                "method": definition.explain.method_zh,
+                "what_to_do": definition.explain.what_to_do_zh,
+                "caveat": sem.caveat_zh if sem else None,
+            }
+        )
+    return items
+
+
 __all__ = [
     "DRILLDOWN_MAX_ITEMS",
     "KNOWN_BENCHMARKS",
     "BatchResult",
     "DrilldownResult",
     "ExplainResult",
+    "batch_etag",
     "batch_metrics",
+    "catalog_metrics",
     "detail_metric",
     "drilldown_metric",
     "explain_metric",

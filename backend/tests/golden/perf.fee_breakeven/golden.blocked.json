@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "metric_id": "perf.fee_breakeven",
-  "definition_version": "1.0",
+  "definition_version": "1.1",
   "fixture": {"id": "fx_fee_breakeven_blocked"},
   "period": "2026-06",
   "scope": "day",
@@ -20,8 +20,8 @@
     }
   },
   "tolerance": {"kind": "ratio_bp", "eps": "0.0001"},
-  "expected_source": {"kind": "hand_calc", "ref": "§7.1.6：period 内任一 blocked 资产日 → 指标整体拒答", "oracle": null},
-  "review": {"author": "test-designer", "reviewer": "zhang", "approved": true, "approved_at": "2026-10-27"},
+  "expected_source": {"kind": "hand_calc", "ref": "2026-10-30 决策 5：period 内任一 blocked 资产日 → 指标整体拒答", "oracle": null},
+  "review": {"author": "AI", "reviewer": "zhang", "approved": true, "approved_at": "2026-10-30", "note": "2026-10-30 决策 5 口径变更，待人工复核签署"},
   "boundaries": [
     "period 内 1 个 blocked 行 → value=None、n=0、decomp 仅保留 fee_amount/n_blocked_days"
   ]

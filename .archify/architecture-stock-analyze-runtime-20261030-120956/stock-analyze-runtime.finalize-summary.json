@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "finalize",
+  "status": "pass",
+  "type": "architecture",
+  "quality": "showcase",
+  "specification": {
+    "path": "/Users/bean/Documents/AI/stock-analyze/.archify/architecture-stock-analyze-runtime-20261030-120956/candidate.json",
+    "sha256": "14f164724221a0cc7fdacb857b8f482938010e36c97cb5d3132aaa267e2adad8",
+    "bytes": 5269
+  },
+  "artifact": {
+    "path": "/Users/bean/Documents/AI/stock-analyze/.archify/architecture-stock-analyze-runtime-20261030-120956/stock-analyze-runtime.html",
+    "sha256": "91c110b821fb83dc3f6d1ffd268650d1394986e69f39bfe1cf911eb532c1b97a",
+    "bytes": 763219
+  },
+  "gates": {
+    "validate": "pass",
+    "deliver": "pass",
+    "check": "pass",
+    "browser-check": "pass"
+  },
+  "diagnostics": [],
+  "diagnosticSummary": {
+    "total": 0,
+    "shown": 0,
+    "truncated": false
+  },
+  "evidence": {
+    "receipt": "/Users/bean/Documents/AI/stock-analyze/.archify/architecture-stock-analyze-runtime-20261030-120956/stock-analyze-runtime.finalize.json",
+    "summaryReceipt": "/Users/bean/Documents/AI/stock-analyze/.archify/architecture-stock-analyze-runtime-20261030-120956/stock-analyze-runtime.finalize-summary.json",
+    "browserCheckReceipt": "/Users/bean/Documents/AI/stock-analyze/.archify/architecture-stock-analyze-runtime-20261030-120956/stock-analyze-runtime.browser-check.json"
+  },
+  "update": {
+    "status": "unavailable",
+    "installedVersion": null,
+    "availableVersion": null,
+    "releaseNotes": null,
+    "checkedAt": null,
+    "source": null,
+    "noticeRequired": false,
+    "noticeText": null,
+    "reason": "cache-unavailable"
+  },
+  "visualReview": "not-requested",
+  "durationMs": 2001
+}

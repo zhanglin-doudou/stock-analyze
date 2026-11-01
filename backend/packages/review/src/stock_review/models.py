@@ -249,6 +249,7 @@ class AssetDaily(Base):
     daily_return_units: Mapped[int | None] = mapped_column(BigInteger)
     status: Mapped[str] = mapped_column(String(16), nullable=False, default="ok")
     status_reason: Mapped[str | None] = mapped_column(String(256))
+    remark: Mapped[str | None] = mapped_column(String(256))
     definition_version: Mapped[str] = mapped_column(String(16), nullable=False)
     rebuilt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
@@ -342,7 +343,8 @@ class MetricResult(Base):
             name="ck_metric_result_definition_version",
         ),
         CheckConstraint(
-            r"period ~ '^[0-9]{4}-(0[1-9]|1[0-2])$'",
+            r"period ~ '^([0-9]{4}|[0-9]{4}-(0[1-9]|1[0-2])"
+            r"|[0-9]{4}-(0[1-9]|1[0-2])-[0-9]{2}\.\.[0-9]{4}-(0[1-9]|1[0-2])-[0-9]{2})$'",
             name="ck_metric_result_period",
         ),
         CheckConstraint("unit IN ('CNY','ratio','days','count','z')", name="ck_metric_result_unit"),
@@ -376,7 +378,7 @@ class MetricResult(Base):
     params_hash: Mapped[str] = mapped_column(String(64), nullable=False)
     params: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False, default=dict)
     domain: Mapped[str] = mapped_column(String(16), nullable=False)
-    period: Mapped[str] = mapped_column(String(7), nullable=False)
+    period: Mapped[str] = mapped_column(String(32), nullable=False)
     scope: Mapped[dict[str, object]] = mapped_column(JSONB, nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False)
     sample_status: Mapped[str] = mapped_column(String(16), nullable=False)
@@ -431,7 +433,7 @@ class MetricDependency(Base):
         PGUUID(as_uuid=True), ForeignKey(USER_FK, ondelete="CASCADE"), nullable=False
     )
     metric_id: Mapped[str] = mapped_column(String(64), nullable=False)
-    period: Mapped[str] = mapped_column(String(7), nullable=False)
+    period: Mapped[str] = mapped_column(String(32), nullable=False)
     definition_version: Mapped[str] = mapped_column(String(16), nullable=False)
     dep_kind: Mapped[str] = mapped_column(String(16), nullable=False)
     dep_id: Mapped[str] = mapped_column(String(64), nullable=False)

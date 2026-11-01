@@ -91,7 +91,13 @@ def _bars(symbol: str, *pairs: tuple[date, int]) -> list[Bar]:
 
 @pytest.fixture
 def cache_settings(settings: Settings) -> Settings:
-    return settings.model_copy(update={"market_mode": "live"})
+    # 旧 read-through 语义测试：显式关闭只读模式。
+    return settings.model_copy(update={"market_mode": "live", "market_live_cache_read_only": False})
+
+
+@pytest.fixture
+def read_only_settings(settings: Settings) -> Settings:
+    return settings.model_copy(update={"market_mode": "live", "market_live_cache_read_only": True})
 
 
 @pytest.fixture
@@ -398,3 +404,94 @@ async def test_gap_fetch_failure_without_cached_bars_raises(
         await cache.get_daily_bars(["600077"], date(2021, 10, 1), TODAY)
     assert caught.value.metadata["market_failure"] == "unavailable"
     assert len(stub.calls) == 1
+
+
+# ── 只读缓存 + 收盘后显式同步（2026-10-30 方案）────────────────
+async def test_read_only_get_daily_bars_never_calls_inner(
+    app_db: Database, read_only_settings: Settings, clock: FrozenClock
+) -> None:
+    inner = StubMarketDataSource(
+        {"000651": _bars("000651", (date(2021, 10, 5), 100), (date(2021, 10, 6), 101))}
+    )
+    cache = _cache(app_db, read_only_settings, clock, inner)
+    bars = await cache.get_daily_bars(["000651"], date(2021, 10, 1), date(2021, 10, 31))
+    assert bars == ()
+    assert inner.calls == []  # 读路径绝不触发第三方
+
+
+async def test_sync_after_close_fetches_then_reuses_cache(
+    app_db: Database, read_only_settings: Settings
+) -> None:
+    clock = FrozenClock("2026-10-23T17:00:00+08:00")
+    inner = StubMarketDataSource(
+        {
+            "000651": _bars(
+                "000651",
+                (date(2026, 10, 21), 100),
+                (date(2026, 10, 22), 101),
+                (date(2026, 10, 23), 102),
+            )
+        }
+    )
+    cache = _cache(app_db, read_only_settings, clock, inner)
+
+    bars, failed = await cache.sync_daily_bars(["000651"], date(2026, 10, 20), TODAY)
+    assert failed == ()
+    assert bars == 3
+    assert inner.calls  # 第一次是显式同步，允许联网
+    fetched_ranges = [(start, end) for _symbols, start, end in inner.calls]
+    assert fetched_ranges[-1][1] == TODAY  # 收盘后可以同步当天
+
+    inner.calls.clear()
+    again, _ = await cache.sync_daily_bars(["000651"], date(2026, 10, 20), TODAY)
+    assert again == 3
+    assert inner.calls == []  # 本地已覆盖 → 不再请求第三方
+
+    cached = await cache.get_daily_bars(["000651"], date(2026, 10, 20), TODAY)
+    assert [bar.trade_date for bar in cached] == [
+        date(2026, 10, 21),
+        date(2026, 10, 22),
+        date(2026, 10, 23),
+    ]
+
+
+async def test_sync_before_close_excludes_today(
+    app_db: Database, read_only_settings: Settings
+) -> None:
+    clock = FrozenClock("2026-10-23T09:00:00+08:00")
+    inner = StubMarketDataSource(
+        {
+            "000651": _bars(
+                "000651",
+                (date(2026, 10, 22), 101),
+                (date(2026, 10, 23), 102),
+            )
+        }
+    )
+    cache = _cache(app_db, read_only_settings, clock, inner)
+    bars, failed = await cache.sync_daily_bars(["000651"], date(2026, 10, 20), TODAY)
+    assert failed == ()
+    assert bars == 1
+    assert inner.calls
+    assert all(end <= date(2026, 10, 22) for _symbols, _start, end in inner.calls)
+    assert [
+        bar.trade_date for bar in await cache.get_daily_bars(["000651"], date(2026, 10, 20), TODAY)
+    ] == [date(2026, 10, 22)]
+
+
+async def test_sync_empty_current_day_retries_next_run(
+    app_db: Database, read_only_settings: Settings
+) -> None:
+    """当天空结果不永久固化：上游晚发布时下一次 sync 仍会重试当天。"""
+    clock = FrozenClock("2026-10-23T17:00:00+08:00")
+    inner = StubMarketDataSource({})
+    cache = _cache(app_db, read_only_settings, clock, inner)
+
+    bars, failed = await cache.sync_daily_bars(["000651"], date(2026, 10, 20), TODAY)
+    assert (bars, failed) == (0, ())
+    assert len(inner.calls) == 1
+
+    inner.calls.clear()
+    await cache.sync_daily_bars(["000651"], date(2026, 10, 20), TODAY)
+    assert len(inner.calls) == 1
+    assert inner.calls[0][2] == TODAY

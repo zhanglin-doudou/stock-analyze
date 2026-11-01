@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "34ffdf72-4cba-4545-93b9-f047dccb0527",
+  "status": "current",
+  "command": "deliver",
+  "type": "architecture",
+  "input": "/Users/bean/Documents/AI/stock-analyze/.archify/architecture-stock-analyze-runtime-20261030-120956/candidate.json",
+  "output": "/Users/bean/Documents/AI/stock-analyze/.archify/architecture-stock-analyze-runtime-20261030-120956/stock-analyze-runtime.html",
+  "specification": {
+    "sha256": "14f164724221a0cc7fdacb857b8f482938010e36c97cb5d3132aaa267e2adad8",
+    "bytes": 5269
+  },
+  "artifact": {
+    "sha256": "91c110b821fb83dc3f6d1ffd268650d1394986e69f39bfe1cf911eb532c1b97a",
+    "bytes": 763219
+  }
+}

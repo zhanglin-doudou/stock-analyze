@@ -3,7 +3,8 @@
 口径（docs/architecture/2026-10-28-dashboard.md）：
 * 资产概览 headline = 最新 ``asset_daily`` 行（``trade_date <= today``），**不自动构建**；
 * 历史概览 = 全历史：已平仓回合计数/最赚最亏 + ``asset_daily`` 日收益的回撤；
-* 旧五卡是月度口径，这里只返回 ``legacy_period``（最近有流水/回合的月份），不内嵌指标；
+* 年度指标区间 = ``as_of`` 所在年份年初 → ``as_of``（低频投资者月度样本不足，
+  看板改用年度口径）；``legacy_period`` 保留（最近有流水/回合的月份）兼容旧前端；
 * 所有金额/比率保持标度整数，格式化只在 API 边界做；blocked/missing 一律 ``None``，
   绝不用 0 冒充缺失。
 
@@ -37,6 +38,7 @@ from stock_review.application.assets import (
 from stock_review.application.bond_alias import build_bond_alias, canonical_code
 from stock_review.application.bridge import bridge_for_period
 from stock_review.application.valuation import (
+    CASHFLOW_CATEGORIES,
     bond_face_divisors,
     bond_value_units,
     category,
@@ -93,6 +95,9 @@ MISSING_HOLDINGS_TRUNCATED = "DASHBOARD_HOLDINGS_TRUNCATED"
 MISSING_HOLDING_PRICE = "DASHBOARD_HOLDING_PRICE_MISSING"
 MISSING_HOLDINGS_MISMATCH = "DASHBOARD_HOLDINGS_MISMATCH"
 MISSING_NO_CLOSED_ROUNDS = "DASHBOARD_NO_CLOSED_ROUNDS"
+MISSING_BILL_RANGE = "DASHBOARD_BILL_RANGE_MISSING"
+MISSING_INITIAL_CAPITAL = "DASHBOARD_INITIAL_CAPITAL_MISSING"
+MISSING_ANNUALIZED_RETURN = "DASHBOARD_ANNUALIZED_RETURN_UNAVAILABLE"
 
 
 @dataclass(slots=True, frozen=True)
@@ -131,6 +136,19 @@ class DashboardRoundBrief:
 
 
 @dataclass(slots=True, frozen=True)
+class DashboardTradeCountBrief:
+    """交易次数 Top3 的一行（流水 buy/sell 行数 + 个股累计收益/总费用）。"""
+
+    security_code: str
+    security_name: str
+    buy_count: int
+    sell_count: int
+    trade_count: int
+    pnl_units: int | None
+    total_fees_units: int
+
+
+@dataclass(slots=True, frozen=True)
 class DashboardMaxDrawdown:
     """全历史最大回撤区间（有效段内；blocked/degraded 不跨断链拼接）。"""
 
@@ -159,6 +177,12 @@ class DashboardAssetOverview:
     max_invested_cost_units: int | None
     max_cost_return_ratio_units: int | None
     total_fees_units: int | None
+    # 账单覆盖区间与桥接期初资金（initial_cash + initial_open_cost）。
+    bill_start_date: date | None
+    bill_end_date: date | None
+    initial_capital_units: int | None
+    # 全历史年化 TWR（最长连续有效段复利累计后按自然日年化；scale=8）。
+    annualized_return_ratio_units: int | None
 
 
 @dataclass(slots=True, frozen=True)
@@ -177,6 +201,9 @@ class DashboardHistoryOverview:
     max_profit_cost_ratio_units: int | None
     top_rounds: list[DashboardRoundBrief]
     bottom_rounds: list[DashboardRoundBrief]
+    # 持仓时长 Top3（已平仓回合按 holding_days 降序）与交易次数 Top3（按证券代码聚合）。
+    top_holding_rounds: list[DashboardRoundBrief]
+    top_trade_counts: list[DashboardTradeCountBrief]
     max_drawdown: DashboardMaxDrawdown
 
 
@@ -187,6 +214,9 @@ class DashboardResult:
     as_of: date
     data_as_of: date | None
     legacy_period: str
+    metrics_period: str
+    metrics_period_start: date
+    metrics_period_end: date
     status: str
     build_state: str
     definition_version: str
@@ -205,6 +235,20 @@ def _ratio_units(numerator: int, denominator: int) -> int | None:
     return int(value.to_integral_value(rounding=ROUND_HALF_UP))
 
 
+def _peak_transfer_cost(trades: list[Trade]) -> int | None:
+    """银证转账峰值转入成本：累计净转入（转入 + / 转出 -）的历史峰值。
+
+    峰值 <= 0（从未净转入）→ None，不伪造 0；收益率分母统一用它。
+    """
+    running = 0
+    peak = 0
+    for trade in trades:
+        if category(trade) == "transfer":
+            running += trade.amount_units
+            peak = max(peak, running)
+    return peak if peak > 0 else None
+
+
 def _overall_status(*statuses: str) -> str:
     return min(statuses, key=lambda item: _STATUS_PRIORITY.get(item, 99))
 
@@ -219,6 +263,11 @@ def _legacy_period(trades: list[Trade], rounds: list[Round], clock: Clock) -> st
     )
     latest = max(candidates) if candidates else clock.today()
     return f"{latest.year:04d}-{latest.month:02d}"
+
+
+def _annual_period(as_of: date) -> tuple[str, date, date]:
+    """看板年度指标区间：`as_of` 所在年份 1/1 → `as_of`（闭区间）。"""
+    return f"{as_of.year:04d}", date(as_of.year, 1, 1), as_of
 
 
 def _round_brief(round_: Round) -> DashboardRoundBrief:
@@ -357,6 +406,14 @@ async def _holdings_at(
     return weighted[:HOLDINGS_MAX], missing_prices, cost_fallback, truncated
 
 
+def _next_workday(day: date) -> date:
+    """下一个应写资产行的日期（跳过周六/周日，与资产表口径一致）。"""
+    nxt = day + timedelta(days=1)
+    while nxt.weekday() >= 5:
+        nxt += timedelta(days=1)
+    return nxt
+
+
 def _drawdown_segments(
     series: list[AssetDaily],
 ) -> tuple[list[tuple[list[date], list[int]]], bool, int]:
@@ -388,7 +445,7 @@ def _drawdown_segments(
                     dates, returns = [], []
             previous = None
             continue
-        if previous is not None and row.trade_date != previous + timedelta(days=1):
+        if previous is not None and row.trade_date != _next_workday(previous):
             has_gaps = True
             if dates:
                 segments.append((dates, returns))
@@ -434,6 +491,24 @@ def _max_drawdown(
         )
 
     if valid_obs < MDD_MIN_OBS:
+        insufficient_missing = [
+            DashboardMissing(
+                field="history_overview.max_drawdown",
+                code=MISSING_MDD_INSUFFICIENT,
+                reason=f"有效观测仅 {valid_obs} 天，不足 {MDD_MIN_OBS} 天，不冒充历史回撤。",
+                what_to_do="补充更长历史账单或等待资产表积累更多交易日。",
+            )
+        ]
+        if has_gaps:
+            # 观测不足与断链是两件事：断链原因必须暴露（否则修完样本量仍会撞上断链）。
+            insufficient_missing.append(
+                DashboardMissing(
+                    field="history_overview.max_drawdown",
+                    code=MISSING_MDD_GAPS,
+                    reason="历史资产序列存在阻断/缺日，回撤按最长连续有效段计算。",
+                    what_to_do="修复阻断日期后重新构建资产表可得到完整回撤。",
+                )
+            )
         return (
             DashboardMaxDrawdown(
                 from_date=None,
@@ -447,14 +522,7 @@ def _max_drawdown(
                 sample_status=STATUS_INSUFFICIENT,
                 reason=f"有效观测 {valid_obs} 天 < {MDD_MIN_OBS} 天门槛",
             ),
-            [
-                DashboardMissing(
-                    field="history_overview.max_drawdown",
-                    code=MISSING_MDD_INSUFFICIENT,
-                    reason=f"有效观测仅 {valid_obs} 天，不足 {MDD_MIN_OBS} 天，不冒充历史回撤。",
-                    what_to_do="补充更长历史账单或等待资产表积累更多交易日。",
-                )
-            ],
+            insufficient_missing,
             has_gaps,
         )
 
@@ -562,6 +630,27 @@ def _max_drawdown(
     )
 
 
+def _annualized_twr(series: list[AssetDaily]) -> int | None:
+    """全历史年化 TWR（时间加权，正确处理资金进出）。
+
+    取最长连续有效段（与回撤同口径：ok/degraded 且日收益非 NULL），把逐日收益
+    复利累计后按自然日年化。无断链时用整条序列起止（含首日锚点），有断链时用
+    最长有效段起止。有效观测 < 2 或跨度 <= 0 → None（不伪造 0）。
+    """
+    segments, has_gaps, _valid = _drawdown_segments(series)
+    if not segments:
+        return None
+    dates, returns = max(segments, key=lambda item: len(item[1]))
+    if len(returns) < 2:
+        return None
+    start = series[0].trade_date if (not has_gaps and len(segments) == 1) else dates[0]
+    natural_days = (dates[-1] - start).days
+    if natural_days <= 0:
+        return None
+    family = drawdown_family(returns, natural_days=natural_days)
+    return family.twr_annual_units
+
+
 async def build_dashboard(
     session: AsyncSession,
     *,
@@ -580,15 +669,14 @@ async def build_dashboard(
         user_id, definition_version=definition_version, on_or_before=today
     )
     series = await asset_repo.series(user_id, definition_version=definition_version)
-    trades = list(
-        await TradeRepository(session).balances_ordered(
-            user_id, period_end=latest.trade_date if latest is not None else today
-        )
-    )
+    trades = list(await TradeRepository(session).balances_ordered(user_id, period_end=today))
     rounds = await RoundRepository(session).closed_rounds(user_id)
+    all_rounds = await RoundRepository(session).all_rounds(user_id)
 
-    as_of = latest.trade_date if latest is not None else today
+    fallback_as_of = build_view.data_as_of if isinstance(build_view.data_as_of, date) else today
+    as_of = latest.trade_date if latest is not None else fallback_as_of
     legacy_period = _legacy_period(trades, rounds, clock)
+    metrics_period, metrics_period_start, metrics_period_end = _annual_period(as_of)
     missing: list[DashboardMissing] = []
 
     # ── 资产概览 ─────────────────────────────────────────────
@@ -623,19 +711,16 @@ async def build_dashboard(
             )
         )
 
-    max_invested: int | None = None
-    for row in series:
-        if row.status == "blocked":
-            continue
-        if max_invested is None or row.holding_cost_units > max_invested:
-            max_invested = row.holding_cost_units
+    # 峰值转入成本 = 银证转账累计净转入的历史峰值（原「历史峰值持仓成本」口径已弃用）；
+    # 峰值成本收益率 = 当前收益额 / 峰值转入成本。
+    max_invested = _peak_transfer_cost(trades)
     if max_invested is None:
         missing.append(
             DashboardMissing(
                 field="asset_overview.max_invested_cost",
                 code=MISSING_MAX_INVESTED,
-                reason="没有非阻断的持仓成本记录。",
-                what_to_do="构建资产表并修复阻断日期。",
+                reason="没有银证转账转入记录，无法计算峰值转入成本。",
+                what_to_do="导入含银证转账流水的账单后重新构建资产表。",
             )
         )
 
@@ -708,6 +793,7 @@ async def build_dashboard(
         total_fees_units = fee_breakdown(cast("list[TradeView]", trade_slice)).fee_amount
 
     total_profit_units: int | None = None
+    initial_capital_units: int | None = None
     if not asset_blocked and latest is not None and trades:
         bridge = await bridge_for_period(
             session,
@@ -716,6 +802,9 @@ async def build_dashboard(
             period_end=latest.trade_date,
             clock=clock,
         )
+        if bridge.status != STATUS_BLOCKED:
+            # 期初资金 = 期初现金 + 期初持仓成本（与桥接总收益公式同源）。
+            initial_capital_units = bridge.initial_cash_units + bridge.initial_open_cost_units
         bridge_ok = (
             bridge.status == STATUS_OK
             and bridge.balanced
@@ -736,6 +825,40 @@ async def build_dashboard(
                 code=MISSING_TOTAL_PROFIT,
                 reason="全历史桥接不平或资产表过期，不硬算总收益。",
                 what_to_do="到资产页更新资产表；若仍不平，到对账页检查断链。",
+            )
+        )
+
+    # 账单覆盖区间：已导入流水的首末交易日（全历史）。
+    bill_start_date = trades[0].trade_date if trades else None
+    bill_end_date = trades[-1].trade_date if trades else None
+    if bill_start_date is None:
+        missing.append(
+            DashboardMissing(
+                field="asset_overview.bill_range",
+                code=MISSING_BILL_RANGE,
+                reason="暂无账单流水，无法确定账单起止时间。",
+                what_to_do="先到导入页导入账单。",
+            )
+        )
+    if initial_capital_units is None:
+        missing.append(
+            DashboardMissing(
+                field="asset_overview.initial_capital",
+                code=MISSING_INITIAL_CAPITAL,
+                reason="没有可用的期初现金/持仓锚点，无法确定期初资金。",
+                what_to_do="导入含期初余额或银证转账的账单后重新构建资产表。",
+            )
+        )
+
+    # 全历史年化 TWR：资产表有效日收益复利累计后按自然日年化（正确处理出入金）。
+    annualized_return_units = None if asset_blocked else _annualized_twr(series)
+    if annualized_return_units is None:
+        missing.append(
+            DashboardMissing(
+                field="asset_overview.annualized_return",
+                code=MISSING_ANNUALIZED_RETURN,
+                reason="资产表有效观测不足或存在阻断，无法计算年化收益率。",
+                what_to_do="补充更长历史账单并构建资产表后重试。",
             )
         )
 
@@ -806,6 +929,70 @@ async def build_dashboard(
         _ratio_units(max_profit, max_invested) if max_profit is not None and max_invested else None
     )
 
+    # 持仓时长 Top3：已平仓回合按持有天数降序（同长按平仓日/回合 id 稳定排序）。
+    top_holding_rounds = [
+        _round_brief(item)
+        for item in sorted(
+            rounds,
+            key=lambda item: (-item.holding_days, item.close_date or item.open_date, item.id),
+        )[:3]
+    ]
+
+    # 交易次数 Top3：按证券代码（可转债归并上市代码）统计流水 buy/sell 行数
+    # （买入/卖出分别计一次交易）；同时聚合个股累计收益（全部回合 pnl）与个股总费用。
+    # 现金类/货基不计。
+    bond_alias, _unresolved = build_bond_alias(
+        (trade.security_code, trade.security_name) for trade in trades
+    )
+    buy_counts: dict[str, int] = {}
+    sell_counts: dict[str, int] = {}
+    fee_by_code: dict[str, int] = {}
+    trade_names: dict[str, str] = {}
+    for trade in trades:
+        code = canonical_code(bond_alias, trade.security_code)
+        if not code or is_money_fund_row(trade) or category(trade) in CASHFLOW_CATEGORIES:
+            continue
+        if code not in trade_names and trade.security_name:
+            trade_names[code] = trade.security_name
+        trade_category = category(trade)
+        if trade_category == "buy":
+            buy_counts[code] = buy_counts.get(code, 0) + 1
+        elif trade_category == "sell":
+            sell_counts[code] = sell_counts.get(code, 0) + 1
+        fee = trade.commission_units + trade.stamp_tax_units + trade.other_fee_units
+        if trade_category == "fee" and fee == 0:
+            fee = abs(trade.amount_units)
+        fee_by_code[code] = fee_by_code.get(code, 0) + fee
+
+    # 个股累计收益：全部回合（含未平仓回合的已实现卖出部分；data_error 剔除）。
+    pnl_by_code: dict[str, int] = {}
+    for round_ in all_rounds:
+        if round_.data_error:
+            continue
+        pnl_by_code[round_.security_code] = (
+            pnl_by_code.get(round_.security_code, 0) + round_.pnl_units
+        )
+
+    ranked_codes = sorted(
+        (code for code in buy_counts.keys() | sell_counts.keys()),
+        key=lambda code: (
+            -(buy_counts.get(code, 0) + sell_counts.get(code, 0)),
+            code,
+        ),
+    )
+    top_trade_counts = [
+        DashboardTradeCountBrief(
+            security_code=code,
+            security_name=trade_names.get(code, code),
+            buy_count=buy_counts.get(code, 0),
+            sell_count=sell_counts.get(code, 0),
+            trade_count=buy_counts.get(code, 0) + sell_counts.get(code, 0),
+            pnl_units=pnl_by_code.get(code),
+            total_fees_units=fee_by_code.get(code, 0),
+        )
+        for code in ranked_codes[:3]
+    ]
+
     max_drawdown, mdd_missing, mdd_gaps = _max_drawdown(series)
     missing.extend(mdd_missing)
 
@@ -834,6 +1021,9 @@ async def build_dashboard(
         as_of=as_of,
         data_as_of=build_view.data_as_of,
         legacy_period=legacy_period,
+        metrics_period=metrics_period,
+        metrics_period_start=metrics_period_start,
+        metrics_period_end=metrics_period_end,
         status=overall,
         build_state=build_view.state,
         definition_version=definition_version,
@@ -849,6 +1039,10 @@ async def build_dashboard(
             max_invested_cost_units=max_invested,
             max_cost_return_ratio_units=max_cost_return,
             total_fees_units=total_fees_units,
+            bill_start_date=bill_start_date,
+            bill_end_date=bill_end_date,
+            initial_capital_units=initial_capital_units,
+            annualized_return_ratio_units=annualized_return_units,
         ),
         history=DashboardHistoryOverview(
             status=history_status,
@@ -865,6 +1059,8 @@ async def build_dashboard(
             max_profit_cost_ratio_units=max_profit_cost,
             top_rounds=top_rounds,
             bottom_rounds=bottom_rounds,
+            top_holding_rounds=top_holding_rounds,
+            top_trade_counts=top_trade_counts,
             max_drawdown=max_drawdown,
         ),
         missing=missing,
@@ -912,5 +1108,6 @@ __all__ = [
     "DashboardMissing",
     "DashboardResult",
     "DashboardRoundBrief",
+    "DashboardTradeCountBrief",
     "build_dashboard",
 ]

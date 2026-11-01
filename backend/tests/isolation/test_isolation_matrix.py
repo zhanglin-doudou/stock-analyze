@@ -247,6 +247,7 @@ ADMIN_FORBIDDEN: list[tuple[str, str]] = [
     ("post", "/assets/build"),
     # Period2-06：admin 不可读指标（身份越权 → 403）
     ("get", "/metrics"),
+    ("get", "/metrics/catalog"),
     ("get", "/metrics/{metric_id}"),
     ("get", "/metrics/{metric_id}/explain"),
     ("get", "/metrics/{metric_id}/drilldown"),
@@ -317,6 +318,7 @@ UNAUTHENTICATED_MATRIX: list[tuple[str, str]] = [
     ("post", "/assets/build"),
     # Period2-06（API-033/034/035/079 指标）
     ("get", "/metrics"),
+    ("get", "/metrics/catalog"),
     ("get", "/metrics/{metric_id}"),
     ("get", "/metrics/{metric_id}/explain"),
     ("get", "/metrics/{metric_id}/drilldown"),

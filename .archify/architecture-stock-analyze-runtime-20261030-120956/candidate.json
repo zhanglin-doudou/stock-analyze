@@ -1,0 +1,151 @@
+{
+  "schema_version": 1,
+  "diagram_type": "architecture",
+  "meta": {
+    "title": "stock-analyze 运行时架构",
+    "locale": "zh-CN",
+    "output": ".archify/architecture-stock-analyze-runtime-20261030-120956/stock-analyze-runtime.html",
+    "quality_profile": "showcase",
+    "repository": {
+      "url": "https://github.com/zhanglin-doudou/stock-analyze.git",
+      "provider": "github",
+      "link_mode": "web",
+      "revision": "8334d0d01f298cc092ccbcb3323e662d52238cac"
+    }
+  },
+  "components": [
+    {
+      "id": "browser",
+      "type": "frontend",
+      "label": "浏览器 SPA",
+      "sublabel": "React 18 · Vite",
+      "pos": [40, 250],
+      "size": [150, 64],
+      "sources": [
+        { "path": "frontend/apps/web/src/App.tsx", "line": 1 },
+        { "path": "frontend/apps/web/vite.config.ts", "line": 11, "end_line": 17 }
+      ]
+    },
+    {
+      "id": "api",
+      "type": "backend",
+      "label": "API 服务",
+      "sublabel": "FastAPI · 无状态",
+      "tag": "RFC 7807",
+      "pos": [300, 250],
+      "size": [160, 64],
+      "sources": [
+        { "path": "backend/services/api/src/stock_api/app.py", "line": 116, "end_line": 140 },
+        { "path": "backend/services/api/src/stock_api/middlewares.py", "line": 34 }
+      ]
+    },
+    {
+      "id": "app",
+      "type": "backend",
+      "label": "应用层",
+      "sublabel": "review / ledger 用例",
+      "pos": [570, 250],
+      "size": [170, 64],
+      "sources": [
+        { "path": "backend/packages/review/src/stock_review/application/dashboard.py", "line": 1 },
+        { "path": "backend/packages/review/src/stock_review/application/rebuild_period.py", "line": 1 }
+      ]
+    },
+    {
+      "id": "core",
+      "type": "backend",
+      "label": "core 纯计算",
+      "sublabel": "标度整数 · FIFO",
+      "pos": [570, 60],
+      "size": [170, 64],
+      "sources": [
+        { "path": "backend/packages/core/src/stock_core/values.py", "line": 5, "end_line": 10 }
+      ]
+    },
+    {
+      "id": "pg",
+      "type": "database",
+      "label": "PostgreSQL 16",
+      "sublabel": "RLS · 多 schema",
+      "pos": [850, 250],
+      "size": [160, 64],
+      "sources": [
+        { "path": "backend/migrations/versions/0002_platform_tenant_rls.py", "line": 71, "end_line": 78 }
+      ]
+    },
+    {
+      "id": "queue",
+      "type": "messagebus",
+      "label": "platform.job",
+      "sublabel": "PG 表队列",
+      "pos": [300, 450],
+      "size": [160, 64],
+      "sources": [
+        { "path": "backend/packages/platform/src/stock_platform/jobs.py", "line": 203, "end_line": 235 }
+      ]
+    },
+    {
+      "id": "worker",
+      "type": "backend",
+      "label": "任务消费者",
+      "sublabel": "租约 · 心跳 · 重试",
+      "pos": [570, 450],
+      "size": [170, 64],
+      "sources": [
+        { "path": "backend/services/worker/src/stock_worker/runner.py", "line": 97, "end_line": 145 },
+        { "path": "backend/services/worker/src/stock_worker/handlers.py", "line": 127, "end_line": 136 }
+      ]
+    },
+    {
+      "id": "market",
+      "type": "external",
+      "label": "行情源",
+      "sublabel": "akshare · 可选",
+      "pos": [850, 60],
+      "size": [160, 64],
+      "sources": [
+        { "path": "backend/packages/platform/src/stock_platform/market_live.py", "line": 1, "end_line": 20 }
+      ]
+    }
+  ],
+  "connections": [
+    { "id": "spa-to-api", "from": "browser", "to": "api", "label": "HTTPS", "variant": "emphasis" },
+    { "id": "api-to-app", "from": "api", "to": "app", "label": "调用用例" },
+    { "id": "app-to-pg", "from": "app", "to": "pg", "label": "SQL / RLS" },
+    { "id": "app-to-core", "from": "app", "to": "core", "label": "纯函数", "fromSide": "top", "toSide": "bottom" },
+    { "id": "api-to-queue", "from": "api", "to": "queue", "label": "入队 202", "fromSide": "bottom", "toSide": "top" },
+    { "id": "queue-to-worker", "from": "queue", "to": "worker", "label": "SKIP LOCKED" },
+    { "id": "worker-to-app", "from": "worker", "to": "app", "label": "执行 handler", "fromSide": "top", "toSide": "bottom" },
+    { "id": "market-to-pg", "from": "market", "to": "pg", "label": "日线缓存", "fromSide": "bottom", "toSide": "top" },
+    { "id": "worker-to-pg", "from": "worker", "to": "pg", "label": "写回结果", "fromSide": "right", "toSide": "bottom" }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "契约与错误",
+      "items": [
+        "OpenAPI 快照 → api-check → 前端 SDK，单一事实源",
+        "错误统一 ApiError(ErrorCode.*)，RFC 7807 六字段响应",
+        "跨账号访问一律 404，admin 禁读业务明细"
+      ]
+    },
+    {
+      "dot": "emerald",
+      "title": "异步重算",
+      "items": [
+        "POST /jobs/rebuild-period → 202 + Location: /jobs/{id}",
+        "worker 在 platform.job 上 SKIP LOCKED 认领，带租约与心跳",
+        "月度编排 rounds → assets → nav → metrics，单事务"
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "本地运行",
+      "items": [
+        "dev 仅 PostgreSQL 进 Docker（:5433）",
+        "api / worker / web 为宿主进程，Vite 把 /api 代理到 :8000",
+        "seed-demo 用 FrozenClock（2026-10-01），数据可复放"
+      ]
+    }
+  ]
+}

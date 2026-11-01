@@ -1,7 +1,13 @@
-import { useCallback, useState, type CSSProperties, type ReactElement, type ReactNode } from "react";
+import { type CSSProperties, type ReactElement, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import { useQuery } from "@tanstack/react-query";
-import type { DashboardOut, DashboardRoundOut, MetricBatch, MetricItem } from "@sa/api-client";
+import type {
+  DashboardOut,
+  DashboardRoundOut,
+  DashboardTradeCountOut,
+  MetricBatch,
+  MetricItem,
+} from "@sa/api-client";
 import { api } from "../client";
 import { TrendChart } from "../charts/TrendChart";
 import { ProblemView } from "../ui/Problem";
@@ -88,19 +94,39 @@ function RoundRow({ round, testPrefix }: { round: DashboardRoundOut; testPrefix:
   );
 }
 
-/** 旧五卡月度指标（按 legacy_period 按需加载，沿用后端格式化值）。 */
-function LegacyMetrics({
+function TradeCountRow({ item }: { item: DashboardTradeCountOut }): ReactElement {
+  return (
+    <li data-testid={`top-trade-${item.security_code}`} className="dash-round">
+      <span className="dash-round-name">
+        {item.security_name}（{item.security_code}）
+      </span>
+      <strong className="num">{item.trade_count} 笔</strong>
+      <span className="dash-round-meta">
+        买 {item.buy_count} · 卖 {item.sell_count} · 累计收益{" "}
+        <span className={tone(item.pnl_display ?? item.pnl)}>
+          {displayValue(shown(item.pnl_display, item.pnl))}
+        </span>{" "}
+        · 总费用 {displayValue(shown(item.total_fees_display, item.total_fees))}
+      </span>
+    </li>
+  );
+}
+
+/** 年度指标（后端 metrics_period：今年年初 → 最新收盘日；低频操作者月度样本不足）。 */
+function AnnualMetrics({
   period,
+  start,
+  end,
   batch,
   loading,
   error,
-  onLoad,
 }: {
   period: string;
+  start: string;
+  end: string;
   batch: MetricBatch | null;
   loading: boolean;
   error: unknown;
-  onLoad: () => void;
 }): ReactElement {
   const valueCell = (row: MetricItem): ReactNode => {
     if (row.value == null) return <span className="dash-muted">—</span>;
@@ -113,22 +139,27 @@ function LegacyMetrics({
     );
   };
   return (
-    <section className="dash-panel" data-testid="legacy-metrics">
+    <section className="dash-panel" data-testid="annual-metrics">
       <div className="dash-panel-head">
-        <h2>月度指标（{period}）</h2>
-        <span className="dash-panel-meta">旧五卡 · 月度口径 · 后端计算</span>
+        <h2>年度指标（{period}）</h2>
+        <span className="dash-panel-meta">
+          {start} → {end} · 后端计算
+        </span>
         <div className="dash-grow" />
-        <Link className="dash-link" to={`/metrics?period=${period}`} data-testid="link-legacy-metrics">
+        <Link
+          className="dash-link"
+          to={`/metrics?period=${period}`}
+          data-testid="link-annual-metrics"
+        >
           指标详情
         </Link>
       </div>
       <p className="dash-muted">
-        旧五卡为月度口径，按需加载；数值由后端计算，本页只展示（含 n / 可信度）。
+        低频操作者月度样本常不足，看板改用年度口径（今年年初 → 最新收盘日）；数值由后端计算，
+        本页只展示（含 n / 可信度）。
       </p>
-      <button className="dash-btn" type="button" disabled={loading} onClick={onLoad}>
-        {loading ? "加载中…" : "加载月度指标"}
-      </button>
       {error != null ? <ProblemView error={error} /> : null}
+      {loading && !batch ? <p className="dash-muted">加载中…</p> : null}
       {batch ? (
         <table className="dash-table dash-legacy-table">
           <thead>
@@ -144,7 +175,7 @@ function LegacyMetrics({
               <tr key={row.metric_id}>
                 <td>
                   <Link to={`/metrics/${encodeURIComponent(row.metric_id)}?period=${period}`}>
-                    {row.metric_id}
+                    {row.presentation?.display_name ?? row.metric_id}
                   </Link>
                 </td>
                 <td>{valueCell(row)}</td>
@@ -155,7 +186,16 @@ function LegacyMetrics({
                     : null}
                 </td>
                 <td>
-                  <StatusBadge status={row.status} kind="data" />
+                  {row.presentation ? (
+                    <span
+                      className={`badge badge-${row.presentation.confidence.level}`}
+                      title={row.presentation.verdict.rationale}
+                    >
+                      {row.presentation.verdict.label}
+                    </span>
+                  ) : (
+                    <StatusBadge status={row.status} kind="data" />
+                  )}
                 </td>
               </tr>
             ))}
@@ -172,10 +212,6 @@ function LegacyMetrics({
  * 所有金额/比率原样展示后端字符串；本页不做任何数值计算（图表几何在 charts/geometry）。
  */
 export function Dashboard(): ReactElement {
-  const [legacy, setLegacy] = useState<MetricBatch | null>(null);
-  const [legacyLoading, setLegacyLoading] = useState(false);
-  const [legacyError, setLegacyError] = useState<unknown>(null);
-
   const dashboardQuery = useQuery({
     queryKey: ["dashboard", "all"],
     queryFn: () => api.dashboard.get(),
@@ -187,19 +223,12 @@ export function Dashboard(): ReactElement {
   });
 
   const data: DashboardOut | undefined = dashboardQuery.data;
-
-  const loadLegacy = useCallback(async (): Promise<void> => {
-    if (!data) return;
-    setLegacyLoading(true);
-    setLegacyError(null);
-    try {
-      setLegacy(await api.metrics.batch({ period: data.legacy_period }));
-    } catch (exc) {
-      setLegacyError(exc);
-    } finally {
-      setLegacyLoading(false);
-    }
-  }, [data]);
+  const metricsQuery = useQuery({
+    queryKey: ["metrics", "annual", data?.metrics_period],
+    queryFn: () => api.metrics.batch({ period: data?.metrics_period ?? "" }),
+    enabled: data != null,
+    staleTime: 60_000,
+  });
 
   if (dashboardQuery.error != null) {
     return (
@@ -240,6 +269,9 @@ export function Dashboard(): ReactElement {
         </div>
         <h1 className="dash-title">看板</h1>
         <p className="dash-sub">先看清自己，再看清市场。所有数值均为后端口径，本页只做呈现与下钻。</p>
+        <p className="dash-muted" data-testid="market-data-notice">
+          行情来自本地缓存（仅收盘后同步，盘中不拉取实时行情）；数据截至 {data.data_as_of ?? "—"}。
+        </p>
         <div className="dash-head-meta" data-testid="dashboard-meta">
           <span>
             构建状态 <StatusBadge status={data.build_state} kind="build" />
@@ -301,8 +333,17 @@ export function Dashboard(): ReactElement {
               峰值成本收益率 {displayValue(asset.max_cost_return_pct)}
             </span>
           </div>
+          <div className="dash-hero-bill" data-testid="kpi-bill-range">
+            <span>
+              账单 {asset.bill_start_date ?? "—"} → {asset.bill_end_date ?? "—"}
+            </span>
+            <span data-testid="kpi-initial-capital">
+              初始资金{" "}
+              {displayValue(shown(asset.initial_capital_display, asset.initial_capital))}
+            </span>
+          </div>
           <p className="dash-hero-note">
-            历史峰值持仓成本{" "}
+            银证转账峰值转入成本{" "}
             {displayValue(shown(asset.max_invested_cost_display, asset.max_invested_cost))} · 总费用{" "}
             {displayValue(shown(asset.total_fees_display, asset.total_fees))}
           </p>
@@ -322,7 +363,7 @@ export function Dashboard(): ReactElement {
             </span>
           </div>
           <Kpi
-            label="历史峰值持仓成本"
+            label="银证转账峰值转入成本"
             value={shown(asset.max_invested_cost_display, asset.max_invested_cost)}
             testId="kpi-max-invested-cost"
           />
@@ -340,6 +381,11 @@ export function Dashboard(): ReactElement {
             label="总费用消耗"
             value={shown(asset.total_fees_display, asset.total_fees)}
             testId="kpi-total-fees"
+          />
+          <Kpi
+            label="年化收益率"
+            value={asset.annualized_return_pct}
+            testId="kpi-annualized-return"
           />
         </div>
       </section>
@@ -536,23 +582,49 @@ export function Dashboard(): ReactElement {
         </section>
       </div>
 
-      {history.max_profit_round ? (
-        <section className="dash-panel" data-testid="max-profit-round">
+      {/* 持仓时长 Top3 / 交易次数 Top3（两列布局） */}
+      <div className="dash-grid">
+        <section className="dash-panel" data-testid="top-holding-duration">
           <div className="dash-panel-head">
-            <h2>最大单笔收益</h2>
+            <h2>持仓时长 Top3</h2>
+            <div className="dash-grow" />
+            <span className="dash-panel-meta">已平仓</span>
           </div>
-          <ul className="dash-rounds">
-            <RoundRow round={history.max_profit_round} testPrefix="max-profit" />
-          </ul>
+          {history.top_holding_rounds.length === 0 ? (
+            <p className="dash-muted">暂无已平仓回合。</p>
+          ) : (
+            <ul className="dash-rounds">
+              {history.top_holding_rounds.map((round) => (
+                <RoundRow key={round.round_id} round={round} testPrefix="top-holding" />
+              ))}
+            </ul>
+          )}
         </section>
-      ) : null}
+        <section className="dash-panel" data-testid="top-trade-count">
+          <div className="dash-panel-head">
+            <h2>交易次数 Top3</h2>
+            <div className="dash-grow" />
+            <span className="dash-panel-meta">按证券代码聚合</span>
+          </div>
+          {history.top_trade_counts.length === 0 ? (
+            <p className="dash-muted">暂无交易流水。</p>
+          ) : (
+            <ul className="dash-rounds">
+              {history.top_trade_counts.map((item) => (
+                <TradeCountRow key={item.security_code} item={item} />
+              ))}
+            </ul>
+          )}
+        </section>
+      </div>
 
-      <LegacyMetrics
-        period={data.legacy_period}
-        batch={legacy}
-        loading={legacyLoading}
-        error={legacyError}
-        onLoad={() => void loadLegacy()}
+      <AnnualMetrics
+        period={data.metrics_period}
+        start={data.metrics_period_start}
+        end={data.metrics_period_end}
+        batch={metricsQuery.data ?? null}
+        loading={metricsQuery.isLoading}
+        error={metricsQuery.error}
       />
 
       <footer className="dash-foot">

@@ -3,8 +3,8 @@
 全部子命令都用 `uv run python -m stock_api.cli <cmd>` 调用；只依赖标准库
 （`argparse` + `asyncio`），不引入 `click`/`typer` 等三方 CLI 依赖。
 
-子命令一览：seed-tenants / seed-demo / api-check / api-snapshot / sdk /
-api-coverage / verify-p1 / demo-p1。
+子命令一览：seed-tenants / seed-demo / sync-market / api-check / api-snapshot /
+sdk / api-coverage / verify-p1 / demo-p1。
 """
 
 from __future__ import annotations
@@ -21,24 +21,28 @@ import urllib.error
 import urllib.request
 import uuid
 from collections.abc import Callable, Coroutine
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
 from sqlalchemy import func, select
-from stock_contracts.clock import FrozenClock
+from stock_contracts.clock import FrozenClock, SystemClock
 from stock_contracts.enums import ImportBatchStatus, Role
 from stock_contracts.errors import CATALOG
 from stock_ledger.application.imports import commit_batch
 from stock_ledger.application.preview import create_preview, default_object_store
 from stock_ledger.fixtures import generate_huatai_bill, generate_market_quotes
+from stock_ledger.market import create_market_source
 from stock_ledger.models import Trade
 from stock_ledger.repositories.imports import ImportBatchRepository
 from stock_ledger.repositories.rules import seed_system_rules
 from stock_platform.config import REPO_ROOT, get_settings
 from stock_platform.db import Database
 from stock_platform.jobs import JobQueue
+from stock_platform.market_live import validate_symbols
 from stock_platform.repositories.users import UserRepository
 from stock_platform.security import hasher_for
+from stock_platform.symbols import classify_symbol
 
 # ── 常量 ────────────────────────────────────────────────────────
 API_PREFIX = "/api/v1"
@@ -921,6 +925,56 @@ def _demo_p1(dry_run: bool, run: bool) -> int:
     return _run_demo(base, bill)
 
 
+# ── 行情同步（收盘后本地缓存）─────────────────────────────────
+BENCHMARK_PROXY_SYMBOLS: tuple[str, ...] = ("510300", "510500", "512100")
+
+
+async def _sync_market(
+    *, start: date | None = None, symbols: tuple[str, ...] | None = None, dry_run: bool = False
+) -> int:
+    """收盘后把持仓/基准日线的缺口同步进本地 ``market.daily_bar``。
+
+    读路径（API/worker 的 metrics/assets）默认只读本地缓存，盘中不拉第三方；
+    本命令是唯一的第三方入口，且盘中不会拉当天。
+    """
+    settings = get_settings()
+    clock = SystemClock()
+    # 运维命令：owner 连接跨租户读全库持仓代码；market 缓存为公共表。
+    db = Database(settings, role="owner")
+    market = create_market_source(settings, session_factory=db.session, clock=clock)
+    try:
+        if not hasattr(market, "sync_daily_bars"):
+            return fail("当前 MARKET_MODE 不是 live+缓存；replay 模式无需同步")
+        async with db.session(begin=True) as session:
+            rows = (
+                await session.execute(
+                    select(Trade.security_code).where(Trade.deleted_at.is_(None)).distinct()
+                )
+            ).all()
+            min_trade_date = await session.scalar(select(func.min(Trade.trade_date)))
+        codes = sorted(
+            {
+                str(row[0])
+                for row in rows
+                if row[0] and classify_symbol(str(row[0])) in {"stock", "fund"}
+            }
+        )
+        wanted = symbols or tuple(validate_symbols((*codes, *BENCHMARK_PROXY_SYMBOLS)))
+        sync_start = start or min_trade_date or (clock.today() - timedelta(days=365))
+        if dry_run:
+            emit("== sync-market（--dry-run：仅打印计划）==")
+            emit(f"  区间：{sync_start} ~ {clock.today()}（盘中自动截到昨天）")
+            emit(f"  标的：{len(wanted)} 个")
+            return 0
+        bars, failed = await market.sync_daily_bars(wanted, sync_start, clock.today())
+        emit(f"✅ 行情同步完成：{bars} 根 bar，{len(wanted)} 个标的")
+        if failed:
+            emit(f"⚠️  失败 {len(failed)} 个：{', '.join(failed)}")
+        return 0
+    finally:
+        await db.dispose()
+
+
 # ── 参数解析 / 分发 ────────────────────────────────────────────
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -931,6 +985,12 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("seed-tenants", help="造体验账号/A/B/admin 与账单（幂等）")
     subparsers.add_parser("seed-demo", help="造演示数据（含行情回放夹具）")
+    sync = subparsers.add_parser(
+        "sync-market", help="收盘后同步本地行情缓存（盘中不拉当天；读路径不联网）"
+    )
+    sync.add_argument("--start", type=date.fromisoformat, default=None, help="起始日 YYYY-MM-DD")
+    sync.add_argument("--symbols", default=None, help="逗号分隔代码（默认全库持仓 + 基准代理）")
+    sync.add_argument("--dry-run", action="store_true", help="只打印计划")
     subparsers.add_parser("api-check", help="契约完整性检查（路径/operationId/错误码/错误响应）")
     snapshot = subparsers.add_parser("api-snapshot", help="规范化写出 contracts/openapi.json")
     snapshot.add_argument("--check", action="store_true", help="只比对不写，漂移则退出码 1")
@@ -965,6 +1025,10 @@ async def _dispatch(args: argparse.Namespace) -> int:
                 emit(f"  {line}")
             return 0
         return await _seed_demo()
+    if command == "sync-market":
+        symbols = args.symbols
+        explicit = tuple(validate_symbols(symbols.split(","))) if symbols else None
+        return await _sync_market(start=args.start, symbols=explicit, dry_run=args.dry_run)
     if command == "api-check":
         return _api_check()
     if command == "api-snapshot":
@@ -984,6 +1048,7 @@ COMMANDS: dict[str, Callable[[argparse.Namespace], Coroutine[Any, Any, int]]] = 
     (
         "seed-tenants",
         "seed-demo",
+        "sync-market",
         "api-check",
         "api-snapshot",
         "sdk",

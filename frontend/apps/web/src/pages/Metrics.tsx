@@ -8,8 +8,8 @@ import {
   type Problem,
 } from "@sa/api-client";
 import { api } from "../client";
-import { currentMonth } from "../lib/date";
-import { MonthInput } from "../ui/MonthInput";
+import { currentYearToken } from "../lib/date";
+import { PeriodInput } from "../ui/PeriodInput";
 import { JobProgress } from "../ui/JobProgress";
 import { ProblemView } from "../ui/Problem";
 import { DataTable, type DataTableColumn } from "../ui/DataTable";
@@ -81,10 +81,10 @@ function jobFailureProblem(status: JobStatus): Problem {
   };
 }
 
-/** 指标页（/metrics）：按月一键构建复盘数据（rounds → 资产 → 净值 → 指标）+ 结果展示。 */
+/** 指标页（/metrics）：按期间一键构建复盘数据（rounds → 资产 → 净值 → 指标）+ 结果展示。 */
 export function Metrics() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const period = searchParams.get('period') || currentMonth();
+  const period = searchParams.get("period") || currentYearToken();
   const [includeExploratory, setIncludeExploratory] = useState(false);
   const [batch, setBatch] = useState<MetricBatch | null>(null);
   const [loading, setLoading] = useState(false);
@@ -217,10 +217,13 @@ export function Metrics() {
     {
       key: "metric_id",
       header: "指标",
-      // 点指标名进入详情页（解释 / 计算方式 / 样本），带上当前月份。
+      // 中文名来自后端 presentation（P0-3）；旧数据回退 metric_id。
       render: (row) => (
         <Link to={`/metrics/${encodeURIComponent(row.metric_id)}?period=${batch?.period ?? period}`}>
-          {row.metric_id}
+          {row.presentation?.display_name ?? row.metric_id}
+          {row.presentation?.display_name ? (
+            <span className="muted"> {row.metric_id}</span>
+          ) : null}
         </Link>
       ),
     },
@@ -231,28 +234,53 @@ export function Metrics() {
       header: "样本",
       render: (row) => {
         const sample = SAMPLE_STATUS_LABELS[row.sample_status];
+        const progress = row.presentation?.progress;
         return (
           <>
             {row.n}
             {sample ? <span className="muted">（{sample}）</span> : null}
+            {progress && progress.remaining > 0 ? (
+              <span className="muted">，还差 {progress.remaining}</span>
+            ) : null}
           </>
         );
       },
     },
     {
+      key: "verdict",
+      header: "判定",
+      render: (row) => {
+        const verdict = row.presentation?.verdict;
+        if (!verdict) return <span className="muted">—</span>;
+        return (
+          <span className={`badge badge-${verdict.level}`} title={verdict.rationale}>
+            {verdict.label}
+          </span>
+        );
+      },
+    },
+    {
       key: "status",
-      header: "状态",
-      render: (row) => (
-        <span className={`badge badge-${row.status}`} title={row.reason ?? undefined}>
-          {metricStatusLabel(row.status)}
-        </span>
-      ),
+      header: "可信度",
+      render: (row) => {
+        const confidence = row.presentation?.confidence;
+        return (
+          <span
+            className={`badge badge-${row.status}`}
+            title={confidence?.reason ?? row.reason ?? undefined}
+          >
+            {confidence?.label ?? metricStatusLabel(row.status)}
+          </span>
+        );
+      },
     },
     {
       key: "reason",
       header: "原因",
-      render: (row) =>
-        row.reason ? <span className="muted">{row.reason}</span> : <span className="muted">—</span>,
+      render: (row) => {
+        const reason = row.presentation?.confidence.reason ?? row.reason;
+        return reason ? <span className="muted">{reason}</span> : <span className="muted">—</span>;
+      },
     },
   ];
 
@@ -266,14 +294,18 @@ export function Metrics() {
     <div>
       <h1>指标</h1>
       <p className="muted">
-        按月复盘指标（收益 / 择时 / 行为 / 选股）；数值由后端计算，本页只展示。
+        按期间（年度 / 月度 / 自定义区间）复盘指标（收益 / 择时 / 行为 / 选股）；默认今年，
+        数值由后端计算，本页只展示。
+      </p>
+      <p className="muted" data-testid="market-data-notice">
+        行情来自本地缓存（仅收盘后同步，盘中不拉取实时行情）；当前数据截至 {batch?.data_as_of ?? "—"}。
       </p>
 
       <div className="card filters">
         <div className="row-actions">
           <label>
-            月份{" "}
-            <MonthInput
+            期间{" "}
+            <PeriodInput
               value={period}
               disabled={executing}
               onChange={(value) => setSearchParams({ period: value })}
@@ -296,6 +328,9 @@ export function Metrics() {
           >
             刷新
           </button>
+          <Link className="btn btn-ghost" to="/metrics/catalog">
+            口径说明
+          </Link>
           <label className="muted">
             <input
               type="checkbox"
@@ -306,8 +341,8 @@ export function Metrics() {
           </label>
         </div>
         <p className="muted">
-          「构建复盘数据」在后台按月顺序执行：回合重建 → 资产表 → 净值 → 指标（默认核心 10
-          个；探索指标勾选后按需计算）。净值页的「构建净值与收益」不受影响。
+          「构建复盘数据」在后台按所选期间顺序执行：回合重建 → 资产表 → 净值 → 指标（默认核心 10
+          个；探索指标勾选后按需计算）。年度/月度结果落库缓存，自定义区间按需计算不落库。
         </p>
       </div>
 
@@ -339,7 +374,7 @@ export function Metrics() {
             </p>
           </div>
           <DataTable
-            caption="月度指标列表"
+            caption="指标列表"
             columns={columns}
             rows={batch.items}
             rowKey={(row) => row.metric_id}

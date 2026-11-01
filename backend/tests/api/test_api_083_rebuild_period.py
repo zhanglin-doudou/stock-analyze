@@ -257,11 +257,11 @@ async def test_api_083_happy_orchestration(
     assert result["rounds"]["rounds_total"] == 1
     assert result["rounds"]["rounds_open"] == 1
 
-    # 阶段②assets：首次构建 full，05-29..07-01 共 34 行
+    # 阶段②assets：首次构建 full，05-29..07-01 的工作日共 24 行（周末不写行）
     assert set(result["assets"]) == {"mode", "rows_written", "status", "data_as_of"}
     assert result["assets"]["mode"] == "full"
     assert result["assets"]["status"] == "ok"
-    assert result["assets"]["rows_written"] == 34
+    assert result["assets"]["rows_written"] == 24
     assert result["assets"]["data_as_of"] == "2026-09-30"
 
     # 阶段③nav：消费同事务 asset_daily
@@ -344,6 +344,67 @@ async def test_api_083_include_exploratory_persists_all(
     rows = await _metric_rows(owner_engine, user_id=acc.user_id, period=_PERIOD)
     assert len(rows) == _ALL_METRIC_COUNT
     assert len({row["metric_id"] for row in rows}) == _ALL_METRIC_COUNT
+
+
+# ── 年度 / 自定义期间 token ──────────────────────────────────
+
+
+async def test_api_083_annual_period_persists(
+    period_client: Any,
+    account_factory: Any,
+    owner_engine: AsyncEngine,
+    settings: Any,
+    frozen_clock: FrozenClock,
+) -> None:
+    """年度 token：job.result.period="2026"，核心 10 行落该年。"""
+    acc = await account_factory()
+    await _seed_happy_chain(owner_engine, user_id=acc.user_id)
+
+    resp = await _post_rebuild(period_client, acc.headers, period="2026")
+    assert resp.status_code == 202, resp.text
+    job_id = resp.json()["job_id"]
+
+    await _drain_worker(settings, clock=frozen_clock, owner_engine=owner_engine)
+
+    job = await _job_row(owner_engine, job_id)
+    assert job is not None and job["status"] == "succeeded", job
+    result = job["result"]
+    assert result["period"] == "2026"
+    assert result["metrics"]["persisted"] == _CORE_METRIC_COUNT
+
+    rows = await _metric_rows(owner_engine, user_id=acc.user_id, period="2026")
+    assert len(rows) == _CORE_METRIC_COUNT
+
+
+async def test_api_083_custom_period_not_persisted(
+    period_client: Any,
+    account_factory: Any,
+    owner_engine: AsyncEngine,
+    settings: Any,
+    frozen_clock: FrozenClock,
+) -> None:
+    """自定义区间：照常计算并返回 statuses，但 persisted=0、metric_result 无该行。"""
+    acc = await account_factory()
+    await _seed_happy_chain(owner_engine, user_id=acc.user_id)
+    period = "2026-01-01..2026-06-30"
+
+    resp = await _post_rebuild(period_client, acc.headers, period=period)
+    assert resp.status_code == 202, resp.text
+    job_id = resp.json()["job_id"]
+
+    await _drain_worker(settings, clock=frozen_clock, owner_engine=owner_engine)
+
+    job = await _job_row(owner_engine, job_id)
+    assert job is not None and job["status"] == "succeeded", job
+    result = job["result"]
+    assert result["period"] == period
+    assert result["metrics"]["computed"] == _CORE_METRIC_COUNT
+    assert result["metrics"]["persisted"] == 0
+    assert sum(result["metrics"]["statuses"].values()) == _CORE_METRIC_COUNT
+
+    assert await _metric_rows(owner_engine, user_id=acc.user_id, period=period) == []
+    # 月度缓存不被自定义区间污染。
+    assert await _metric_rows(owner_engine, user_id=acc.user_id, period=_PERIOD) == []
 
 
 # ── 幂等 ────────────────────────────────────────────────────

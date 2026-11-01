@@ -126,7 +126,7 @@ def _row(result, trade_date: date) -> dict[str, object]:
 
 
 def test_pure_cash_days_have_zero_market_and_zero_pnl() -> None:
-    """UT-01：单条余额行后 5 天无流水 → 5 行纯现金，首行 prev=期初锚点。"""
+    """UT-01：单条余额行后 5 个自然日（含周末不写行）→ 3 工作日行，首行 prev=期初锚点。"""
     trades = [
         _trade(
             trade_date=date(2026, 1, 1),
@@ -137,7 +137,7 @@ def test_pure_cash_days_have_zero_market_and_zero_pnl() -> None:
     ]
     result = _run(trades, date(2026, 1, 1), date(2026, 1, 5))
     assert result.global_blocked is False
-    assert len(result.rows) == 5
+    assert len(result.rows) == 3
     for row in result.rows:
         assert row["cash_units"] == cents("100000.00")
         assert row["market_value_units"] == 0
@@ -145,11 +145,10 @@ def test_pure_cash_days_have_zero_market_and_zero_pnl() -> None:
         assert row["holding_count"] == 0
         assert row["status"] == "ok"
         assert row["status_reason"] is None
+    # 01-03/01-04 为周六/周日：不写行（资产表只保留工作日）。
     assert [row["trade_date"] for row in result.rows] == [
         date(2026, 1, 1),
         date(2026, 1, 2),
-        date(2026, 1, 3),
-        date(2026, 1, 4),
         date(2026, 1, 5),
     ]
     first = _row(result, date(2026, 1, 1))
@@ -189,7 +188,7 @@ def test_buy_and_month_end_valuation_matches_oracle() -> None:
         date(2026, 6, 30),
         ladder=_ladder(_bar("600519", date(2026, 6, 30), "1706.20")),
     )
-    assert len(result.rows) == 33
+    assert len(result.rows) == 23
     row = _row(result, date(2026, 6, 30))
     assert row["cash_units"] == -cents("70000.00")
     assert row["market_value_units"] == cents("170620.00")
@@ -272,7 +271,7 @@ def test_sell_carries_cost_proportionally() -> None:
             line_no=2,
         ),
         _trade(
-            trade_date=date(2026, 1, 3),
+            trade_date=date(2026, 1, 5),
             category="sell",
             amount_units=cents("1200.00"),
             quantity_units=shares("100"),
@@ -281,9 +280,9 @@ def test_sell_carries_cost_proportionally() -> None:
             line_no=3,
         ),
     ]
-    ladder = _ladder(_bar("600519", date(2026, 1, 3), "12.00"))
-    result = _run(trades, date(2026, 1, 1), date(2026, 1, 3), ladder=ladder)
-    row = _row(result, date(2026, 1, 3))
+    ladder = _ladder(_bar("600519", date(2026, 1, 5), "12.00"))
+    result = _run(trades, date(2026, 1, 1), date(2026, 1, 5), ladder=ladder)
+    row = _row(result, date(2026, 1, 5))
     assert row["holding_count"] == 1
     assert row["holding_cost_units"] == cents("1000.00")
     assert row["market_value_units"] == cents("1200.00")
@@ -309,16 +308,16 @@ def test_dividend_and_fee_change_cash_without_touching_holdings() -> None:
             line_no=2,
         ),
         _trade(
-            trade_date=date(2026, 1, 3), category="dividend", amount_units=cents("50.00"), line_no=3
+            trade_date=date(2026, 1, 5), category="dividend", amount_units=cents("50.00"), line_no=3
         ),
         _trade(
-            trade_date=date(2026, 1, 3), category="interest", amount_units=cents("5.00"), line_no=4
+            trade_date=date(2026, 1, 5), category="interest", amount_units=cents("5.00"), line_no=4
         ),
-        _trade(trade_date=date(2026, 1, 3), category="fee", amount_units=-cents("2.00"), line_no=5),
+        _trade(trade_date=date(2026, 1, 5), category="fee", amount_units=-cents("2.00"), line_no=5),
     ]
     ladder = _ladder(_bar("600519", date(2026, 1, 2), "10.00"))
-    result = _run(trades, date(2026, 1, 1), date(2026, 1, 3), ladder=ladder)
-    row = _row(result, date(2026, 1, 3))
+    result = _run(trades, date(2026, 1, 1), date(2026, 1, 5), ladder=ladder)
+    row = _row(result, date(2026, 1, 5))
     assert row["cash_units"] == cents("9053.00")
     assert row["holding_cost_units"] == cents("1000.00")
     assert row["holding_count"] == 1
@@ -612,16 +611,16 @@ def test_blocked_next_day_has_null_pnl_then_recovers() -> None:
             line_no=2,
         ),
     ]
-    # 01-02 没有「当日或之前」收盘 → blocked；01-03 起有 bar。
-    ladder = _ladder(_bar("600519", date(2026, 1, 3), "10.00"))
-    result = _run(trades, date(2026, 1, 1), date(2026, 1, 4), ladder=ladder)
+    # 01-02 没有「当日或之前」收盘 → blocked；01-05（周一）起有 bar。
+    ladder = _ladder(_bar("600519", date(2026, 1, 5), "10.00"))
+    result = _run(trades, date(2026, 1, 1), date(2026, 1, 6), ladder=ladder)
     assert _row(result, date(2026, 1, 2))["status"] == "blocked"
-    after_blocked = _row(result, date(2026, 1, 3))
+    after_blocked = _row(result, date(2026, 1, 5))
     assert after_blocked["status"] == "ok"
     assert after_blocked["prev_total_assets_units"] is None
     assert after_blocked["daily_pnl_units"] is None
     assert after_blocked["daily_return_units"] is None
-    recovered = _row(result, date(2026, 1, 4))
+    recovered = _row(result, date(2026, 1, 6))
     assert recovered["prev_total_assets_units"] == after_blocked["total_assets_units"]
     assert recovered["daily_pnl_units"] == 0
 
@@ -646,9 +645,9 @@ def test_uncovered_market_degraded_only_when_holding() -> None:
         ),
     ]
     ladder = _ladder(_bar("600519", date(2026, 1, 2), "10.00"))
-    result = _run(trades, date(2026, 1, 1), date(2026, 1, 4), ladder=ladder, as_of=date(2026, 1, 2))
+    result = _run(trades, date(2026, 1, 1), date(2026, 1, 5), ladder=ladder, as_of=date(2026, 1, 2))
     assert _row(result, date(2026, 1, 2))["status"] == "ok"
-    uncovered = _row(result, date(2026, 1, 3))
+    uncovered = _row(result, date(2026, 1, 5))
     assert uncovered["status"] == "degraded"
     assert uncovered["status_reason"] == MARKET_UNCOVERED_REASON
 
@@ -810,7 +809,7 @@ def test_rows_are_deterministic() -> None:
 
 
 def test_incremental_window_only_emits_from_rebuild_from_and_uses_prev_row() -> None:
-    """增量：只产窗口行；窗口首行 prev_total 取落库上一日行。"""
+    """增量：只产窗口行；rebuild_from 落在周末 → 首行顺延到周一，prev 取落库上一工作日行。"""
     trades = [
         _trade(
             trade_date=date(2026, 1, 1),
@@ -834,15 +833,16 @@ def test_incremental_window_only_emits_from_rebuild_from_and_uses_prev_row() -> 
     result = _run(
         trades,
         date(2026, 1, 1),
-        date(2026, 1, 4),
+        date(2026, 1, 6),
         rebuild_from=date(2026, 1, 3),
         prev_row=prev_row,
     )
+    # 01-03（周六）/01-04（周日）不写行；窗口首行是 01-05（周一）。
     assert [row["trade_date"] for row in result.rows] == [
-        date(2026, 1, 3),
-        date(2026, 1, 4),
+        date(2026, 1, 5),
+        date(2026, 1, 6),
     ]
-    first = _row(result, date(2026, 1, 3))
+    first = _row(result, date(2026, 1, 5))
     assert first["prev_total_assets_units"] == cents("150000.00")
     assert first["daily_pnl_units"] == 0
 
@@ -860,11 +860,11 @@ def test_incremental_window_prev_row_blocked_gives_null_pnl() -> None:
     result = _run(
         trades,
         date(2026, 1, 1),
-        date(2026, 1, 4),
+        date(2026, 1, 6),
         rebuild_from=date(2026, 1, 3),
         prev_row=prev_row,
     )
-    first = _row(result, date(2026, 1, 3))
+    first = _row(result, date(2026, 1, 5))
     assert first["prev_total_assets_units"] is None
     assert first["daily_pnl_units"] is None
     assert first["daily_return_units"] is None
@@ -908,7 +908,7 @@ def test_total_equals_cash_plus_market_and_pnl_identity() -> None:
 
 
 def test_window_boundary_arithmetic() -> None:
-    """相邻自然日不跳日：跨越周末/节假日的行连续（UT-08/UT-15 简化）。"""
+    """周末不写行：01-01 至 01-31 只保留工作日行（22 天），日期严格递增。"""
     trades = [
         _trade(
             trade_date=date(2026, 1, 1),
@@ -920,8 +920,14 @@ def test_window_boundary_arithmetic() -> None:
     start, end = date(2026, 1, 1), date(2026, 1, 31)
     result = _run(trades, start, end)
     dates = [row["trade_date"] for row in result.rows]
-    assert len(dates) == 31
-    assert dates == [start + timedelta(days=offset) for offset in range(31)]
+    assert len(dates) == 22
+    expected: list[date] = []
+    cursor = start
+    while cursor <= end:
+        if cursor.weekday() < 5:
+            expected.append(cursor)
+        cursor += timedelta(days=1)
+    assert dates == expected
 
 
 # ── 可转债发债代码归并（设计 2026-10-29 D3）：上市前 degraded / 上市后正常 ──
@@ -930,7 +936,7 @@ def test_window_boundary_arithmetic() -> None:
 def test_new_stock_prelisting_degraded_not_blocked_and_holding_counted_once() -> None:
     """新股 001237：中签/入帐通知行（金额 0）不计持仓，缴款行建仓 500 股。
 
-    上市前（05-18 ~ 05-21）无行情 → 按认购成本兜底 degraded（不 blocked）；
+    上市前（05-18 ~ 05-21）无行情 → 按认购成本兜底，视为正常（ok，不 degraded）；
     上市首日（05-22）有行情 → 按市价 ok；通知行不再重复计数（持仓恒 500 股）。
     """
     trades = [
@@ -966,7 +972,7 @@ def test_new_stock_prelisting_degraded_not_blocked_and_holding_counted_once() ->
             amount_units=0,
         ),
         _trade(
-            trade_date=date(2026, 5, 23),
+            trade_date=date(2026, 5, 25),
             category="sell",
             security_code="001237",
             side="sell",
@@ -976,7 +982,7 @@ def test_new_stock_prelisting_degraded_not_blocked_and_holding_counted_once() ->
         ),
     ]
     ladder = _ladder(_bar("001237", date(2026, 5, 22), "135.00"), symbols=["001237"])
-    result = _run(trades, date(2026, 5, 1), date(2026, 5, 23), ladder=ladder)
+    result = _run(trades, date(2026, 5, 1), date(2026, 5, 25), ladder=ladder)
     assert result.global_blocked is False
 
     # 中签通知行当天：还没缴款，不持有 → ok。
@@ -984,11 +990,11 @@ def test_new_stock_prelisting_degraded_not_blocked_and_holding_counted_once() ->
     assert notice["status"] == "ok"
     assert notice["holding_count"] == 0
 
-    # 缴款后上市前：按认购成本兜底 degraded，现金 73370 + 成本 26630 = 100000。
+    # 缴款后上市前：按认购成本兜底，视为正常（ok），现金 73370 + 成本 26630 = 100000。
     pre = _row(result, date(2026, 5, 20))
-    assert pre["status"] == "degraded"
-    assert "新股待上市" in (pre["status_reason"] or "")
-    assert "001237" in (pre["status_reason"] or "")
+    assert pre["status"] == "ok"
+    assert pre["status_reason"] is None
+    assert pre["remark"] is None
     assert pre["market_value_units"] == cents("26630")
     assert pre["total_assets_units"] == cents("100000")
     assert pre["holding_count"] == 1  # 通知行不重复计数：500 股而非 1500 股
@@ -1000,7 +1006,7 @@ def test_new_stock_prelisting_degraded_not_blocked_and_holding_counted_once() ->
     assert listed["total_assets_units"] == cents("140870")
     assert listed["holding_count"] == 1
     # 次日卖出：持仓清零，现金 140870。
-    after = _row(result, date(2026, 5, 23))
+    after = _row(result, date(2026, 5, 25))
     assert after["status"] == "ok"
     assert after["holding_count"] == 0
     assert after["total_assets_units"] == cents("140870")
@@ -1008,7 +1014,8 @@ def test_new_stock_prelisting_degraded_not_blocked_and_holding_counted_once() ->
 
 def test_cbond_alias_prelisting_degraded_postlisting_ok() -> None:
     """754019 曙26发债（07-20 中签缴款 1 手@-1000）归并到 113050 曙26转债：
-    上市前（08-03 前）按买入价兜底 degraded；上市后按行情估值 ok，且全程不 blocked。"""
+    上市前（08-03 前）按买入价兜底，视为正常（ok），remark 标注含可转债；
+    上市后按行情估值 ok，全程不 blocked。"""
     alias = {"754019": "113050"}
     trades = [
         _trade(
@@ -1037,10 +1044,10 @@ def test_cbond_alias_prelisting_degraded_postlisting_ok() -> None:
     assert result.global_blocked is False
 
     pre = _row(result, date(2026, 7, 20))
-    # 上市前无行情 → 债券按买入价兜底：现金 99000 + 成本 1000 = 100000。
-    assert pre["status"] == "degraded"
-    assert "113050" in (pre["status_reason"] or "")
-    assert "754019" not in (pre["status_reason"] or "")
+    # 上市前无行情 → 可转债按买入价兜底，视为正常（ok），remark 标注；现金 99000 + 成本 1000 = 100000。
+    assert pre["status"] == "ok"
+    assert pre["status_reason"] is None
+    assert pre["remark"] == "当日资产含可转债"
     assert pre["total_assets_units"] == cents("100000")
     assert pre["market_value_units"] == cents("1000")
 

@@ -47,7 +47,7 @@ def test_registry_partition_18_core_10_exploratory_8() -> None:
 
 @pytest.mark.parametrize("definition", DEFS, ids=[d.id for d in DEFS])
 def test_required_fields_and_versions(definition: MetricDef) -> None:
-    """13 字段齐全；id 前缀与 domain 一致；version 1.0；unit/precision 匹配。"""
+    """13 字段齐全；id 前缀与 domain 一致；version 1.x；unit/precision 匹配。"""
     tag = label(definition)
     for name in (
         "id",
@@ -70,7 +70,7 @@ def test_required_fields_and_versions(definition: MetricDef) -> None:
         assert hasattr(definition, name), f"{tag}: 缺少字段 {name}"
 
     assert definition.id.startswith(f"{definition.domain}."), tag
-    assert definition.definition_version == "1.0", tag
+    assert re.fullmatch(r"1\.\d+", definition.definition_version), tag
     assert definition.unit in VALID_UNITS, tag
     assert definition.frequency in {"sync", "async"}, tag
     assert definition.mvp in {"P0", "M1", "M2"}, tag

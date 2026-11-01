@@ -15,6 +15,7 @@ from datetime import UTC, date, datetime
 from pathlib import Path
 
 import pytest
+from sqlalchemy import text as sa_text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from stock_contracts.errors import ErrorCode
 from stock_review.application.metrics import set_registry_for_tests
@@ -108,6 +109,21 @@ async def test_api_033_batch_happy_etag_and_304(client, account_factory, owner_e
     assert item["inputs_hash"].startswith("sha256:")
     assert item["ci_low"] < item["value"] < item["ci_high"]
     assert item["scope"] == {"unit": "round", "cohort": "close_date", "period": "month"}
+    # P0-3 呈现层：display_name/direction/verdict/interpretation 必须随 item 返回。
+    presentation = item["presentation"]
+    assert presentation["display_name"]
+    assert presentation["direction"] in {"higher_better", "lower_better", "neutral"}
+    assert presentation["confidence"]["level"] == "high"
+    assert presentation["verdict"]["level"] in {
+        "good",
+        "neutral",
+        "watch",
+        "unknown",
+        "unavailable",
+    }
+    assert presentation["interpretation"]["fact"]
+    assert presentation["interpretation"]["meaning"]
+    assert presentation["interpretation"]["action"]
 
     etag = r.headers["etag"]
     assert etag.startswith('W/"')
@@ -258,6 +274,13 @@ async def test_api_034_explain_happy_and_insufficient(client, account_factory, o
     # 详情页三要素：含义恒非空、计算方式、样本（n + 判定门槛）。
     assert body["meaning"] == body["conclusion"]
     assert body["domain"] == "perf"
+    # P0-3：explain 的 presentation 与 item 同源（fact/n/CI），且三字段非空。
+    presentation = body["presentation"]
+    assert presentation["interpretation"]["fact"]
+    assert presentation["interpretation"]["meaning"]
+    assert presentation["interpretation"]["action"]
+    assert presentation["progress"]["current"] == body["sample"]["n"]
+    assert presentation["confidence"]["level"] == "high"
     assert body["unit"] == "ratio"
     assert body["sample"] == {
         "n": 12,
@@ -560,3 +583,129 @@ async def test_api_079_admin_forbidden(client, account_factory):
     )
     assert r.status_code == 403
     assert r.json()["code"] == ErrorCode.ADMIN_CANNOT_READ_TRADES.value
+
+
+@pytest.mark.asyncio
+async def test_api_033_304_skips_market_data_and_compute(
+    client, app, account_factory, owner_engine
+):
+    """304 快速路径：命中 If-None-Match 后不得触发行情/指标计算（回归 7s 慢 304）。"""
+    acc = await account_factory()
+    await _seed_rounds(owner_engine, user_id=acc.user_id)
+    url = "/api/v1/metrics"
+    params = {"ids": WIN_RATE, "period": PERIOD}
+
+    first = await client.get(url, params=params, headers=acc.headers)
+    assert first.status_code == 200, first.text
+    etag = first.headers["etag"]
+
+    class NoFetchMarket:
+        def __init__(self, inner: object) -> None:
+            self._inner = inner
+
+        def __getattr__(self, name: str) -> object:
+            return getattr(self._inner, name)
+
+        async def get_daily_bars(self, *_args: object, **_kwargs: object) -> object:
+            raise AssertionError("304 不应读取行情")
+
+    state = app.state.sa
+    original = state.market_data
+    state.market_data = NoFetchMarket(original)
+    try:
+        second = await client.get(
+            url, params=params, headers={**acc.headers, "If-None-Match": etag}
+        )
+    finally:
+        state.market_data = original
+
+    assert second.status_code == 304, second.text
+    assert second.content == b""
+
+
+async def _period_rows(
+    engine: AsyncEngine, *, user_id: uuid.UUID, period: str
+) -> list[dict[str, object]]:
+    async with engine.begin() as conn:
+        rows = (
+            (
+                await conn.execute(
+                    sa_text(
+                        "select metric_id from review.metric_result "
+                        "where user_id = :uid and period = :period"
+                    ),
+                    {"uid": user_id, "period": period},
+                )
+            )
+            .mappings()
+            .all()
+        )
+    return [dict(row) for row in rows]
+
+
+@pytest.mark.asyncio
+async def test_api_033_annual_period_is_cached(client, account_factory, owner_engine):
+    """年度 token：scope.period=year、window.kind=year，且结果落 metric_result。"""
+    acc = await account_factory()
+    await _seed_rounds(owner_engine, user_id=acc.user_id)
+
+    r = await client.get(
+        "/api/v1/metrics", params={"ids": WIN_RATE, "period": "2026"}, headers=acc.headers
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["period"] == "2026"
+    item = body["items"][0]
+    assert item["period"] == "2026"
+    assert item["scope"]["period"] == "year"
+    assert item["presentation"]["window"]["kind"] == "year"
+    assert item["status"] == "ok"
+
+    rows = await _period_rows(owner_engine, user_id=acc.user_id, period="2026")
+    assert [row["metric_id"] for row in rows] == [WIN_RATE]
+
+
+@pytest.mark.asyncio
+async def test_api_033_custom_period_computed_but_not_persisted(
+    client, account_factory, owner_engine
+):
+    """自定义区间：按需计算（200）但不落 metric_result（cacheable=false）。"""
+    acc = await account_factory()
+    await _seed_rounds(owner_engine, user_id=acc.user_id)
+    period = "2026-01-01..2026-06-30"
+
+    r = await client.get(
+        "/api/v1/metrics", params={"ids": WIN_RATE, "period": period}, headers=acc.headers
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+    assert body["period"] == period
+    item = body["items"][0]
+    assert item["period"] == period
+    assert item["scope"]["period"] == "custom"
+    assert item["presentation"]["window"]["kind"] == "custom_range"
+    # 区间覆盖 6 月的 12 笔回合（闭区间包含端点）
+    assert item["n"] == 12
+
+    assert await _period_rows(owner_engine, user_id=acc.user_id, period=period) == []
+    # 月度缓存未被自定义区间污染。
+    assert await _period_rows(owner_engine, user_id=acc.user_id, period=PERIOD) == []
+
+
+@pytest.mark.asyncio
+async def test_api_033_invalid_token_shapes(client, account_factory):
+    """年度/自定义非法形态一律 422 INVALID_PERIOD（未来、倒置、超 366 天）。"""
+    acc = await account_factory()
+    cases = [
+        "2027",  # 未来年
+        "2026-06-30..2026-01-01",  # 起止倒置
+        "2026-01-01..2027-12-31",  # 超 366 天
+        "2027-01-01..2027-03-01",  # 未来起点
+        "2026-1-1..2026-06-30",  # 非 ISO 补零
+    ]
+    for period in cases:
+        r = await client.get(
+            "/api/v1/metrics", params={"ids": WIN_RATE, "period": period}, headers=acc.headers
+        )
+        assert r.status_code == 422, (period, r.text)
+        assert r.json()["code"] == ErrorCode.INVALID_PERIOD.value, (period, r.text)

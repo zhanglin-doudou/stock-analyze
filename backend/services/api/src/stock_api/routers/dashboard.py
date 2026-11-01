@@ -2,8 +2,9 @@
 
 * `GET /dashboard`（`getDashboard`）：**只读**，不落库、不触发构建/job；
 * 当前快照取最新 `asset_daily` 行（`trade_date <= today`），历史概览为全历史；
+* 年度指标区间（`metrics_period`/`_start`/`_end`）= 该快照日所在年份年初 → 快照日；
 * 所有金额/数量/比率在本层转**定点字符串**；blocked/missing 字段显式 `null`；
-* 旧五卡（月度口径）由前端按 `legacy_period` 懒加载 `/metrics`，本端点不内嵌。
+* 年度指标由前端按 `metrics_period` 懒加载 `/metrics`，本端点不内嵌。
 
 跨账号/不存在一律 404，admin 不可读业务数据（身份越权 → 403）。
 """
@@ -27,6 +28,7 @@ from stock_api.schemas import (
     DashboardMissingOut,
     DashboardOut,
     DashboardRoundOut,
+    DashboardTradeCountOut,
 )
 
 router = APIRouter(tags=["dashboard"], route_class=StrictQueryRoute)
@@ -90,6 +92,9 @@ def _to_out(result: Any) -> DashboardOut:
         as_of=result.as_of,
         data_as_of=result.data_as_of,
         legacy_period=period,
+        metrics_period=result.metrics_period,
+        metrics_period_start=result.metrics_period_start,
+        metrics_period_end=result.metrics_period_end,
         status=result.status,
         build_state=result.build_state,
         definition_version=result.definition_version,
@@ -123,6 +128,12 @@ def _to_out(result: Any) -> DashboardOut:
             max_invested_cost=_money(asset.max_invested_cost_units),
             max_cost_return_pct=_pct_2dp(asset.max_cost_return_ratio_units),
             total_fees=_money(asset.total_fees_units),
+            bill_start_date=asset.bill_start_date,
+            bill_end_date=asset.bill_end_date,
+            initial_capital=_money(asset.initial_capital_units),
+            initial_capital_display=_money_display(asset.initial_capital_units),
+            annualized_return=_ratio(asset.annualized_return_ratio_units),
+            annualized_return_pct=_pct_2dp(asset.annualized_return_ratio_units),
             market_value_display=_money_display(asset.market_value_units),
             cash_display=_money_display(asset.cash_units),
             money_fund_display=_money_display(asset.money_fund_units),
@@ -154,6 +165,21 @@ def _to_out(result: Any) -> DashboardOut:
             max_profit_cost_pct=_pct_2dp(history.max_profit_cost_ratio_units),
             top_rounds=[_round_out(item) for item in history.top_rounds],
             bottom_rounds=[_round_out(item) for item in history.bottom_rounds],
+            top_holding_rounds=[_round_out(item) for item in history.top_holding_rounds],
+            top_trade_counts=[
+                DashboardTradeCountOut(
+                    security_code=item.security_code,
+                    security_name=item.security_name,
+                    buy_count=item.buy_count,
+                    sell_count=item.sell_count,
+                    trade_count=item.trade_count,
+                    pnl=_money(item.pnl_units),
+                    pnl_display=_money_display(item.pnl_units),
+                    total_fees=_money(item.total_fees_units) or "0.00",
+                    total_fees_display=_money_display(item.total_fees_units),
+                )
+                for item in history.top_trade_counts
+            ],
             max_drawdown=DashboardMaxDrawdownOut(
                 from_date=drawdown.from_date,
                 to_date=drawdown.to_date,
@@ -179,7 +205,7 @@ def _to_out(result: Any) -> DashboardOut:
         links=DashboardLinksOut(
             assets="/assets",
             rounds="/rounds",
-            metrics=f"/metrics?period={period}",
+            metrics=f"/metrics?period={result.metrics_period}",
             reports="/reports",
             exports="/exports",
             attribution=f"/attribution?period={period}",
@@ -194,7 +220,7 @@ async def get_dashboard_endpoint(
     request: Request,
     ctx: Annotated[TenantContext, Depends(get_tenant)],
 ) -> DashboardOut:
-    """API-084：Dashboard 两板块聚合（只读；旧五卡按 legacy_period 懒加载）。"""
+    """API-084：Dashboard 两板块聚合（只读；年度指标按 metrics_period 懒加载）。"""
     ctx.forbid_admin_trades()
     user_id = ctx.require_user()
     state = get_state(request)

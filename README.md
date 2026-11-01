@@ -11,6 +11,14 @@
 >
 > 设计与验收记录见 [Dashboard 设计](docs/architecture/2026-10-28-dashboard.md)、[月度报告设计](docs/architecture/2026-10-28-monthly-report.md)、[S10 验收记录](docs/reviews/2026-10-27-p207-S10-acceptance.md)。
 
+## 架构一览
+
+![stock-analyze 运行时架构](.archify/architecture-stock-analyze-runtime-20261030-120956/visual-check/stock-analyze-runtime.visual-check.2048x1320.light.png)
+
+主链路：浏览器 SPA → FastAPI（中间件 / 路由）→ 应用层（review · ledger 用例）→ PostgreSQL（RLS 多租户）；`core` 是零 I/O 纯计算内核，由应用层单向调用；长任务由 API 写 `platform.job`（202 + `Location`），worker 以 `SKIP LOCKED` 认领并靠租约 / 心跳续命。行情源只在 `MARKET_MODE=live` 时接入，回放模式下不依赖外部行情。
+
+> 图由 [Archify](https://github.com/tt-a1i/archify) 依据代码生成，绑定提交 `8334d0d`（12 处源码证据）。[交互版](.archify/architecture-stock-analyze-runtime-20261030-120956/stock-analyze-runtime.html)（明暗主题 / 查找 / 路径 / 导出）
+
 ## 功能特性
 
 - **多租户与安全**：注册 / 登录 / 刷新令牌轮换 / 登出 / PAT；仓储层强制 `user_id` + PostgreSQL RLS 双层隔离；跨账号 404，admin 禁读业务明细。
@@ -30,8 +38,8 @@
 | 后端 | Python ≥ 3.12 · uv workspace · FastAPI · SQLAlchemy 2.0 async · asyncpg · Alembic |
 | 数据库 | PostgreSQL 16（多 schema + RLS） |
 | 任务 | PG 队列 + 独立 worker（SKIP LOCKED / 租约 / 心跳 / 单飞） |
-| 前端 | Vite · React 18 · TypeScript（strict）· React Router · Vitest/RTL |
-| 明确未引入 | TanStack Query、ECharts、MSW、Playwright（当前仓库依赖中没有；不要假设已安装） |
+| 前端 | Vite · React 18 · TypeScript（strict）· React Router · TanStack Query · Vitest/RTL |
+| 明确未引入 | ECharts、MSW、Playwright（当前仓库依赖中没有；不要假设已安装） |
 | 质量 | ruff · mypy strict · import-linter · pytest · vitest · tsc |
 
 ## 目录结构
@@ -85,6 +93,9 @@ cd frontend && pnpm install && cd ..
 # 4) 造演示数据（固定体验账号 + 行情回放 + 账单）
 make seed-demo
 
+# 4b) live 模式先同步行情到本地缓存（replay 模式可跳过）
+make sync-market
+
 # 5) 起服务（api + worker + web；不会自动起 DB）
 make dev
 ```
@@ -113,6 +124,17 @@ make dev
 - `make seed-tenants` / `make seed-demo` 使用固定口令 `1234`；`backend/tests/conftest.py` 的 `DEV_EMAIL/DEV_PASSWORD` 与体验账号一致。
 - 账号/口令仅用于本地测试，**禁止用于生产或对外环境**。
 - 全新数据库（或 `make db-reset` 后）四个账号口令均为 `1234`；旧数据库里此前创建的账号 seed 会重置口令；已有有效流水会跳过导入，无流水账号会重新导入。需要完全重建数据时请 `make db-reset` 后重新 seed。
+
+### Live 行情（收盘后同步，盘中不拉取）
+
+`MARKET_MODE=live` 时，API/worker 的读路径**只读本地** `market.daily_bar`，不会在请求中访问第三方行情；
+盘中也不会拉取当天行情。行情更新由显式命令完成（东八区 16:30 前自动截到昨天，留出收盘数据发布窗口）：
+
+```bash
+make sync-market          # 只补本地缺失区间；已有数据不重复请求
+```
+
+指标/看板页面会显示「行情来自本地缓存（仅收盘后同步，盘中不拉取实时行情）」。`MARKET_MODE=replay` 使用夹具，无需同步。
 
 ### 首次看板数据
 
@@ -222,6 +244,7 @@ pnpm -r test                 # vitest
 
 ## 文档索引
 
+- 架构图：[运行时架构（交互版）](docs/architecture/diagrams/stock-analyze-runtime.html) · [SVG](docs/architecture/diagrams/stock-analyze-runtime.svg) · [图规格 JSON](docs/architecture/diagrams/stock-analyze-runtime.spec.json)
 - [Dashboard 设计（Period2-12）](docs/architecture/2026-10-28-dashboard.md)
 - [月度报告设计（Period2-09，暂停）](docs/architecture/2026-10-28-monthly-report.md)
 - [S10 验收记录](docs/reviews/2026-10-27-p207-S10-acceptance.md)

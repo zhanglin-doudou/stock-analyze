@@ -187,7 +187,7 @@ export interface paths {
         };
         /**
          * Get Dashboard Endpoint
-         * @description API-084：Dashboard 两板块聚合（只读；旧五卡按 legacy_period 懒加载）。
+         * @description API-084：Dashboard 两板块聚合（只读；年度指标按 metrics_period 懒加载）。
          */
         get: operations["getDashboard"];
         put?: never;
@@ -479,6 +479,26 @@ export interface paths {
          * @description API-033：指标批量查询（只物化 ok；304 无副作用）。
          */
         get: operations["metrics_batch"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/metrics/catalog": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Metrics Catalog Endpoint
+         * @description API-086：18 个指标的口径说明书（静态元数据；无用户数据/无副作用）。
+         */
+        get: operations["metrics_catalog"];
         put?: never;
         post?: never;
         delete?: never;
@@ -1122,6 +1142,8 @@ export interface components {
             money_fund?: string | null;
             /** Prev Total Assets */
             prev_total_assets?: string | null;
+            /** Remark */
+            remark?: string | null;
             /**
              * Status
              * @enum {string}
@@ -1331,19 +1353,34 @@ export interface components {
         };
         /**
          * DashboardAssetOverviewOut
-         * @description 资产概览：当前快照（最新资产日）+ 全历史峰值成本/总收益/费用。
+         * @description 资产概览：当前快照（最新资产日）+ 峰值转入成本/总收益/费用。
+         *
+         *     `max_invested_cost` 语义为**银证转账峰值转入成本**（累计净转入的峰值），
+         *     `max_cost_return_pct` = 总收益 / 峰值转入成本（字段名保留以兼容旧客户端）。
          */
         DashboardAssetOverviewOut: {
+            /** Annualized Return */
+            annualized_return?: string | null;
+            /** Annualized Return Pct */
+            annualized_return_pct?: string | null;
             /** Balance */
             balance?: string | null;
             /** Balance Display */
             balance_display?: string | null;
+            /** Bill End Date */
+            bill_end_date?: string | null;
+            /** Bill Start Date */
+            bill_start_date?: string | null;
             /** Cash */
             cash?: string | null;
             /** Cash Display */
             cash_display?: string | null;
             /** Holdings */
             holdings: components["schemas"]["DashboardHoldingOut"][];
+            /** Initial Capital */
+            initial_capital?: string | null;
+            /** Initial Capital Display */
+            initial_capital_display?: string | null;
             /** Market Value */
             market_value?: string | null;
             /** Market Value Display */
@@ -1380,7 +1417,7 @@ export interface components {
         };
         /**
          * DashboardHistoryOverviewOut
-         * @description 历史概览：全历史已平仓计数/最赚最亏 + 最大回撤。
+         * @description 历史概览：全历史已平仓计数/最赚最亏/持仓时长 Top3/交易次数 Top3 + 最大回撤。
          */
         DashboardHistoryOverviewOut: {
             /** Bottom Rounds */
@@ -1410,8 +1447,12 @@ export interface components {
              * @enum {string}
              */
             status: "ok" | "degraded" | "stale" | "blocked" | "missing" | "insufficient";
+            /** Top Holding Rounds */
+            top_holding_rounds: components["schemas"]["DashboardRoundOut"][];
             /** Top Rounds */
             top_rounds: components["schemas"]["DashboardRoundOut"][];
+            /** Top Trade Counts */
+            top_trade_counts: components["schemas"]["DashboardTradeCountOut"][];
             /** Win Count */
             win_count: number;
             /** Win Pct */
@@ -1443,7 +1484,7 @@ export interface components {
         };
         /**
          * DashboardLinksOut
-         * @description 下钻/占位页链接（旧五卡按 `legacy_period` 懒加载）。
+         * @description 下钻/占位页链接（年度指标按 `metrics_period` 懒加载）。
          */
         DashboardLinksOut: {
             /** Assets */
@@ -1500,7 +1541,7 @@ export interface components {
              * Code
              * @enum {string}
              */
-            code: "DASHBOARD_ASSET_MISSING" | "DASHBOARD_ASSET_BLOCKED" | "DASHBOARD_STALE" | "DASHBOARD_TOTAL_PROFIT_UNAVAILABLE" | "DASHBOARD_MAX_INVESTED_COST_MISSING" | "DASHBOARD_MDD_INSUFFICIENT" | "DASHBOARD_MDD_UNRELIABLE" | "DASHBOARD_MDD_GAPS" | "DASHBOARD_HOLDINGS_TRUNCATED" | "DASHBOARD_HOLDING_PRICE_MISSING" | "DASHBOARD_HOLDINGS_MISMATCH" | "DASHBOARD_NO_CLOSED_ROUNDS";
+            code: "DASHBOARD_ASSET_MISSING" | "DASHBOARD_ASSET_BLOCKED" | "DASHBOARD_STALE" | "DASHBOARD_TOTAL_PROFIT_UNAVAILABLE" | "DASHBOARD_MAX_INVESTED_COST_MISSING" | "DASHBOARD_MDD_INSUFFICIENT" | "DASHBOARD_MDD_UNRELIABLE" | "DASHBOARD_MDD_GAPS" | "DASHBOARD_HOLDINGS_TRUNCATED" | "DASHBOARD_HOLDING_PRICE_MISSING" | "DASHBOARD_HOLDINGS_MISMATCH" | "DASHBOARD_NO_CLOSED_ROUNDS" | "DASHBOARD_BILL_RANGE_MISSING" | "DASHBOARD_INITIAL_CAPITAL_MISSING" | "DASHBOARD_ANNUALIZED_RETURN_UNAVAILABLE";
             /** Field */
             field: string;
             /** Reason */
@@ -1538,6 +1579,18 @@ export interface components {
             /** Legacy Period */
             legacy_period: string;
             links: components["schemas"]["DashboardLinksOut"];
+            /** Metrics Period */
+            metrics_period: string;
+            /**
+             * Metrics Period End
+             * Format: date
+             */
+            metrics_period_end: string;
+            /**
+             * Metrics Period Start
+             * Format: date
+             */
+            metrics_period_start: string;
             /** Missing */
             missing: components["schemas"]["DashboardMissingOut"][];
             /**
@@ -1572,6 +1625,30 @@ export interface components {
             security_code: string;
             /** Security Name */
             security_name: string;
+        };
+        /**
+         * DashboardTradeCountOut
+         * @description 交易次数 Top3 的一行（流水 buy/sell 行数 + 个股累计收益/总费用）。
+         */
+        DashboardTradeCountOut: {
+            /** Buy Count */
+            buy_count: number;
+            /** Pnl */
+            pnl?: string | null;
+            /** Pnl Display */
+            pnl_display?: string | null;
+            /** Security Code */
+            security_code: string;
+            /** Security Name */
+            security_name: string;
+            /** Sell Count */
+            sell_count: number;
+            /** Total Fees */
+            total_fees: string;
+            /** Total Fees Display */
+            total_fees_display?: string | null;
+            /** Trade Count */
+            trade_count: number;
         };
         /** @description RFC 7807 问题详情 + 平台扩展字段（code/user_message/what_to_do/retryable/request_id/errors），对应 Content-Type: application/problem+json。 */
         Error: {
@@ -1753,6 +1830,20 @@ export interface components {
             };
             user: components["schemas"]["UserBrief"];
         };
+        /** MetricBandOut */
+        MetricBandOut: {
+            /** From */
+            from?: string | null;
+            /** Label */
+            label: string;
+            /**
+             * Level
+             * @enum {string}
+             */
+            level: "good" | "neutral" | "watch";
+            /** To */
+            to?: string | null;
+        };
         /** MetricBatchOut */
         MetricBatchOut: {
             /** Assumptions */
@@ -1770,6 +1861,80 @@ export interface components {
             items?: components["schemas"]["MetricItemOut"][];
             /** Period */
             period: string;
+        };
+        /**
+         * MetricCatalogItemOut
+         * @description 单个指标的口径说明（API-086）：静态定义 + 经验区间，无用户数据。
+         */
+        MetricCatalogItemOut: {
+            /** Bands */
+            bands?: components["schemas"]["MetricBandOut"][] | null;
+            /** Caveat */
+            caveat?: string | null;
+            /**
+             * Ci
+             * @enum {string}
+             */
+            ci: "wilson" | "bootstrap" | "none";
+            /** Ci Min N */
+            ci_min_n: number;
+            /** Definition Version */
+            definition_version: string;
+            /**
+             * Direction
+             * @enum {string}
+             */
+            direction: "higher_better" | "lower_better" | "neutral";
+            /** Display Name */
+            display_name: string;
+            /** Display Name En */
+            display_name_en: string;
+            /** Domain */
+            domain: string;
+            /** Meaning */
+            meaning: string;
+            /** Method */
+            method: string;
+            /** Metric Id */
+            metric_id: string;
+            /** Min N */
+            min_n: number;
+            /** Min Trading Days */
+            min_trading_days: number;
+            /** Precision */
+            precision: number;
+            /** Scope */
+            scope: {
+                [key: string]: string;
+            };
+            /**
+             * Unit
+             * @enum {string}
+             */
+            unit: "CNY" | "ratio" | "days" | "count" | "z";
+            /** What To Do */
+            what_to_do?: string | null;
+            /** Window Kind */
+            window_kind: string;
+        };
+        /** MetricCatalogOut */
+        MetricCatalogOut: {
+            /** Items */
+            items?: components["schemas"]["MetricCatalogItemOut"][];
+            /** Registry Version */
+            registry_version: string;
+        };
+        /** MetricConfidenceOut */
+        MetricConfidenceOut: {
+            /** Label */
+            label: string;
+            /**
+             * Level
+             * @enum {string}
+             */
+            level: "high" | "medium" | "low" | "unavailable";
+            /** Reason */
+            reason: string;
         };
         /** MetricDrilldownItemOut */
         MetricDrilldownItemOut: {
@@ -1874,6 +2039,7 @@ export interface components {
             period: string;
             /** Precision */
             precision: number;
+            presentation: components["schemas"]["MetricPresentationOut"];
             /** Reason */
             reason?: string | null;
             sample: components["schemas"]["MetricExplainSample"];
@@ -1914,8 +2080,54 @@ export interface components {
              */
             sample_status: "ok" | "insufficient" | "pending_window" | "blocked";
         };
+        /** MetricInterpretationOut */
+        MetricInterpretationOut: {
+            /** Action */
+            action: string;
+            /** Fact */
+            fact: string;
+            /** Meaning */
+            meaning: string;
+        };
         MetricItemOut: {
             [key: string]: unknown;
+        };
+        /**
+         * MetricPresentationOut
+         * @description 指标呈现层（2026-10-30 P0-3）：后端渲染，前端零口径展示。
+         */
+        MetricPresentationOut: {
+            /** Bands */
+            bands?: components["schemas"]["MetricBandOut"][] | null;
+            /** Caveats */
+            caveats?: string[];
+            confidence: components["schemas"]["MetricConfidenceOut"];
+            /**
+             * Direction
+             * @enum {string}
+             */
+            direction: "higher_better" | "lower_better" | "neutral";
+            /** Display Name */
+            display_name: string;
+            interpretation: components["schemas"]["MetricInterpretationOut"];
+            progress?: components["schemas"]["MetricProgressOut"] | null;
+            verdict: components["schemas"]["MetricVerdictOut"];
+            window: components["schemas"]["MetricWindowOut"];
+        };
+        /** MetricProgressOut */
+        MetricProgressOut: {
+            /** Current */
+            current: number;
+            /** Label */
+            label: string;
+            /** Remaining */
+            remaining: number;
+            /** Required */
+            required: number;
+            /** Unit */
+            unit: string;
+            /** Unit Label */
+            unit_label: string;
         };
         /** MetricScopeOut */
         MetricScopeOut: {
@@ -1925,6 +2137,25 @@ export interface components {
             period: string;
             /** Unit */
             unit: string;
+        };
+        /** MetricVerdictOut */
+        MetricVerdictOut: {
+            /** Label */
+            label: string;
+            /**
+             * Level
+             * @enum {string}
+             */
+            level: "good" | "neutral" | "watch" | "unknown" | "unavailable";
+            /** Rationale */
+            rationale: string;
+        };
+        /** MetricWindowOut */
+        MetricWindowOut: {
+            /** Kind */
+            kind: string;
+            /** Label */
+            label: string;
         };
         /**
          * NavHoldingOut
@@ -2259,7 +2490,9 @@ export interface components {
         };
         /**
          * RebuildPeriodIn
-         * @description API-083：按月一键构建编排（rounds → assets → nav → metrics）。
+         * @description API-083：一键构建编排（rounds → assets → nav → metrics）。
+         *
+         *     `period` 支持三种 token：`YYYY-MM`（月）/ `YYYY`（年）/ `YYYY-MM-DD..YYYY-MM-DD`（自定义区间）。
          */
         RebuildPeriodIn: {
             /**
@@ -4412,6 +4645,66 @@ export interface operations {
             };
             /** @description 资源不存在 */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    metrics_catalog: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MetricCatalogOut"];
+                };
+            };
+            /** @description 请求参数错误 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
                 headers: {
                     [name: string]: unknown;
                 };

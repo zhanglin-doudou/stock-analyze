@@ -451,9 +451,12 @@ class RebuildRoundsIn(StrictModel):
 
 
 class RebuildPeriodIn(StrictModel):
-    """API-083：按月一键构建编排（rounds → assets → nav → metrics）。"""
+    """API-083：一键构建编排（rounds → assets → nav → metrics）。
 
-    period: str = Field(min_length=7, max_length=7)
+    `period` 支持三种 token：`YYYY-MM`（月）/ `YYYY`（年）/ `YYYY-MM-DD..YYYY-MM-DD`（自定义区间）。
+    """
+
+    period: str = Field(min_length=4, max_length=23)
     include_exploratory: bool = False
 
 
@@ -625,6 +628,7 @@ class AssetPointOut(StrictModel):
     daily_return_pct: str | None = None
     status: Literal["ok", "blocked", "degraded"]
     status_reason: str | None = None
+    remark: str | None = None
 
 
 class AssetBuildStateOut(StrictModel):
@@ -705,6 +709,9 @@ DashboardMissingCode = Literal[
     "DASHBOARD_HOLDING_PRICE_MISSING",
     "DASHBOARD_HOLDINGS_MISMATCH",
     "DASHBOARD_NO_CLOSED_ROUNDS",
+    "DASHBOARD_BILL_RANGE_MISSING",
+    "DASHBOARD_INITIAL_CAPITAL_MISSING",
+    "DASHBOARD_ANNUALIZED_RETURN_UNAVAILABLE",
 ]
 
 
@@ -747,6 +754,20 @@ class DashboardRoundOut(StrictModel):
     pnl_display: str | None = None
 
 
+class DashboardTradeCountOut(StrictModel):
+    """交易次数 Top3 的一行（流水 buy/sell 行数 + 个股累计收益/总费用）。"""
+
+    security_code: str
+    security_name: str
+    buy_count: int
+    sell_count: int
+    trade_count: int
+    pnl: str | None = None
+    pnl_display: str | None = None
+    total_fees: str
+    total_fees_display: str | None = None
+
+
 class DashboardMaxDrawdownOut(StrictModel):
     """历史最大回撤区间；insufficient/blocked 时 mdd_pct 显式 null。"""
 
@@ -763,7 +784,11 @@ class DashboardMaxDrawdownOut(StrictModel):
 
 
 class DashboardAssetOverviewOut(StrictModel):
-    """资产概览：当前快照（最新资产日）+ 全历史峰值成本/总收益/费用。"""
+    """资产概览：当前快照（最新资产日）+ 峰值转入成本/总收益/费用。
+
+    `max_invested_cost` 语义为**银证转账峰值转入成本**（累计净转入的峰值），
+    `max_cost_return_pct` = 总收益 / 峰值转入成本（字段名保留以兼容旧客户端）。
+    """
 
     status: DashboardStatus
     holdings: list[DashboardHoldingOut]
@@ -778,6 +803,14 @@ class DashboardAssetOverviewOut(StrictModel):
     max_invested_cost: str | None = None
     max_cost_return_pct: str | None = None
     total_fees: str | None = None
+    # 账单覆盖区间（首末流水日）与桥接期初资金（期初现金 + 期初持仓成本）。
+    bill_start_date: date | None = None
+    bill_end_date: date | None = None
+    initial_capital: str | None = None
+    initial_capital_display: str | None = None
+    # 全历史年化 TWR（时间加权；scale=8 小数串 + 两位百分比展示）。
+    annualized_return: str | None = None
+    annualized_return_pct: str | None = None
     # 后端已格式化的展示串（千分位金额）；前端优先使用，raw 保留兼容。
     market_value_display: str | None = None
     cash_display: str | None = None
@@ -790,7 +823,7 @@ class DashboardAssetOverviewOut(StrictModel):
 
 
 class DashboardHistoryOverviewOut(StrictModel):
-    """历史概览：全历史已平仓计数/最赚最亏 + 最大回撤。"""
+    """历史概览：全历史已平仓计数/最赚最亏/持仓时长 Top3/交易次数 Top3 + 最大回撤。"""
 
     status: DashboardStatus
     closed_security_count: int
@@ -807,11 +840,13 @@ class DashboardHistoryOverviewOut(StrictModel):
     max_profit_cost_pct: str | None = None
     top_rounds: list[DashboardRoundOut]
     bottom_rounds: list[DashboardRoundOut]
+    top_holding_rounds: list[DashboardRoundOut]
+    top_trade_counts: list[DashboardTradeCountOut]
     max_drawdown: DashboardMaxDrawdownOut
 
 
 class DashboardLinksOut(StrictModel):
-    """下钻/占位页链接（旧五卡按 `legacy_period` 懒加载）。"""
+    """下钻/占位页链接（年度指标按 `metrics_period` 懒加载）。"""
 
     assets: str
     rounds: str
@@ -827,6 +862,9 @@ class DashboardOut(StrictModel):
     as_of: date
     data_as_of: date | None = None
     legacy_period: str
+    metrics_period: str
+    metrics_period_start: date
+    metrics_period_end: date
     status: DashboardStatus
     build_state: Literal["missing", "current", "stale", "blocked"]
     definition_version: str
@@ -872,6 +910,89 @@ class MetricScopeOut(BaseModel):
     period: str
 
 
+class MetricConfidenceOut(BaseModel):
+    level: Literal["high", "medium", "low", "unavailable"]
+    label: str
+    reason: str
+
+
+class MetricProgressOut(BaseModel):
+    current: int
+    required: int
+    remaining: int
+    unit: str
+    unit_label: str
+    label: str
+
+
+class MetricVerdictOut(BaseModel):
+    level: Literal["good", "neutral", "watch", "unknown", "unavailable"]
+    label: str
+    rationale: str
+
+
+class MetricWindowOut(BaseModel):
+    kind: str
+    label: str
+
+
+class MetricInterpretationOut(BaseModel):
+    fact: str
+    meaning: str
+    action: str
+
+
+class MetricBandOut(BaseModel):
+    level: Literal["good", "neutral", "watch"]
+    label: str
+    from_: str | None = Field(default=None, alias="from")
+    """区间下界（定点字符串；None=无下界）。"""
+    to: str | None = None
+
+
+class MetricPresentationOut(BaseModel):
+    """指标呈现层（2026-10-30 P0-3）：后端渲染，前端零口径展示。"""
+
+    display_name: str
+    direction: Literal["higher_better", "lower_better", "neutral"]
+    confidence: MetricConfidenceOut
+    progress: MetricProgressOut | None = None
+    verdict: MetricVerdictOut
+    bands: list[MetricBandOut] | None = None
+    window: MetricWindowOut
+    interpretation: MetricInterpretationOut
+    caveats: list[str] = Field(default_factory=list)
+
+
+class MetricCatalogItemOut(BaseModel):
+    """单个指标的口径说明（API-086）：静态定义 + 经验区间，无用户数据。"""
+
+    metric_id: str
+    display_name: str
+    display_name_en: str
+    domain: str
+    direction: Literal["higher_better", "lower_better", "neutral"]
+    unit: Literal["CNY", "ratio", "days", "count", "z"]
+    precision: int
+    definition_version: str
+    scope: dict[str, str]
+    min_n: int
+    ci_min_n: int
+    ci: Literal["wilson", "bootstrap", "none"]
+    min_trading_days: int
+    window_kind: str
+    bands: list[MetricBandOut] | None = None
+    meaning: str
+    method: str
+    what_to_do: str | None = None
+    caveat: str | None = None
+
+
+class MetricCatalogOut(BaseModel):
+    registry_version: str
+    items: list[MetricCatalogItemOut] = Field(default_factory=list)
+
+
 class MetricItemOut(BaseModel):
     """单个指标结果；`value` 在非 ok / pending_window 时**整键省略**（C-31）。"""
 
@@ -895,6 +1016,7 @@ class MetricItemOut(BaseModel):
     data_as_of: date
     inputs_hash: str
     computed_at: datetime
+    presentation: MetricPresentationOut | None = None
 
     @model_serializer(mode="wrap")
     def _omit_empty_value(self, handler: Any) -> dict[str, Any]:
@@ -948,6 +1070,7 @@ class MetricExplainOut(BaseModel):
     what_to_do: str | None = None
     assumptions: dict[str, Any] = Field(default_factory=dict)
     data_as_of: date
+    presentation: MetricPresentationOut
 
 
 class MetricDrilldownItemOut(BaseModel):

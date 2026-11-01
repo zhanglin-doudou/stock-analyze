@@ -236,6 +236,7 @@ NON_TRADE_SUMMARY_SIDE: tuple[tuple[str, str], ...] = (
     ("股息红利税", Side.BUY.value),
     ("转存管转入", Side.UNKNOWN.value),
     ("转存管转出", Side.UNKNOWN.value),
+    ("资管转让资金上账", Side.SELL.value),
 )
 
 # 资金划转（银证转账 / 转存管）摘要关键词：分类规则与方向识别共用同一词表。
@@ -248,6 +249,7 @@ TRANSFER_SUMMARY_KEYWORDS: tuple[str, ...] = (
     "银行转取",
     "转存管转入",
     "转存管转出",
+    "资管转让资金上账",
 )
 
 

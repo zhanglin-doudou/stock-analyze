@@ -31,6 +31,9 @@ const Metrics = lazy(() => import("./pages/Metrics").then((m) => ({ default: m.M
 const MetricDetail = lazy(() =>
   import("./pages/MetricDetail").then((m) => ({ default: m.MetricDetail })),
 );
+const MetricsCatalog = lazy(() =>
+  import("./pages/MetricsCatalog").then((m) => ({ default: m.MetricsCatalog })),
+);
 const Import = lazy(() => import("./pages/Import").then((m) => ({ default: m.Import })));
 const Imports = lazy(() => import("./pages/Imports").then((m) => ({ default: m.Imports })));
 const Settings = lazy(() => import("./pages/Settings").then((m) => ({ default: m.Settings })));
@@ -54,6 +57,7 @@ export const router = createBrowserRouter([
       { path: "nav", element: <NavPage /> },
       { path: "assets", element: <Assets /> },
       { path: "metrics", element: <Metrics /> },
+      { path: "metrics/catalog", element: <MetricsCatalog /> },
       { path: "metrics/:metricId", element: <MetricDetail /> },
       { path: "import", element: <Import /> },
       { path: "imports", element: <Imports /> },

@@ -178,3 +178,22 @@ def asset_days_in_period(ctx: MetricContext) -> list[AssetDailyView]:
     """period 内 asset_daily 行（按日期升序）。"""
     rows = [row for row in ctx.asset_daily if ctx.period_start <= row.trade_date <= ctx.period_end]
     return sorted(rows, key=lambda row: row.trade_date)
+
+
+def asset_days_window(ctx: MetricContext, trading_days: int) -> list[AssetDailyView]:
+    """截至 `period_end` 的回看窗口（含 blocked 行），以最后 N 个工作日为界。
+
+    用于回撤/β 等「期末回看 60 个交易日」的日频指标：`asset_daily` 视图已向前加载
+    回看数据，本函数只截最后 N 个交易日对应的自然日区间（周末行保留以保持收益序列
+    与原口径一致）。
+    """
+    rows = sorted(
+        (row for row in ctx.asset_daily if row.trade_date <= ctx.period_end),
+        key=lambda row: row.trade_date,
+    )
+    weekdays = [row for row in rows if row.trade_date.weekday() < 5]
+    if not weekdays:
+        return []
+    cutoff_index = max(0, len(weekdays) - trading_days)
+    cutoff = weekdays[cutoff_index].trade_date
+    return [row for row in rows if row.trade_date >= cutoff]

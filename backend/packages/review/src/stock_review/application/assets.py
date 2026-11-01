@@ -31,6 +31,7 @@ from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from stock_contracts.clock import Clock
 from stock_contracts.enums import JobStatus
@@ -38,8 +39,10 @@ from stock_contracts.errors import ApiError, ErrorCode
 from stock_core.fifo import build_rounds
 from stock_ledger.models import Trade
 from stock_platform.jobs import JobQueue
+from stock_platform.market_models import DailyBar
 from stock_platform.obs import get_logger
 from stock_platform.ports import MarketDataSource
+from stock_platform.symbols import is_convertible_bond
 
 from stock_review.application.bond_alias import build_bond_alias, canonical_code
 from stock_review.application.bridge import _initial_cash
@@ -47,7 +50,6 @@ from stock_review.application.rebuild import trades_to_events
 from stock_review.application.valuation import (
     BOND_COST_FALLBACK_PREFIX,
     CASHFLOW_CATEGORIES,
-    NEW_STOCK_COST_FALLBACK_PREFIX,
     PRICE_LOOKBACK,
     blocked_price_reason,
     bond_face_divisors,
@@ -59,7 +61,6 @@ from stock_review.application.valuation import (
     is_money_fund_row,
     load_prices,
     money_fund_balance,
-    new_stock_fallback_reason,
     new_stock_pending_codes,
     total_market_value,
 )
@@ -76,7 +77,11 @@ log = get_logger("stock_review.assets")
 # 1.4：新股中签/入帐通知行（金额 0）不再计持仓；待上市新股缺行情按认购成本兜底 degraded。
 # 1.5：货基负余额按 0 兜底（账单缺赎回/转出流水时不再误报「期初未知」降级），看板持仓与
 #      资产表同口径（货基不进持仓、可转债代码归并、债券/待上市新股按成本兜底）。
-ASSET_DEFINITION_VERSION = "1.5"
+# 1.6：新股按认购成本兜底 / 可转债按买入价兜底 → 不再 degraded（视为正常估值），
+#      新增 remark 列标注「当日资产含可转债」；仅非可转债按成本兜底仍 degraded。
+# 1.7：周六/周日不写资产行（A 股无交易，去除周末噪声行）；周末银证转账并入下一交易日
+#      现金流，prev_total 取上一已写工作日。
+ASSET_DEFINITION_VERSION = "1.7"
 # 安全窗：每次有新数据/脏流水/行情 as_of 变化时重算最近 45 天。
 SAFETY_DAYS = 45
 # 水位线重叠窗：PG `now()` = 事务开始时间，覆盖「长事务晚提交」竞态。
@@ -128,6 +133,7 @@ class AssetPoint:
     daily_return_units: int | None
     status: str
     status_reason: str | None
+    remark: str | None
     definition_version: str
 
 
@@ -220,10 +226,10 @@ def _row_status_reason(
     fifo_error: bool,
     uncovered: bool,
     bond_fallback: list[str] | None = None,
-    new_stock_fallback: list[str] | None = None,
 ) -> str | None:
-    """行级 degraded 原因（FIFO 异常 / 行情未覆盖 / 债券按买入价 / 新股待上市）。
+    """行级 degraded 原因（FIFO 异常 / 行情未覆盖 / 非可转债按买入价）。
 
+    新股按认购成本兜底、可转债按买入价兜底不再降级（视为正常估值）。
     都不命中返回 NULL；多条原因用「；」拼接（去重由调用方保证）。
     """
     reasons: list[str] = []
@@ -233,19 +239,13 @@ def _row_status_reason(
         reasons.append(MARKET_UNCOVERED_REASON)
     if bond_fallback:
         reasons.append(bond_fallback_reason(bond_fallback))
-    if new_stock_fallback:
-        reasons.append(new_stock_fallback_reason(new_stock_fallback))
     return "；".join(reasons) if reasons else None
 
 
 # degraded 原因聚合标签（日志用）：去掉逐日变化的标的清单，避免键随组合爆炸。
 _BOND_FALLBACK_TAG = "债券按买入价估值（无行情）"
-_NEW_STOCK_FALLBACK_TAG = "新股待上市，按认购价估值（无行情）"
-_COST_FALLBACK_TAGS = frozenset({_BOND_FALLBACK_TAG, _NEW_STOCK_FALLBACK_TAG})
-_COST_FALLBACK_PREFIXES = (
-    (BOND_COST_FALLBACK_PREFIX, _BOND_FALLBACK_TAG),
-    (NEW_STOCK_COST_FALLBACK_PREFIX, _NEW_STOCK_FALLBACK_TAG),
-)
+_COST_FALLBACK_TAGS = frozenset({_BOND_FALLBACK_TAG})
+_COST_FALLBACK_PREFIXES = ((BOND_COST_FALLBACK_PREFIX, _BOND_FALLBACK_TAG),)
 
 
 def _reason_tag(part: str) -> tuple[str, list[str]]:
@@ -278,8 +278,9 @@ def compute_daily_valuations(
 
     逐日推演口径见设计 §5.3：现金（余额行覆盖优先）/ 持仓数量 / 含费成本 / 外部现金流 /
     逐标的 floor 市值；缺行情 → 该日 blocked（数值 0、prev/pnl/return NULL）；FIFO 异常或
-    `date > as_of` 且仍有持仓 → degraded（按最近收盘估值）。`prev_total` 取**严格上一自然日**
-    非 blocked 总资产，首行取期初现金锚点；`rebuild_from > start` 时首行用落库的 `prev_row`。
+    `date > as_of` 且仍有持仓 → degraded（按最近收盘估值）。**周六/周日不写行**（A 股无交易），
+    周末的外部现金流并入下一交易日；`prev_total` 取上一**已写工作日**的非 blocked 总资产，
+    全量首行取期初现金锚点，增量首行用落库的 `prev_row`。
     持仓/成本/货基键按 `bond_alias` 归一为上市代码（发债代码不请求行情，设计 D3）。
     """
     alias = bond_alias or {}
@@ -298,9 +299,13 @@ def compute_daily_valuations(
     money_fund: dict[str, int] = dict(initial_money_fund)
     holdings: dict[str, int] = {}
     cost_basis: dict[str, int] = {}
-    # 上一自然日的非 blocked 总资产；None 表示首日之前或上一日 blocked。
+    # 上一**已写入行**（跳过周末后即上一交易日）的非 blocked 总资产；
+    # None 表示首日之前或上一行 blocked。
     prior_total: int | None = None
     rows: list[dict[str, object]] = []
+    window_started = False
+    # 周末不写行，但周末发生的银证转账仍需计入下一交易日的当日现金流。
+    pending_cashflow = 0
 
     cursor_date = start
     while cursor_date <= end:
@@ -340,8 +345,14 @@ def compute_daily_valuations(
             cash_units = balance_override
         else:
             cash_units += day_cash_delta
+        pending_cashflow += cashflow_units
 
-        market_value_units, missing, bond_fallback, new_stock_fallback = total_market_value(
+        # 周六/周日不写资产行（A 股无交易，避免周末噪声行）；周末流水并入下一交易日。
+        if cursor_date.weekday() >= 5:
+            cursor_date += timedelta(days=1)
+            continue
+
+        market_value_units, missing, bond_fallback, _new_stock_fallback = total_market_value(
             holdings,
             ladder,
             cursor_date,
@@ -349,6 +360,12 @@ def compute_daily_valuations(
             bond_divisors=bond_divisors,
             new_stock_codes=pending_codes,
         )
+        # 新股按认购成本兜底（待上市）→ 视为正常，不再降级；
+        # 可转债按买入价兜底 → 视为正常（产品债务记录），仅在 remark 标注；
+        # 只有非可转债（如普通企业债）按成本兜底才 degraded。
+        convertible_bonds = [s for s in bond_fallback if is_convertible_bond(s)]
+        other_bonds = [s for s in bond_fallback if not is_convertible_bond(s)]
+        has_convertible = bool(convertible_bonds)
         money_fund_units = sum(money_fund.values())
         nonzero_holdings = sum(1 for qty in holdings.values() if qty != 0)
 
@@ -366,7 +383,10 @@ def compute_daily_valuations(
                         rebuilt_at=rebuilt_at,
                     )
                 )
+                # 窗口首行即 blocked：后续行 prev_total 必须为 NULL（链路在此断开）。
+                window_started = True
             prior_total = None
+            pending_cashflow = 0
             cursor_date += timedelta(days=1)
             continue
 
@@ -379,33 +399,32 @@ def compute_daily_valuations(
         # FIFO 异常只影响持有问题代码的那些天；对无 FIFO 问题代码持仓的其他天不降级。
         fifo_error_today = any(code in fifo_error_codes for code in holdings)
         status = (
-            ROW_STATUS_DEGRADED
-            if (fifo_error_today or uncovered or bond_fallback or new_stock_fallback)
-            else ROW_STATUS_OK
+            ROW_STATUS_DEGRADED if (fifo_error_today or uncovered or other_bonds) else ROW_STATUS_OK
         )
         status_reason = (
             _row_status_reason(
                 fifo_error=fifo_error_today,
                 uncovered=uncovered,
-                bond_fallback=bond_fallback,
-                new_stock_fallback=new_stock_fallback,
+                bond_fallback=other_bonds,
             )
             if status == ROW_STATUS_DEGRADED
             else None
         )
 
-        # prev_total：首行取期初锚点；否则严格上一自然日（上一日 blocked → NULL）。
+        # prev_total：首行取期初锚点；否则取上一**已写入行**（周末已跳过；上一行 blocked → NULL）。
         # 增量窗口首行用落库的 prev_row（窗口外行不重写，但必须与旧行衔接）。
         if cursor_date >= rebuild_from:
-            effective_prev = (
-                prev_row_total(prev_row, cursor_date, start, rebuild_from, initial_total)
-                if cursor_date == rebuild_from
-                else prior_total
-            )
+            if not window_started:
+                effective_prev = prev_row_total(
+                    prev_row, cursor_date, start, rebuild_from, initial_total
+                )
+                window_started = True
+            else:
+                effective_prev = prior_total
             daily_pnl_units = (
                 None
                 if effective_prev is None
-                else total_assets_units - cashflow_units - effective_prev
+                else total_assets_units - pending_cashflow - effective_prev
             )
             daily_return_units = (
                 None
@@ -424,18 +443,20 @@ def compute_daily_valuations(
                     "holding_cost_units": holding_cost_units,
                     "unrealized_pnl_units": unrealized_pnl_units,
                     "holding_count": nonzero_holdings,
-                    "cashflow_units": cashflow_units,
+                    "cashflow_units": pending_cashflow,
                     "prev_total_assets_units": effective_prev,
                     "daily_pnl_units": daily_pnl_units,
                     "daily_return_units": daily_return_units,
                     "status": status,
                     "status_reason": status_reason,
+                    "remark": "当日资产含可转债" if has_convertible else None,
                     "definition_version": ASSET_DEFINITION_VERSION,
                     "rebuilt_at": rebuilt_at,
                 }
             )
 
         prior_total = total_assets_units
+        pending_cashflow = 0
         cursor_date += timedelta(days=1)
 
     return _DailyValuations(rows=rows, global_blocked=False, global_reason=None)
@@ -448,10 +469,15 @@ def prev_row_total(
     rebuild_from: date,
     initial_total: int,
 ) -> int | None:
-    """增量窗口首行的 `prev_total`：首行取期初锚点（现金 + 货基），否则落库上一日行。"""
-    if trade_date == start:
+    """窗口首行的 `prev_total`：全量取期初锚点，增量衔接窗口外上一已写行。
+
+    周末不写行，因此窗口首行可能是 `rebuild_from` 之后的第一个工作日；
+    全量（`rebuild_from <= start`）一律取期初锚点，增量取落库的 `prev_row`
+    （上一行 blocked → NULL，链路断开）。
+    """
+    if rebuild_from <= start:
         return initial_total
-    if rebuild_from > start and trade_date == rebuild_from:
+    if trade_date >= rebuild_from:
         if prev_row is None or prev_row.status == ROW_STATUS_BLOCKED:
             return None
         return prev_row.total_assets_units
@@ -479,6 +505,7 @@ def _blocked_row(
         "daily_return_units": None,
         "status": ROW_STATUS_BLOCKED,
         "status_reason": reason,
+        "remark": None,
         "definition_version": ASSET_DEFINITION_VERSION,
         "rebuilt_at": rebuilt_at,
     }
@@ -553,6 +580,32 @@ def _symbols(live: list[Trade], bond_alias: dict[str, str] | None = None) -> lis
     )
 
 
+def latest_workday(day: date) -> date:
+    """最近工作日（周六/周日回退到周五）；资产表周末不写行。
+
+    构建终点、状态判定（本模块与 metrics 门禁）共用，保证「周末不判 stale」口径一致。
+    """
+    while day.weekday() >= 5:
+        day -= timedelta(days=1)
+    return day
+
+
+async def _market_as_of(session: AsyncSession, market_data: MarketDataSource, clock: Clock) -> date:
+    """行情覆盖日（构建与状态判定必须同口径，跨进程一致）。
+
+    live+缓存模式（`CachedMarketDataSource`）的端口 `as_of` 是**进程内近似值**
+    （未读过 bar 时退化为业务今天），API 与 worker 会得到不同结果；权威覆盖在
+    `market.daily_bar` 的最大交易日。replay / 纯透传 live 没有本地缓存，直接用端口值。
+    """
+    if getattr(market_data, "get_cached_bars", None) is not None:
+        latest = await session.scalar(
+            select(func.max(DailyBar.trade_date)).where(DailyBar.trade_date <= clock.today())
+        )
+        if latest is not None:
+            return latest
+    return market_data.as_of
+
+
 async def build_assets(
     session: AsyncSession,
     *,
@@ -599,7 +652,9 @@ async def build_assets(
         )
 
     start = min(trade.trade_date for trade in live)
-    end = clock.today()
+    # 资产表只在工作日写行（周六/周日跳过，设计 §5.3）：末行日期对齐到最近工作日，
+    # 避免水位线停在周末导致下次增量「窗口前一日本无行」而误触发全量。
+    end = latest_workday(clock.today())
 
     # 可转债发债→上市代码别名（设计 D3）：回合/持仓/行情请求统一用 canonical 代码。
     bond_alias, bond_alias_unresolved = build_bond_alias(
@@ -640,7 +695,7 @@ async def build_assets(
     fifo_result = build_rounds(trades_to_events(live, bond_alias=bond_alias))
     fifo_error_codes: set[str] = {e.security_code for e in fifo_result.data_errors}
     fifo_error_now = bool(fifo_error_codes)
-    market_as_of = market_data.as_of
+    market_as_of = await _market_as_of(session, market_data, clock)
     market_changed = state is not None and state.data_as_of != market_as_of
 
     # 3) 全量判定（§6.2）：任何无法安全定位的变更都收敛到全量。
@@ -729,9 +784,14 @@ async def build_assets(
         rebuild_from = start
 
     # 5) 增量窗口前一日必须有落库行（提供 prev_total）；缺失 → 全量兜底。
+    #    周末不写行，窗口边界可能落在周六/周日，因此取「rebuild_from 之前最近的已写行」。
     prev_row: AssetDaily | None = None
     if not full and rebuild_from > start:
-        prev_row = await repo.get_row(user_id, rebuild_from - timedelta(days=1))
+        prev_row = await repo.latest(
+            user_id,
+            definition_version=ASSET_DEFINITION_VERSION,
+            on_or_before=rebuild_from - timedelta(days=1),
+        )
         if prev_row is None:
             full = True
             rebuild_from = start
@@ -921,6 +981,7 @@ def _to_point(row: AssetDaily) -> AssetPoint:
         daily_return_units=row.daily_return_units,
         status=row.status,
         status_reason=row.status_reason,
+        remark=row.remark,
         definition_version=row.definition_version,
     )
 
@@ -952,6 +1013,7 @@ def _missing_state(definition_version: str) -> AssetBuildState:
 
 async def _build_state_view(
     repo: AssetRepository,
+    session: AsyncSession,
     *,
     user_id: uuid.UUID,
     clock: Clock,
@@ -1003,12 +1065,14 @@ async def _build_state_view(
         base.state = STATE_STALE
         return base
     # 6) 行情前进 → stale（并标记 has_new_market_data）。
-    if state.data_as_of is None or market_data.as_of > state.data_as_of:
+    #    行情覆盖日与构建同口径（live+缓存读 market.daily_bar，避免进程内近似值误判）。
+    market_as_of = await _market_as_of(session, market_data, clock)
+    if state.data_as_of is None or market_as_of > state.data_as_of:
         base.state = STATE_STALE
         base.has_new_market_data = True
         return base
-    # 7) 有新自然日。
-    if clock.today() > state.last_built_through:
+    # 7) 有新工作日；周六/周日不判 stale（资产表周末不写行）。
+    if latest_workday(clock.today()) > state.last_built_through:
         base.state = STATE_STALE
     return base
 
@@ -1041,7 +1105,7 @@ async def list_assets(
         sort=sort,
     )
     build = await _build_state_view(
-        repo, user_id=user_id, clock=clock, market_data=market_data, state=state
+        repo, session, user_id=user_id, clock=clock, market_data=market_data, state=state
     )
     return [_to_point(row) for row in rows], next_cursor, build
 
@@ -1058,7 +1122,7 @@ async def get_asset_build_state(
     state = await repo.get_state(user_id)
     definition_version = state.definition_version if state is not None else ASSET_DEFINITION_VERSION
     build = await _build_state_view(
-        repo, user_id=user_id, clock=clock, market_data=market_data, state=state
+        repo, session, user_id=user_id, clock=clock, market_data=market_data, state=state
     )
     return build, definition_version
 

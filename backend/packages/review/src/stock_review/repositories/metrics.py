@@ -18,7 +18,9 @@ from sqlalchemy import delete, func, insert, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from stock_ledger.models import Trade
+from stock_platform.market_models import DailyBar
 
+from stock_review.metrics.hash import canonical_json, sha256_hex
 from stock_review.models import (
     AssetBuildState,
     AssetDaily,
@@ -218,6 +220,36 @@ class MetricDatasetRepository:
             "max_updated_at": max_updated,
             "max_id": max_id,
         }
+
+    async def market_bars_fingerprint(self, symbols: Sequence[str], start: date, end: date) -> str:
+        """行情缓存内容指纹（只看本地 ``daily_bar``，不触发任何第三方请求）。"""
+        ordered = tuple(sorted(set(symbols)))
+        if not ordered or start > end:
+            return sha256_hex(canonical_json({"symbols": [], "bars": []}))
+        stmt = (
+            select(
+                DailyBar.symbol,
+                DailyBar.trade_date,
+                DailyBar.close_units,
+                DailyBar.return_units,
+            )
+            .where(
+                DailyBar.adjust == "",
+                DailyBar.symbol.in_(ordered),
+                DailyBar.trade_date >= start,
+                DailyBar.trade_date <= end,
+            )
+            .order_by(DailyBar.symbol, DailyBar.trade_date)
+        )
+        rows = (await self._session.execute(stmt)).all()
+        return sha256_hex(
+            canonical_json(
+                {
+                    "symbols": list(ordered),
+                    "bars": [[row[0], row[1].isoformat(), row[2], row[3]] for row in rows],
+                }
+            )
+        )
 
     async def asset_daily_fingerprint_parts(self, user_id: uuid.UUID) -> dict[str, object]:
         count, max_updated, max_id = (

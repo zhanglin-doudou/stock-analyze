@@ -211,6 +211,13 @@ class RoundRepository:
         )
         return list(rows)
 
+    async def all_rounds(self, user_id: uuid.UUID) -> list[Round]:
+        """全历史全部回合（含 open/data_error；看板个股累计收益用）。"""
+        rows = await self._session.scalars(
+            select(Round).where(Round.user_id == user_id).order_by(Round.id.asc())
+        )
+        return list(rows)
+
     async def fills_in_period(self, user_id: uuid.UUID, start: date, end: date) -> list[RoundFill]:
         """指标视图：平仓日落在区间内的逐 chunk 明细。"""
         rows = await self._session.scalars(

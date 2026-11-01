@@ -339,6 +339,28 @@ input[type="checkbox"] {
   background: #fff4e5;
   color: #8a5300;
 }
+/* 指标呈现层（P0-3）：可信度/判定三档 */
+.badge-good,
+.badge-high,
+.badge-sufficient {
+  background: #e6f4ea;
+  color: #0a7d32;
+}
+.badge-neutral,
+.badge-medium {
+  background: #eef2f7;
+  color: #344054;
+}
+.badge-watch,
+.badge-low {
+  background: #fff4e5;
+  color: #8a5300;
+}
+.badge-unknown,
+.badge-unavailable {
+  background: #f2f4f7;
+  color: #667085;
+}
 /* A 股涨跌语义：红涨绿跌（D2）；颜色只作辅助，符号由后端字符串给出 */
 .money-pos {
   color: var(--up);

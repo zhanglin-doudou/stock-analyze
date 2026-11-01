@@ -87,6 +87,7 @@ def _asset_point_out(dto: Any) -> AssetPointOut:
         daily_return_pct=None if blocked else _pct_2dp(dto.daily_return_units),
         status=dto.status,
         status_reason=dto.status_reason,
+        remark=dto.remark,
     )
 
 

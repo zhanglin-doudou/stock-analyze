@@ -64,6 +64,9 @@ class Settings(BaseSettings):
     market_live_adjust: Literal[""] = Field("", alias="MARKET_LIVE_ADJUST")
     market_live_timeout_seconds: float = Field(10.0, alias="MARKET_LIVE_TIMEOUT_SECONDS")
     market_live_cache_enabled: bool = Field(True, alias="MARKET_LIVE_CACHE_ENABLED")
+    # 默认只读本地 market.daily_bar：读路径绝不触发第三方行情；收盘后用
+    # `make sync-market` 显式补缺口/当日。调试可设 false 恢复旧 read-through。
+    market_live_cache_read_only: bool = Field(True, alias="MARKET_LIVE_CACHE_READ_ONLY")
     market_live_cache_ttl_days: int = Field(30, alias="MARKET_LIVE_CACHE_TTL_DAYS")
     market_live_negative_ttl_days: int = Field(1, alias="MARKET_LIVE_NEGATIVE_TTL_DAYS")
     market_live_tail_refetch_days: int = Field(5, alias="MARKET_LIVE_TAIL_REFETCH_DAYS")

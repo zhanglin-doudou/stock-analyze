@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import {
@@ -44,6 +44,9 @@ function makeDashboard(overrides: Partial<DashboardOut> = {}): DashboardOut {
     as_of: "2026-07-01",
     data_as_of: "2026-09-30",
     legacy_period: "2026-06",
+    metrics_period: "2026",
+    metrics_period_start: "2026-01-01",
+    metrics_period_end: "2026-07-01",
     status: "ok",
     build_state: "current",
     definition_version: "1.0",
@@ -69,16 +72,22 @@ function makeDashboard(overrides: Partial<DashboardOut> = {}): DashboardOut {
       total_assets: "100620.00",
       position_pct: "169.57%",
       total_profit: "620.00",
-      max_invested_cost: "170000.00",
-      max_cost_return_pct: "0.36%",
+      max_invested_cost: "100000.00",
+      max_cost_return_pct: "0.62%",
       total_fees: "0.00",
+      bill_start_date: "2026-04-01",
+      bill_end_date: "2026-06-30",
+      initial_capital: "100000.00",
+      initial_capital_display: "100,000.00",
+      annualized_return: "0.01234567",
+      annualized_return_pct: "1.23%",
       market_value_display: "170,620.00",
       cash_display: "-70,000.00",
       money_fund_display: "20,000.00",
       balance_display: "-50,000.00",
       total_assets_display: "100,620.00",
       total_profit_display: "620.00",
-      max_invested_cost_display: "170,000.00",
+      max_invested_cost_display: "100,000.00",
       total_fees_display: "0.00",
     },
     history_overview: {
@@ -94,10 +103,51 @@ function makeDashboard(overrides: Partial<DashboardOut> = {}): DashboardOut {
       max_profit: "2000.00",
       max_profit_display: "2,000.00",
       max_profit_round: makeRound(),
-      max_profit_cost_pct: "1.18%",
+      max_profit_cost_pct: "2.00%",
       top_rounds: [
         makeRound(),
         makeRound({ round_id: "rnd_000001", security_code: "000001", security_name: "平安银行", pnl: "1000.00" }),
+      ],
+      top_holding_rounds: [
+        makeRound({ round_id: "rnd_600519", holding_days: 120 }),
+        makeRound({
+          round_id: "rnd_000001",
+          security_code: "000001",
+          security_name: "平安银行",
+          holding_days: 90,
+        }),
+        makeRound({
+          round_id: "rnd_000858",
+          security_code: "000858",
+          security_name: "五粮液",
+          holding_days: 60,
+          pnl: "-500.00",
+          return_rate_pct: "-5.00%",
+        }),
+      ],
+      top_trade_counts: [
+        {
+          security_code: "600519",
+          security_name: "贵州茅台",
+          buy_count: 4,
+          sell_count: 3,
+          trade_count: 7,
+          pnl: "2000.00",
+          pnl_display: "2,000.00",
+          total_fees: "56.78",
+          total_fees_display: "56.78",
+        },
+        {
+          security_code: "000001",
+          security_name: "平安银行",
+          buy_count: 2,
+          sell_count: 2,
+          trade_count: 4,
+          pnl: "1000.00",
+          pnl_display: "1,000.00",
+          total_fees: "12.00",
+          total_fees_display: "12.00",
+        },
       ],
       bottom_rounds: [
         makeRound({
@@ -159,6 +209,12 @@ function missingDashboard(): DashboardOut {
       max_invested_cost: null,
       max_cost_return_pct: null,
       total_fees: null,
+      bill_start_date: null,
+      bill_end_date: null,
+      initial_capital: null,
+      initial_capital_display: null,
+      annualized_return: null,
+      annualized_return_pct: null,
     },
     history_overview: {
       status: "missing",
@@ -174,6 +230,8 @@ function missingDashboard(): DashboardOut {
       max_profit_round: null,
       max_profit_cost_pct: null,
       top_rounds: [],
+      top_holding_rounds: [],
+      top_trade_counts: [],
       bottom_rounds: [],
       max_drawdown: {
         from_date: null,
@@ -201,7 +259,7 @@ function missingDashboard(): DashboardOut {
 
 function makeMetricBatch(): MetricBatch {
   return {
-    period: "2026-06",
+    period: "2026",
     definition_version: "1.0",
     data_as_of: "2026-06-30",
     assumptions: {},
@@ -210,7 +268,7 @@ function makeMetricBatch(): MetricBatch {
         metric_id: "perf.total_return",
         definition_version: "1.0",
         domain: "perf",
-        period: "2026-06",
+        period: "2026",
         status: "ok",
         sample_status: "ok",
         reason: null,
@@ -303,36 +361,54 @@ describe("Dashboard 看板", () => {
     expect(screen.getByTestId("kpi-market-value").textContent).toContain("170,620.00");
     expect(screen.getByTestId("kpi-position").textContent).toContain("169.57%");
     expect(screen.getByTestId("kpi-total-profit").textContent).toContain("620.00");
-    expect(screen.getByTestId("kpi-max-cost-return").textContent).toContain("0.36%");
+    expect(screen.getByTestId("kpi-max-cost-return").textContent).toContain("0.62%");
     expect(screen.getByTestId("kpi-closed-securities").textContent).toContain("3");
     expect(screen.getByTestId("kpi-win-count").textContent).toContain("2");
     expect(screen.getByTestId("kpi-win-pct").textContent).toContain("66.67%");
     expect(screen.getByTestId("kpi-max-profit").textContent).toContain("2,000.00");
-    expect(screen.getByTestId("kpi-max-profit-cost").textContent).toContain("1.18%");
+    expect(screen.getByTestId("kpi-max-profit-cost").textContent).toContain("2.00%");
     expect(screen.getByTestId("kpi-max-drawdown").textContent).toContain("0.00%");
     expect(screen.getByTestId("kpi-max-drawdown").textContent).toContain("92");
 
     expect(screen.getByTestId("holding-row-600519").textContent).toContain("贵州茅台");
     expect(screen.getByTestId("holding-row-600519").textContent).toContain("100.0000");
-    expect(screen.getByTestId("max-profit-round")).toBeTruthy();
     expect(screen.getByTestId("top-round-rnd_600519")).toBeTruthy();
     expect(screen.getByTestId("bottom-round-rnd_000858")).toBeTruthy();
+
+    // 持仓时长 Top3 / 交易次数 Top3（两列布局）
+    expect(screen.getByTestId("top-holding-duration")).toBeTruthy();
+    expect(screen.getByTestId("top-trade-count")).toBeTruthy();
+    expect(screen.getByTestId("top-holding-rnd_600519").textContent).toContain("持有 120 天");
+    expect(screen.getByTestId("top-holding-rnd_000001").textContent).toContain("持有 90 天");
+    expect(screen.getByTestId("top-trade-600519").textContent).toContain("7 笔");
+    expect(screen.getByTestId("top-trade-000001").textContent).toContain("4 笔");
+    expect(screen.getByTestId("top-trade-600519").textContent).toContain("买 4");
+    expect(screen.getByTestId("top-trade-600519").textContent).toContain("卖 3");
+    expect(screen.getByTestId("top-trade-600519").textContent).toContain("2,000.00");
+    expect(screen.getByTestId("top-trade-600519").textContent).toContain("56.78");
+
+    // 总资产下方：账单起止时间 + 初始资金
+    expect(screen.getByTestId("kpi-bill-range").textContent).toContain("2026-04-01");
+    expect(screen.getByTestId("kpi-bill-range").textContent).toContain("2026-06-30");
+    expect(screen.getByTestId("kpi-initial-capital").textContent).toContain("100,000.00");
+    expect(screen.getByTestId("kpi-annualized-return").textContent).toContain("1.23%");
 
     expect(screen.getByTestId("dashboard-meta").textContent).toContain("最新");
     expect(screen.getByTestId("dashboard-meta").textContent).toContain("正常");
     expect(screen.getByTestId("dashboard-meta").textContent).toContain("2026-09-30");
+    expect(screen.getByTestId("market-data-notice").textContent).toContain("收盘后同步");
 
     expect(screen.getByTestId("link-reports").getAttribute("href")).toBe("/reports");
     expect(screen.getByTestId("link-exports").getAttribute("href")).toBe("/exports");
     expect(screen.getByTestId("link-attribution").getAttribute("href")).toBe(
       "/attribution?period=2026-06",
     );
-    expect(screen.getByTestId("link-legacy-metrics").getAttribute("href")).toBe(
-      "/metrics?period=2026-06",
+    expect(screen.getByTestId("link-annual-metrics").getAttribute("href")).toBe(
+      "/metrics?period=2026",
     );
 
-    // 旧五卡按需加载：进入页面不触发 metrics 请求。
-    expect(batchMetrics).not.toHaveBeenCalled();
+    // 年度指标自动加载（metrics_period = 今年），无需手动点击。
+    await waitFor(() => expect(batchMetrics).toHaveBeenCalledWith({ period: "2026" }));
     expect(screen.queryByTestId("missing-list")).toBeNull();
   });
 
@@ -346,6 +422,9 @@ describe("Dashboard 看板", () => {
     expect(screen.getByTestId("kpi-market-value").textContent).not.toContain("0.00");
     expect(screen.getByTestId("kpi-total-profit").textContent).toContain("—");
     expect(screen.getByTestId("kpi-win-pct").textContent).toContain("—");
+    expect(screen.getByTestId("kpi-bill-range").textContent).toContain("—");
+    expect(screen.getByTestId("kpi-initial-capital").textContent).toContain("—");
+    expect(screen.getByTestId("kpi-annualized-return").textContent).toContain("—");
     expect(screen.getByText(/没有持仓/)).toBeTruthy();
 
     expect(screen.getByTestId("dashboard-meta").textContent).toContain("未构建");
@@ -358,17 +437,15 @@ describe("Dashboard 看板", () => {
     expect(screen.getByTestId("kpi-max-drawdown").textContent).toContain("阻断");
   });
 
-  it("FT-03 旧五卡按需加载：点击后用 legacy_period 请求并原样展示 value", async () => {
+  it("FT-03 年度指标自动加载：用 metrics_period 请求并原样展示 value", async () => {
     renderPage();
     await screen.findByTestId("asset-overview");
 
-    fireEvent.click(screen.getByRole("button", { name: "加载月度指标" }));
-
-    await waitFor(() => expect(batchMetrics).toHaveBeenCalledWith({ period: "2026-06" }));
+    await waitFor(() => expect(batchMetrics).toHaveBeenCalledWith({ period: "2026" }));
     expect(await screen.findByText("perf.total_return")).toBeTruthy();
-    const legacy = screen.getByTestId("legacy-metrics");
-    expect(legacy.textContent).toContain("12.34");
-    expect(legacy.textContent).toContain("元");
+    const annual = screen.getByTestId("annual-metrics");
+    expect(annual.textContent).toContain("12.34");
+    expect(annual.textContent).toContain("元");
   });
 
   it("FT-04 零口径：源码不含 Number/parseFloat/parseInt/toFixed", () => {

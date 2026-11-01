@@ -120,6 +120,7 @@ export type DashboardAssetOverviewOut = ApiSchemas["DashboardAssetOverviewOut"];
 export type DashboardHistoryOverviewOut = ApiSchemas["DashboardHistoryOverviewOut"];
 export type DashboardHoldingOut = ApiSchemas["DashboardHoldingOut"];
 export type DashboardRoundOut = ApiSchemas["DashboardRoundOut"];
+export type DashboardTradeCountOut = ApiSchemas["DashboardTradeCountOut"];
 export type DashboardMaxDrawdownOut = ApiSchemas["DashboardMaxDrawdownOut"];
 export type DashboardMissingOut = ApiSchemas["DashboardMissingOut"];
 
@@ -244,6 +245,13 @@ export type AssetBuildLastStatus = NonNullable<AssetBuildState["last_status"]>;
 /** API-082 请求体：`{"mode": "auto" | "full"}`，默认 auto。 */
 export type AssetBuildBody = AssetBuildIn;
 
+/** 指标呈现层（P0-3，additive；后端已渲染，前端只展示）。 */
+export type MetricPresentation = ApiSchemas["MetricPresentationOut"];
+export type MetricConfidence = MetricPresentation["confidence"];
+export type MetricProgress = NonNullable<MetricPresentation["progress"]>;
+export type MetricVerdict = MetricPresentation["verdict"];
+export type MetricInterpretation = MetricPresentation["interpretation"];
+
 /** Period2-05/07：指标批量查询响应（API-033）与单个指标结果。
  * `value`/`ci_*` 为后端定点字符串，前端只展示不计算。
  *
@@ -270,6 +278,8 @@ export interface MetricItem {
   ci_low?: string | null;
   ci_high?: string | null;
   data_as_of: string;
+  /** P0-3 呈现层；旧后端可为 null。 */
+  presentation?: MetricPresentation | null;
 }
 
 /** `MetricBatchOut.items` 的元素类型同上（generated 的 items 随 MetricItemOut 一起退化）。 */
@@ -288,6 +298,9 @@ export type MetricExplain = MetricExplainOut;
 export type MetricExplainSampleInfo = MetricExplainOut["sample"];
 export type MetricDrilldown = MetricDrilldownOut;
 export type MetricDrilldownItem = NonNullable<MetricDrilldownOut["items"]>[number];
+/** API-086：18 个指标口径说明书。 */
+export type MetricCatalog = ApiSchemas["MetricCatalogOut"];
+export type MetricCatalogItem = NonNullable<MetricCatalog["items"]>[number];
 
 // ── 编译期断言：后端契约变化必须在这里/typecheck 里炸出来 ─────────────────
 

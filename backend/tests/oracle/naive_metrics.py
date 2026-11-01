@@ -460,29 +460,34 @@ def fee_breakeven(ctx: Any) -> OracleResult:
 
     natural_days = (ctx.period_end - ctx.period_start).days + 1
     annualized_fee = round_units(Fraction(totals["fee_amount"] * 365, natural_days), 0)
-    avg_holding_mv = _mean_int([item.market_value_units for item in rows])
+    avg_total_assets = _mean_int([item.total_assets_units for item in rows])
     returns = tuple(item.daily_return_units for item in rows if item.daily_return_units is not None)
     twr = compound_return_units(returns) if returns else None
     span_days = (rows[-1].trade_date - rows[0].trade_date).days
     annualized_twr = annualize_units(twr, span_days) if twr is not None else None
-    avg_total = _mean_int([item.total_assets_units for item in rows])
+    annualized_fee_ratio = (
+        round_units(Fraction(annualized_fee, avg_total_assets), RATIO_SCALE)
+        if avg_total_assets > 0
+        else None
+    )
 
     twr_eaten: int | None = None
     if annualized_twr is not None and twr is not None and twr > 0:
-        twr_amount = round_units(Fraction(avg_total * annualized_twr, 10**RATIO_SCALE), 0)
+        twr_amount = round_units(Fraction(avg_total_assets * annualized_twr, 10**RATIO_SCALE), 0)
         denominator = abs(twr_amount) + annualized_fee
         if denominator > 0:
             twr_eaten = round_units(Fraction(annualized_fee, denominator), RATIO_SCALE)
 
     decomposition.update(
+        avg_total_assets=avg_total_assets,
         annualized_fee=annualized_fee,
-        avg_holding_mv=avg_holding_mv,
+        annualized_fee_ratio=annualized_fee_ratio,
         twr=twr,
         annualized_twr=annualized_twr,
         twr_eaten_pct=twr_eaten,
         n_days=len(rows),
     )
-    value = Fraction(annualized_fee, avg_holding_mv) if avg_holding_mv > 0 else None
+    value = Fraction(totals["fee_amount"], avg_total_assets) if avg_total_assets > 0 else None
     return OracleResult(value, len(rows), decomposition)
 
 

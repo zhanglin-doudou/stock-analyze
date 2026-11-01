@@ -27,6 +27,7 @@ help:
 	@echo "── 数据 ──────────────────────────────────────────────"
 	@echo "  make seed-tenants   造体验账号(1234@dev.com)+A/B/admin 与账单"
 	@echo "  make seed-demo      造体验账号 + 演示数据（含行情回放）"
+	@echo "  make sync-market    收盘后同步本地行情缓存（读路径不再联网）"
 	@echo "── 质量 ──────────────────────────────────────────────"
 	@echo "  make lint           ruff + eslint + frontend tsc"
 	@echo "  make typecheck      mypy + tsc + import-linter"
@@ -111,6 +112,10 @@ seed-tenants:
 .PHONY: seed-demo
 seed-demo:
 	@$(PY) -m stock_api.cli seed-demo
+
+.PHONY: sync-market
+sync-market:
+	@$(PY) -m stock_api.cli sync-market
 
 # ── 质量 ────────────────────────────────────────────────────
 .PHONY: lint

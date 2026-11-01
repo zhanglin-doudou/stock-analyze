@@ -36,7 +36,7 @@ from typing import Any
 from sqlalchemy import and_, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
-from stock_contracts.clock import Clock
+from stock_contracts.clock import SHANGHAI, Clock
 from stock_contracts.constants import SCALE_PRICE, SCALE_RATIO
 from stock_contracts.errors import ApiError, ErrorCode
 
@@ -758,11 +758,147 @@ class CachedMarketDataSource:
             raise ApiError(ErrorCode.VALIDATION_ERROR, detail=f"start({start}) 不能晚于 end({end})")
         if start > self._clock.today():
             return ()
+        # 默认只读本地缓存：读路径不触发任何第三方请求。行情由收盘后
+        # `make sync-market` 显式同步（见 sync_daily_bars）。
+        if self._settings.market_live_cache_read_only:
+            return await self.get_cached_bars(wanted, start, end)
         collected: list[Bar] = []
         # 逐标的处理：每个标的的缺口判定/拉取/写入都是独立短事务（不持有 nav 外层事务）。
         for symbol in wanted:
             collected.extend(await self._symbol_bars(symbol, start, end))
         return tuple(sorted(collected, key=lambda bar: (bar.trade_date, bar.symbol)))
+
+    async def sync_daily_bars(
+        self, symbols: Sequence[str], start: date, end: date
+    ) -> tuple[int, tuple[str, ...]]:
+        """收盘后显式把本地缺口补到 ``end``；返回 (可读 bar 数, 失败标的)。
+
+        - 只补 `market.daily_bar` 缺失区间，已有数据不重复请求第三方；
+        - 盘中（东八区 16:30 前）不拉当天，``end`` 最多截到昨天；
+        - 失败标的记录后继续，避免一颗坏代码阻断整批同步。
+        """
+        wanted = validate_symbols(symbols)
+        if start > end:
+            raise ApiError(ErrorCode.VALIDATION_ERROR, detail=f"start({start}) 不能晚于 end({end})")
+        today = self._clock.today()
+        now = self._clock.now().astimezone(SHANGHAI)
+        effective_end = min(end, today)
+        if (now.hour, now.minute) < (16, 30) and effective_end >= today:
+            effective_end = today - timedelta(days=1)
+        # 18:00 后上游日线已基本定型：空结果可覆盖当天，避免同一晚重复请求；
+        # 16:30~18:00 之间仍留当天缺口，给晚发布留重试机会。
+        final_ready = (now.hour, now.minute) >= (18, 0)
+        if effective_end < start:
+            return 0, ()
+        failed: list[str] = []
+        for symbol in wanted:
+            ranges = await self._load_ranges(symbol, include_stale=True)
+            # today=effective_end+1 让 plan_fetch 不再把尾段当缺口：本地已覆盖就不请求。
+            gaps = plan_fetch(
+                ranges,
+                start=start,
+                end=effective_end,
+                today=effective_end + timedelta(days=1),
+                tail_refetch_days=0,
+            )
+            if not gaps:
+                continue
+            fetch_start, fetch_end = gaps[0][0], gaps[-1][1]
+            try:
+                fetched = await self._inner.get_daily_bars([symbol], fetch_start, fetch_end)
+            except ApiError as exc:
+                failed.append(symbol)
+                log.warning(
+                    "market.sync",
+                    symbol=symbol,
+                    start=fetch_start.isoformat(),
+                    end=fetch_end.isoformat(),
+                    result="failed",
+                    error=str(exc),
+                )
+                continue
+            rows = [(bar.trade_date, bar.close_units, bar.return_units) for bar in fetched]
+            data_end = rows[-1][0] if rows else None
+            if fetch_end >= today:
+                # 当天空结果/未发布：只覆盖到昨天，今天留缺口供下一次 sync 重试。
+                if data_end is None:
+                    if fetch_start < today:
+                        await self._store(
+                            symbol,
+                            fetch_start,
+                            today - timedelta(days=1),
+                            [],
+                            None,
+                            negative_covers_end=True,
+                        )
+                    if final_ready:
+                        await self._store(
+                            symbol,
+                            today,
+                            today,
+                            [],
+                            None,
+                            negative_covers_end=True,
+                        )
+                else:
+                    await self._store(
+                        symbol, fetch_start, fetch_end, rows, data_end, negative_covers_end=True
+                    )
+                    if data_end < today - timedelta(days=1):
+                        await self._store(
+                            symbol,
+                            data_end + timedelta(days=1),
+                            today - timedelta(days=1),
+                            [],
+                            None,
+                            negative_covers_end=True,
+                        )
+                    if final_ready and data_end < today:
+                        await self._store(
+                            symbol,
+                            today,
+                            today,
+                            [],
+                            None,
+                            negative_covers_end=True,
+                        )
+                log.info(
+                    "market.sync",
+                    symbol=symbol,
+                    start=fetch_start.isoformat(),
+                    end=fetch_end.isoformat(),
+                    bars=len(rows),
+                    result="current_day_gap_retained",
+                )
+                continue
+            await self._store(
+                symbol,
+                fetch_start,
+                fetch_end,
+                rows,
+                data_end,
+                negative_covers_end=True,
+            )
+            log.info(
+                "market.sync",
+                symbol=symbol,
+                start=fetch_start.isoformat(),
+                end=fetch_end.isoformat(),
+                bars=len(rows),
+                result="ok",
+            )
+        total = 0
+        latest: date | None = None
+        for symbol in wanted:
+            bars = await self._load_bars(symbol, start, effective_end)
+            total += len(bars)
+            if bars and (latest is None or bars[-1].trade_date > latest):
+                latest = bars[-1].trade_date
+        if latest is not None and (
+            self._last_known_as_of is None or latest > self._last_known_as_of
+        ):
+            self._last_known_as_of = latest
+        return total, tuple(failed)
 
     async def get_latest_quotes(self, symbols: Sequence[str]) -> Sequence[Quote]:
         wanted = validate_symbols(symbols)
@@ -786,12 +922,14 @@ class CachedMarketDataSource:
         """
         wanted = validate_symbols(symbols)
         if start > end:
-            raise ApiError(
-                ErrorCode.VALIDATION_ERROR, detail=f"start({start}) 不能晚于 end({end})"
-            )
+            raise ApiError(ErrorCode.VALIDATION_ERROR, detail=f"start({start}) 不能晚于 end({end})")
         collected: list[Bar] = []
         for symbol in wanted:
             collected.extend(await self._load_bars(symbol, start, end))
+        if collected:
+            last_date = max(bar.trade_date for bar in collected)
+            if self._last_known_as_of is None or last_date > self._last_known_as_of:
+                self._last_known_as_of = last_date
         return tuple(sorted(collected, key=lambda bar: (bar.trade_date, bar.symbol)))
 
     # ── 内部 ────────────────────────────────────────────
@@ -851,19 +989,25 @@ class CachedMarketDataSource:
                 self._last_known_as_of = last_date
         return cached
 
-    async def _load_ranges(self, symbol: str) -> list[tuple[date, date]]:
+    async def _load_ranges(
+        self, symbol: str, *, include_stale: bool = False
+    ) -> list[tuple[date, date]]:
         now = self._clock.now()
         ttl_cutoff = now - timedelta(days=self._settings.market_live_cache_ttl_days)
         negative_cutoff = now - timedelta(days=self._settings.market_live_negative_ttl_days)
-        stmt = select(PullRange.range_start, PullRange.range_end).where(
+        conditions = [
             PullRange.symbol == symbol,
             PullRange.adjust == ADJUST,
             PullRange.adjust_version == ADJUST_VERSION,
-            or_(
-                and_(PullRange.bar_count > 0, PullRange.pulled_at >= ttl_cutoff),
-                and_(PullRange.bar_count == 0, PullRange.pulled_at >= negative_cutoff),
-            ),
-        )
+        ]
+        if not include_stale:
+            conditions.append(
+                or_(
+                    and_(PullRange.bar_count > 0, PullRange.pulled_at >= ttl_cutoff),
+                    and_(PullRange.bar_count == 0, PullRange.pulled_at >= negative_cutoff),
+                )
+            )
+        stmt = select(PullRange.range_start, PullRange.range_end).where(*conditions)
         async with self._session_factory(begin=True) as session:
             rows = (await session.execute(stmt)).all()
         return [(row[0], row[1]) for row in rows]
@@ -902,6 +1046,8 @@ class CachedMarketDataSource:
         requested_end: date,
         rows: Sequence[tuple[date, int, int]],
         data_end: date | None,
+        *,
+        negative_covers_end: bool = False,
     ) -> None:
         pulled_at = self._clock.now()
         today = self._clock.today()
@@ -911,6 +1057,10 @@ class CachedMarketDataSource:
         else:
             # 含未来日期：只覆盖到上游实际数据；尾部由 tail_refetch_days 兜底刷新。
             range_end = data_end if data_end is not None else today - timedelta(days=1)
+            # 已结束区间（周中补历史）空结果覆盖到请求上界；当天仍留缺口，
+            # 让上游晚发布时下一次 sync 能重试（不把“今天暂无数据”永久固化）。
+            if negative_covers_end and data_end is None and requested_end < today:
+                range_end = requested_end
         range_end = max(fetch_start, min(range_end, requested_end))
         complete = range_end >= requested_end
         checksum = _bar_checksum(rows)

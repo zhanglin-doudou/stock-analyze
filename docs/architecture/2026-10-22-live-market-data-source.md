@@ -3,6 +3,12 @@
 > 版本：v2（2026-10-23，按评审裁定修订）
 > 评审报告：[2026-10-23-DevDesign-Review-live-market-data-source.md](../reviews/2026-10-23-DevDesign-Review-live-market-data-source.md)
 > 人工裁定（2026-10-23）：D1=不复权估值；D2=不新增错误码、保持 degraded blocked 200；D3=区间并集覆盖 + 尾部刷新 + TTL；D4=接受推荐（范围限制 + MVP 偏离登记）。
+>
+> **2026-10-30 修订（读路径只读化）**：`MARKET_LIVE_CACHE_READ_ONLY=true`（默认）时，
+> `CachedMarketDataSource.get_daily_bars` 只读本地 `market.daily_bar`，**不触发任何第三方请求**；
+> 盘中不拉当天行情。行情更新改为收盘后显式 `make sync-market`（`sync_daily_bars`，只补本地
+> 缺失区间；东八区 16:30 前自动截到昨天，留出收盘数据发布窗口）。`MARKET_LIVE_CACHE_READ_ONLY=false` 保留旧
+> read-through（缺口/尾部即时拉取）仅用于调试。
 > 实施状态：**已实现**（2026-10-23），记录见 [Period2-live-market-data-source-Implementation-Log.md](../reviews/Period2-live-market-data-source-Implementation-Log.md)。
 
 ## Context
@@ -236,6 +242,7 @@ market_live_adjust: Literal[""] = Field("", alias="MARKET_LIVE_ADJUST")   # v1 �
 market_live_timeout_seconds: float = Field(10.0, alias="MARKET_LIVE_TIMEOUT_SECONDS")
 market_live_cache_enabled: bool = Field(True, alias="MARKET_LIVE_CACHE_ENABLED")
 market_live_cache_ttl_days: int = Field(30, alias="MARKET_LIVE_CACHE_TTL_DAYS")
+market_live_cache_read_only: bool = Field(True, alias="MARKET_LIVE_CACHE_READ_ONLY")
 market_live_negative_ttl_days: int = Field(1, alias="MARKET_LIVE_NEGATIVE_TTL_DAYS")
 market_live_tail_refetch_days: int = Field(5, alias="MARKET_LIVE_TAIL_REFETCH_DAYS")
 market_live_max_concurrency: int = Field(2, alias="MARKET_LIVE_MAX_CONCURRENCY")
@@ -246,7 +253,7 @@ market_live_retry_backoff_seconds: float = Field(1.5, alias="MARKET_LIVE_RETRY_B
 - `MARKET_MODE` 已有的 `Literal["replay", "live"]` 不动。
 - `market_live_source` 单值 Literal 是「本期仅 akshare」的显式声明；多源（Extensibility EP-2 的 `config/market.yaml` + 工厂字典）留后续期次。
 - 缓存开关默认开；关闭则 `CachedMarketDataSource` 不装配，退化为纯 akshare（调试用）。
-- 以上 **10 个**新变量需同步 `infra/.env.example`。
+- 以上 **11 个**新变量需同步 `infra/.env.example`。
 
 ### 8. 装配改造
 
