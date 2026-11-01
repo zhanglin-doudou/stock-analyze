@@ -92,9 +92,8 @@ class Settings(BaseSettings):
     sector_benchmark_max_age_days: int = Field(45, alias="SECTOR_BENCHMARK_MAX_AGE_DAYS")
     sector_industry_stale_days: int = Field(35, alias="SECTOR_INDUSTRY_STALE_DAYS")
     sector_concept_stale_days: int = Field(7, alias="SECTOR_CONCEPT_STALE_DAYS")
-    sector_sw_call_interval_seconds: float = Field(0.4, alias="SECTOR_SW_CALL_INTERVAL_SECONDS")
-    sector_em_page_interval_seconds: float = Field(0.8, alias="SECTOR_EM_PAGE_INTERVAL_SECONDS")
     sector_ths_call_interval_seconds: float = Field(0.6, alias="SECTOR_THS_CALL_INTERVAL_SECONDS")
+    sector_ths_page_interval_seconds: float = Field(0.6, alias="SECTOR_THS_PAGE_INTERVAL_SECONDS")
     sector_sync_retry_attempts: int = Field(3, alias="SECTOR_SYNC_RETRY_ATTEMPTS")
     sector_flat_active_units: int = Field(100_000, alias="SECTOR_FLAT_ACTIVE_UNITS")
 

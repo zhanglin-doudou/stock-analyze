@@ -28,7 +28,9 @@ help:
 	@echo "  make seed-tenants   造体验账号(1234@dev.com)+A/B/admin 与账单"
 	@echo "  make seed-demo      造体验账号 + 演示数据（含行情回放）"
 	@echo "  make sync-market    收盘后同步本地行情缓存（读路径不再联网）"
-	@echo "  make sync-sectors   同步板块公共数据（仅 SECTOR_MODE=live；ARGS='--dry-run'）"
+	@echo "  make sync-sectors           同步板块公共数据（仅 SECTOR_MODE=live；ARGS='--dry-run'）"
+	@echo "  make sync-sector-industry   只同步行业板块（同花顺）"
+	@echo "  make sync-sector-concept    只同步概念板块（同花顺）"
 	@echo "── 质量 ──────────────────────────────────────────────"
 	@echo "  make lint           ruff + eslint + frontend tsc"
 	@echo "  make typecheck      mypy + tsc + import-linter"
@@ -121,6 +123,14 @@ sync-market:
 .PHONY: sync-sectors
 sync-sectors:
 	@$(PY) -m stock_api.cli sync-sectors $(ARGS)
+
+.PHONY: sync-sector-industry
+sync-sector-industry:
+	@$(PY) -m stock_api.cli sync-sector-industry $(ARGS)
+
+.PHONY: sync-sector-concept
+sync-sector-concept:
+	@$(PY) -m stock_api.cli sync-sector-concept $(ARGS)
 
 # ── 质量 ────────────────────────────────────────────────────
 .PHONY: lint

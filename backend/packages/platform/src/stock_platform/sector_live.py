@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import time
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import date
@@ -20,6 +21,7 @@ from typing import Any
 
 import requests
 from bs4 import BeautifulSoup
+from sqlalchemy import select
 from stock_contracts.clock import Clock
 from stock_core.sector import SectorNode, resolve_level
 from stock_core.values import Ratio
@@ -321,11 +323,17 @@ class AkshareSectorSource:
     def _ths_board_members(self, code: str, taxonomy: str) -> tuple[tuple[str, str], ...]:
         """抓取同花顺板块详情页成分股（同步，由 ``_call`` 放入线程池并限流）。
 
-        表格首列为 ``代码``，必须用 BeautifulSoup 取 ``.text``（pandas ``read_html``
-        会把 ``003032`` 转成 int 丢前导零）。分页靠 ``Referer`` 头，翻到 0 行即停。
+        概念详情页首屏通常有**两张表**：第 1 张是「概念解析」产业链/子行业，
+        第 2 张才是成分股表（含 ``代码`` 列）。因此必须遍历所有表找带 ``代码`` 表头的
+        那张，不能只取第一张。单元格一律用 BeautifulSoup 取 ``.text``
+        （pandas ``read_html`` 会把 ``003032`` 转 int 丢前导零）。
+        分页靠 ``Referer`` 头，翻到无成分行即停。
         """
         members: list[tuple[str, str]] = []
+        page_interval = self._settings.sector_ths_page_interval_seconds
         for page in range(1, self._THS_MAX_PAGES + 1):
+            if page > 1 and page_interval > 0:
+                time.sleep(page_interval)
             url = self._ths_board_url(code, taxonomy, page)
             headers = {"User-Agent": self._THS_USER_AGENT, "Referer": url}
             resp = requests.get(
@@ -333,31 +341,49 @@ class AkshareSectorSource:
             )
             resp.raise_for_status()
             soup = BeautifulSoup(resp.text, "html.parser")
-            table = soup.find("table")
-            if table is None:
+            tables = soup.find_all("table")
+            parsed = self._ths_parse_member_table(tables) if tables else None
+            if parsed is None:
+                if page == 1:
+                    # 首屏拿不到成分表：多为同花顺限流/反爬（返回无表格的拦截页），
+                    # 或页面结构变更。必须显式失败，不能静默产出空成分。
+                    raise SectorValidationError(
+                        f"同花顺板块 {code} 详情页无成分表（可能被限流或页面结构变更，"
+                        f"响应 {len(resp.text)} 字节）"
+                    )
                 break
+            page_count = 0
+            for symbol in parsed:
+                members.append((code, symbol))
+                page_count += 1
+            if page_count == 0:
+                break
+        return tuple(members)
+
+    @staticmethod
+    def _ths_parse_member_table(tables: Any) -> list[str] | None:
+        """在多张表中找出含「代码」表头的成分表，返回归一后的股票代码。
+
+        没有匹配表时返回 ``None``（由调用方区分「无成分表」与「本页无成分」）。
+        """
+        for table in tables:
             rows = table.find_all("tr")
             if len(rows) <= 1:
-                break
-            header = [th.get_text(strip=True) for th in rows[0].find_all(["th", "td"])]
-            try:
-                code_idx = header.index("代码")
-            except ValueError as exc:
-                raise SectorValidationError(
-                    f"同花顺板块 {code} 详情页表头缺少「代码」列: {header}"
-                ) from exc
-            page_count = 0
+                continue
+            header = [cell.get_text(strip=True) for cell in rows[0].find_all(["th", "td"])]
+            if "代码" not in header:
+                continue
+            code_idx = header.index("代码")
+            symbols: list[str] = []
             for tr in rows[1:]:
                 cells = [td.get_text(strip=True) for td in tr.find_all("td")]
                 if len(cells) <= code_idx:
                     continue
                 symbol = _norm_symbol(cells[code_idx])
                 if symbol is not None:
-                    members.append((code, symbol))
-                    page_count += 1
-            if page_count == 0:
-                break
-        return tuple(members)
+                    symbols.append(symbol)
+            return symbols
+        return None
 
     # ── 目录 ────────────────────────────────────────────
     async def _fetch_industry_catalog(self) -> tuple[SectorInfo, ...]:
@@ -385,8 +411,14 @@ class AkshareSectorSource:
         self, catalog: tuple[SectorInfo, ...]
     ) -> tuple[tuple[str, str], ...]:
         interval = self._settings.sector_ths_call_interval_seconds
+        total = len(catalog)
+        log.info(
+            "industry member fetch start",
+            source=SOURCE_THS,
+            total=total,
+        )
         members: list[tuple[str, str]] = []
-        for row in catalog:
+        for index, row in enumerate(catalog, start=1):
             rows = await self._call(
                 self._ths_board_members,
                 row.sector_code,
@@ -394,8 +426,26 @@ class AkshareSectorSource:
                 interval=interval,
             )
             members.extend(rows)
+            if index % 20 == 0 or index == total:
+                log.info(
+                    "industry member fetch progress",
+                    source=SOURCE_THS,
+                    done=index,
+                    total=total,
+                    members=len(members),
+                )
         # 行业成员互斥（同花顺行业也应一只股票只属一个行业）。
         validate_unique_industry(members)
+        # 全部行业板块成分数为 0 → 上游异常；同上保护旧快照不被空数据覆盖。
+        if not members:
+            raise SectorValidationError(
+                f"全部 {total} 个行业板块未拉到任何成分，保留旧快照不写入空数据"
+            )
+        log.info(
+            "industry member fetch done",
+            source=SOURCE_THS,
+            members=len(members),
+        )
         return tuple(members)
 
     # ── 概念板块（同花顺 THS）────────────────────────────
@@ -423,9 +473,15 @@ class AkshareSectorSource:
         self, catalog: tuple[SectorInfo, ...]
     ) -> tuple[tuple[str, str], ...]:
         interval = self._settings.sector_ths_call_interval_seconds
+        total = len(catalog)
+        log.info(
+            "concept member fetch start",
+            source=SOURCE_THS,
+            total=total,
+        )
         members: list[tuple[str, str]] = []
         skipped: list[str] = []
-        for row in catalog:
+        for index, row in enumerate(catalog, start=1):
             try:
                 rows = await self._call(
                     self._ths_board_members,
@@ -445,12 +501,27 @@ class AkshareSectorSource:
                 )
                 continue
             members.extend(rows)
-        if skipped:
-            log.info(
-                "concept member fetch partial",
-                source=SOURCE_THS,
-                ok=len(catalog) - len(skipped),
-                skipped=len(skipped),
+            if index % 10 == 0 or index == total:
+                log.info(
+                    "concept member fetch progress",
+                    source=SOURCE_THS,
+                    done=index,
+                    total=total,
+                    members=len(members),
+                    skipped=len(skipped),
+                )
+        log.info(
+            "concept member fetch done",
+            source=SOURCE_THS,
+            ok=total - len(skipped),
+            skipped=len(skipped),
+            members=len(members),
+        )
+        # 全部板块拉取失败 → 上游整体不可用（限流/网络）；此时若以空 members 落库会把
+        # 已有概念成分全部 close，造成不可逆的数据丢失。直接抛错让整批回滚，保留旧快照。
+        if skipped and len(skipped) == total:
+            raise SectorValidationError(
+                f"全部 {total} 个概念板块成分拉取失败，保留旧快照不写入空数据"
             )
         return tuple(members)
 
@@ -542,25 +613,24 @@ class AkshareSectorSource:
         dry_run: bool = False,
         taxonomies: Sequence[str] | None = None,
     ) -> SyncReport:
+        wanted = _wanted_taxonomies(taxonomies)
         if dry_run:
             async with self._session_factory(begin=True) as session:
                 await SectorRepository(session).list_catalog()
-            wanted = ",".join(taxonomies) if taxonomies else "industry,concept"
             return SyncReport(
                 as_of=today,
                 status="skipped",
                 message=(
-                    f"dry-run: 配置/DB 可用；数据集={wanted}；目标 as_of={today.isoformat()}；"
-                    "不联网、不写库"
+                    f"dry-run: 配置/DB 可用；数据集="
+                    f"{','.join(_taxonomy_label(t) for t in wanted)}；"
+                    f"目标 as_of={today.isoformat()}；不联网、不写库"
                 ),
             )
         try:
-            snapshot = await self._build_snapshot()
+            snapshot = await self._build_snapshot(wanted)
         except (SectorValidationError, RuntimeError) as exc:
             await self._record_failure(today=today, detail=str(exc))
             return SyncReport(as_of=today, status="failed", message=str(exc))
-        if taxonomies:
-            snapshot = _filter_taxonomies(snapshot, taxonomies)
 
         try:
             written = await self._persist(snapshot, today=today)
@@ -575,18 +645,25 @@ class AkshareSectorSource:
             message=snapshot.checksum if written else "checksum unchanged（no-op）",
         )
 
-    async def _build_snapshot(self) -> _Snapshot:
-        industry = await self._fetch_industry_catalog()
-        concepts = await self._fetch_concept_catalog()
-        catalog = industry + concepts
-        # 同花顺行业为扁平 L1（非申万 L1/L2/L3 树），只校验 level=1。
-        validate_catalog(industry, level=1)
-        validate_catalog(concepts, level=0)
+    async def _build_snapshot(self, wanted: tuple[str, ...]) -> _Snapshot:
+        """按 `wanted` 只抓取需要的 taxonomy（行业/概念可分开同步，互不拖累）。"""
+        industry: tuple[SectorInfo, ...] = ()
+        concepts: tuple[SectorInfo, ...] = ()
+        if TAXONOMY_INDUSTRY in wanted:
+            industry = await self._fetch_industry_catalog()
+            # 同花顺行业为扁平 L1（非申万 L1/L2/L3 树），只校验 level=1。
+            validate_catalog(industry, level=1)
+        if TAXONOMY_CONCEPT in wanted:
+            concepts = await self._fetch_concept_catalog()
+            validate_catalog(concepts, level=0)
 
         members: dict[str, tuple[tuple[str, str], ...]] = {}
-        members[TAXONOMY_INDUSTRY] = await self._fetch_industry_members(industry)
-        members[TAXONOMY_CONCEPT] = await self._fetch_concept_members(concepts)
+        if industry:
+            members[TAXONOMY_INDUSTRY] = await self._fetch_industry_members(industry)
+        if concepts:
+            members[TAXONOMY_CONCEPT] = await self._fetch_concept_members(concepts)
 
+        catalog = industry + concepts
         benchmark = await self._fetch_benchmark()
         checksum = _snapshot_checksum(catalog, members, benchmark)
         return _Snapshot(
@@ -657,11 +734,28 @@ class AkshareSectorSource:
                     )
 
             weights = snapshot.benchmark_weights
-            await repo.close_benchmark_members(
-                benchmark_id=BENCHMARK_ID, keep=set(weights), effective_to=today
-            )
+            # 基准成分权重按日全量快照：关闭上一版 current 行，再写入当日新行。
+            # 关键：当日已存在 `effective_from=today` 的行（同日内重跑/分 taxonomy 多次同步）
+            # 必须跳过 insert，否则撞主键 `(benchmark_id, symbol, effective_from)`。
+            current_benchmark = (
+                await session.scalars(
+                    select(BenchmarkMember).where(
+                        BenchmarkMember.benchmark_id == BENCHMARK_ID,
+                        BenchmarkMember.effective_to.is_(None),
+                    )
+                )
+            ).all()
+            existing_today = {
+                bm_row.symbol for bm_row in current_benchmark if bm_row.effective_from == today
+            }
+            # 关闭「非今日」的 current 行（跨日重跑需要替换）以及已退出基准的 symbol。
+            for bm_row in current_benchmark:
+                if bm_row.effective_from < today or bm_row.symbol not in weights:
+                    bm_row.effective_to = today
             await session.flush()
             for symbol, units in weights.items():
+                if symbol in existing_today:
+                    continue
                 session.add(
                     BenchmarkMember(
                         benchmark_id=BENCHMARK_ID,
@@ -736,22 +830,35 @@ def _snapshot_checksum(
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-def _filter_taxonomies(snapshot: _Snapshot, taxonomies: Sequence[str]) -> _Snapshot:
-    """按 `--taxonomies` 裁剪快照（未知值直接报错，避免静默写错集合）。"""
-    wanted = set(taxonomies)
-    unknown = wanted - {TAXONOMY_INDUSTRY, TAXONOMY_CONCEPT}
-    if unknown:
-        raise SectorValidationError(f"未知 taxonomy: {', '.join(sorted(unknown))}")
-    catalog = tuple(row for row in snapshot.catalog if row.taxonomy in wanted)
-    members = {key: value for key, value in snapshot.members.items() if key in wanted}
-    checksum = _snapshot_checksum(catalog, members, snapshot.benchmark_weights)
-    return _Snapshot(
-        catalog=catalog,
-        members=members,
-        benchmark_weights=snapshot.benchmark_weights,
-        checksum=checksum,
-        concept_source=snapshot.concept_source,
-    )
+def _wanted_taxonomies(taxonomies: Sequence[str] | None) -> tuple[str, ...]:
+    """归一 `--taxonomies`：默认全部；未知值直接报错，避免静默写错集合。
+
+    CLI/运维习惯用短名 ``industry`` / ``concept``，DB taxonomy 是
+    ``industry_sw`` / ``concept_em``（沿用建表时的取值），两种写法都接受。
+    """
+    if not taxonomies:
+        return (TAXONOMY_INDUSTRY, TAXONOMY_CONCEPT)
+    aliases = {
+        "industry": TAXONOMY_INDUSTRY,
+        "concept": TAXONOMY_CONCEPT,
+        TAXONOMY_INDUSTRY: TAXONOMY_INDUSTRY,
+        TAXONOMY_CONCEPT: TAXONOMY_CONCEPT,
+    }
+    wanted: set[str] = set()
+    for item in taxonomies:
+        resolved = aliases.get(item)
+        if resolved is None:
+            raise SectorValidationError(f"未知 taxonomy: {item}（可用 industry / concept）")
+        wanted.add(resolved)
+    return tuple(t for t in (TAXONOMY_INDUSTRY, TAXONOMY_CONCEPT) if t in wanted)
+
+
+def _taxonomy_label(taxonomy: str) -> str:
+    """DB taxonomy → 运维短名（日志/报告用）。"""
+    return {
+        TAXONOMY_INDUSTRY: "industry",
+        TAXONOMY_CONCEPT: "concept",
+    }.get(taxonomy, taxonomy)
 
 
 __all__ = [

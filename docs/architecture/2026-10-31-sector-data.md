@@ -518,8 +518,8 @@ class SyncableSectorSource(Protocol):
 | `SECTOR_BENCHMARK_MAX_AGE_DAYS` | `45` | 基准权重最大可接受滞后天数 |
 | `SECTOR_INDUSTRY_STALE_DAYS` | `35` | 行业快照超过该天数 → `stale`（season 调整低频） |
 | `SECTOR_CONCEPT_STALE_DAYS` | `7` | 概念快照超过该天数 → `stale`（事件高频） |
-| `SECTOR_SW_CALL_INTERVAL_SECONDS` | `0.4` | 申万总览/成分调用间隔（单并发） |
-| `SECTOR_EM_PAGE_INTERVAL_SECONDS` | `0.8` | 东财分页间隔 |
+| `SECTOR_THS_CALL_INTERVAL_SECONDS` | `0.6` | 同花顺单板块调用间隔（单并发） |
+| `SECTOR_THS_PAGE_INTERVAL_SECONDS` | `0.6` | 同花顺详情页翻页间隔（分页有反爬限流） |
 | `SECTOR_SYNC_RETRY_ATTEMPTS` | `3` | 整批重试次数（指数退避） |
 | `SECTOR_FLAT_ACTIVE_UNITS` | `100_000` | `|Δ| ≤ 0.001`（scale=8）判平配 |
 
