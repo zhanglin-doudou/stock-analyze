@@ -422,6 +422,19 @@ async def build_sector_overview(
     sector_as_of: date | None = sector_data.as_of
     history_start = sector_data.capabilities.history_start
     classification_version = catalog[0].classification_version if catalog else ""
+    # 校验请求层级在目录中实际存在：THS 行业为扁平 L1，申万才有 L1/L2/L3。
+    # 若请求了目录不存在的层级，core 的 resolve_level 会抛 ValueError 变成 500，
+    # 这里提前给出 422（catalog 为空时交给 SECTOR_DATA_MISSING 处理）。
+    if taxonomy == TAXONOMY_INDUSTRY and catalog:
+        catalog_levels = {item.level for item in catalog}
+        if level not in catalog_levels:
+            raise ApiError(
+                ErrorCode.VALIDATION_ERROR,
+                detail=(
+                    f"行业分类当前仅支持 level {sorted(catalog_levels)}，"
+                    f"请求 level={level} 不存在"
+                ),
+            )
     dataset_version = (
         f"{classification_version.lower()}@{sector_as_of.isoformat()}"
         if classification_version and sector_as_of
@@ -759,11 +772,13 @@ async def _industry_overview(
     missing: list[SectorMissing] = []
     nodes = _nodes(catalog)
     names = _names(catalog)
-    assignments = {
+    # 全量成分→板块映射（含非持仓）：基准权重聚合必须覆盖全部基准成分，
+    # 否则非持仓基准板块会被丢弃，导致主动权重/偏离度失真（行业通用口径）。
+    all_assignments = {
         row.symbol: row.sector_code
         for row in await sector_data.get_memberships(db_taxonomy, as_of=snapshot, level=level)
-        if row.symbol in stock_mv
     }
+    assignments = {symbol: code for symbol, code in all_assignments.items() if symbol in stock_mv}
     mapped_mv = sum_by_sector(assignments, stock_mv)
     mapped_total = sum(mapped_mv.values())
     unclassified_symbols = sorted(set(stock_mv) - set(assignments))
@@ -807,7 +822,7 @@ async def _industry_overview(
     benchmark_weights: dict[str, int] = {}
     benchmark_as_of: date | None = None
     for row in await sector_data.get_benchmark_members(benchmark_id, as_of=snapshot):
-        code = assignments.get(row.symbol)
+        code = all_assignments.get(row.symbol)
         if code is None:
             continue
         benchmark_weights[code] = benchmark_weights.get(code, 0) + row.weight_units

@@ -254,6 +254,67 @@ async def test_industry_benchmark_stale_degrades_without_changing_numbers() -> N
     assert any(item.code == "SECTOR_BENCHMARK_WEIGHTS_STALE" for item in body.missing)
 
 
+async def test_industry_non_held_benchmark_sector_is_underweight() -> None:
+    """基准含非持仓成分时，该板块必须以 active<0 计入低配（行业通用口径）。
+
+    旧实现只把「持仓 ∩ 基准」的成分纳入基准权重并重新归一，会丢弃非持仓基准板块、
+    放大持仓板块基准权重，导致主动权重与偏离度失真。
+    """
+    catalog = (
+        _info("801030.SI", "基础化工"),
+        _info("801050.SI", "银行"),
+        _info("801150.SI", "医药生物"),
+    )
+    stock_mv = {
+        "600001": cents(50),
+        "600002": cents(30),
+        "600003": cents(10),
+    }
+    memberships = (
+        SectorMembership(_TAXONOMY, "801030.SI", "600001"),
+        SectorMembership(_TAXONOMY, "801030.SI", "600002"),
+        SectorMembership(_TAXONOMY, "801050.SI", "600003"),
+        SectorMembership(_TAXONOMY, "801150.SI", "600006"),  # 基准成分，非持仓
+    )
+    # 基准：化工 40% / 银行 30% / 医药 30%（600006 非持仓）
+    benchmark = (
+        BenchmarkMember("hs300", "600001", 20_000_000, _AS_OF),
+        BenchmarkMember("hs300", "600002", 20_000_000, _AS_OF),
+        BenchmarkMember("hs300", "600003", 30_000_000, _AS_OF),
+        BenchmarkMember("hs300", "600006", 30_000_000, _AS_OF),
+    )
+    body = await _industry(
+        sector_data=StubSectorData(catalog=catalog, memberships=memberships, benchmark=benchmark),
+        stock_mv=stock_mv,
+        equity_units=cents(90),
+        total_assets=cents(100),
+        holding_mv=cents(90),
+        non_stock_units=cents(10),
+        holding_count=3,
+    )
+
+    rows = {row.sector_code: row for row in body.sectors}
+    # 医药非持仓但在基准中 → 必须出现且为低配
+    assert "801150.SI" in rows
+    assert rows["801150.SI"].market_value_units == 0
+    assert rows["801150.SI"].benchmark_weight_units == 30_000_000
+    assert rows["801150.SI"].active_weight_units == -30_000_000
+    assert rows["801150.SI"].direction == "under"
+
+    # 化工：组合 80/90=88.8889% - 基准 40% = +48.8889%
+    assert rows["801030.SI"].benchmark_weight_units == 40_000_000
+    assert rows["801030.SI"].active_weight_units == 48_888_889
+    assert rows["801030.SI"].direction == "over"
+
+    # 银行：组合 10/90=11.1111% - 基准 30% = -18.8889%
+    assert rows["801050.SI"].active_weight_units == -18_888_889
+    assert rows["801050.SI"].direction == "under"
+
+    # 偏离度 D = Σ|Δ|/2 = (48.8889 + 18.8889 + 30) / 2 = 48.8889%
+    assert body.preference is not None
+    assert body.preference.deviation_units == 48_888_889
+
+
 async def test_industry_all_unmapped_is_insufficient() -> None:
     body = await _industry(
         sector_data=StubSectorData(catalog=_CATALOG, memberships=(), benchmark=_BENCHMARK)

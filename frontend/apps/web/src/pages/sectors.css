@@ -56,6 +56,18 @@
   border-top: 1px solid var(--line);
 }
 
+.sector-algo-hint {
+  margin: var(--s2) 0 var(--s3);
+  color: var(--faint);
+  font-size: var(--fs-micro);
+  line-height: 1.6;
+}
+
+.sector-algo-hint strong {
+  color: var(--text-2);
+  font-weight: 600;
+}
+
 .pref-bar {
   display: grid;
   grid-template-columns: minmax(90px, 1fr) 2fr auto;

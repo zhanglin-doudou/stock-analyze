@@ -1,7 +1,7 @@
 import { type ReactElement } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import type { SectorsOverview, SectorTaxonomy } from "@sa/api-client";
+import type { SectorsOverview, SectorCatalogPage, SectorTaxonomy } from "@sa/api-client";
 import { api } from "../client";
 import { ProblemView } from "../ui/Problem";
 import { CaveatBanner } from "../ui/Caveat";
@@ -36,25 +36,30 @@ function Kpi({
   label,
   value,
   testId,
+  hint,
 }: {
   label: string;
   value: string | null | undefined;
   testId: string;
+  hint?: string;
 }): ReactElement {
   return (
     <div className="dash-kpi" data-testid={testId}>
       <span className="dash-kpi-label">{label}</span>
       <strong className="num">{displayValue(value)}</strong>
+      {hint ? <span className="dash-kpi-hint">{hint}</span> : null}
     </div>
   );
 }
 
 function IndustryView({
   overview,
+  availableLevels,
   onLevel,
   onExpand,
 }: {
   overview: SectorsOverview;
+  availableLevels: number[];
   onLevel: (level: number) => void;
   onExpand: (code: string, level: number) => void;
 }): ReactElement {
@@ -72,7 +77,12 @@ function IndustryView({
     <div data-testid="sector-industry-view">
       <div className="dash-kpi-grid sector-kpis">
         <Kpi label="HHI" value={concentration.hhi} testId="sector-kpi-hhi" />
-        <Kpi label="有效板块数" value={concentration.effective_n} testId="sector-kpi-effective-n" />
+        <Kpi
+          label="有效板块数"
+          value={concentration.effective_n}
+          testId="sector-kpi-effective-n"
+          hint={`${concentration.n_sectors} 个持仓板块`}
+        />
         <Kpi label="Top1" value={concentration.top1_weight} testId="sector-kpi-top1" />
         <Kpi label="Top3" value={concentration.top3_weight} testId="sector-kpi-top3" />
         <Kpi
@@ -82,15 +92,22 @@ function IndustryView({
         />
       </div>
 
-      {benchmark && prefRows.length > 0 ? (
+      {benchmark ? (
         <div className="sector-pref" data-testid="sector-preference">
           <div className="dash-panel-head">
             <h2>偏好（超配 / 低配 TopN）</h2>
             <span className="dash-panel-meta">基准 {overview.benchmark_id}</span>
           </div>
-          {prefRows.map((row) => (
-            <PreferenceBar key={row.sector_code} row={row} />
-          ))}
+          <p className="sector-algo-hint" data-testid="sector-algo-hint">
+            主动权重 = 组合权重 − 基准权重；偏离度 = Σ|主动权重| / 2（总超配 = 总低配 ={" "}
+            <strong>{displayValue(preference?.deviation)}</strong>
+            ）。基准中组合未持有的板块以低配列示，不可省略。
+          </p>
+          {prefRows.length > 0 ? (
+            prefRows.map((row) => <PreferenceBar key={row.sector_code} row={row} />)
+          ) : (
+            <p className="dash-muted">无显著超配 / 低配板块。</p>
+          )}
         </div>
       ) : (
         <p className="dash-muted" data-testid="sector-preference-fallback">
@@ -100,15 +117,15 @@ function IndustryView({
 
       <div className="sector-toolbar">
         <span className="dash-kpi-label">层级</span>
-        {[1, 2, 3].map((level) => (
+        {availableLevels.map((lvl) => (
           <button
-            key={level}
+            key={lvl}
             type="button"
-            className={`sector-level${overview.level === level ? " is-active" : ""}`}
-            onClick={() => onLevel(level)}
-            aria-pressed={overview.level === level}
+            className={`sector-level${overview.level === lvl ? " is-active" : ""}`}
+            onClick={() => onLevel(lvl)}
+            aria-pressed={overview.level === lvl}
           >
-            L{level}
+            L{lvl}
           </button>
         ))}
       </div>
@@ -177,6 +194,21 @@ export function Sectors(): ReactElement {
       }),
     placeholderData: keepPreviousData,
   });
+
+  // 行业层级按目录实际存在的层级动态渲染（THS 扁平 L1；申万才有 L1/L2/L3），
+  // 避免展示不存在的层级导致 422。概念恒为 L0，无需查询。
+  const catalogQuery = useQuery<SectorCatalogPage>({
+    queryKey: ["sectors", "catalog", taxonomy],
+    queryFn: () => api.sectors.list({ taxonomy }),
+    enabled: taxonomy === "industry",
+    staleTime: 5 * 60 * 1000,
+  });
+  const industryLevels: number[] =
+    taxonomy === "industry"
+      ? Array.from(new Set((catalogQuery.data?.items ?? []).map((item) => item.level))).sort(
+          (a, b) => a - b
+        )
+      : [0];
 
   const update = (next: Record<string, string | undefined>): void => {
     const draft = new URLSearchParams(params);
@@ -284,6 +316,7 @@ export function Sectors(): ReactElement {
           {taxonomy === "industry" ? (
             <IndustryView
               overview={overview}
+              availableLevels={industryLevels}
               onLevel={(next) => update({ level: String(next), parent: undefined })}
               onExpand={(code, next) => update({ parent: code, level: String(next) })}
             />

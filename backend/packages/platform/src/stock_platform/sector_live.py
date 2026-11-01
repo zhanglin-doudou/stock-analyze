@@ -21,7 +21,7 @@ from typing import Any
 
 import requests
 from bs4 import BeautifulSoup
-from sqlalchemy import select
+from sqlalchemy import func, select
 from stock_contracts.clock import Clock
 from stock_core.sector import SectorNode, resolve_level
 from stock_core.values import Ratio
@@ -109,10 +109,27 @@ class CachedSectorSource:
         self._session_factory = session_factory
         self._clock = clock
         self._as_of: date | None = None
+        self._history_start: date | None = None
 
     @property
     def capabilities(self) -> SectorCapabilities:
-        return self._inner.capabilities
+        """合并 inner 能力与缓存实际历史下界（首次同步日）。
+
+        live 源的 ``AkshareSectorSource`` 无法预知首次同步日，故由缓存层从
+        ``MIN(sector_member.effective_from)`` 推导 ``history_start``，使
+        ``as_of < 首次同步日`` 时 fail-closed 走 ``SECTOR_HISTORY_NOT_COVERED``
+        （而非误导性的 ``SECTOR_MEMBERSHIP_MISSING``）。
+        """
+        inner_caps = self._inner.capabilities
+        return SectorCapabilities(
+            mode=inner_caps.mode,
+            taxonomies=inner_caps.taxonomies,
+            benchmark_ids=inner_caps.benchmark_ids,
+            supports_membership=inner_caps.supports_membership,
+            supports_board_bars=inner_caps.supports_board_bars,
+            supports_benchmark_weights=inner_caps.supports_benchmark_weights,
+            history_start=self._history_start or inner_caps.history_start,
+        )
 
     @property
     def as_of(self) -> date:
@@ -127,9 +144,12 @@ class CachedSectorSource:
 
     async def _refresh_state(self) -> None:
         async with self._session_factory(begin=True) as session:
-            state = await SectorRepository(session).sync_state(dataset_key=DATASET_KEY)
+            repo = SectorRepository(session)
+            state = await repo.sync_state(dataset_key=DATASET_KEY)
+            history_start = await session.scalar(select(func.min(SectorMember.effective_from)))
         if state is not None and state.as_of is not None:
             self._as_of = state.as_of
+        self._history_start = history_start
 
     async def get_catalog(self, taxonomy: str | None = None) -> tuple[SectorInfo, ...]:
         await self._refresh_state()

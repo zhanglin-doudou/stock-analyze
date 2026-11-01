@@ -211,19 +211,29 @@ async def test_api_087_industry_happy(
     assert portfolio["classified_holding_count"] == 1
 
     rows = body["sectors"]
-    assert len(rows) == 1
-    row = rows[0]
-    assert row["sector_code"] == "801120.SI"
-    assert row["sector_name"] == "食品饮料"
-    assert row["level"] == 1
-    assert row["weight"] == "1.00000000"
-    assert row["weight_pct"] == "100.00%"
-    assert row["benchmark_weight"] == "1.00000000"
-    assert row["active_weight"] == "0.00000000"
-    assert row["direction"] == "flat"
-    assert row["holding_count"] == 1
-    # 行业互斥：板块市值合计 == 权益市值，未分类为 0。
-    assert row["market_value"] == portfolio["equity_market_value"]
+    # 行业通用口径：持仓板块 ∪ 基准板块（非持仓基准板块以低配出现）
+    assert len(rows) == 4
+    by_code = {row["sector_code"]: row for row in rows}
+    food = by_code["801120.SI"]
+    assert food["sector_name"] == "食品饮料"
+    assert food["level"] == 1
+    assert food["weight"] == "1.00000000"
+    assert food["weight_pct"] == "100.00%"
+    # 基准含 5 只成分，食品饮料占 (5.32+1.98)/17.07 = 42.765085%
+    assert food["benchmark_weight"] == "0.42765085"
+    assert food["active_weight"] == "0.57234915"
+    assert food["direction"] == "over"
+    assert food["holding_count"] == 1
+    assert food["market_value"] == portfolio["equity_market_value"]
+
+    # 非持仓基准板块：市值 0、权重 null、低配
+    for code in ("801050.SI", "801080.SI", "801180.SI"):
+        row = by_code[code]
+        assert row["market_value"] == "0.00"
+        assert row["weight"] is None
+        assert row["holding_count"] == 0
+        assert row["direction"] == "under"
+        assert row["active_weight"] == "-" + row["benchmark_weight"]
 
     concentration = body["concentration"]
     assert concentration["method"] == "industry_single_membership"
@@ -232,16 +242,22 @@ async def test_api_087_industry_happy(
     assert concentration["effective_n"] == "1.00000000"
     assert concentration["top1_weight"] == "1.00000000"
     assert concentration["top3_weight"] == "1.00000000"
-    assert concentration["benchmark_hhi"] == "1.00000000"
+    # 基准 HHI 按全部基准板块分布计算（4 个板块）
+    assert concentration["benchmark_hhi"] == "0.29920185"
+    # n_sectors 统计组合持仓涉及的板块数（与 HHI 计算口径一致，不含基准独占板块）
     assert concentration["n_sectors"] == 1
 
     preference = body["preference"]
     assert preference is not None
-    assert preference["deviation"] == "0.00000000"
-    assert preference["max_overweight"] is None
-    assert preference["max_underweight"] is None
-    assert preference["top_overweight"] == []
-    assert preference["top_underweight"] == []
+    assert preference["deviation"] == "0.57234915"
+    assert preference["max_overweight"]["sector_code"] == "801120.SI"
+    assert preference["max_underweight"]["sector_code"] == "801180.SI"
+    assert [item["sector_code"] for item in preference["top_overweight"]] == ["801120.SI"]
+    assert [item["sector_code"] for item in preference["top_underweight"]] == [
+        "801180.SI",
+        "801080.SI",
+        "801050.SI",
+    ]
 
     for key in (
         "total_assets",
@@ -364,9 +380,15 @@ async def test_api_087_cross_account_isolation(
 
     codes_a = {row["sector_code"] for row in resp_a.json()["sectors"]}
     codes_b = {row["sector_code"] for row in resp_b.json()["sectors"]}
-    assert codes_a == {"801120.SI"}
-    assert codes_b == {"801050.SI"}
-    assert codes_a.isdisjoint(codes_b)
+    # 基准板块是公共缓存，两账号看到相同的板块集合；隔离体现在持仓市值上。
+    assert codes_a == codes_b == {"801120.SI", "801050.SI", "801080.SI", "801180.SI"}
+    rows_a = {row["sector_code"]: row for row in resp_a.json()["sectors"]}
+    rows_b = {row["sector_code"]: row for row in resp_b.json()["sectors"]}
+    # A 持仓食品饮料（600519），B 持仓银行（000001）；对方持仓板块市值为 0。
+    assert rows_a["801120.SI"]["market_value"] != "0.00"
+    assert rows_a["801050.SI"]["market_value"] == "0.00"
+    assert rows_b["801050.SI"]["market_value"] != "0.00"
+    assert rows_b["801120.SI"]["market_value"] == "0.00"
     # 响应里不出现对方持仓代码。
     assert "000001" not in resp_a.text
     assert "600519" not in resp_b.text

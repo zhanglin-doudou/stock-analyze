@@ -24,7 +24,7 @@ interface SectorTableProps {
  * 板块明细表（零口径）：金额/比率/百分比全部原样展示后端字符串。
  * industry 用 weight/benchmark/active 列；concept 用 exposure 列，且无基准/主动权重列。
  */
-export function SectorTable({ rows, taxonomy, onExpand }: SectorTableProps): ReactElement {
+export function SectorTable({ rows, taxonomy }: SectorTableProps): ReactElement {
   if (rows.length === 0) {
     return <p className="dash-muted">暂无板块数据。</p>;
   }
@@ -43,7 +43,6 @@ export function SectorTable({ rows, taxonomy, onExpand }: SectorTableProps): Rea
       </thead>
       <tbody>
         {rows.map((row) => {
-          const expandable = !isConcept && onExpand != null && row.level < 3;
           return (
             <tr
               key={row.sector_code}
@@ -51,16 +50,6 @@ export function SectorTable({ rows, taxonomy, onExpand }: SectorTableProps): Rea
               data-level={row.level}
             >
               <td>
-                {expandable ? (
-                  <button
-                    type="button"
-                    className="sector-expand"
-                    aria-label={`展开 ${row.sector_name}`}
-                    onClick={() => onExpand?.(row)}
-                  >
-                    +
-                  </button>
-                ) : null}
                 <span className="dash-holding-name">
                   {row.sector_name}
                   <span className="dash-holding-code">{row.sector_code}</span>

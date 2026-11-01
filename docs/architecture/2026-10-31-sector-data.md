@@ -587,21 +587,36 @@ equity_pos = div_round(E_t, total_assets, scale=8)                    # 股票�
 
 ### 6.2 行业权重与基准权重（板块偏好）
 
+> **行业通用口径**：超配/低配 = 组合板块权重 − 基准板块权重；基准板块权重由**全部基准成分**
+> （含组合未持有的成分）按板块聚合后归一化得到。偏离度 `D = Σ|Δ|/2` 即板块层级的
+> Active Share（Cremers & Petajisto, 2009），满足 `总超配 = 总低配 = D`。
+
 对行业层级 `L ∈ {1,2,3}`（默认 L1）。成分只存最深层（多为 L3），`L=1/2` 用 `parent_code` 树上 rollup：
 
 ```text
-MV_s,t(L) = Σ_{i: 归属节点 ∈ descendants(s, L)} mv_i,t              # L3 直接；L1/L2 由子节点求和
-w_p,s     = div_round(MV_s,t(L), E_map,t(L), scale=8)                # 组合板块权重，Σ≈1
-w_b,s     = div_round(Σ_{i∈s} bench_w_i, Σ_{i∈mapped} bench_w_i, 8)  # 基准板块权重，归一化
-Δ_s       = w_p,s − w_b,s                                            # 主动权重（板块偏好）
-Δ_pp,s    = div_round(Δ_s, 10_000)                                   # 百分点的百分之一（2 位小数）
-D         = div_round(Σ_s |Δ_s|, 2, scale=0)                         # 行业偏离度 Σ|Δ|/2（注意 scale=0）
+MV_s,t(L) = Σ_{i: 归属节点 ∈ descendants(s, L)} mv_i,t                              # L3 直接；L1/L2 由子节点求和
+w_p,s     = div_round(MV_s,t(L), E_map,t(L), scale=8)                                # 组合板块权重，Σ≈1
+W_b,s     = Σ_{i: bench_i 归属板块 s} bench_w_i                                       # 基准成分权重按板块求和（全量基准）
+w_b,s     = div_round(W_b,s, Σ_{s'} W_b,s', scale=8)                                  # 基准板块权重，归一化（Σ=1）
+Δ_s       = w_p,s − w_b,s                                                            # 主动权重（板块偏好）
+Δ_pp,s    = div_round(Δ_s, 10_000)                                                   # 百分点的百分之一（2 位小数）
+D         = div_round(Σ_s |Δ_s|, 2, scale=0)                                         # 偏离度 = Active Share（板块层）
 ```
 
-- `bench_w_i` 为基准成分权重（scale=8）；分母只取「映射到该层级板块的基准成分权重之和」，保证 `Σ w_b = 1`。分母为 0 → 基准不可用（`benchmark_weight=null` + `SECTOR_BENCHMARK_WEIGHTS_MISSING`）。
+**板块行集合 = 组合持仓板块 ∪ 基准板块（并集）**，不做交集：
+
+| 板块类型 | `market_value` | `weight` | `benchmark_weight` | `active_weight` | `direction` |
+|---|---|---|---|---|---|
+| 组合持有 | `> 0` | `MV_s / E_map` | 归一化基准权重 | `w_p − w_b` | over/under/flat |
+| 基准独占（组合未持有） | `0` | `null` | 归一化基准权重 | `−w_b`（负值） | `under` |
+| 组合独占（基准不含） | `> 0` | `MV_s / E_map` | `0`（隐含） | `+w_p`（正值） | `over` |
+
+- `bench_w_i` 为基准成分权重（scale=8）；**聚合范围是全部基准成分**，不仅限于组合持仓：组合未持有的基准成分仍须计入对应板块的 `W_b,s`，否则该板块会被静默丢弃、其余板块基准权重被放大，导致主动权重与偏离度失真（实现中用 `all_assignments` = 全部成分→板块映射，而非仅持仓的 `assignments`）。
+- 基准分母 `Σ_{s'} W_b,s'` 是「映射到该层级板块的**全部**基准成分权重之和」，保证 `Σ w_b = 1`。分母为 0 → 基准不可用（`benchmark_weight=null` + `SECTOR_BENCHMARK_WEIGHTS_MISSING`），**禁止**用等权或总资产分母冒充。
 - `Δ_pp` 示例：`Δ=63_376_764` → `div_round(63_376_764, 10_000)=6_338` → 展示「+63.38pp」。**不要**用 `div_round(Δ, 100)` 或 `scale=2`，会把 pp 放大 100 倍。
 - `direction`：`Δ > +0.001` → `over`；`Δ < −0.001` → `under`；`|Δ| ≤ 0.001` → `flat`（阈值 `SECTOR_FLAT_ACTIVE_UNITS=100_000`，scale=8）。
 - `Σ_s Δ_s` 理论为 0；断言容差 `≤ ceil((n_p+n_b)/2)` units（权重逐项舍入漂移），**不得**据此判 unreliable。
+- `D = Σ|Δ_s|/2`：因为 `Σ Δ_s = 0`，所以 `Σ_{Δ>0} Δ = Σ_{Δ<0} |Δ| = D`，即「总超配 = 总低配 = 偏离度」，这是 Brinson/Active Share 的标准恒等式。
 - `benchmark_as_of` 距快照 > `SECTOR_BENCHMARK_MAX_AGE_DAYS=45` → `status=stale`/`degraded` + `SECTOR_BENCHMARK_WEIGHTS_STALE`，数字照常但提示。
 
 ### 6.3 行业集中度
@@ -709,6 +724,7 @@ def concept_exposure(mv_by_symbol: Mapping[str, int], memberships: Mapping[str, 
 | 未分类 | 化工=80，银行=10，电子=6，未分类=4 | E=100、E_map=96、coverage=0.96；w=0.83333333/0.10416667/0.0625；HHI=0.70920139；top3=1.0 |
 | 概念重叠 | A∈{C1,C2}、B∈{C1}、C∉任何、D∈{C2}；市值 A=50,B=30,C=10,D=10 | exposure C1=0.8、C2=0.6（E=100）；coverage=0.9；overlap=1.4；multi_tag=0.5（只有 A 属 ≥2 个概念） |
 | 基准权重缺失 | — | `active_*` 全 null；`status=degraded`；`SECTOR_BENCHMARK_WEIGHTS_MISSING` |
+| 基准含非持仓板块 | 组合仅持有化工=80；基准：化工 0.40、银行 0.30、医药 0.30 | 板块行 = {化工, 银行, 医药}；银行/医药 `mv=0`、`weight=null`、`active=−基准权重`（under）；化工 `active=0.8333−0.40=+0.4333`（over）；`D=(0.4333+0.30+0.30)/2≈0.5167` |
 
 **手算 golden（小宇宙，§10.2 使用）**：A=50（化工）、B=30（化工）、C=10（银行）、D=6（电子）、E=4（未分类），E=100、E_map=96。**概念指标分母是 `E_t=100`**（含未分类/无标签股票），与行业 `E_map=96` 不同，二者不得横比。
 
