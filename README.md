@@ -145,9 +145,13 @@ make sync-market          # 只补本地缺失区间；已有数据不重复请�
 `SECTOR_MODE=replay`（默认）读 `fixtures/market/sectors.json`，无需联网；`live` 时 API **读路径只读** `market.sector*` 缓存，不请求中访问第三方：
 
 ```bash
-make sync-sectors                       # 同花顺行业/概念目录+成分 + 基准成分权重
+make sync-sectors                       # 行业 + 概念 + 基准成分权重（全部）
+make sync-sector-industry               # 只同步行业板块（同花顺）
+make sync-sector-concept                # 只同步概念板块（同花顺；板块多、耗时远长于行业）
 make sync-sectors ARGS='--dry-run'      # 只做配置/DB 检查，不联网不写库
 ```
+
+- 行业与概念可**分开同步**（`sync-sector-industry` / `sync-sector-concept`），互不依赖：各自只抓自己的目录与成分，一个失败不影响另一个。
 
 - 数据源与兜底链：
   - **行业目录/成分**：同花顺 THS 扁平一级行业（互斥，Σ权重=1）。目录走 akshare `stock_board_industry_name_ths`，成分股因 akshare 无 THS 成分接口，改为抓取同花顺板块详情页分页表格（`q.10jqka.com.cn/thshy/detail/...`）。
@@ -241,17 +245,28 @@ pnpm -r test                 # vitest
 
 | 套件 | 命令 | 依赖 |
 |---|---|---|
-| 快速单测 | `make test` | 无 |
-| core 覆盖门禁 | `make test-core`（100%） | 无 |
-| API 验收 | `make test-api` | PostgreSQL |
-| 二期主套餐 | `make test-p2` | PostgreSQL |
-| review/rebuild/资产增量 | `make test-review` | PostgreSQL |
-| 指标 golden/oracle/契约 | `make test-metrics` | 无/部分真库 |
-| 板块 golden/oracle | `make test-p2`（`unit/core/test_sector_*`、`unit/review/test_sector_*`） | 无 |
-| RLS/越权 | `make test-rls` / `make test-isolation` | PostgreSQL |
+| 快速单测 | `make test` | PostgreSQL（Docker 5433） |
+| core 覆盖门禁 | `make test-core`（100%） | PostgreSQL（Docker 5433） |
+| API 验收 | `make test-api` | PostgreSQL（Docker 5433） |
+| 二期主套餐 | `make test-p2` | PostgreSQL（Docker 5433） |
+| review/rebuild/资产增量 | `make test-review` | PostgreSQL（Docker 5433） |
+| 指标 golden/oracle/契约 | `make test-metrics` | 部分真库（Docker 5433） |
+| 板块 golden/oracle | `make test-p2`（`unit/core/test_sector_*`、`unit/review/test_sector_*`） | PostgreSQL（Docker 5433） |
+| RLS/越权 | `make test-rls` / `make test-isolation` | PostgreSQL（Docker 5433） |
 | 前端 | `cd frontend && pnpm -r test` | Node |
 
 硬约束：不 mock 数据库（RLS 必须真连库）；测试读根 `.env`；跨租户/401/403/404 由隔离矩阵强制。
+
+**清库守卫（防误清本机 5432 开发库）**：自动化测试的 TRUNCATE 只许打到 Docker 开发库
+（`127.0.0.1:5433`）；`.env` 指向本机 5432 时 `make test-*` 直接拒绝。本机开发跑测试：
+
+```bash
+make db-up                          # 起 Docker 开发库（5433，首启自动建角色/库）+ make migrate
+STOCK_DB_PORT=5433 make test-p2     # 显式指向 Docker 库（不改 .env 的 5432 开发配置）
+```
+
+本机 5432 的清库只走人工入口 `make db-reset`（双模式：5433 销毁卷重建；5432 TRUNCATE
+全部数据表+迁移，见 [DATABASE.md §6](docs/DATABASE.md)）。
 
 ## 已知未完成（二期暂停项）
 

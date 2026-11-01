@@ -17,7 +17,7 @@ help:
 	@echo "  make db-up          启动开发用 PostgreSQL（docker compose，5433）"
 	@echo "  make db-bootstrap   在本机 PostgreSQL 上创建角色/库（无 Docker 时的替代）"
 	@echo "  make db-down        停止 DB"
-	@echo "  make db-reset       重建本地数据库（销毁并重新初始化）"
+	@echo "  make db-reset       重建开发数据库（5433=销毁卷重建；本机 5432=TRUNCATE 数据+迁移）"
 	@echo "  make migrate        执行 Alembic 迁移（建 schema + 表 + RLS）"
 	@echo "── 运行 ──────────────────────────────────────────────"
 	@echo "  make dev            起 api(热重载) + worker + web"
@@ -73,11 +73,21 @@ db-bootstrap:
 db-down:
 	@$(COMPOSE) down
 
+# db-reset 双模式：按有效端口选路径（环境变量 > .env > 默认 5433）。
+# 5433（Docker compose）：销毁数据卷彻底重建；其余（本机 PG，如 5432）：TRUNCATE 全部
+# 数据表（保留表结构与 schema_version）后重跑迁移。自动化测试的 TRUNCATE 只允许打
+# Docker 开发库，本机库的清理由此显式人工入口承担。
 .PHONY: db-reset
 db-reset:
-	@$(COMPOSE) down -v
-	@$(MAKE) db-up
-	@$(MAKE) migrate
+	@port="$${STOCK_DB_PORT:-$$(grep -E '^STOCK_DB_PORT=' $(ENV_FILE) 2>/dev/null | tail -n1 | cut -d= -f2)}"; \
+	port="$${port:-5433}"; \
+	if [ "$$port" = "5433" ]; then \
+		echo "→ Docker PostgreSQL（$$port）：销毁数据卷并重建"; \
+		$(COMPOSE) down -v && $(MAKE) db-up && $(MAKE) migrate; \
+	else \
+		echo "→ 本机 PostgreSQL（$$port）：TRUNCATE 全部数据表并重跑迁移（表结构保留）"; \
+		$(PY) -m stock_api.cli db-truncate && $(MAKE) migrate; \
+	fi
 
 .PHONY: migrate
 migrate:

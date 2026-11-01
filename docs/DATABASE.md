@@ -228,32 +228,31 @@ FROM pg_stat_statements ORDER BY total_exec_time DESC LIMIT 10;
 
 ## 6. 重置与清理
 
+`make db-reset` 按 `.env` 的 `STOCK_DB_PORT`（环境变量优先）自动选路径：
+
+| 路径 | 触发条件 | 行为 |
+|---|---|---|
+| Docker | `STOCK_DB_PORT=5433`（默认） | `compose down -v` 销毁数据卷 → 重新 up → 重跑迁移（彻底重建） |
+| 本机 PG | `STOCK_DB_PORT=5432`（或其它非 5433） | `stock_api.cli db-truncate`：TRUNCATE 全部数据表（保留表结构与 `platform.schema_version`）→ 重跑迁移 |
+
 ```bash
-make db-reset        # Docker：down -v 销毁卷 → 重新 up → 重跑迁移（彻底重建）
+make db-reset        # 双模式：Docker 5433 销毁重建；本机 5432 清空数据+迁移
 make migrate         # 仅补跑迁移
 ```
 
-只清业务与行情缓存数据、保留表结构（与测试 `conftest` 同思路；`market` 缓存清空后可重拉）：
+**自动化测试的清库守卫**（防误清本机开发库）：`backend/tests/conftest.py` 的
+`owner_engine` 夹具在创建前校验 owner DSN——只许指向 Docker 开发库
+（`127.0.0.1:5433`），指向本机 5432 时整个测试会话直接拒绝（exit 2）。
+因此本机 PG 开发时请这样跑测试：
 
-```sql
-TRUNCATE TABLE platform."user", platform.refresh_token, platform.api_token,
-  platform.job, platform.job_event, platform.idempotency_key, platform.outbox_event,
-  platform.audit_log, platform.user_setting, platform.config_release,
-  platform.rate_limit_bucket, platform.login_attempt, platform.backup_run
-RESTART IDENTITY CASCADE;
-TRUNCATE TABLE ledger.import_batch, ledger.import_preview, ledger.trade,
-  ledger.trade_history, ledger.quarantine_row, ledger.summary_rule, ledger.reconciliation
-RESTART IDENTITY CASCADE;
-TRUNCATE TABLE review.round, review.round_fill, review.round_build_state,
-  review.nav_daily, review.asset_daily, review.asset_build_state
-RESTART IDENTITY CASCADE;
-TRUNCATE TABLE market.daily_bar, market.pull_range,
-  market.sector, market.sector_member, market.benchmark_member,
-  market.sector_bar, market.sector_pull_range, market.sector_sync_state
-RESTART IDENTITY CASCADE;
+```bash
+make db-up                               # 起 Docker 开发库（5433）
+STOCK_DB_PORT=5433 make test-p2          # 显式指向 Docker 库跑测试（不动 .env）
 ```
 
-> 注意 `platform.schema_version` 不要 TRUNCATE（启动校验依赖它）；上表若与当前迁移有出入，以 `\dt platform.*` / `\dt ledger.*` 实际表清单为准。
+本机 5432 的清库只有 `make db-reset` 这个人工入口；`db-truncate` 的表清单实时查
+`information_schema`（platform/ledger/review/market 四 schema 全表），
+不会随迁移漂移漏清新表，且只接受 localhost 目标（远端 DSN 一律拒绝）。
 
 清库后重新造数：`make seed-tenants`（A/B/admin）或 `make seed-demo`（含行情回放）。
 
