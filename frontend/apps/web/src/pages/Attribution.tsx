@@ -36,6 +36,9 @@ const REASON_CODE_LABELS: Record<string, string> = {
   COVERAGE_LOW: '资金覆盖率不足',
 };
 
+const RATIO_HINT =
+  '贡献率 = 因子金额 / 本期总损益。总损益为负时，正金额表示“减少亏损”。';
+
 /** 原始码值一律转人话；未知码保留可追溯但加“未识别”前缀（U-02）。 */
 function labelFor(map: Record<string, string>, code: string | null | undefined): string {
   if (code == null || code === '') return '—';
@@ -79,8 +82,8 @@ function FactorRow({ factor }: { factor: AttributionFactor }): ReactElement {
           <span className="attr-factor-amount num">
             {formatMoney(factor.amount)}
           </span>
-          <span className="muted num">
-            {formatPct(factor.presentation.ratio_pct)}
+          <span className="muted num" title={RATIO_HINT}>
+            贡献率 {formatPct(factor.presentation.ratio_pct)}
           </span>
           <span className="muted num">
             占构成 {formatPct(factor.presentation.share_pct)}
@@ -157,6 +160,7 @@ function SummaryCard({ data }: { data: Attribution }): ReactElement {
             <FactorRow key={factor.code} factor={factor} />
           ))}
       </ul>
+      <p className="muted attr-ratio-hint">{RATIO_HINT}</p>
     </section>
   );
 }
