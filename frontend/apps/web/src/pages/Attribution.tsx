@@ -15,6 +15,33 @@ import './dashboard.css';
 import './attribution.css';
 import { PeriodInput } from '../ui/PeriodInput';
 
+const TOTAL_PNL_BASIS_LABELS: Record<string, string> = {
+  asset_daily_mtm: '资产日表盯市（现金 + 持仓市值）',
+};
+const SYMBOL_CLASS_LABELS: Record<string, string> = {
+  stock: 'A 股',
+  fund: '基金',
+  bond: '债券',
+  cash: '现金',
+  pseudo: '非证券标的',
+};
+const REASON_CODE_LABELS: Record<string, string> = {
+  SECTOR_MAPPING_MISSING: '缺行业归属',
+  SECTOR_BAR_MISSING: '缺板块指数行情',
+  SECTOR_BENCHMARK_WEIGHTS_MISSING: '缺基准权重',
+  SECTOR_HISTORY_NOT_COVERED: '板块成分历史未覆盖',
+  ASSET_SERIES_MISSING: '缺资产日表',
+  ASSET_ROW_BLOCKED: '资产行阻断',
+  ASSET_SERIES_STALE: '资产日表过期',
+  COVERAGE_LOW: '资金覆盖率不足',
+};
+
+/** 原始码值一律转人话；未知码保留可追溯但加“未识别”前缀（U-02）。 */
+function labelFor(map: Record<string, string>, code: string | null | undefined): string {
+  if (code == null || code === '') return '—';
+  return map[code] ?? `未识别项（${code}）`;
+}
+
 function StatusBadge({ status }: { status: string }): ReactElement {
   return (
     <span className={`dash-badge is-${status}`} data-testid="attr-status-badge">
@@ -65,9 +92,13 @@ function MissingList({
         <li
           key={`${item.code}-${item.field}-${index}`}
           data-testid={`attr-missing-${item.code}`}
+          data-severity={item.severity}
         >
+          <span className="attr-severity" data-severity={item.severity}>
+            {item.severity === 'blocker' ? '阻断' : '降级'}
+          </span>
           <strong>{item.reason}</strong>
-          <span className="muted">{item.field}</span>
+          <span className="muted">{item.field_label ?? item.field}</span>
           <span className="attr-what-to-do">{item.what_to_do}</span>
         </li>
       ))}
@@ -144,7 +175,9 @@ function ResidualCard({ data }: { data: Attribution }): ReactElement {
       <ul className="attr-buckets" data-testid="attr-residual-buckets">
         {buckets.map(([key, value]) => (
           <li key={key}>
-            <span className="muted">{key}</span>
+            <span className="muted">
+              {data.residual_breakdown_labels?.[key] ?? key}
+            </span>
             <span className="num">{displayValue(value)}</span>
           </li>
         ))}
@@ -154,8 +187,12 @@ function ResidualCard({ data }: { data: Attribution }): ReactElement {
           {unattributed.map((item) => (
             <li key={item.security_code}>
               <strong>{item.security_code}</strong>
-              <span className="muted">{item.symbol_class}</span>
-              <span className="muted">{item.reason_code ?? ''}</span>
+              <span className="muted">
+                {labelFor(SYMBOL_CLASS_LABELS, item.symbol_class)}
+              </span>
+              <span className="muted">
+                {labelFor(REASON_CODE_LABELS, item.reason_code)}
+              </span>
               <span className="num">{displayValue(item.amount)}</span>
             </li>
           ))}
@@ -238,7 +275,12 @@ export function AttributionPage(): ReactElement {
             页面状态 <StatusBadge status={data?.status ?? 'missing'} />
           </span>
           <span>数据截至 {data?.data_as_of ?? '—'}</span>
-          {data ? <span>总损益口径 {data.total_pnl_basis}</span> : null}
+          {data ? (
+            <span>
+              总损益口径{' '}
+              {labelFor(TOTAL_PNL_BASIS_LABELS, data.total_pnl_basis)}
+            </span>
+          ) : null}
         </div>
       </header>
 
