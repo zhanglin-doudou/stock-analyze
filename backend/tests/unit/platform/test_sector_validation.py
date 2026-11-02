@@ -8,8 +8,10 @@
 
 from __future__ import annotations
 
+from datetime import date
+
 import pytest
-from stock_platform.ports import SectorInfo
+from stock_platform.ports import SectorCapabilities, SectorInfo
 from stock_platform.sector_validation import (
     SectorValidationError,
     catalog_row_counts,
@@ -42,6 +44,22 @@ _CATALOG = (
 def test_validate_catalog_accepts_clean_tree() -> None:
     validate_catalog(_CATALOG, level=3)
     assert catalog_row_counts(_CATALOG) == {1: 2, 2: 2, 3: 1}
+
+
+def test_capabilities_history_start_is_per_taxonomy() -> None:
+    """各 taxonomy 首次观测日不同：概念晚同步时不能被行业下界「带过」。"""
+    caps = SectorCapabilities(
+        mode="live",
+        history_start=date(2026, 10, 30),
+        history_starts=(
+            ("industry_sw", date(2026, 10, 30)),
+            ("concept_em", date(2026, 11, 2)),
+        ),
+    )
+    assert caps.history_start_for("concept_em") == date(2026, 11, 2)
+    assert caps.history_start_for("industry_sw") == date(2026, 10, 30)
+    # 未登记的 taxonomy 回退全局下界（保持旧语义）。
+    assert caps.history_start_for("unknown") == date(2026, 10, 30)
 
 
 def test_validate_catalog_rejects_duplicate_code_in_same_level() -> None:

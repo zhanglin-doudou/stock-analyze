@@ -141,7 +141,7 @@ market.sector_sync_state / market.sector_pull_range                   ← 新鲜
   - 首次同步：写入当前成分，`effective_from = 同步业务日`（上游不提供历史变更日，只能「观测日」生效，文档显式披露）；
   - 后续同步：对同一 `(taxonomy, sector_code, symbol)` 做 diff，消失 → 关闭 `effective_to = 同步业务日`；新增 → 插入 `effective_from = 同步业务日`；不变 → 不动；
   - `as_of` 查询：`effective_from <= as_of AND (effective_to IS NULL OR as_of < effective_to)`。
-- **历史局限（fail-closed，D-04b）**：首次同步前不存在成分历史，且上游只给「当前快照」、不提供剔除日。因此查询 `as_of < 首次同步日` 一律 `not_covered`/blocked，**不得**用最早已知成分近似冒充历史（归因期次如需历史，只能另接付费历史成分源，未验证）。
+- **历史局限（fail-closed，D-04b）**：首次同步前不存在成分历史，且上游只给「当前快照」、不提供剔除日。因此查询 `as_of < 首次同步日` 一律 `not_covered`/blocked，**不得**用最早已知成分近似冒充历史（归因期次如需历史，只能另接付费历史成分源，未验证）。**首次同步日按 taxonomy 各自计算**（`MIN(effective_from)` 分组）：行业与概念可以分批同步，概念晚于行业时，概念的历史下界不得被行业的更早日期「带过」，否则会误报 `insufficient`（覆盖 0）而不是 PIT blocked。
 - **行业成分只存「最深层可得的归属」**：绝大多数股票落 L3；申万实测「特钢Ⅱ」无三级子节点，其成分 + 其他无三级归属股票共 **12 只（5217 vs 5229，约 0.23%）** 上游只到 L2，但**没有 L2 成分接口**，无法落库 → 这 12 只在**所有层级**均记未分类（不是只 L3 未分类）。看板/归因必须显式披露未分类桶，不得摊到假三级。
 - 行业当前成分的唯一性由**部分唯一索引**兜底：`UNIQUE (symbol) WHERE taxonomy='industry_sw' AND effective_to IS NULL`，从数据库层杜绝「一股两行业」。
 
@@ -754,7 +754,7 @@ def concept_exposure(mv_by_symbol: Mapping[str, int], memberships: Mapping[str, 
 
 | 参数 | 类型/取值 | 必填 | 默认 | 语义与校验 |
 |---|---|---|---|---|
-| `as_of` | `YYYY-MM-DD` | 否 | 最新 `asset_daily.trade_date` | 未来日 → 422 `VALIDATION_ERROR`；早于首个资产快照 → 200 `status=missing` + `SECTOR_AS_OF_NOT_AVAILABLE`；早于首次板块同步日 → `status=blocked` + `SECTOR_HISTORY_NOT_COVERED`（fail-closed，不出数） |
+| `as_of` | `YYYY-MM-DD` | 否 | 最新 `asset_daily.trade_date` | 未来日 → 422 `VALIDATION_ERROR`；早于首个资产快照 → 200 `status=missing` + `SECTOR_AS_OF_NOT_AVAILABLE`；早于**该 taxonomy** 首次板块同步日 → `status=blocked` + `SECTOR_HISTORY_NOT_COVERED`（fail-closed，不出数） |
 | `taxonomy` | `industry` / `concept` | 否 | `industry` | 非法 → 422 `VALIDATION_ERROR` |
 | `level` | `1`/`2`/`3`（industry） | 否 | `1` | `taxonomy=concept` 时传非 0 → 422；概念响应 `level=0` |
 | `parent` | 板块代码（行业钻取） | 否 | null | 仅 industry；未知 → 200 + `sectors=[]`（不是 404） |

@@ -420,7 +420,9 @@ async def build_sector_overview(
     db_taxonomy = _DB_TAXONOMY[taxonomy]
     catalog = tuple(await sector_data.get_catalog(db_taxonomy))
     sector_as_of: date | None = sector_data.as_of
-    history_start = sector_data.capabilities.history_start
+    # 按 taxonomy 取历史下界：行业/概念首次同步日可能不同（概念晚同步时，
+    # 用全局 MIN 会让概念请求在「行业已覆盖、概念未覆盖」的日期误走 insufficient）。
+    history_start = sector_data.capabilities.history_start_for(db_taxonomy)
     classification_version = catalog[0].classification_version if catalog else ""
     # 校验请求层级在目录中实际存在：THS 行业为扁平 L1，申万才有 L1/L2/L3。
     # 若请求了目录不存在的层级，core 的 resolve_level 会抛 ValueError 变成 500，
@@ -694,9 +696,11 @@ async def build_sector_overview(
                 statuses=statuses,
             )
 
-    missing.extend(body.missing)
+    if not history_blocked:
+        missing.extend(body.missing)
     if history_blocked:
         # fail-closed：PIT 未覆盖 → blocked，数字一律不出（不输出 0 或占位百分比）。
+        # 此时 body 的覆盖度类提示（如「补充概念同步数据」）是误导的，一并丢弃。
         body.status = STATUS_BLOCKED
         body.portfolio = _empty_portfolio()
         body.sectors = []

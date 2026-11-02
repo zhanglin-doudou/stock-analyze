@@ -110,6 +110,7 @@ class CachedSectorSource:
         self._clock = clock
         self._as_of: date | None = None
         self._history_start: date | None = None
+        self._history_starts: tuple[tuple[str, date], ...] = ()
 
     @property
     def capabilities(self) -> SectorCapabilities:
@@ -129,6 +130,7 @@ class CachedSectorSource:
             supports_board_bars=inner_caps.supports_board_bars,
             supports_benchmark_weights=inner_caps.supports_benchmark_weights,
             history_start=self._history_start or inner_caps.history_start,
+            history_starts=self._history_starts or inner_caps.history_starts,
         )
 
     @property
@@ -147,9 +149,22 @@ class CachedSectorSource:
             repo = SectorRepository(session)
             state = await repo.sync_state(dataset_key=DATASET_KEY)
             history_start = await session.scalar(select(func.min(SectorMember.effective_from)))
+            per_taxonomy = (
+                await session.execute(
+                    select(
+                        SectorMember.taxonomy,
+                        func.min(SectorMember.effective_from),
+                    ).group_by(SectorMember.taxonomy)
+                )
+            ).all()
         if state is not None and state.as_of is not None:
             self._as_of = state.as_of
         self._history_start = history_start
+        # 各 taxonomy 的首次观测日可能不同（如概念比行业晚同步），分别记录以免
+        # 概念查询在行业已覆盖的日期被误判为「insufficient 覆盖 0」而非 PIT blocked。
+        self._history_starts = tuple(
+            (str(taxonomy), first) for taxonomy, first in per_taxonomy if first is not None
+        )
 
     async def get_catalog(self, taxonomy: str | None = None) -> tuple[SectorInfo, ...]:
         await self._refresh_state()
@@ -378,7 +393,8 @@ class AkshareSectorSource:
                 page_count += 1
             if page_count == 0:
                 break
-        return tuple(members)
+        # 单板块分页可能出现重复行（同花顺页面偶发分页重叠），去重保序。
+        return tuple(dict.fromkeys(members))
 
     @staticmethod
     def _ths_parse_member_table(tables: Any) -> list[str] | None:
@@ -454,19 +470,21 @@ class AkshareSectorSource:
                     total=total,
                     members=len(members),
                 )
+        # 先去重：防止某板块分页泄漏到相邻板块（同 symbol 出现在多个行业代码下）。
+        unique_members = tuple(dict.fromkeys(members))
         # 行业成员互斥（同花顺行业也应一只股票只属一个行业）。
-        validate_unique_industry(members)
+        validate_unique_industry(unique_members)
         # 全部行业板块成分数为 0 → 上游异常；同上保护旧快照不被空数据覆盖。
-        if not members:
+        if not unique_members:
             raise SectorValidationError(
                 f"全部 {total} 个行业板块未拉到任何成分，保留旧快照不写入空数据"
             )
         log.info(
             "industry member fetch done",
             source=SOURCE_THS,
-            members=len(members),
+            members=len(unique_members),
         )
-        return tuple(members)
+        return unique_members
 
     # ── 概念板块（同花顺 THS）────────────────────────────
     async def _fetch_concept_catalog(self) -> tuple[SectorInfo, ...]:
@@ -543,7 +561,9 @@ class AkshareSectorSource:
             raise SectorValidationError(
                 f"全部 {total} 个概念板块成分拉取失败，保留旧快照不写入空数据"
             )
-        return tuple(members)
+        # 概念成分跨板块天然可能重复（同 symbol 属多个概念），但同板块内不应重复。
+        # 这里统一去重，防止上游分页重叠造成同 (sector_code, symbol) 出现两次。
+        return tuple(dict.fromkeys(members))
 
     async def _fetch_benchmark(self) -> dict[str, int]:
         cons = await self._call(self._ak.index_stock_cons_csindex, BENCHMARK_INDEX)
@@ -724,6 +744,8 @@ class AkshareSectorSource:
             await session.flush()
 
             for taxonomy, members in snapshot.members.items():
+                # 防御性去重：即使上游已去重，落库前再次确保同批次无重复。
+                members = tuple(dict.fromkeys(members))
                 current = await repo.memberships_at(taxonomy=taxonomy, as_of=today)
                 current_keys = {(item.sector_code, item.symbol) for item in current}
                 new_keys = set(members)

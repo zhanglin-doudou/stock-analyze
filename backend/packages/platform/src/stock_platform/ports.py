@@ -161,6 +161,14 @@ class SectorCapabilities:
     supports_board_bars: bool = True
     supports_benchmark_weights: bool = True
     history_start: date | None = None
+    # 分 taxonomy 的历史下界（各板块类各自的首个成分观测日）；缺项回退 history_start。
+    history_starts: tuple[tuple[str, date], ...] = ()
+
+    def history_start_for(self, taxonomy: str) -> date | None:
+        for tax, first in self.history_starts:
+            if tax == taxonomy:
+                return first
+        return self.history_start
 
 
 @dataclass(frozen=True, slots=True)
