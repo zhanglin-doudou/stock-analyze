@@ -39,6 +39,10 @@ const REASON_CODE_LABELS: Record<string, string> = {
 const RATIO_BASIS_LABELS: Record<string, string> = {
   'amount/total_pnl': '本期总损益',
 };
+const COVERAGE_BASE_LABELS: Record<string, string> = {
+  market: '按市值加权',
+  mixed: '市值与现金混合',
+};
 const BENCHMARK_LABELS: Record<string, string> = {
   hs300_tr: '沪深 300 全收益',
   zz500_tr: '中证 500 全收益',
@@ -237,14 +241,17 @@ function ResidualCard({ data }: { data: Attribution }): ReactElement {
         负数=估值差/账面与市值口径差异（拉低本期损益）。
       </p>
       <div className="dash-kpi-grid attr-kpis">
-        <div className="dash-kpi">
-          <span className="dash-kpi-label">资金覆盖率</span>
+        <div
+          className="dash-kpi"
+          title="三种覆盖口径：资金权重=已归因权益市值/应归因权益市值；标的=已归因数/持仓数；段=已归因段/可归因段"
+        >
+          <span className="dash-kpi-label">资金覆盖率（按资金权重）</span>
           <strong className="num" data-testid="attr-capital-ratio">
             {formatPct(data.coverage?.capital_ratio_pct)}
           </strong>
-          <span className="dash-kpi-hint">
+          <span className="dash-kpi-hint" data-testid="attr-coverage-bases">
             {data.coverage
-              ? `已归因 ${data.coverage.segments_attributed}/${data.coverage.segments_total} 段`
+              ? `按标的 ${data.coverage.symbols_attributed}/${data.coverage.symbols_total} · 按段 ${data.coverage.segments_attributed}/${data.coverage.segments_total} · ${labelFor(COVERAGE_BASE_LABELS, data.coverage.base_basis)}`
               : '—'}
           </span>
         </div>

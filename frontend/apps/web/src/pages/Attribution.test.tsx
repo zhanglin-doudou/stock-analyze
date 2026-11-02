@@ -168,6 +168,8 @@ describe("AttributionPage", () => {
     expect(screen.getByTestId("attr-factor-selection").textContent).toContain("拖累 1,900.00 元");
     expect(screen.getByTestId("attr-factor-fee").textContent).toContain("费用");
     expect(screen.getByTestId("attr-capital-ratio").textContent).toContain("98.9%");
+    expect(screen.getByTestId("attr-coverage-bases").textContent).toContain("按标的 5/6");
+    expect(screen.getByTestId("attr-coverage-bases").textContent).toContain("市值与现金混合");
 
     const bar = screen.getByTestId("attr-factor-selection").querySelector(".attr-bar > i");
     expect(bar).not.toBeNull();
