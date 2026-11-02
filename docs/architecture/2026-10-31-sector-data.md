@@ -1052,6 +1052,7 @@ A_total  = Σ_s A_s
 - **ratio 基准（与 API-036 断言③对齐）**：`assumptions.ratio_basis` 按 model 写死——`five_factor` 的 `ratio = amount / total_pnl`，`Σfactors.ratio + residual_ratio = 1`；`brinson_industry` 的 `ratio = effect / R_excess`（收益空间），三效应 ratio 之和 = 1（相对超额），**不**要求等于 `total_pnl` 的份额。验收断言按 model 分别写，不得用同一句「Σratio=1」套两个模型。
 - `factors[].code="sector"`、`name="板块配置"`；排序结论由后端生成（前端零口径）。
 
+> **2026-11-02 裁决补充（五因子归因设计 v1.0 已人工批准）**：M1 五因子归因的「板块」因子按**行业指数收益贡献**实现（`base × 行业指数区间收益`，含市场项），本节「板块因子 = Brinson 配置效应折算金额」的裁决改由 **M2**（`model=brinson_industry`，P3-08）承接；M1 与 M2 的分母/`ratio_basis`/`definition_version` 不同，禁止混算或并列相加（见 [五因子归因设计](2026-11-02-five-factor-attribution.md) §3.9/§10.3）。§8.2 的 Brinson 口径不变。
 ### 8.4 Carino 多期链接（本期不实现，只冻结口径）
 
 ```text
@@ -1070,6 +1071,8 @@ A_linked = Σ_t (k_t/K) · A_t；S、I 同理
 - 区间跨过已知成分变更且无法还原当时归属（同步间隔太粗）→ 422 `MODEL_NOT_AVAILABLE` 或 200 `status="blocked"`（按 API-036 约定）。
 - 基准权重同理：只有首次同步后的区间；更早区间 → `blocked` + `what_to_do`（缩短区间/升级数据源历史权重）。
 - 未分类占比 `>5%` → `degraded`；`>20%` → blocker（三效应不出结论），但 `total_pnl`/`residual` 仍可给。**本段阈值仅用于归因口径**；描述性看板仍用 §6.5 的 95%/90% 两条线（两者服务对象不同，不要混用）。
+
+> **2026-11-02 裁决补充**：M1 五因子归因**默认仍按本节 fail-closed**（首次同步日之前一律 blocked）；经人工批准的唯一例外见 [归因设计 §4.3](2026-11-02-five-factor-attribution.md)（部署开关 `SECTOR_LOOKAHEAD_ENABLED=true` + 请求 `classification_lookahead=allow` + `status=degraded`/`missing[]` 披露），且**仅用于 M1 五因子**；描述性看板与 Brinson（M2）仍严格按本节执行。
 
 ---
 

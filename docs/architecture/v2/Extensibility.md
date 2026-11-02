@@ -54,6 +54,8 @@
 | **EP-11** | 通知通道 | `delivery/notify/`（`bus.py` 固定，通道可加） | 通道注册表 + 配置启用 | `NotificationTarget` | `extension_api_version` + `template_version` | stable（in-app）/experimental（email/webhook） | M1 in-app / M2 其他 |
 | **EP-12** | API DTO 与版本演进 | `backend/packages/contracts/src/contracts/dto/` + `backend/services/api/routes/` | **显式** `OperationSpec` 登记（禁止 glob 自动暴露） | `OperationSpec` + Pydantic DTO + OpenAPI 快照 | `/api/v{N}` + `schema_version` + `operationId` | stable（v1 内 additive） | M0 |
 
+> **2026-11-02（五因子归因设计 v1.0 批准）**：EP-6 的实现形态修订为——`stock_core/attribution/`（纯函数 + `AttributionModel` 协议）+ `stock_review/attribution/`（装配/结论）+ 独立 `GET /attribution`；M1 **不注册** `MetricDef`、**不建** `MetricGroup`（当前引擎无组不变量实现），族不变式由端点守门；`AttributionModel` 协议保留，M2 以同一协议接入（加文件 + 注册一行，不改端点骨架）。详见 [归因设计 §5.4](../2026-11-02-five-factor-attribution.md) 与 ADR 记录。
+
 ### 2.1 契约签名（每点一条主签名；完整定义见各节）
 
 ```python

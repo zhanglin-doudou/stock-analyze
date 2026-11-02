@@ -415,6 +415,7 @@ Internet ──TLS──▶   │  nginx  :443  ──静态资源──▶ Reac
 
 - 口径同 v1.1：P0 五因子拆解（金额 + 占比 + 结论），P1 行业 Brinson（Carino）。
 - **API 验收**：`GET /api/v1/attribution?period=...&model=five_factor` → 200，`factors[]{code, amount, ratio, rank}` 与 `residual`；因子金额之和 + residual 与区间总损益差额 ≤0.01 元；单因子主导 fixture 下 `rank[0].code` 正确。JSON `factors[]` 固定含 `code="sector"`（板块配置）；`model=brinson_industry`（P1）行业权重按**期初（BoP，R1）**口径并附 `sectors[]` 明细。
+> **口径注（2026-11-02 五因子归因设计 v1.0 人工批准）**：`total_pnl` = **资产表 MTM 区间损益**（含浮盈亏/股息/利息/费用）− 外部现金流，并用桥接式独立对账；P0「买点/卖点」采用**执行口径**（成交价 vs 当日收盘），追涨/卖飞由 `timing.*` 指标承担；「板块」为行业指数收益贡献（M2 才做 Brinson，`model=brinson_industry` 本期 422 `MODEL_NOT_AVAILABLE`）。详见 [设计 §3](../architecture/2026-11-02-five-factor-attribution.md)。
 - **UI 验收**：必须（"为什么亏"卡）。
 
 #### FR-R8 统计可信度与最小样本 —— P0

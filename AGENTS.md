@@ -2,9 +2,11 @@
 
 本文档是**本仓 AI 编程助手的第一入口**。任何未阅读本文档就开始编码的 AI 会在 30 秒内踩坑。
 
-## 0. 当前阶段与固定本地账号（2026-10-31）
+## 0. 当前阶段与固定本地账号（2026-11-02）
 
-- **一期**：已完成；**二期核心**（回合、净值、资产、18 指标、Dashboard、API-083 月度编排、板块数据 API-087/088 + `/sectors`）已落地/验收；**二期剩余**（归因/月报/导出/设置增强/报告页/verify-p2/零口径 ESLint）暂停，未完成功能只用占位入口，禁止伪造数据/下载。
+- **一期**：已完成；**二期核心**（回合、净值、资产、18 指标、Dashboard、API-083 月度编排、板块数据 API-087/088 + `/sectors`）已落地/验收。
+- **Period2-08 五因子归因**：**设计已人工批准（2026-11-02）**——[设计 v1.0](docs/architecture/2026-11-02-five-factor-attribution.md) / [交叉评审](docs/reviews/2026-11-02-DevDesign-Review-five-factor-attribution.md)；**实现未开始**，前置 08a（THS 行业指数日线落 `market.sector_bar` + replay 日线）。
+- **其余二期项**（月报/导出/设置增强/报告页/verify-p2）暂停，未完成功能只用占位入口，禁止伪造数据/下载。
 - **固定本地测试 / 体验账号**：`1234@dev.com` / `1234`（仅本地；由 `make seed-tenants` / `make seed-demo` 创建）。
   - 隔离对照：`a@demo.example.com` / `b@demo.example.com`，管理员：`admin@demo.example.com`；本地 seed 口令统一为 `1234`。
   - `backend/tests/conftest.py` 的 `DEV_EMAIL/DEV_PASSWORD` 即该固定账号；测试和手工验收优先使用它，不要再造临时账号。
@@ -99,7 +101,7 @@ raise ApiError(ErrorCode.NOT_FOUND, detail=f"trade {trade_id} 不存在")
 2. **禁止等权近似**：基准成分权重缺失 → `active_*` 全 `null` + `missing[]` 码 `SECTOR_BENCHMARK_WEIGHTS_MISSING`；禁止用等权/总资产分母冒充。
 3. **`market.*` 是公共缓存（无 RLS）**：同步只能走 CLI `sync-sectors`（`SECTOR_MODE=live`，或用 `sync-sector-industry` / `sync-sector-concept` 分开同步），API 读路径只读缓存、请求内不联网；`platform` 仓储 `SectorRepository` 的公共查询不收 `user_id`（这是显式例外，写进 docstring）。
 4. **占位/缺失一律 200 + `missing[]`**：未同步/覆盖不足/历史成分缺失时返回 200 降级，`missing[]` 码是**响应字段**不是 `ErrorCode`；不可用数值显式 `null`，禁止输出 0。
-5. **分类版本与时点**：`classification_version`（默认 `THS`）随响应透出；成分按 SCD2 时点区间读取，缺失即 fail-closed（`not_covered`），禁止 assumed 近似。
+5. **分类版本与时点**：`classification_version`（默认 `THS`）随响应透出；成分按 SCD2 时点区间读取，缺失即 fail-closed（`not_covered`），禁止 assumed 近似。**唯一例外（2026-11-02 人工批准）**：五因子归因（M1）默认同样 fail-closed；仅当部署 `SECTOR_LOOKAHEAD_ENABLED=true` 且请求 `classification_lookahead=allow`、经人工批准时，允许用最早可用快照并标 `classification_lookahead=true`/`status=degraded`/`missing[]=SECTOR_CLASSIFICATION_LOOKAHEAD`（详见 [归因设计 §4.3](docs/architecture/2026-11-02-five-factor-attribution.md)）；描述性板块看板与 Brinson（M2）**不得**使用该例外。
 6. **前端零口径**：板块页面只渲染后端 `*_pct`/`*_display`；偏好条宽度用后端绝对百分比串（去符号）作 CSS 宽度，不做 `Number()/parseFloat`。
 
 **live 同步数据源链（`sector_live.py`）**：行业与概念板块统一走同花顺（THS）——目录用 akshare `stock_board_industry_name_ths` / `stock_board_concept_name_ths`；成分股因 akshare 无 THS 成分接口，改为抓取同花顺板块详情页分页表格（`http://q.10jqka.com.cn/{thshy,gn}/detail/code/{code}/page/{n}/`，需 `User-Agent` + `Referer` 头，BeautifulSoup 取 `代码` 列保留前导零）。基准权重仍走 `csindex`。单板成分拉取独立超时+重试，概念板块单板块失败跳过不阻断整批（行业成员互斥校验失败则整批回滚）。
