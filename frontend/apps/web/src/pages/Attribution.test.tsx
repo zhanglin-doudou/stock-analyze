@@ -123,7 +123,9 @@ function attribution(overrides: Partial<Attribution> = {}): Attribution {
       ],
     },
     missing: [],
-    assumptions: {},
+    assumptions: {
+      data_sources: { assets: "2026-06-30", market: "2026-06-30", sector: "2026-06-29" },
+    },
     data_as_of: "2026-06-30",
     inputs_hash: "sha256:abc",
     links: {
@@ -170,6 +172,9 @@ describe("AttributionPage", () => {
     expect(screen.getByTestId("attr-capital-ratio").textContent).toContain("98.9%");
     expect(screen.getByTestId("attr-coverage-bases").textContent).toContain("按标的 5/6");
     expect(screen.getByTestId("attr-coverage-bases").textContent).toContain("市值与现金混合");
+    expect(screen.getByTestId("attr-data-sources").textContent).toContain(
+      "资产 2026-06-30 · 行情 2026-06-30 · 板块 2026-06-29",
+    );
 
     const bar = screen.getByTestId("attr-factor-selection").querySelector(".attr-bar > i");
     expect(bar).not.toBeNull();
@@ -242,6 +247,7 @@ describe("AttributionPage", () => {
     expect(screen.queryByTestId("attr-residual")).toBeNull();
     expect(screen.getByTestId("attr-quality")).toBeTruthy();
     expect(screen.getByTestId("attr-missing").textContent).toContain("期初资产行不可信");
+    expect(screen.getByTestId("attr-period-end").textContent).toContain("2026-06-30");
   });
 
   it("insufficient：金额照给，结论区用后端样本不足句（不在前端写死）", async () => {

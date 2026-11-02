@@ -129,6 +129,14 @@ function assumptionText(
   return typeof value === 'string' && value !== '' ? value : undefined;
 }
 
+/** 只读展示用：assumptions.data_sources 三源截至日（U-11）。 */
+function dataSourceText(data: Attribution, key: string): string | undefined {
+  const sources = data.assumptions?.['data_sources'];
+  if (sources == null || typeof sources !== 'object') return undefined;
+  const value = (sources as Record<string, unknown>)[key];
+  return typeof value === 'string' && value !== '' ? value : undefined;
+}
+
 function StatusBadge({ status }: { status: string }): ReactElement {
   return (
     <span className={`dash-badge is-${status}`} data-testid="attr-status-badge">
@@ -381,6 +389,11 @@ export function AttributionPage(): ReactElement {
 
   const data = query.data;
   const blocked = data?.status === 'blocked';
+  const assetsAsOf = data ? dataSourceText(data, 'assets') : undefined;
+  const marketAsOf = data ? dataSourceText(data, 'market') : undefined;
+  const sectorAsOf = data ? dataSourceText(data, 'sector') : undefined;
+  const hasDataSources =
+    assetsAsOf != null || marketAsOf != null || sectorAsOf != null;
 
   return (
     <div className="attr-page" data-testid="attribution-page">
@@ -404,6 +417,15 @@ export function AttributionPage(): ReactElement {
           <span>数据截至 {data?.data_as_of ?? '—'}</span>
           {data ? (
             <>
+              {hasDataSources ? (
+                <span data-testid="attr-data-sources">
+                  资产 {assetsAsOf ?? '—'} · 行情 {marketAsOf ?? '—'} · 板块{' '}
+                  {sectorAsOf ?? '—'}
+                </span>
+              ) : null}
+              {blocked ? (
+                <span data-testid="attr-period-end">区间末端 {data.period_end}</span>
+              ) : null}
               <span>
                 总损益口径{' '}
                 {labelFor(TOTAL_PNL_BASIS_LABELS, data.total_pnl_basis)}
