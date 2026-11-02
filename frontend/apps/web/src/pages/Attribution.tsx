@@ -449,6 +449,9 @@ function CaliberNotes({ data }: { data: Attribution }): ReactElement {
         <dt>总损益口径</dt>
         <dd>{labelFor(TOTAL_PNL_BASIS_LABELS, data.total_pnl_basis)}</dd>
       </dl>
+      <p className="attr-caliber-term">
+        术语：残差 = 未归属（与结论中的“未归属”同义）；板块配置 = 用户常说的“板块”。
+      </p>
       <details className="attr-tech-details">
         <summary className="muted">
           技术口径（assumptions {Object.keys(assumptions).length} 项）
@@ -518,7 +521,7 @@ export function AttributionPage(): ReactElement {
 
   const data = query.data;
   const blocked = data?.status === 'blocked';
-  const assetsAsOf = data ? dataSourceText(data, 'assets') : undefined;
+  const assetsAsOf = data ? dataSourceText(data, 'asset_daily') : undefined;
   const marketAsOf = data ? dataSourceText(data, 'market') : undefined;
   const sectorAsOf = data ? dataSourceText(data, 'sector') : undefined;
   const hasDataSources =

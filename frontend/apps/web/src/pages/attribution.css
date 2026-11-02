@@ -112,6 +112,11 @@
   overflow-wrap: anywhere;
 }
 
+.attr-caliber-term {
+  margin: 0 0 var(--s2);
+  font-size: var(--fs-xs);
+}
+
 .attr-factor-amount {
   display: flex;
   flex-direction: column;

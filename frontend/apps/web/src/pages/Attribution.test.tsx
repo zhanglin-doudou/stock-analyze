@@ -126,7 +126,7 @@ function attribution(overrides: Partial<Attribution> = {}): Attribution {
     missing: [],
     assumptions: {
       benchmark_id: "hs300_tr",
-      data_sources: { assets: "2026-06-30", market: "2026-06-30", sector: "2026-06-29" },
+      data_sources: { asset_daily: "2026-06-30", market: "2026-06-30", sector: "2026-06-29" },
     },
     data_as_of: "2026-06-30",
     inputs_hash: "sha256:abc",

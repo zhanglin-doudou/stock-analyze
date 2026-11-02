@@ -37,12 +37,21 @@
   flex-wrap: wrap;
   align-items: center;
   gap: var(--s2);
+  min-width: 0;
 }
 
 .period-range {
   display: inline-flex;
+  flex-wrap: wrap;
   align-items: center;
   gap: var(--s2);
+  min-width: 0;
+}
+
+.month-input,
+.month-select {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .period-range-error {
