@@ -176,6 +176,21 @@
             "title": "Rows Count",
             "type": "integer"
           },
+          "session_notice": {
+            "anyOf": [
+              {
+                "enum": [
+                  "market_open",
+                  "sync_pending"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Notice"
+          },
           "state": {
             "enum": [
               "missing",
@@ -1563,6 +1578,10 @@
           "rounds": {
             "title": "Rounds",
             "type": "string"
+          },
+          "sectors": {
+            "title": "Sectors",
+            "type": "string"
           }
         },
         "required": [
@@ -1571,7 +1590,8 @@
           "metrics",
           "reports",
           "exports",
-          "attribution"
+          "attribution",
+          "sectors"
         ],
         "title": "DashboardLinksOut",
         "type": "object"
@@ -4897,6 +4917,1207 @@
           "items"
         ],
         "title": "RoundPage",
+        "type": "object"
+      },
+      "SectorCatalogItemOut": {
+        "additionalProperties": false,
+        "properties": {
+          "classification_version": {
+            "title": "Classification Version",
+            "type": "string"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "level": {
+            "title": "Level",
+            "type": "integer"
+          },
+          "member_count": {
+            "title": "Member Count",
+            "type": "integer"
+          },
+          "parent_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Code"
+          },
+          "path": {
+            "items": {
+              "$ref": "#/components/schemas/SectorCatalogPathOut"
+            },
+            "title": "Path",
+            "type": "array"
+          },
+          "sector_code": {
+            "title": "Sector Code",
+            "type": "string"
+          },
+          "sector_name": {
+            "title": "Sector Name",
+            "type": "string"
+          },
+          "source": {
+            "enum": [
+              "sw",
+              "em"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "taxonomy": {
+            "enum": [
+              "industry",
+              "concept"
+            ],
+            "title": "Taxonomy",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sector_code",
+          "sector_name",
+          "taxonomy",
+          "level",
+          "path",
+          "member_count",
+          "source",
+          "classification_version",
+          "is_active"
+        ],
+        "title": "SectorCatalogItemOut",
+        "type": "object"
+      },
+      "SectorCatalogOut": {
+        "additionalProperties": false,
+        "description": "API-088：板块目录树（公共数据；未同步 → items=[] + missing）。",
+        "properties": {
+          "as_of": {
+            "format": "date",
+            "title": "As Of",
+            "type": "string"
+          },
+          "catalog_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Catalog Version"
+          },
+          "has_more": {
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/SectorCatalogItemOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "missing": {
+            "items": {
+              "$ref": "#/components/schemas/SectorMissingOut"
+            },
+            "title": "Missing",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "sector_data_state": {
+            "enum": [
+              "current",
+              "stale",
+              "missing"
+            ],
+            "title": "Sector Data State",
+            "type": "string"
+          },
+          "taxonomy": {
+            "enum": [
+              "industry",
+              "concept"
+            ],
+            "title": "Taxonomy",
+            "type": "string"
+          }
+        },
+        "required": [
+          "as_of",
+          "taxonomy",
+          "sector_data_state",
+          "items",
+          "has_more",
+          "missing"
+        ],
+        "title": "SectorCatalogOut",
+        "type": "object"
+      },
+      "SectorCatalogPathOut": {
+        "additionalProperties": false,
+        "properties": {
+          "sector_code": {
+            "title": "Sector Code",
+            "type": "string"
+          },
+          "sector_name": {
+            "title": "Sector Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sector_code",
+          "sector_name"
+        ],
+        "title": "SectorCatalogPathOut",
+        "type": "object"
+      },
+      "SectorConcentrationOut": {
+        "additionalProperties": false,
+        "description": "行业集中度（scale=8）；概念请求恒 unavailable。",
+        "properties": {
+          "benchmark_hhi": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Hhi"
+          },
+          "effective_n": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective N"
+          },
+          "hhi": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hhi"
+          },
+          "method": {
+            "enum": [
+              "industry_single_membership",
+              "concept_overlap"
+            ],
+            "title": "Method",
+            "type": "string"
+          },
+          "n_sectors": {
+            "title": "N Sectors",
+            "type": "integer"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "top1_weight": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Top1 Weight"
+          },
+          "top3_weight": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Top3 Weight"
+          }
+        },
+        "required": [
+          "method",
+          "status",
+          "n_sectors"
+        ],
+        "title": "SectorConcentrationOut",
+        "type": "object"
+      },
+      "SectorConceptBlockOut": {
+        "additionalProperties": false,
+        "description": "概念块（多归属；overlap 为 Σexposure 比率，非权重）。",
+        "properties": {
+          "caveat": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Caveat"
+          },
+          "coverage": {
+            "title": "Coverage",
+            "type": "string"
+          },
+          "coverage_basis": {
+            "title": "Coverage Basis",
+            "type": "string"
+          },
+          "coverage_pct": {
+            "title": "Coverage Pct",
+            "type": "string"
+          },
+          "hhi_tag": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Hhi Tag"
+          },
+          "multi_tag_market_value": {
+            "title": "Multi Tag Market Value",
+            "type": "string"
+          },
+          "multi_tag_pct": {
+            "title": "Multi Tag Pct",
+            "type": "string"
+          },
+          "overlap": {
+            "title": "Overlap",
+            "type": "string"
+          },
+          "tagged_market_value": {
+            "title": "Tagged Market Value",
+            "type": "string"
+          },
+          "top1_concept": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SectorConceptTopOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "top5_concepts": {
+            "items": {
+              "$ref": "#/components/schemas/SectorConceptTopOut"
+            },
+            "title": "Top5 Concepts",
+            "type": "array"
+          }
+        },
+        "required": [
+          "coverage",
+          "coverage_pct",
+          "coverage_basis",
+          "tagged_market_value",
+          "multi_tag_market_value",
+          "multi_tag_pct",
+          "overlap",
+          "top5_concepts"
+        ],
+        "title": "SectorConceptBlockOut",
+        "type": "object"
+      },
+      "SectorConceptTopOut": {
+        "additionalProperties": false,
+        "description": "概念 TopN（按 exposure 降序，不是 tag_share）。",
+        "properties": {
+          "exposure": {
+            "title": "Exposure",
+            "type": "string"
+          },
+          "exposure_pct": {
+            "title": "Exposure Pct",
+            "type": "string"
+          },
+          "sector_code": {
+            "title": "Sector Code",
+            "type": "string"
+          },
+          "sector_name": {
+            "title": "Sector Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sector_code",
+          "sector_name",
+          "exposure",
+          "exposure_pct"
+        ],
+        "title": "SectorConceptTopOut",
+        "type": "object"
+      },
+      "SectorMissingOut": {
+        "additionalProperties": false,
+        "description": "200 降级项（字段路径 + 机读码 + 人话 + 可执行指引）。",
+        "properties": {
+          "code": {
+            "enum": [
+              "SECTOR_ASSET_BUILD_MISSING",
+              "SECTOR_ASSET_BUILD_BLOCKED",
+              "SECTOR_ASSET_BUILD_STALE",
+              "SECTOR_DATA_MISSING",
+              "SECTOR_DATA_STALE",
+              "SECTOR_SYNC_FAILED",
+              "SECTOR_MEMBERSHIP_MISSING",
+              "SECTOR_NON_STOCK_HOLDINGS",
+              "SECTOR_NO_STOCK_POSITIONS",
+              "SECTOR_BENCHMARK_WEIGHTS_MISSING",
+              "SECTOR_BENCHMARK_WEIGHTS_STALE",
+              "SECTOR_CONCEPT_MULTI_MEMBERSHIP",
+              "SECTOR_CONCEPT_COVERAGE_LOW",
+              "SECTOR_CONCEPT_HHI_UNAVAILABLE",
+              "SECTOR_HISTORY_NOT_COVERED",
+              "SECTOR_ASSET_MISMATCH",
+              "SECTOR_TRUNCATED",
+              "SECTOR_HOLDING_TRUNCATED",
+              "SECTOR_PRICE_MISSING",
+              "SECTOR_AS_OF_NOT_AVAILABLE"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "field": {
+            "title": "Field",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "what_to_do": {
+            "title": "What To Do",
+            "type": "string"
+          }
+        },
+        "required": [
+          "field",
+          "code",
+          "reason",
+          "what_to_do"
+        ],
+        "title": "SectorMissingOut",
+        "type": "object"
+      },
+      "SectorOthersOut": {
+        "additionalProperties": false,
+        "description": "limit 截断后的「其他板块」聚合（industry 带权重；concept 带暴露）。",
+        "properties": {
+          "exposure": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exposure"
+          },
+          "exposure_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exposure Pct"
+          },
+          "holding_count": {
+            "title": "Holding Count",
+            "type": "integer"
+          },
+          "market_value": {
+            "title": "Market Value",
+            "type": "string"
+          },
+          "weight": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weight"
+          },
+          "weight_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weight Pct"
+          }
+        },
+        "required": [
+          "market_value",
+          "holding_count"
+        ],
+        "title": "SectorOthersOut",
+        "type": "object"
+      },
+      "SectorOverviewLinksOut": {
+        "additionalProperties": false,
+        "properties": {
+          "attribution": {
+            "title": "Attribution",
+            "type": "string"
+          },
+          "dashboard": {
+            "title": "Dashboard",
+            "type": "string"
+          },
+          "sectors": {
+            "title": "Sectors",
+            "type": "string"
+          }
+        },
+        "required": [
+          "dashboard",
+          "sectors",
+          "attribution"
+        ],
+        "title": "SectorOverviewLinksOut",
+        "type": "object"
+      },
+      "SectorOverviewOut": {
+        "additionalProperties": false,
+        "description": "API-087：当前快照的板块配置/偏好/集中度（只读；金额/比率后端格式化）。",
+        "properties": {
+          "as_of": {
+            "format": "date",
+            "title": "As Of",
+            "type": "string"
+          },
+          "asset_build_state": {
+            "enum": [
+              "missing",
+              "current",
+              "stale",
+              "blocked"
+            ],
+            "title": "Asset Build State",
+            "type": "string"
+          },
+          "assumptions": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Assumptions",
+            "type": "object"
+          },
+          "benchmark_as_of": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark As Of"
+          },
+          "benchmark_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Id"
+          },
+          "concentration": {
+            "$ref": "#/components/schemas/SectorConcentrationOut"
+          },
+          "concept": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SectorConceptBlockOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "data_as_of": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data As Of"
+          },
+          "definition_version": {
+            "title": "Definition Version",
+            "type": "string"
+          },
+          "inputs_hash": {
+            "title": "Inputs Hash",
+            "type": "string"
+          },
+          "level": {
+            "title": "Level",
+            "type": "integer"
+          },
+          "links": {
+            "$ref": "#/components/schemas/SectorOverviewLinksOut"
+          },
+          "missing": {
+            "items": {
+              "$ref": "#/components/schemas/SectorMissingOut"
+            },
+            "title": "Missing",
+            "type": "array"
+          },
+          "others": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SectorOthersOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "portfolio": {
+            "$ref": "#/components/schemas/SectorPortfolioOut"
+          },
+          "preference": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SectorPreferenceOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "sector_data_as_of": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sector Data As Of"
+          },
+          "sector_data_state": {
+            "enum": [
+              "current",
+              "stale",
+              "missing"
+            ],
+            "title": "Sector Data State",
+            "type": "string"
+          },
+          "sector_dataset_version": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sector Dataset Version"
+          },
+          "sectors": {
+            "items": {
+              "$ref": "#/components/schemas/SectorRowOut"
+            },
+            "title": "Sectors",
+            "type": "array"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "degraded",
+              "stale",
+              "insufficient",
+              "missing",
+              "blocked"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "taxonomy": {
+            "enum": [
+              "industry",
+              "concept"
+            ],
+            "title": "Taxonomy",
+            "type": "string"
+          },
+          "unclassified": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SectorUnclassifiedOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "weight_mode": {
+            "enum": [
+              "additive",
+              "overlapping"
+            ],
+            "title": "Weight Mode",
+            "type": "string"
+          }
+        },
+        "required": [
+          "as_of",
+          "taxonomy",
+          "level",
+          "status",
+          "asset_build_state",
+          "sector_data_state",
+          "definition_version",
+          "weight_mode",
+          "portfolio",
+          "sectors",
+          "concentration",
+          "missing",
+          "links",
+          "assumptions",
+          "inputs_hash"
+        ],
+        "title": "SectorOverviewOut",
+        "type": "object"
+      },
+      "SectorPortfolioOut": {
+        "additionalProperties": false,
+        "description": "持仓口径（金额 2 位、比率 scale=8；行业专属字段在概念请求下为 null）。",
+        "properties": {
+          "classified_holding_count": {
+            "title": "Classified Holding Count",
+            "type": "integer"
+          },
+          "coverage": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coverage"
+          },
+          "coverage_basis": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coverage Basis"
+          },
+          "coverage_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coverage Pct"
+          },
+          "equity_market_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Equity Market Value"
+          },
+          "equity_position": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Equity Position"
+          },
+          "equity_position_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Equity Position Pct"
+          },
+          "holding_count": {
+            "title": "Holding Count",
+            "type": "integer"
+          },
+          "holding_market_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Holding Market Value"
+          },
+          "mapped_market_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mapped Market Value"
+          },
+          "non_stock_market_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Non Stock Market Value"
+          },
+          "total_assets": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Assets"
+          },
+          "total_assets_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Assets Display"
+          },
+          "unclassified_market_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Unclassified Market Value"
+          }
+        },
+        "required": [
+          "holding_count",
+          "classified_holding_count"
+        ],
+        "title": "SectorPortfolioOut",
+        "type": "object"
+      },
+      "SectorPreferenceItemOut": {
+        "additionalProperties": false,
+        "description": "板块偏好一项（active_weight scale=8 + 两位百分比 + 方向）。",
+        "properties": {
+          "active_weight": {
+            "title": "Active Weight",
+            "type": "string"
+          },
+          "active_weight_pct": {
+            "title": "Active Weight Pct",
+            "type": "string"
+          },
+          "direction": {
+            "anyOf": [
+              {
+                "enum": [
+                  "over",
+                  "under",
+                  "flat"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Direction"
+          },
+          "sector_code": {
+            "title": "Sector Code",
+            "type": "string"
+          },
+          "sector_name": {
+            "title": "Sector Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sector_code",
+          "sector_name",
+          "active_weight",
+          "active_weight_pct"
+        ],
+        "title": "SectorPreferenceItemOut",
+        "type": "object"
+      },
+      "SectorPreferenceOut": {
+        "additionalProperties": false,
+        "description": "板块主动偏离（Σ|Δ|/2，scale=8）。",
+        "properties": {
+          "deviation": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Deviation"
+          },
+          "max_overweight": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SectorPreferenceItemOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "max_underweight": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SectorPreferenceItemOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "top_overweight": {
+            "items": {
+              "$ref": "#/components/schemas/SectorPreferenceItemOut"
+            },
+            "title": "Top Overweight",
+            "type": "array"
+          },
+          "top_underweight": {
+            "items": {
+              "$ref": "#/components/schemas/SectorPreferenceItemOut"
+            },
+            "title": "Top Underweight",
+            "type": "array"
+          }
+        },
+        "required": [
+          "top_overweight",
+          "top_underweight"
+        ],
+        "title": "SectorPreferenceOut",
+        "type": "object"
+      },
+      "SectorRowOut": {
+        "additionalProperties": false,
+        "description": "板块行：industry 用 weight/active_weight；concept 用 exposure（其余为 null）。",
+        "properties": {
+          "active_weight": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Weight"
+          },
+          "active_weight_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active Weight Pct"
+          },
+          "benchmark_weight": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Weight"
+          },
+          "benchmark_weight_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Benchmark Weight Pct"
+          },
+          "direction": {
+            "anyOf": [
+              {
+                "enum": [
+                  "over",
+                  "under",
+                  "flat"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Direction"
+          },
+          "exposure": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exposure"
+          },
+          "exposure_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exposure Pct"
+          },
+          "holding_count": {
+            "title": "Holding Count",
+            "type": "integer"
+          },
+          "level": {
+            "title": "Level",
+            "type": "integer"
+          },
+          "market_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Value"
+          },
+          "market_value_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Market Value Display"
+          },
+          "overlap": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Overlap"
+          },
+          "parent_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Parent Code"
+          },
+          "sector_code": {
+            "title": "Sector Code",
+            "type": "string"
+          },
+          "sector_name": {
+            "title": "Sector Name",
+            "type": "string"
+          },
+          "weight": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weight"
+          },
+          "weight_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weight Pct"
+          }
+        },
+        "required": [
+          "sector_code",
+          "sector_name",
+          "level",
+          "holding_count"
+        ],
+        "title": "SectorRowOut",
+        "type": "object"
+      },
+      "SectorUnclassifiedOut": {
+        "additionalProperties": false,
+        "description": "未分类持仓（正常披露；分母为 equity_market_value）。",
+        "properties": {
+          "holding_count": {
+            "title": "Holding Count",
+            "type": "integer"
+          },
+          "market_value": {
+            "title": "Market Value",
+            "type": "string"
+          },
+          "ratio_of_equity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ratio Of Equity"
+          },
+          "symbols": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Symbols",
+            "type": "array"
+          }
+        },
+        "required": [
+          "market_value",
+          "holding_count",
+          "symbols"
+        ],
+        "title": "SectorUnclassifiedOut",
         "type": "object"
       },
       "SummaryRuleCreateIn": {
@@ -10944,16 +12165,16 @@
                           "to": "2026-09-30"
                         }
                       ],
-                      "caveat": "示例",
+                      "caveat": "概念为多归属标签：暴露可重叠、不可加总。",
                       "ci": "wilson",
                       "ci_min_n": 1,
-                      "definition_version": "示例",
+                      "definition_version": "1.0",
                       "direction": "higher_better",
                       "display_name": "示例",
                       "display_name_en": "示例",
                       "domain": "示例",
                       "meaning": "示例",
-                      "method": "示例",
+                      "method": "industry_single_membership",
                       "metric_id": "obj_01J9Z6ABCDEFGHJKMNPQRSTVWX",
                       "min_n": 1,
                       "min_trading_days": 1,
@@ -13213,6 +14434,712 @@
           "TOKEN_REVOKED",
           "MULTIPLE_CREDENTIALS",
           "ADMIN_CANNOT_READ_TRADES"
+        ],
+        "x-idempotent": false,
+        "x-required-scope": "read"
+      }
+    },
+    "/api/v1/sectors": {
+      "get": {
+        "description": "API-088：板块目录树（公共数据、无用户维度；未同步 → 200 + items=[]）。",
+        "operationId": "listSectors",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "taxonomy",
+            "required": false,
+            "schema": {
+              "default": "industry",
+              "title": "Taxonomy",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "level",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Level"
+            }
+          },
+          {
+            "in": "query",
+            "name": "parent",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Parent"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 32,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "active_only",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Active Only",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-api-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "as_of": "2026-09-30",
+                  "catalog_version": "a1b2c3d4e5f60718",
+                  "has_more": true,
+                  "items": [
+                    {
+                      "classification_version": "SW2021",
+                      "is_active": false,
+                      "level": 1,
+                      "member_count": 1,
+                      "parent_code": "示例",
+                      "path": [
+                        {
+                          "sector_code": "801030.SI",
+                          "sector_name": "基础化工"
+                        }
+                      ],
+                      "sector_code": "801030.SI",
+                      "sector_name": "基础化工",
+                      "source": "sw",
+                      "taxonomy": "industry"
+                    }
+                  ],
+                  "missing": [
+                    {
+                      "code": "SECTOR_ASSET_BUILD_MISSING",
+                      "field": "示例",
+                      "reason": "示例原因",
+                      "what_to_do": "示例"
+                    }
+                  ],
+                  "next_cursor": "cursor_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "sector_data_state": "current",
+                  "taxonomy": "industry"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/SectorCatalogOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "UNKNOWN_QUERY_PARAM",
+                  "detail": "请求包含未知参数。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 400,
+                  "title": "UNKNOWN_QUERY_PARAM",
+                  "type": "https://stock-analyze.local/errors/UNKNOWN_QUERY_PARAM",
+                  "user_message": "请求包含未知参数。",
+                  "what_to_do": "移除未知参数后重试。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "请求参数错误"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "TOKEN_EXPIRED",
+                  "detail": "访问凭证已过期。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 401,
+                  "title": "TOKEN_EXPIRED",
+                  "type": "https://stock-analyze.local/errors/TOKEN_EXPIRED",
+                  "user_message": "访问凭证已过期。",
+                  "what_to_do": "用 refresh_token 换新 access，或重建 PAT。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "未认证或凭证无效"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "ADMIN_CANNOT_READ_TRADES",
+                  "detail": "管理员账号不能查看交易明细。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 403,
+                  "title": "ADMIN_CANNOT_READ_TRADES",
+                  "type": "https://stock-analyze.local/errors/ADMIN_CANNOT_READ_TRADES",
+                  "user_message": "管理员账号不能查看交易明细。",
+                  "what_to_do": "用数据所有者账号访问。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "权限不足"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "example": {
+                  "code": "VALIDATION_ERROR",
+                  "detail": "请求参数有问题。",
+                  "errors": [
+                    {
+                      "code": "invalid",
+                      "field": "body.email",
+                      "message": "邮箱格式不正确。"
+                    }
+                  ],
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 422,
+                  "title": "VALIDATION_ERROR",
+                  "type": "https://stock-analyze.local/errors/VALIDATION_ERROR",
+                  "user_message": "请求参数有问题。",
+                  "what_to_do": "按 errors[] 修正字段后重试。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Sectors Endpoint",
+        "tags": [
+          "sectors"
+        ],
+        "x-async": false,
+        "x-error-codes": [
+          "TOKEN_EXPIRED",
+          "TOKEN_REVOKED",
+          "MULTIPLE_CREDENTIALS",
+          "ADMIN_CANNOT_READ_TRADES",
+          "UNKNOWN_QUERY_PARAM",
+          "VALIDATION_ERROR",
+          "INVALID_CURSOR"
+        ],
+        "x-idempotent": false,
+        "x-required-scope": "read"
+      }
+    },
+    "/api/v1/sectors/overview": {
+      "get": {
+        "description": "API-087：当前快照的板块配置/偏好/集中度（只读；ETag 命中 → 304）。",
+        "operationId": "getSectorsOverview",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "as_of",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "As Of"
+            }
+          },
+          {
+            "in": "query",
+            "name": "taxonomy",
+            "required": false,
+            "schema": {
+              "default": "industry",
+              "title": "Taxonomy",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "level",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Level"
+            }
+          },
+          {
+            "in": "query",
+            "name": "parent",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Parent"
+            }
+          },
+          {
+            "in": "query",
+            "name": "benchmark",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Benchmark"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 500,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-api-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "as_of": "2026-09-30",
+                  "asset_build_state": "missing",
+                  "assumptions": {
+                    "benchmark_id": "hs300_tr"
+                  },
+                  "benchmark_as_of": "2026-09-30",
+                  "benchmark_id": "obj_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "concentration": {
+                    "benchmark_hhi": "0.1234",
+                    "effective_n": "0.1234",
+                    "hhi": "0.1234",
+                    "method": "industry_single_membership",
+                    "n_sectors": 1,
+                    "status": "ok",
+                    "top1_weight": "0.1234",
+                    "top3_weight": "0.1234"
+                  },
+                  "concept": {
+                    "caveat": "概念为多归属标签：暴露可重叠、不可加总。",
+                    "coverage": "0.1234",
+                    "coverage_basis": "mapped_equity_market_value / equity_market_value",
+                    "coverage_pct": "96.00%",
+                    "hhi_tag": "0.1234",
+                    "multi_tag_market_value": "示例",
+                    "multi_tag_pct": "36.00%",
+                    "overlap": "示例",
+                    "tagged_market_value": "示例",
+                    "top1_concept": {
+                      "exposure": "0.1234",
+                      "exposure_pct": "80.00%",
+                      "sector_code": "801030.SI",
+                      "sector_name": "基础化工"
+                    },
+                    "top5_concepts": [
+                      {
+                        "exposure": "0.1234",
+                        "exposure_pct": "80.00%",
+                        "sector_code": "801030.SI",
+                        "sector_name": "基础化工"
+                      }
+                    ]
+                  },
+                  "data_as_of": "2026-09-30",
+                  "definition_version": "1.0",
+                  "inputs_hash": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+                  "level": 1,
+                  "links": {
+                    "attribution": "示例",
+                    "dashboard": "示例",
+                    "sectors": "示例"
+                  },
+                  "missing": [
+                    {
+                      "code": "SECTOR_ASSET_BUILD_MISSING",
+                      "field": "示例",
+                      "reason": "示例原因",
+                      "what_to_do": "示例"
+                    }
+                  ],
+                  "others": {
+                    "exposure": "0.1234",
+                    "exposure_pct": "80.00%",
+                    "holding_count": 1,
+                    "market_value": "示例",
+                    "weight": "0.1234",
+                    "weight_pct": "83.33%"
+                  },
+                  "portfolio": {
+                    "classified_holding_count": 1,
+                    "coverage": "0.1234",
+                    "coverage_basis": "mapped_equity_market_value / equity_market_value",
+                    "coverage_pct": "96.00%",
+                    "equity_market_value": "示例",
+                    "equity_position": "0.1234",
+                    "equity_position_pct": "90.91%",
+                    "holding_count": 1,
+                    "holding_market_value": "示例",
+                    "mapped_market_value": "示例",
+                    "non_stock_market_value": "示例",
+                    "total_assets": "示例",
+                    "total_assets_display": "示例",
+                    "unclassified_market_value": "示例"
+                  },
+                  "preference": {
+                    "deviation": "0.1234",
+                    "max_overweight": {
+                      "active_weight": "0.1234",
+                      "active_weight_pct": "53.33%",
+                      "direction": "over",
+                      "sector_code": "801030.SI",
+                      "sector_name": "基础化工"
+                    },
+                    "max_underweight": {
+                      "active_weight": "0.1234",
+                      "active_weight_pct": "53.33%",
+                      "direction": "over",
+                      "sector_code": "801030.SI",
+                      "sector_name": "基础化工"
+                    },
+                    "top_overweight": [
+                      {
+                        "active_weight": "0.1234",
+                        "active_weight_pct": "53.33%",
+                        "direction": "over",
+                        "sector_code": "801030.SI",
+                        "sector_name": "基础化工"
+                      }
+                    ],
+                    "top_underweight": [
+                      {
+                        "active_weight": "0.1234",
+                        "active_weight_pct": "53.33%",
+                        "direction": "over",
+                        "sector_code": "801030.SI",
+                        "sector_name": "基础化工"
+                      }
+                    ]
+                  },
+                  "sector_data_as_of": "2026-09-30",
+                  "sector_data_state": "current",
+                  "sector_dataset_version": "sw2021@2026-09-30",
+                  "sectors": [
+                    {
+                      "active_weight": "0.1234",
+                      "active_weight_pct": "53.33%",
+                      "benchmark_weight": "0.1234",
+                      "benchmark_weight_pct": "30.00%",
+                      "direction": "over",
+                      "exposure": "0.1234",
+                      "exposure_pct": "80.00%",
+                      "holding_count": 1,
+                      "level": 1,
+                      "market_value": "示例",
+                      "market_value_display": "示例",
+                      "overlap": false,
+                      "parent_code": "示例",
+                      "sector_code": "801030.SI",
+                      "sector_name": "基础化工",
+                      "weight": "0.1234",
+                      "weight_pct": "83.33%"
+                    }
+                  ],
+                  "status": "ok",
+                  "taxonomy": "industry",
+                  "unclassified": {
+                    "holding_count": 1,
+                    "market_value": "示例",
+                    "ratio_of_equity": "0.1234",
+                    "symbols": [
+                      "示例"
+                    ]
+                  },
+                  "weight_mode": "additive"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/SectorOverviewOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "304": {
+            "description": "Not Modified（If-None-Match 命中）"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "UNKNOWN_QUERY_PARAM",
+                  "detail": "请求包含未知参数。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 400,
+                  "title": "UNKNOWN_QUERY_PARAM",
+                  "type": "https://stock-analyze.local/errors/UNKNOWN_QUERY_PARAM",
+                  "user_message": "请求包含未知参数。",
+                  "what_to_do": "移除未知参数后重试。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "请求参数错误"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "TOKEN_EXPIRED",
+                  "detail": "访问凭证已过期。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 401,
+                  "title": "TOKEN_EXPIRED",
+                  "type": "https://stock-analyze.local/errors/TOKEN_EXPIRED",
+                  "user_message": "访问凭证已过期。",
+                  "what_to_do": "用 refresh_token 换新 access，或重建 PAT。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "未认证或凭证无效"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "ADMIN_CANNOT_READ_TRADES",
+                  "detail": "管理员账号不能查看交易明细。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 403,
+                  "title": "ADMIN_CANNOT_READ_TRADES",
+                  "type": "https://stock-analyze.local/errors/ADMIN_CANNOT_READ_TRADES",
+                  "user_message": "管理员账号不能查看交易明细。",
+                  "what_to_do": "用数据所有者账号访问。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "权限不足"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "example": {
+                  "code": "VALIDATION_ERROR",
+                  "detail": "请求参数有问题。",
+                  "errors": [
+                    {
+                      "code": "invalid",
+                      "field": "body.email",
+                      "message": "邮箱格式不正确。"
+                    }
+                  ],
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 422,
+                  "title": "VALIDATION_ERROR",
+                  "type": "https://stock-analyze.local/errors/VALIDATION_ERROR",
+                  "user_message": "请求参数有问题。",
+                  "what_to_do": "按 errors[] 修正字段后重试。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Sectors Overview Endpoint",
+        "tags": [
+          "sectors"
+        ],
+        "x-async": false,
+        "x-error-codes": [
+          "TOKEN_EXPIRED",
+          "TOKEN_REVOKED",
+          "MULTIPLE_CREDENTIALS",
+          "ADMIN_CANNOT_READ_TRADES",
+          "UNKNOWN_QUERY_PARAM",
+          "VALIDATION_ERROR",
+          "UNKNOWN_BENCHMARK"
         ],
         "x-idempotent": false,
         "x-required-scope": "read"

@@ -18,6 +18,7 @@ from stock_platform.idempotency import IdempotencyStore
 from stock_platform.jobs import JobQueue
 from stock_platform.obs import configure_logging, get_logger
 from stock_platform.ratelimit import RateLimiter
+from stock_platform.sector_source import create_sector_source
 from stock_platform.security import TokenService
 from stock_platform.storage import LocalObjectStore
 
@@ -42,6 +43,7 @@ from stock_api.routers import (
     reconciliation,
     rounds,
     rules,
+    sectors,
     tokens,
     trades,
 )
@@ -75,6 +77,8 @@ def build_state(settings: Settings, clock: Clock | None = None) -> AppState:
     resolved_clock = clock or SystemClock()
     # 行情源统一走工厂：live 分支需要无租户 session_factory（公共行情缓存）。
     market_data = create_market_source(settings, session_factory=db.session, clock=resolved_clock)
+    # 板块数据源同口径（replay 读夹具；live 读 market.* 缓存，缺 akshare 启动期 fail-fast）。
+    sector_data = create_sector_source(settings, session_factory=db.session, clock=resolved_clock)
     return AppState(
         settings=settings,
         db=db,
@@ -86,6 +90,7 @@ def build_state(settings: Settings, clock: Clock | None = None) -> AppState:
             settings.jwt_secret, settings.jwt_algorithm, settings.access_ttl_seconds
         ),
         market_data=market_data,
+        sector_data=sector_data,
         object_store=LocalObjectStore(settings.data_dir / "objects"),
     )
 
@@ -133,6 +138,7 @@ def create_app(settings: Settings | None = None, *, clock: Clock | None = None) 
         assets,
         metrics,
         dashboard,
+        sectors,
     ):
         app.include_router(module.router, prefix=API_PREFIX)
     # 探针/根路由按容器惯例不带前缀（/healthz、/readyz、/version、/metrics、/）

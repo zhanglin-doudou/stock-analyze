@@ -18,7 +18,6 @@ import json
 import uuid
 from dataclasses import dataclass, field
 from datetime import date, timedelta
-from decimal import ROUND_HALF_UP, Decimal
 from typing import TYPE_CHECKING, cast
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -27,7 +26,6 @@ from stock_core.stats.drawdown import DrawdownFamily, drawdown_family
 from stock_ledger.models import Trade
 from stock_ledger.repositories.trades import TradeRepository
 from stock_platform.obs import get_logger
-from stock_platform.symbols import is_bond
 
 from stock_review.application.assets import (
     STATE_BLOCKED,
@@ -37,16 +35,11 @@ from stock_review.application.assets import (
 )
 from stock_review.application.bond_alias import build_bond_alias, canonical_code
 from stock_review.application.bridge import bridge_for_period
+from stock_review.application.portfolio import HOLDINGS_MAX, Holding, holdings_at, ratio_units
 from stock_review.application.valuation import (
     CASHFLOW_CATEGORIES,
-    bond_face_divisors,
-    bond_value_units,
     category,
-    close_on_or_before,
-    holding_delta,
     is_money_fund_row,
-    load_prices,
-    new_stock_pending_codes,
 )
 from stock_review.metrics.defs._common import fee_breakdown
 from stock_review.metrics.views import TradeView
@@ -60,10 +53,7 @@ if TYPE_CHECKING:
 log = get_logger("stock_review.dashboard")
 
 DASHBOARD_VERSION = "1.0"
-HOLDINGS_MAX = 200
 MDD_MIN_OBS = 60
-# 当前持仓估值只看最近 45 天行情（与资产表安全窗同源）。
-PRICE_WINDOW_DAYS = 45
 
 STATUS_BLOCKED = "blocked"
 STATUS_MISSING = "missing"
@@ -110,16 +100,8 @@ class DashboardMissing:
     what_to_do: str
 
 
-@dataclass(slots=True, frozen=True)
-class DashboardHolding:
-    """当前持仓（证券维度；现金不在列表内）。"""
-
-    security_code: str
-    security_name: str
-    quantity_units: int
-    cost_units: int
-    market_value_units: int | None
-    weight_ratio_units: int | None
+# 持仓数据结构由 ``portfolio.Holding`` 提供，dashboard 只保留旧类名兼容引用。
+DashboardHolding = Holding
 
 
 @dataclass(slots=True, frozen=True)
@@ -227,14 +209,6 @@ class DashboardResult:
     assumptions: dict[str, str] = field(default_factory=dict)
 
 
-def _ratio_units(numerator: int, denominator: int) -> int | None:
-    """标度比率（scale=8，四舍五入）；分母 <= 0 → None（不伪造 0）。"""
-    if denominator <= 0:
-        return None
-    value = (Decimal(numerator) / Decimal(denominator)).scaleb(8)
-    return int(value.to_integral_value(rounding=ROUND_HALF_UP))
-
-
 def _peak_transfer_cost(trades: list[Trade]) -> int | None:
     """银证转账峰值转入成本：累计净转入（转入 + / 转出 -）的历史峰值。
 
@@ -288,122 +262,8 @@ async def _holdings_at(
     as_of: date,
     market_data: MarketDataSource,
 ) -> tuple[list[DashboardHolding], list[str], list[str], bool]:
-    """按资产表同一口径重建 ``as_of`` 收盘持仓。
-
-    与 ``asset_daily`` 必须逐项对齐，否则会出现「持仓市值合计与快照不一致」的假告警：
-    * 货基行不进持仓、不请求行情（货基已计入 ``money_fund_units`` 余额）；
-    * 可转债发债代码归一到上市代码（发债代码永无行情）；
-    * 债券按面值换算系数估值（``bond_value_units``），可转债固定 1 手 = 10 张；
-    * 债券 / 待上市新股缺行情时按买入成本兜底，不算「缺行情」。
-
-    返回 ``(holdings, 缺价标的, 成本兜底标的, 是否截断)``；成本与
-    ``asset_daily.holding_cost`` 同源：买入/配股/打新累加 ``-amount``，卖出按数量比例结转。
-    """
-    bond_alias, _unresolved = build_bond_alias(
-        (trade.security_code, trade.security_name) for trade in trades
-    )
-    holdings: dict[str, int] = {}
-    cost_basis: dict[str, int] = {}
-    names: dict[str, str] = {}
-
-    for trade in trades:
-        if trade.trade_date > as_of:
-            break
-        raw_code = (trade.security_code or "").strip()
-        if not raw_code:
-            continue
-        # 货基：余额口径资产，不进持仓，也不请求行情（否则必然缺行情）。
-        if is_money_fund_row(trade):
-            continue
-        code = canonical_code(bond_alias, raw_code)
-        trade_category = category(trade)
-        delta = holding_delta(trade_category, trade.quantity_units, amount_units=trade.amount_units)
-        if delta:
-            holdings[code] = holdings.get(code, 0) + delta
-            names[code] = trade.security_name or code
-        if trade_category in {"buy", "rights", "new_stock"} and trade.amount_units != 0:
-            cost_basis[code] = cost_basis.get(code, 0) + (-trade.amount_units)
-        elif trade_category == "sell":
-            old_qty = holdings.get(code, 0) - delta
-            if old_qty > 0 and delta < 0:
-                old_cost = cost_basis.get(code, 0)
-                cost_basis[code] = max(0, old_cost + (old_cost * delta) // old_qty)
-
-    held = {code: qty for code, qty in holdings.items() if qty != 0}
-    if not held:
-        return [], [], [], False
-
-    symbols = sorted(held)
-    # 只读缓存取价：与 asset_daily 快照同价，避免盘中补拉造成市值漂移。
-    ladder, _causes = await load_prices(
-        market_data,
-        symbols,
-        as_of - timedelta(days=PRICE_WINDOW_DAYS),
-        as_of,
-        cached_only=True,
-    )
-    # 债券面值换算系数（成交金额反推；可转债固定 1 手 = 10 张）与待上市新股集合。
-    bond_divisors = bond_face_divisors([trade for trade in trades if trade.trade_date <= as_of])
-    pending_new_stock = {
-        canonical_code(bond_alias, code) for code in new_stock_pending_codes(trades)
-    }
-
-    rows: list[tuple[int, DashboardHolding]] = []
-    missing_prices: list[str] = []
-    cost_fallback: list[str] = []
-    for code in symbols:
-        quantity = held[code]
-        close = close_on_or_before(ladder, code, as_of)
-        if close is None:
-            # 债券 / 待上市新股缺行情 → 按买入成本兜底（与资产表 degraded 口径一致）。
-            cost = max(0, cost_basis.get(code, 0))
-            if cost and (is_bond(code) or code in pending_new_stock):
-                cost_fallback.append(code)
-                market_value = cost
-            else:
-                missing_prices.append(code)
-                market_value = None
-        elif is_bond(code):
-            market_value = bond_value_units(code, quantity, close, bond_divisors)
-        else:
-            market_value = quantity * close // 100_000_000
-        rows.append(
-            (
-                market_value if market_value is not None else -1,
-                DashboardHolding(
-                    security_code=code,
-                    security_name=names.get(code, code),
-                    quantity_units=quantity,
-                    cost_units=max(0, cost_basis.get(code, 0)),
-                    market_value_units=market_value,
-                    weight_ratio_units=None,
-                ),
-            )
-        )
-
-    # 持仓权重：mv / Σmv（行内和 100%），与 position_pct（mv/total_assets）分开。
-    total_mv = sum(item.market_value_units or 0 for _, item in rows)
-    weighted: list[DashboardHolding] = []
-    for _, item in rows:
-        weight = (
-            _ratio_units(item.market_value_units, total_mv)
-            if item.market_value_units is not None
-            else None
-        )
-        weighted.append(
-            DashboardHolding(
-                security_code=item.security_code,
-                security_name=item.security_name,
-                quantity_units=item.quantity_units,
-                cost_units=item.cost_units,
-                market_value_units=item.market_value_units,
-                weight_ratio_units=weight,
-            )
-        )
-
-    weighted.sort(key=lambda item: (-(item.market_value_units or 0), item.security_code))
-    truncated = len(weighted) > HOLDINGS_MAX
-    return weighted[:HOLDINGS_MAX], missing_prices, cost_fallback, truncated
+    """薄包装（兼容既有单测）；实现与 ``/sectors/overview`` 共用 ``portfolio.holdings_at``。"""
+    return await holdings_at(trades, as_of=as_of, market_data=market_data)
 
 
 def _next_workday(day: date) -> date:
@@ -739,7 +599,7 @@ async def build_dashboard(
         cash_units = latest.cash_units
         money_fund_units = latest.money_fund_units
         total_assets_units = latest.total_assets_units
-        position_ratio_units = _ratio_units(market_value_units, total_assets_units)
+        position_ratio_units = ratio_units(market_value_units, total_assets_units)
         if truncated:
             missing.append(
                 DashboardMissing(
@@ -863,7 +723,7 @@ async def build_dashboard(
         )
 
     max_cost_return = (
-        _ratio_units(total_profit_units, max_invested)
+        ratio_units(total_profit_units, max_invested)
         if total_profit_units is not None and max_invested
         else None
     )
@@ -899,9 +759,9 @@ async def build_dashboard(
     win_count = sum(1 for round_ in rounds if round_.pnl_units > 0)
     loss_count = sum(1 for round_ in rounds if round_.pnl_units < 0)
     flat_count = closed_count - win_count - loss_count
-    win_ratio = _ratio_units(win_count, closed_count) if closed_count else None
-    loss_ratio = _ratio_units(loss_count, closed_count) if closed_count else None
-    flat_ratio = _ratio_units(flat_count, closed_count) if closed_count else None
+    win_ratio = ratio_units(win_count, closed_count) if closed_count else None
+    loss_ratio = ratio_units(loss_count, closed_count) if closed_count else None
+    flat_ratio = ratio_units(flat_count, closed_count) if closed_count else None
     if closed_count == 0:
         missing.append(
             DashboardMissing(
@@ -926,7 +786,7 @@ async def build_dashboard(
         ]
     ]
     max_profit_cost = (
-        _ratio_units(max_profit, max_invested) if max_profit is not None and max_invested else None
+        ratio_units(max_profit, max_invested) if max_profit is not None and max_invested else None
     )
 
     # 持仓时长 Top3：已平仓回合按持有天数降序（同长按平仓日/回合 id 稳定排序）。

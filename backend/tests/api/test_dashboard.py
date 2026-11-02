@@ -470,6 +470,7 @@ async def test_api_084_happy_path_two_sections(
         "reports": "/reports",
         "exports": "/exports",
         "attribution": "/attribution?period=2026-06",
+        "sectors": "/sectors?taxonomy=industry&level=1&as_of=2026-07-01",
     }
     assert body["assumptions"]["total_profit_basis"] == "full_history_bridge"
     assert re.match(r"^[0-9a-f]{64}$", body["inputs_hash"])

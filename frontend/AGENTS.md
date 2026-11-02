@@ -121,6 +121,14 @@ export default defineConfig({
 - **图表**：Phase 1 先自研 SVG，几何投影收敛到 `src/charts/geometry.ts`（唯一允许 `Number()` 的模块，配 golden `path d` 测试）；Phase 2 起后端 `GET /views/*` 返回归一化序列为主路径。
 - **键盘**：`⌘K`/`Ctrl+K` 命令面板；`F` 专注模式（输入框内不触发）；`Esc` 关闭面板。
 
+### 9. 板块页面（`/sectors` + Dashboard 子块）：零口径与容器约定
+
+- **不换算比率**：板块 KPI 直接渲染后端 ratio 串（HHI/effective_n/top3）与 `*_pct`；禁止把 `0.xxxx` ratio 转百分比。
+- **偏好条几何**：CSS 宽度用后端绝对百分比串（如 `weight_pct="70.00%"`，去除正负号）赋给自定义属性 `--w`；`active_weight_pct` 只作文本，不做 `Number()`/`parseFloat`/`toFixed`。
+- **Dashboard 容器**：板块级容器恰 2 个 `[data-board]`（`asset-overview` / `history-overview`）；`SectorBlock` 是子块，标 `data-board-member="asset-overview"`，测试同时断言两者。
+- **概念警示**：概念表无“基准/主动”列，`concept.caveat` 由后端提供并原样渲染（`ui/Caveat.tsx`），前端不拼结论文案。
+- **深链**：`/sectors?taxonomy=industry&level=1|2|3&parent=<code>&as_of=<date>`；`level` 用字符串比较回填，不做数值解析。
+
 ## 文件清单
 
 | 路径 | 职责 |
@@ -137,6 +145,12 @@ export default defineConfig({
 | `apps/web/src/ui/status.ts` | Phase 1 两轴状态语义（文案/色调/优先级） |
 | `apps/web/src/ui/format.ts` | Phase 1 符号/空值展示辅助（只读后端字符串） |
 | `apps/web/src/charts/TrendChart.tsx` | Phase 1c 总资产趋势图（自研 SVG，数据来自 /assets） |
+| `apps/web/src/pages/dashboard/SectorBlock.tsx` | Dashboard 板块子块（4 KPI + 偏好 + 概念警示 + 深链，`data-board-member`） |
+| `apps/web/src/pages/Sectors.tsx` | `/sectors` 详情页（行业三级下钻 / 概念暴露，深链与 `keepPreviousData`） |
+| `apps/web/src/pages/sectors/SectorTable.tsx` | 板块明细表（行业含基准/主动列；概念含暴露/多归属列） |
+| `apps/web/src/pages/sectors.css` | 板块页样式（tokens-only） |
+| `apps/web/src/charts/PreferenceBar.tsx` | 偏好条（宽度复用后端百分比串，零口径） |
+| `apps/web/src/ui/Caveat.tsx` | 概念多归属警示横幅（文案来自后端 `concept.caveat`） |
 | `apps/web/src/pages/dashboard.css` | Phase 1c Dashboard 样式（tokens-only） |
 | `apps/web/src/pages/settings.css` | Phase 3a 设置页样式（外观偏好 + PAT，tokens-only） |
 | `apps/web/src/pages/detail.css` | Phase 3b 详情/导入页共享样式（tokens-only） |

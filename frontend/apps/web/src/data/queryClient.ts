@@ -38,4 +38,20 @@ export const queryKeys = {
     ["metrics", period, exploratory] as const,
   rounds: (filters: Record<string, string>) => ["rounds", filters] as const,
   trades: (filters: Record<string, string>) => ["trades", filters] as const,
+  /** 板块概览（API-087）：as_of + taxonomy + level + parent + benchmark。 */
+  sectorOverview: (
+    asOf: string,
+    taxonomy: string,
+    level: number,
+    parent: string,
+    benchmark: string,
+  ) => ["sectors", "overview", asOf, taxonomy, level, parent, benchmark] as const,
+  /** 板块目录（API-088）：taxonomy + level + parent + q + cursor。 */
+  sectorCatalog: (
+    taxonomy: string,
+    level: number,
+    parent: string,
+    q: string,
+    cursor: string,
+  ) => ["sectors", "catalog", taxonomy, level, parent, q, cursor] as const,
 } as const;

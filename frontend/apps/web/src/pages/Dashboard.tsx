@@ -10,6 +10,7 @@ import type {
 } from "@sa/api-client";
 import { api } from "../client";
 import { TrendChart } from "../charts/TrendChart";
+import { SectorBlock } from "./dashboard/SectorBlock";
 import { ProblemView } from "../ui/Problem";
 import { displayValue, signTone } from "../ui/format";
 import {
@@ -315,7 +316,8 @@ export function Dashboard(): ReactElement {
         </section>
       ) : null}
 
-      {/* 资产概览 */}
+      {/* 资产概览（板块级容器 asset-overview：Hero + SectorBlock + 总资产曲线） */}
+      <div data-board="asset-overview">
       <section className="dash-hero" data-testid="asset-overview">
         <div className="dash-hero-main">
           <div className="dash-eyebrow">总资产 · 含资产余额与市值</div>
@@ -390,6 +392,8 @@ export function Dashboard(): ReactElement {
         </div>
       </section>
 
+      <SectorBlock asOf={data.as_of} linkHref={data.links.sectors} />
+
       {/* 总资产趋势 */}
       <section className="dash-panel dash-chart-panel">
         <div className="dash-panel-head">
@@ -417,8 +421,10 @@ export function Dashboard(): ReactElement {
           <span>有效观测 {drawdown.n_obs} 天</span>
         </div>
       </section>
+      </div>
 
-      {/* 历史概览 + 持仓 */}
+      {/* 历史概览 + 持仓（板块级容器 history-overview） */}
+      <div data-board="history-overview">
       <div className="dash-grid">
         <section className="dash-panel" data-testid="history-overview">
           <div className="dash-panel-head">
@@ -626,6 +632,7 @@ export function Dashboard(): ReactElement {
         loading={metricsQuery.isLoading}
         error={metricsQuery.error}
       />
+      </div>
 
       <footer className="dash-foot">
         <span>数据截至 {data.data_as_of ?? "—"}</span>

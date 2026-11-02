@@ -1,4 +1,4 @@
-# 架构决策记录 v2（ADR-0013 ~ ADR-0025）
+# 架构决策记录 v2（ADR-0013 ~ ADR-0026）
 
 > 项目：个人交易复盘平台 ｜ 需求基线：[PRD-v2.md](../../prd/PRD-v2.md)（v2.0）｜ 主文档：[Architecture-v2.md](../../Architecture-v2.md)
 > v1 决策见 [v1/ADR.md](../v1/ADR.md)（ADR-0001~0012）。本文件记载 **v2 对 v1 的取代与新增**。
@@ -219,6 +219,30 @@
 - 缓解：hfq/因子版本后续期次补齐；NAV 异步化把取数移出请求事务；补灾备源与统一出站治理；缓存命中优先 + 并发 2 + 重试克制；downgrade 直接 drop `market` schema。
 **被否方案**：qfq 前复权估值（时变 + 股息重复计入 + 可为负）；hfq 估值（v1 无因子快照，无法保证 PIT 正确性，留后续期次）；无 TTL 的永久缓存（上游修正与新股上市/停牌恢复无法自愈）；每次请求全量重拉（东财按并发封 IP，延迟不可接受）；新增 `MARKET_DATA_UNAVAILABLE` 错误码或 503（`/nav` 消费方吞 `ApiError`，503 是死码）；Redis/独立缓存服务（多一个有状态组件，与「不引入额外中间件」约束冲突）；行情放 `review` schema（跨用户公共数据不属于复盘租户域，且 RLS 语义不符）。
 **关联需求**：FR-R1、NFR-2、NFR-9、NFR-10；见 Reliability §7/§8 的降级矩阵与出站治理。
+
+---
+
+## ADR-0026 板块分类与数据源（申万三级 + 东财概念 + 公共缓存）
+
+**状态**：采纳 ｜ 2026-10-31 ｜ 依据：设计 [2026-10-31-sector-data.md](../2026-10-31-sector-data.md) v0.2（D-01~D-24 / H-01~H-09 按推荐方案）
+**背景**：Dashboard 需要「板块配置」视角（行业分布/集中度/相对基准偏好；概念暴露），并为归因（五因子 `sector`、Brinson 行业）铺设数据底座。板块数据是**跨用户公共数据**（同一交易日全市场一致），既不适合放进租户域 RLS 表，也不能在请求路径实时外呼（东财/申万反爬与延迟不可控）。同时行业与概念的分类语义不同：行业成员互斥可加总，概念成员多归属不可加总。
+**决策**：
+1. **分类与数据源（H-01/H-02）**：行业用**申万三级（SW2021）**（免费、真三级树，`classification_version="SW2021"`）；概念用**东方财富概念板块**。两者共用 `taxonomy ∈ industry/concept` 命名空间但**永不混算**。
+2. **公共缓存（market schema，无 RLS）**：新建 `market.sector` / `sector_member` / `benchmark_member` / `sector_bar` / `sector_pull_range` / `sector_sync_state` 六表（迁移 `0011_market_sectors`），可再生、无 `user_id`、无 RLS。`SectorRepository` 的公共查询是仓储「显式 `user_id`」规则的**唯一显式例外**（docstring 标注）。
+3. **同步与读路径分离**：同步只走 CLI `uv run python -m stock_api.cli sync-sectors`（仅 `SECTOR_MODE=live`；`--dry-run` 只做配置/表检查）；API 启动期由 `create_sector_source` 注入 `SectorDataSource`，**请求内只读缓存、不联网、不写表**。`SECTOR_MODE=replay`（默认）读 `fixtures/market/sectors.json`。
+4. **时点正确性（PIT）**：成分用 SCD2 区间（`effective_from/effective_to` + `classification_version`），按 `as_of` 读取；首次同步前/历史缺失 → **fail-closed**（`not_covered`/blocked），禁止 assumed 近似。目录/成分同步幂等（按版本 + 起点 upsert），失败保留旧快照、不推进 `sector_sync_state`。
+5. **权重分母（H-09/D-22）**：行业权重分母为**已映射权益市值 `E_map`**，故 `Σweight≈1`、`Σactive≈0`；覆盖率 `coverage=Σmapped/Σequity` 独立披露，`coverage<90%` → `insufficient` 且 HHI=null；未分类桶单列，不摊入三级行业。
+6. **概念不归一（R-03）**：概念成员多归属，只输出 `exposure/overlap/multi_tag/hhi_tag`，**不输出** `weight/active`；`Σexposure>1` 时响应必须带 `caveat`，`weight_mode="overlapping"`。
+7. **基准缺失 fail-closed（H-05/R-06）**：基准成分权重缺失或过期 → `active_*` 全 `null` + `missing[]` 码 `SECTOR_BENCHMARK_WEIGHTS_MISSING`，前端退化为组合权重 Top3；**禁止等权近似**；基准权重按 `weight_as_of` 归一。
+8. **范围（H-04/H-07）**：板块集中度**不注册**为第 19 个指标（不触碰 18 指标冻结基线/`inputs_hash`）；本期不做分子股成分端点（API-089 不登记）。契约新增仅 API-087/088，`missing[]` 是 200 响应字段而非 `ErrorCode`。
+9. **归因预留（H-08）**：API-036 五因子 `factors[]` 固定含 `code="sector"`；Brinson 行业权重采用**期初权重（BoP，R1）**，修订 PRD 原「区间平均」口径；多期 Carino 仍在后续期次。
+**理由**：① 公共数据放租户域会让同一份成分为每个用户重复存储，且 RLS 语义不符；CLI 同步 + 只读缓存把不可控外呼隔离出请求链路。② SCD2 + 版本戳才能保证历史 `as_of` 复算与归因可追溯，避免「用今天的成分算去年的持仓」。③ `E_map` 分母让行业权重可与基准权重直接比较、主动权重可加总；用总资产分母会把现金/非股票混入板块，主动权重失去意义。④ 概念多归属若强行归一，会制造「Σ权重=1」的假象并误导配置决策。⑤ 基准缺失时宁可 `null` 也不等权近似，避免把「没有基准」伪装成「与基准持平」。
+**后果**：
+- 正面：板块看板与归因共享一套可复算的公共数据；`replay` 夹具使测试与离线演示确定性；读路径无外呼，p95 可控；行业/概念口径边界清晰。
+- 负面：首次全量同步耗时（概念 4~8 万行、申万 335 次约 2~4 分钟）；上游反爬/页面漂移需重试与结构校验；当前基准数据源本身缺失（`/nav` beta 也为 null），板块偏好暂时只能降级展示；`market.*` 无 RLS，依赖「不开放 HTTP 写路径」控制风险。
+- 缓解：单并发 + 限速 + 有上限重试 + 快照级整批校验；失败保留旧快照并标 `stale` 自愈；基准列为归因前置依赖；缓存可随时重建，不背备份责任。
+**被否方案**：每用户存一份板块成分（重复存储 + RLS 语义不符）；请求内实时拉取申万/东财（延迟与反爬不可控）；逐快照全量版本（历史归因无法按 `as_of` 稳定复算）；概念权重归一化（多归属被误读为可加总）；基准缺失时用等权或总资产分母近似（制造假偏好）；把板块集中度注册为第 19 个指标（破坏 18 指标冻结基线）；本期做 API-089 分子股端点（端点/契约计数膨胀且非看板必需）。
+**关联需求**：FR-D1、FR-R7、NFR-2、NFR-9、NFR-10；见设计 [2026-10-31-sector-data.md](../2026-10-31-sector-data.md) §2~§8。
 
 ---
 

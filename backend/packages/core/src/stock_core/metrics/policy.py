@@ -29,3 +29,12 @@ DEFAULT_LEVERAGE_SCALE8: Final[int] = 100_000_000  # 1.0（无杠杆）
 # bar 密度阈值：bar_coverage = #有 bar 交易日 / #应交易日
 # 低于此值视为数据稀疏（timing.beta 等择时指标的信号质量下降）
 BAR_DENSITY_THRESHOLD_SCALE8: Final[int] = 95_000_000  # 0.95
+
+# —— 板块统计（2026-10-31 sector-data §6.5）——
+# 板块覆盖率（已映射权益市值 / 权益市值）分级阈值（scale=8，0.95 = 95_000_000）
+SECTOR_COVERAGE_OK_MIN_UNITS: Final[int] = 95_000_000  # 0.95 → ok
+SECTOR_COVERAGE_DEGRADED_MIN_UNITS: Final[int] = 90_000_000  # 0.90 → degraded
+# 主动权重判平配阈值（|Δ| ≤ 0.001，scale=8）
+SECTOR_FLAT_ACTIVE_UNITS: Final[int] = 100_000
+# 基准成分权重的最大可接受滞后天数（超过 → stale/降级提示）
+SECTOR_BENCHMARK_MAX_AGE_DAYS: Final[int] = 45

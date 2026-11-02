@@ -7,9 +7,11 @@ import {
   type DashboardOut,
   type DashboardRoundOut,
   type MetricBatch,
+  type SectorsOverview,
 } from "@sa/api-client";
 import { Dashboard } from "./Dashboard";
 import dashboardSource from "./Dashboard.tsx?raw";
+import sectorBlockSource from "./dashboard/SectorBlock.tsx?raw";
 import { api } from "../client";
 
 vi.mock("../client", () => ({
@@ -17,12 +19,14 @@ vi.mock("../client", () => ({
     dashboard: { get: vi.fn() },
     metrics: { batch: vi.fn() },
     assets: { chart: vi.fn() },
+    sectors: { overview: vi.fn() },
   },
 }));
 
 const getDashboard = vi.mocked(api.dashboard.get);
 const batchMetrics = vi.mocked(api.metrics.batch);
 const getAssetChart = vi.mocked(api.assets.chart);
+const getSectorsOverview = vi.mocked(api.sectors.overview);
 
 function makeRound(overrides: Partial<DashboardRoundOut> = {}): DashboardRoundOut {
   return {
@@ -179,6 +183,7 @@ function makeDashboard(overrides: Partial<DashboardOut> = {}): DashboardOut {
       reports: "/reports",
       exports: "/exports",
       attribution: "/attribution?period=2026-06",
+      sectors: "/sectors?taxonomy=industry&level=1&as_of=2026-07-01",
     },
     assumptions: {
       calendar: "weekday_proxy",
@@ -306,6 +311,206 @@ function makeAssetChart(): AssetChart {
   };
 }
 
+function makeIndustryOverview(overrides: Partial<SectorsOverview> = {}): SectorsOverview {
+  return {
+    as_of: "2026-07-01",
+    taxonomy: "industry",
+    level: 1,
+    status: "ok",
+    asset_build_state: "current",
+    sector_data_state: "current",
+    definition_version: "1.0",
+    sector_dataset_version: "SW2021",
+    data_as_of: "2026-09-30",
+    sector_data_as_of: "2026-06-30",
+    benchmark_id: "hs300",
+    benchmark_as_of: "2026-06-30",
+    weight_mode: "additive",
+    portfolio: {
+      holding_count: 1,
+      classified_holding_count: 1,
+      holding_market_value: "170620.00",
+      equity_market_value: "170620.00",
+      mapped_market_value: "170620.00",
+      unclassified_market_value: "0.00",
+      non_stock_market_value: "0.00",
+      total_assets: "100620.00",
+      total_assets_display: "100,620.00",
+      coverage: "1.00000000",
+      coverage_pct: "100.00%",
+      coverage_basis: "mapped_equity_market_value / equity_market_value",
+      equity_position: "1.00000000",
+      equity_position_pct: "100.00%",
+    },
+    sectors: [
+      {
+        sector_code: "801120.SI",
+        sector_name: "食品饮料",
+        level: 1,
+        parent_code: null,
+        market_value: "170620.00",
+        market_value_display: "170,620.00",
+        weight: "1.00000000",
+        weight_pct: "100.00%",
+        holding_count: 1,
+        benchmark_weight: "0.30000000",
+        benchmark_weight_pct: "30.00%",
+        active_weight: "0.70000000",
+        active_weight_pct: "70.00%",
+        direction: "over",
+        exposure: null,
+        exposure_pct: null,
+        overlap: null,
+      },
+    ],
+    others: null,
+    unclassified: null,
+    concentration: {
+      method: "industry_single_membership",
+      status: "ok",
+      hhi: "1.00000000",
+      effective_n: "1.00000000",
+      top1_weight: "1.00000000",
+      top3_weight: "1.00000000",
+      benchmark_hhi: "0.34000000",
+      n_sectors: 1,
+    },
+    preference: {
+      deviation: "0.70000000",
+      max_overweight: {
+        sector_code: "801120.SI",
+        sector_name: "食品饮料",
+        active_weight: "0.70000000",
+        active_weight_pct: "70.00%",
+        direction: "over",
+      },
+      max_underweight: null,
+      top_overweight: [
+        {
+          sector_code: "801120.SI",
+          sector_name: "食品饮料",
+          active_weight: "0.70000000",
+          active_weight_pct: "70.00%",
+          direction: "over",
+        },
+      ],
+      top_underweight: [],
+    },
+    concept: null,
+    missing: [],
+    links: {
+      dashboard: "/dashboard",
+      sectors: "/sectors?taxonomy=industry&level=1&as_of=2026-07-01",
+      attribution: "/attribution?period=2026-07",
+    },
+    assumptions: { calendar: "weekday_proxy" },
+    inputs_hash: "b".repeat(64),
+    ...overrides,
+  };
+}
+
+function makeConceptOverview(overrides: Partial<SectorsOverview> = {}): SectorsOverview {
+  return {
+    as_of: "2026-07-01",
+    taxonomy: "concept",
+    level: 0,
+    status: "insufficient",
+    asset_build_state: "current",
+    sector_data_state: "current",
+    definition_version: "1.0",
+    sector_dataset_version: "EM",
+    data_as_of: "2026-09-30",
+    sector_data_as_of: "2026-06-30",
+    benchmark_id: null,
+    benchmark_as_of: null,
+    weight_mode: "overlapping",
+    portfolio: {
+      holding_count: 1,
+      classified_holding_count: 0,
+      holding_market_value: "170620.00",
+      equity_market_value: "170620.00",
+      mapped_market_value: null,
+      unclassified_market_value: null,
+      non_stock_market_value: "0.00",
+      total_assets: "100620.00",
+      total_assets_display: "100,620.00",
+      coverage: "1.00000000",
+      coverage_pct: "100.00%",
+      coverage_basis: null,
+      equity_position: "1.00000000",
+      equity_position_pct: "100.00%",
+    },
+    sectors: [
+      {
+        sector_code: "BK0999",
+        sector_name: "白酒",
+        level: 0,
+        parent_code: null,
+        market_value: null,
+        market_value_display: null,
+        weight: null,
+        weight_pct: null,
+        holding_count: 1,
+        benchmark_weight: null,
+        benchmark_weight_pct: null,
+        active_weight: null,
+        active_weight_pct: null,
+        direction: null,
+        exposure: "1.00000000",
+        exposure_pct: "100.00%",
+        overlap: true,
+      },
+    ],
+    others: null,
+    unclassified: null,
+    concentration: {
+      method: "concept_overlap",
+      status: "insufficient",
+      hhi: null,
+      effective_n: null,
+      top1_weight: null,
+      top3_weight: null,
+      benchmark_hhi: null,
+      n_sectors: 1,
+    },
+    preference: null,
+    concept: {
+      coverage: "1.00000000",
+      coverage_pct: "100.00%",
+      coverage_basis: "tagged_equity_market_value / equity_market_value",
+      tagged_market_value: "170620.00",
+      multi_tag_market_value: "0.00",
+      multi_tag_pct: "0.00%",
+      overlap: "1.00000000",
+      hhi_tag: null,
+      top1_concept: {
+        sector_code: "BK0999",
+        sector_name: "白酒",
+        exposure: "1.00000000",
+        exposure_pct: "100.00%",
+      },
+      top5_concepts: [
+        {
+          sector_code: "BK0999",
+          sector_name: "白酒",
+          exposure: "1.00000000",
+          exposure_pct: "100.00%",
+        },
+      ],
+      caveat: "概念板块可重叠、暴露不可加总",
+    },
+    missing: [],
+    links: {
+      dashboard: "/dashboard",
+      sectors: "/sectors?taxonomy=concept&level=0",
+      attribution: "/attribution?period=2026-07",
+    },
+    assumptions: {},
+    inputs_hash: "c".repeat(64),
+    ...overrides,
+  };
+}
+
 function renderPage(): ReturnType<typeof render> {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -324,6 +529,9 @@ beforeEach(() => {
   getDashboard.mockResolvedValue(makeDashboard());
   batchMetrics.mockResolvedValue(makeMetricBatch());
   getAssetChart.mockResolvedValue(makeAssetChart());
+  getSectorsOverview.mockImplementation(async ({ taxonomy }) =>
+    taxonomy === "concept" ? makeConceptOverview() : makeIndustryOverview(),
+  );
 });
 
 afterEach(cleanup);
@@ -407,6 +615,17 @@ describe("Dashboard 看板", () => {
       "/metrics?period=2026",
     );
 
+    // 板块子块：asset-overview 的成员（不新增板块级 data-board）
+    const sectorBlock = await screen.findByTestId("asset-sector-block");
+    expect(sectorBlock.getAttribute("data-board-member")).toBe("asset-overview");
+    expect(document.querySelectorAll("[data-board]")).toHaveLength(2);
+    expect(screen.getByTestId("sector-kpi-hhi").textContent).toContain("1.00000000");
+    expect(screen.getByTestId("sector-kpi-concept-coverage").textContent).toContain("100.00%");
+    expect(screen.getByTestId("sector-pref-801120.SI").textContent).toContain("70.00%");
+    expect(screen.getByTestId("link-sectors").getAttribute("href")).toBe(
+      "/sectors?taxonomy=industry&level=1&as_of=2026-07-01",
+    );
+
     // 年度指标自动加载（metrics_period = 今年），无需手动点击。
     await waitFor(() => expect(batchMetrics).toHaveBeenCalledWith({ period: "2026" }));
     expect(screen.queryByTestId("missing-list")).toBeNull();
@@ -449,9 +668,57 @@ describe("Dashboard 看板", () => {
   });
 
   it("FT-04 零口径：源码不含 Number/parseFloat/parseInt/toFixed", () => {
-    expect(dashboardSource).not.toMatch(/\bNumber\s*\(/);
-    expect(dashboardSource).not.toMatch(/\bparseFloat\b/);
-    expect(dashboardSource).not.toMatch(/\bparseInt\b/);
-    expect(dashboardSource).not.toMatch(/\.toFixed\s*\(/);
+    for (const source of [dashboardSource, sectorBlockSource]) {
+      expect(source).not.toMatch(/\bNumber\s*\(/);
+      expect(source).not.toMatch(/\bparseFloat\b/);
+      expect(source).not.toMatch(/\bparseInt\b/);
+      expect(source).not.toMatch(/\.toFixed\s*\(/);
+    }
+  });
+
+  it("FT-05 基准缺失：偏好降级为组合权重 Top3，概念警示可见", async () => {
+    getSectorsOverview.mockImplementation(async ({ taxonomy }) =>
+      taxonomy === "concept"
+        ? makeConceptOverview()
+        : makeIndustryOverview({ benchmark_id: null, preference: null }),
+    );
+    renderPage();
+
+    const block = await screen.findByTestId("asset-sector-block");
+    await screen.findByTestId("sector-weight-801120.SI");
+    expect(block.textContent).toContain("组合权重 Top3");
+    expect(screen.getByTestId("sector-weight-801120.SI").textContent).toContain("100.00%");
+    expect(screen.queryByTestId("sector-pref-801120.SI")).toBeNull();
+    expect(screen.getByTestId("sector-kpi-concept").textContent).toContain("不可加总");
+  });
+
+  it("FT-06 missing/blocked：板块子块不展示金额/百分比", async () => {
+    getSectorsOverview.mockImplementation(async ({ taxonomy }) =>
+      taxonomy === "concept"
+        ? makeConceptOverview({ concept: null, missing: [
+            { field: "sector", code: "SECTOR_DATA_MISSING", reason: "无板块数据", what_to_do: "先同步" },
+          ] })
+        : makeIndustryOverview({
+            status: "blocked",
+            concentration: {
+              method: "industry_single_membership",
+              status: "blocked",
+              hhi: null,
+              effective_n: null,
+              top1_weight: null,
+              top3_weight: null,
+              benchmark_hhi: null,
+              n_sectors: 0,
+            },
+            sectors: [],
+            preference: null,
+          }),
+    );
+    renderPage();
+
+    const block = await screen.findByTestId("asset-sector-block");
+    await screen.findByTestId("sector-kpi-hhi");
+    expect(screen.getByTestId("sector-kpi-hhi").textContent).toContain("—");
+    expect(block.textContent ?? "").not.toMatch(/\d+\.\d{2}%/);
   });
 });

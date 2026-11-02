@@ -99,6 +99,23 @@ class JobRepository:
 ```
 **禁止**在 repository 内部调用 `current_context().require_user()`——user_id 必须显式传入。
 
+### 9. 板块公共数据：`market.*` 无 RLS + 端口注入 + CLI 同步
+
+```python
+# AppState 启动期装配板块数据源（replay 读夹具，live 读缓存；两者都不在请求内联网）
+from stock_platform.sector_source import create_sector_source
+sector_data = create_sector_source(settings, session_factory=db.session, clock=resolved_clock)
+
+# 公共查询豁免 user_id（唯一显式例外：market.* 是跨用户公共缓存）
+class SectorRepository:
+    async def memberships_at(self, session, *, taxonomy, as_of, level=None): ...
+```
+
+- `market.sector` / `sector_member` / `benchmark_member` / `sector_bar` / `sector_pull_range` / `sector_sync_state` 六表为**可再生的公共缓存**，无 RLS、无 `user_id`；仓储 docstring 必须标注此例外。
+- **禁止**在 API 请求路径里调用 akshare 或写 `market.*`；同步只走 `uv run python -m stock_api.cli sync-sectors`（仅 `SECTOR_MODE=live`，`--dry-run` 只做配置/表检查）。
+- 同步幂等：目录/成分按 `(taxonomy, sector_code, classification_version, effective_from)` upsert，成分区间 SCD2；失败保留旧快照，不推进 `sector_sync_state`。
+- 权重/暴露全部为标度整数（`*_units`），枚举列用 `text` + 应用层校验（`taxonomy ∈ industry/concept`）。
+
 ## 文件清单
 
 | 文件 | 职责 |
@@ -115,3 +132,9 @@ class JobRepository:
 | `ids.py` | ULID 风格 ID 生成（trade_id / import_batch_id ...） |
 | `security.py` | hasher_for（密码哈希，pbkdf2） |
 | `outbox.py` | Outbox 事件表（投递后置） |
+| `market_models.py` | `market` schema ORM：行情缓存 + 板块 6 表（无 RLS，可再生） |
+| `sector_source.py` | `create_sector_source`（按 `SECTOR_MODE` 装配 replay/live 源） |
+| `sector_live.py` | akshare 适配：同花顺 THS 行业/概念目录（`stock_board_{industry,concept}_name_ths`）+ 成分股（抓取 THS 板块详情页分页表格）+ 基准成分权重（csindex） |
+| `sector_replay.py` / `sector_fixture.py` | 夹具读取与 `fixtures/market/sectors.json` 生成（确定性） |
+| `sector_validation.py` | 同步结果结构校验（层级/父级/权重和/唯一性，失败整批拒绝） |
+| `repositories/sectors.py` | `SectorRepository`（公共查询，豁免 `user_id`） |

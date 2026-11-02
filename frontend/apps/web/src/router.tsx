@@ -28,6 +28,7 @@ const RoundDetail = lazy(() =>
 const NavPage = lazy(() => import("./pages/Nav").then((m) => ({ default: m.Nav })));
 const Assets = lazy(() => import("./pages/Assets").then((m) => ({ default: m.Assets })));
 const Metrics = lazy(() => import("./pages/Metrics").then((m) => ({ default: m.Metrics })));
+const Sectors = lazy(() => import("./pages/Sectors").then((m) => ({ default: m.Sectors })));
 const MetricDetail = lazy(() =>
   import("./pages/MetricDetail").then((m) => ({ default: m.MetricDetail })),
 );
@@ -57,6 +58,7 @@ export const router = createBrowserRouter([
       { path: "nav", element: <NavPage /> },
       { path: "assets", element: <Assets /> },
       { path: "metrics", element: <Metrics /> },
+      { path: "sectors", element: <Sectors /> },
       { path: "metrics/catalog", element: <MetricsCatalog /> },
       { path: "metrics/:metricId", element: <MetricDetail /> },
       { path: "import", element: <Import /> },

@@ -46,6 +46,8 @@ import type {
   Round,
   RoundFillPage,
   RoundPage,
+  SectorCatalogPage,
+  SectorsOverview,
   TokenList,
   TradeHistoryPage,
   TradeMutationOut,
@@ -203,6 +205,27 @@ export interface GetMetricDrilldownQuery {
 
 export interface CursorQuery {
   [key: string]: QueryValue;
+  limit?: number;
+  cursor?: string;
+}
+
+/** API-087 板块概览查询（taxonomy 必填；未给 as_of → 最新；level/parent 做树形下钻）。 */
+export interface SectorsOverviewQuery {
+  taxonomy: "industry" | "concept";
+  as_of?: string;
+  level?: number;
+  parent?: string;
+  benchmark?: string;
+  limit?: number;
+}
+
+/** API-088 板块目录查询（公共数据；level/parent/q 过滤 + 游标分页）。 */
+export interface ListSectorsQuery {
+  taxonomy?: "industry" | "concept";
+  level?: number;
+  parent?: string;
+  q?: string;
+  active_only?: boolean;
   limit?: number;
   cursor?: string;
 }
@@ -665,6 +688,38 @@ export function createClient(options: ClientOptions) {
     },
   };
 
+  const sectors = {
+    /** API-087：当前快照的板块配置/偏好/集中度（纯读；ETag 命中 → 304）。 */
+    overview(query: SectorsOverviewQuery) {
+      return send<SectorsOverview>({
+        path: "/sectors/overview",
+        query: {
+          taxonomy: query.taxonomy,
+          as_of: query.as_of,
+          level: query.level,
+          parent: query.parent,
+          benchmark: query.benchmark,
+          limit: query.limit,
+        },
+      }).then((r) => r.data);
+    },
+    /** API-088：板块目录树（公共数据、无用户维度；未同步 → items=[]）。 */
+    list(query: ListSectorsQuery = {}) {
+      return send<SectorCatalogPage>({
+        path: "/sectors",
+        query: {
+          taxonomy: query.taxonomy,
+          level: query.level,
+          parent: query.parent,
+          q: query.q,
+          active_only: query.active_only,
+          limit: query.limit,
+          cursor: query.cursor,
+        },
+      }).then((r) => r.data);
+    },
+  };
+
   const metricsApi = {
     /** API-086：18 个指标的口径说明书（无 period；只读）。 */
     catalog() {
@@ -727,7 +782,7 @@ export function createClient(options: ClientOptions) {
     },
   };
 
-  return { auth, tokens, imports, jobs, trades, rounds, nav, assets, dashboard, metrics: metricsApi, ops, request: send };
+  return { auth, tokens, imports, jobs, trades, rounds, nav, assets, dashboard, sectors, metrics: metricsApi, ops, request: send };
 }
 
 export type ApiClient = ReturnType<typeof createClient>;

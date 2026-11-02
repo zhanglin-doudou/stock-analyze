@@ -105,6 +105,7 @@ def _build_state_out(dto: Any) -> AssetBuildStateOut:
         status_reason=dto.status_reason,
         has_new_market_data=dto.has_new_market_data,
         definition_version=dto.definition_version,
+        session_notice=dto.session_notice,
     )
 
 

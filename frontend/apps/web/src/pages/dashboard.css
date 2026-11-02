@@ -707,3 +707,61 @@
     display: none;
   }
 }
+
+/* ── 板块子块（asset-overview 成员，零口径只展示后端串） ───── */
+.dash-sector-pref {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: var(--s4);
+  margin-top: var(--s3);
+  padding-top: var(--s3);
+  border-top: 1px solid var(--line);
+}
+
+.dash-sector-pref-col {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.dash-sector-chip {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s2);
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+
+.dash-sector-chip-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dash-sector-chip > strong {
+  font-size: 12px;
+  color: var(--text);
+}
+
+.dash-sector-concept {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s3);
+  margin-top: var(--s3);
+  padding-top: var(--s3);
+  border-top: 1px solid var(--line);
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+
+.dash-sector-caveat {
+  padding: 1px 8px;
+  border-radius: var(--r-pill);
+  border: 1px solid var(--line-strong);
+  background: var(--warn-soft);
+  color: var(--text-2);
+}
+

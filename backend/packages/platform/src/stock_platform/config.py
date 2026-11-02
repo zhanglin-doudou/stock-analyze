@@ -75,6 +75,28 @@ class Settings(BaseSettings):
     market_live_retry_backoff_seconds: float = Field(1.5, alias="MARKET_LIVE_RETRY_BACKOFF_SECONDS")
     # replay 日线能力声明（C-28）：显式配置日线夹具；未配置时 replay 仅月频序列。
     market_bars_file: Path | None = Field(None, alias="MARKET_BARS_FILE")
+    # ── 板块数据（2026-10-31 sector-data 设计）──────────────
+    # replay/live；live 才允许 `make sync-sectors` 外呼，读路径恒只读缓存。
+    sector_mode: Literal["replay", "live"] = Field("replay", alias="SECTOR_MODE")
+    sector_fixtures_file: Path | None = Field(None, alias="SECTOR_FIXTURES_FILE")
+    sector_cache_read_only: bool = Field(True, alias="SECTOR_CACHE_READ_ONLY")
+    sector_live_max_concurrency: int = Field(2, alias="SECTOR_LIVE_MAX_CONCURRENCY")
+    sector_live_timeout_seconds: float = Field(30.0, alias="SECTOR_LIVE_TIMEOUT_SECONDS")
+    sector_live_retry_attempts: int = Field(2, alias="SECTOR_LIVE_RETRY_ATTEMPTS")
+    sector_industry_level_default: int = Field(1, alias="SECTOR_INDUSTRY_LEVEL_DEFAULT")
+    sector_coverage_ok_min_units: int = Field(95_000_000, alias="SECTOR_COVERAGE_OK_MIN_UNITS")
+    sector_coverage_degraded_min_units: int = Field(
+        90_000_000, alias="SECTOR_COVERAGE_DEGRADED_MIN_UNITS"
+    )
+    sector_benchmark_id: str = Field("hs300", alias="SECTOR_BENCHMARK_ID")
+    sector_benchmark_max_age_days: int = Field(45, alias="SECTOR_BENCHMARK_MAX_AGE_DAYS")
+    sector_industry_stale_days: int = Field(35, alias="SECTOR_INDUSTRY_STALE_DAYS")
+    sector_concept_stale_days: int = Field(7, alias="SECTOR_CONCEPT_STALE_DAYS")
+    sector_ths_call_interval_seconds: float = Field(0.6, alias="SECTOR_THS_CALL_INTERVAL_SECONDS")
+    sector_ths_page_interval_seconds: float = Field(0.6, alias="SECTOR_THS_PAGE_INTERVAL_SECONDS")
+    sector_sync_retry_attempts: int = Field(3, alias="SECTOR_SYNC_RETRY_ATTEMPTS")
+    sector_flat_active_units: int = Field(100_000, alias="SECTOR_FLAT_ACTIVE_UNITS")
+
     # 指标引擎：无风险利率（C-24，D-14）
     rf_annual: Decimal = Field(RF_ANNUAL_DEFAULT, alias="RF_ANNUAL")
     llm_provider: Literal["none", "glm", "local"] = Field("none", alias="LLM_PROVIDER")

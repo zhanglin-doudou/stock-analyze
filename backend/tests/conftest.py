@@ -1,6 +1,8 @@
 """公共夹具：真实 PostgreSQL + 无网络端口的 ASGI 客户端。
 
 硬约束：不 mock 数据库（RLS 必须真连库）；每个用例自造数据自清理，不依赖执行顺序。
+清库目标守卫：TRUNCATE 只许打到 Docker 开发库（127.0.0.1:5433）；本机 5432 拒绝，
+清本机库只走人工 `make db-reset`（`stock_api.cli db-truncate`）。
 契约角色分工：
   * ``stock_owner``（owner DSN）：DDL/TRUNCATE/系统行写入，绕过 RLS；
   * ``stock_app``（app DSN，非 owner、NOBYPASSRLS）：应用运行时，受 RLS 约束。
@@ -17,6 +19,7 @@ import httpx
 import pytest
 import pytest_asyncio
 from sqlalchemy import text
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from stock_api.app import create_app
 from stock_api.version import API_PREFIX
@@ -81,6 +84,28 @@ _TRUNCATE_SQL = (
     + " RESTART IDENTITY CASCADE"
 )
 
+# ── 清库目标守卫 ─────────────────────────────────────────────
+# 自动化测试的 TRUNCATE 只许发生在 Docker 开发库（compose 把容器 5432 映射到宿主 5433）。
+# `.env` 指向本机 5432（Homebrew PG，存真实开发数据）时直接拒绝整个测试会话，
+# 防止 `make test-*` 误清开发库；本机清库只走显式的 `make db-reset`（人工动作）。
+_TEST_DB_ALLOWED_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+_TEST_DB_ALLOWED_PORTS = frozenset({5433})
+
+
+def _assert_docker_test_db(settings: Settings) -> None:
+    url = make_url(settings.owner_dsn())
+    if url.host in _TEST_DB_ALLOWED_HOSTS and url.port in _TEST_DB_ALLOWED_PORTS:
+        return
+    pytest.exit(
+        reason=(
+            f"测试将 TRUNCATE 目标库 {url.host}:{url.port}/{url.database}，"
+            "但自动化测试只允许清空 Docker 开发库（127.0.0.1:5433）。\n"
+            "→ 修复：`make db-up` 后以 `STOCK_DB_PORT=5433 make test-*` 跑测试\n"
+            "→ 本机 5432 如需清库，请显式执行 `make db-reset`（人工动作）"
+        ),
+        returncode=2,
+    )
+
 
 # ── 基础设施夹具 ────────────────────────────────────────────
 
@@ -92,7 +117,7 @@ def settings() -> Settings:
     `.env` 被手工改成 live（端到端验证）时，测试套件必须仍然走确定性回放，否则
     全量 API 测试会触发外网取数。联网用例（`@pytest.mark.live`）自己构造 live Settings。
     """
-    return get_settings().model_copy(update={"market_mode": "replay"})
+    return get_settings().model_copy(update={"market_mode": "replay", "sector_mode": "replay"})
 
 
 @pytest_asyncio.fixture
@@ -100,7 +125,9 @@ async def owner_engine(settings: Settings) -> AsyncIterator[AsyncEngine]:
     """owner 引擎：脚手架（造用户 / TRUNCATE / 系统行）。
 
     与默认的函数级事件循环同域，避免跨 loop 复用 asyncpg 连接。
+    创建前先校验目标库：非 Docker 开发库（5433）直接拒绝，保护本机 5432 数据。
     """
+    _assert_docker_test_db(settings)
     engine = create_async_engine(settings.owner_dsn(), pool_pre_ping=True)
     try:
         yield engine

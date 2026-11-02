@@ -3,8 +3,8 @@
 全部子命令都用 `uv run python -m stock_api.cli <cmd>` 调用；只依赖标准库
 （`argparse` + `asyncio`），不引入 `click`/`typer` 等三方 CLI 依赖。
 
-子命令一览：seed-tenants / seed-demo / sync-market / api-check / api-snapshot /
-sdk / api-coverage / verify-p1 / demo-p1。
+子命令一览：seed-tenants / seed-demo / sync-market / sync-sectors / api-check /
+api-snapshot / sdk / api-coverage / verify-p1 / demo-p1 / db-truncate。
 """
 
 from __future__ import annotations
@@ -25,7 +25,9 @@ from datetime import date, timedelta
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
+from sqlalchemy.engine import make_url
+from sqlalchemy.ext.asyncio import create_async_engine
 from stock_contracts.clock import FrozenClock, SystemClock
 from stock_contracts.enums import ImportBatchStatus, Role
 from stock_contracts.errors import CATALOG
@@ -41,6 +43,8 @@ from stock_platform.db import Database
 from stock_platform.jobs import JobQueue
 from stock_platform.market_live import validate_symbols
 from stock_platform.repositories.users import UserRepository
+from stock_platform.sector_fixture import generate_sector_fixture
+from stock_platform.sector_source import create_live_sector_source
 from stock_platform.security import hasher_for
 from stock_platform.symbols import classify_symbol
 
@@ -664,7 +668,9 @@ def write_market_fixtures() -> dict[str, Path]:
     bill.write_bytes(generate_huatai_bill(seed=42, months=3, count=120))
     quotes = MARKET_DIR / "quotes.json"
     quotes.write_bytes(generate_market_quotes())
-    return {"bill": bill, "quotes": quotes}
+    sectors = MARKET_DIR / "sectors.json"
+    sectors.write_bytes(generate_sector_fixture())
+    return {"bill": bill, "quotes": quotes, "sectors": sectors}
 
 
 async def _run_seed(label: str, market_bill: bool) -> int:
@@ -939,6 +945,7 @@ async def _sync_market(
     """
     settings = get_settings()
     clock = SystemClock()
+    _prepare_sync_network()
     # 运维命令：owner 连接跨租户读全库持仓代码；market 缓存为公共表。
     db = Database(settings, role="owner")
     market = create_market_source(settings, session_factory=db.session, clock=clock)
@@ -975,6 +982,158 @@ async def _sync_market(
         await db.dispose()
 
 
+# ── 板块同步（公共参考数据，仅 live）───────────────────────────
+_SYNC_BROWSER_UA = (
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+)
+
+
+def _proxy_reachable(proxy_url: str, *, timeout: float = 1.5) -> bool:
+    """探测代理端口是否可用（仅 TCP 建连，不发数据）。"""
+    import socket
+    from urllib.parse import urlparse
+
+    host = urlparse(proxy_url if "://" in proxy_url else f"http://{proxy_url}")
+    if not host.hostname:
+        return False
+    try:
+        with socket.create_connection((host.hostname, host.port or 80), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def _prepare_sync_network() -> None:
+    """为 akshare/requests 出站做进程内网络治理（仅同步 CLI）。
+
+    1. **代理探测**：requests 经 urllib `getproxies()` 会读取 macOS 系统代理。
+       代理进程不可达时所有出站以 ProxyError 失败 → 置 `NO_PROXY=*` 绕过；
+       代理可用时保留（用户可能在代理端为行情域名配置了节点分流规则）。
+       用户显式设置过 NO_PROXY 时尊重其配置。
+    2. **强制 IPv4**：`push2.eastmoney.com` 等优先解析到 IPv6，但本机/运营商的
+       v6 路径可能"能握手、无数据"（连接建立后被重置）。urllib3 提供
+       `allowed_gai_family` 钩子，限定 AF_INET 即强制走 IPv4。
+    3. **浏览器 UA**：`python-requests/x.y` 默认 UA 易被行情 API 的 WAF 标记，
+       同步进程内把 requests 默认 UA 换成桌面浏览器串。
+    """
+    from urllib.request import getproxies
+
+    proxies = {url for url in getproxies().values() if url}
+    if proxies and not any(_proxy_reachable(url) for url in proxies):
+        os.environ.setdefault("NO_PROXY", "*")
+    try:
+        import socket
+
+        import urllib3.util.connection as urllib3_connection
+
+        urllib3_connection.allowed_gai_family = lambda: socket.AF_INET
+    except ImportError:  # pragma: no cover - urllib3 是 requests 的传递依赖
+        pass
+    try:
+        import requests.utils
+
+        requests.utils.default_user_agent = lambda name="python-requests": _SYNC_BROWSER_UA
+    except ImportError:  # pragma: no cover
+        pass
+
+
+async def _sync_sectors(
+    *,
+    start: date | None = None,
+    taxonomies: tuple[str, ...] | None = None,
+    dry_run: bool = False,
+) -> int:
+    """把行业 / 概念 / 基准权重同步进 ``market.*`` 缓存（唯一外呼入口）。
+
+    ``taxonomies`` 只含 ``industry`` 或只含 ``concept`` 时可分开同步，
+    互不依赖（概念板块数多、耗时远长于行业，分开跑更可控）。
+    """
+    settings = get_settings()
+    clock = SystemClock()
+    today = clock.business_today()
+    if settings.sector_mode != "live":
+        emit(
+            f"SECTOR_MODE={settings.sector_mode}：板块数据来自 replay 夹具，"
+            "无需同步（live 环境才需要 make sync-sectors）"
+        )
+        return 0
+    _prepare_sync_network()
+    # 运维命令：owner 连接写 market 公共表（无 user_id / 无 RLS）。
+    db = Database(settings, role="owner")
+    try:
+        source = create_live_sector_source(settings, session_factory=db.session, clock=clock)
+        if start is not None:
+            emit(f"  提示：--start {start.isoformat()} 仅用于板块日线回填（P1），当前忽略")
+        report = await source.sync_to_cache(today=today, dry_run=dry_run, taxonomies=taxonomies)
+    except Exception as exc:
+        emit(f"\n❌ sync-sectors 失败：{type(exc).__name__}: {exc}")
+        return 1
+    finally:
+        await db.dispose()
+    if dry_run:
+        emit("== sync-sectors（--dry-run：仅做配置/DB 检查）==")
+    emit(f"  目标 as_of={report.as_of.isoformat()}；状态={report.status}")
+    if report.entity_count or report.member_count:
+        emit(f"  目录 {report.entity_count} 行；成分 {report.member_count} 行")
+    if report.message:
+        emit(f"  {report.message}")
+    if report.status == "failed":
+        return 1
+    emit("✅ 板块同步完成")
+    return 0
+
+
+# ── db-truncate（本机 db-reset 路径）────────────────────────────
+# 清空这 4 个 schema 的全部数据表；`platform.schema_version` 是启动校验依赖，永不清空。
+_RESET_SCHEMAS = ("platform", "ledger", "review", "market")
+_RESET_EXCLUDE = {("platform", "schema_version")}
+_RESET_ALLOWED_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
+async def _db_truncate() -> int:
+    """清空本机开发库全部业务/缓存数据（保留表结构与 ``platform.schema_version``）。
+
+    只服务「本机 PostgreSQL」路径的 ``make db-reset``（Docker 路径直接销毁卷重建）。
+    表清单实时查 ``information_schema``，避免随迁移漂移漏清新表。
+    安全边界：owner DSN 指向非 localhost 一律拒绝，防止误清远端/生产库。
+    """
+    settings = get_settings()
+    url = make_url(settings.owner_dsn())
+    if url.host not in _RESET_ALLOWED_HOSTS:
+        return fail(f"db-truncate 只允许本机目标，当前 owner DSN 指向 {url.host}，已拒绝")
+    engine = create_async_engine(settings.owner_dsn(), pool_pre_ping=True)
+    try:
+        async with engine.begin() as conn:
+            rows = (
+                await conn.execute(
+                    text(
+                        "select table_schema, table_name from information_schema.tables "
+                        "where table_schema = any(:schemas) and table_type = 'BASE TABLE'"
+                    ),
+                    {"schemas": list(_RESET_SCHEMAS)},
+                )
+            ).all()
+            targets = [
+                f'"{schema}"."{name}"'
+                for schema, name in rows
+                if (schema, name) not in _RESET_EXCLUDE
+            ]
+            if not targets:
+                return fail("未发现可清空的数据表（迁移未执行？请先 make migrate）")
+            await conn.execute(
+                text(f"TRUNCATE TABLE {', '.join(targets)} RESTART IDENTITY CASCADE")
+            )
+    finally:
+        await engine.dispose()
+    emit(
+        f"✅ 已清空 {url.host}:{url.port}/{url.database} 的 {len(targets)} 张数据表"
+        "（platform.schema_version 保留）"
+    )
+    emit("  下一步：make migrate 校验迁移版本；make seed-tenants / seed-demo 重新造数")
+    return 0
+
+
 # ── 参数解析 / 分发 ────────────────────────────────────────────
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
@@ -985,12 +1144,38 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers.add_parser("seed-tenants", help="造体验账号/A/B/admin 与账单（幂等）")
     subparsers.add_parser("seed-demo", help="造演示数据（含行情回放夹具）")
+    subparsers.add_parser(
+        "db-truncate",
+        help="清空本机库全部数据表（保留表结构与 schema_version；本机 db-reset 路径）",
+    )
     sync = subparsers.add_parser(
         "sync-market", help="收盘后同步本地行情缓存（盘中不拉当天；读路径不联网）"
     )
     sync.add_argument("--start", type=date.fromisoformat, default=None, help="起始日 YYYY-MM-DD")
     sync.add_argument("--symbols", default=None, help="逗号分隔代码（默认全库持仓 + 基准代理）")
     sync.add_argument("--dry-run", action="store_true", help="只打印计划")
+    sectors = subparsers.add_parser(
+        "sync-sectors", help="同步板块公共数据到 market.* 缓存（仅 SECTOR_MODE=live）"
+    )
+    sectors.add_argument(
+        "--start", type=date.fromisoformat, default=None, help="板块日线回填起始日（P1）"
+    )
+    sectors.add_argument(
+        "--taxonomies", default=None, help="逗号分隔：industry,concept（默认全部）"
+    )
+    sectors.add_argument("--dry-run", action="store_true", help="只做配置/DB 检查，不联网不写库")
+    sector_industry = subparsers.add_parser(
+        "sync-sector-industry", help="只同步行业板块（同花顺，扁平一级 + 成分）"
+    )
+    sector_industry.add_argument(
+        "--dry-run", action="store_true", help="只做配置/DB 检查，不联网不写库"
+    )
+    sector_concept = subparsers.add_parser(
+        "sync-sector-concept", help="只同步概念板块（同花顺，多归属 + 成分）"
+    )
+    sector_concept.add_argument(
+        "--dry-run", action="store_true", help="只做配置/DB 检查，不联网不写库"
+    )
     subparsers.add_parser("api-check", help="契约完整性检查（路径/operationId/错误码/错误响应）")
     snapshot = subparsers.add_parser("api-snapshot", help="规范化写出 contracts/openapi.json")
     snapshot.add_argument("--check", action="store_true", help="只比对不写，漂移则退出码 1")
@@ -1029,6 +1214,19 @@ async def _dispatch(args: argparse.Namespace) -> int:
         symbols = args.symbols
         explicit = tuple(validate_symbols(symbols.split(","))) if symbols else None
         return await _sync_market(start=args.start, symbols=explicit, dry_run=args.dry_run)
+    if command == "sync-sectors":
+        wanted = (
+            tuple(item.strip() for item in args.taxonomies.split(",") if item.strip())
+            if args.taxonomies
+            else None
+        )
+        return await _sync_sectors(start=args.start, taxonomies=wanted, dry_run=args.dry_run)
+    if command == "sync-sector-industry":
+        return await _sync_sectors(taxonomies=("industry",), dry_run=args.dry_run)
+    if command == "sync-sector-concept":
+        return await _sync_sectors(taxonomies=("concept",), dry_run=args.dry_run)
+    if command == "db-truncate":
+        return await _db_truncate()
     if command == "api-check":
         return _api_check()
     if command == "api-snapshot":
@@ -1049,6 +1247,10 @@ COMMANDS: dict[str, Callable[[argparse.Namespace], Coroutine[Any, Any, int]]] = 
         "seed-tenants",
         "seed-demo",
         "sync-market",
+        "sync-sectors",
+        "sync-sector-industry",
+        "sync-sector-concept",
+        "db-truncate",
         "api-check",
         "api-snapshot",
         "sdk",

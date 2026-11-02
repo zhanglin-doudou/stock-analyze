@@ -311,6 +311,28 @@ describe("Assets 资产表页", () => {
     expect(screen.getByText(/检测到新行情数据/)).toBeTruthy();
   });
 
+  it("FT-03c 未收盘提示：session_notice=market_open → 「当日还未收盘」", async () => {
+    listAssets.mockResolvedValue(
+      makePage({ build: makeBuild({ session_notice: "market_open" }) }),
+    );
+
+    renderPage();
+
+    expect(await screen.findByTestId("assets-session-notice")).toBeTruthy();
+    expect(screen.getByText(/当日还未收盘/)).toBeTruthy();
+  });
+
+  it("FT-03d 待同步行情提示：session_notice=sync_pending → 提示 make sync-market", async () => {
+    listAssets.mockResolvedValue(
+      makePage({ build: makeBuild({ session_notice: "sync_pending" }) }),
+    );
+
+    renderPage();
+
+    expect(await screen.findByTestId("assets-session-notice")).toBeTruthy();
+    expect(screen.getByText(/make sync-market/)).toBeTruthy();
+  });
+
   it("FT-04/FT-04b 列表：金额/百分比原样展示、blocked 行「—」+ badge、0.00% 不着色", async () => {
     listAssets.mockResolvedValue(
       makePage({

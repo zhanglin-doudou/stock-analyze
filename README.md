@@ -2,10 +2,10 @@
 
 面向个人投资者的交易复盘系统：导入券商对账单，自动落库/分类/对账，建立 FIFO 回合、净值/资产序列与三域指标，并在 Dashboard 中聚合展示。
 
-> **当前阶段（2026-10-28）**
+> **当前阶段（2026-10-31）**
 >
 > - **一期**：已完成（认证/多租户/RLS、导入、任务队列、流水维护、契约链路）。
-> - **二期核心**：已完成验收或已落地——FIFO 回合、`GET /nav`、资产表、18 指标引擎与 `/metrics`、**Dashboard 两板块（API-084）**、`POST /jobs/rebuild-period`（API-083）。
+> - **二期核心**：已完成验收或已落地——FIFO 回合、`GET /nav`、资产表、18 指标引擎与 `/metrics`、**Dashboard 两板块（API-084）**、`POST /jobs/rebuild-period`（API-083）、**板块数据底座（API-087/088 + `/sectors`）**。
 > - **二期剩余**：归因、月报、导出、设置增强、报告/导出前端页按计划**暂停**；前端已预留 `/reports`、`/exports`、`/attribution` 占位入口，验收中按缺失清单 SKIP，不伪造数据。
 > - **三期**：未开始。
 >
@@ -28,7 +28,8 @@
 - **净值与收益**：份额法 TWR、XIRR/MWR、日资产/现金流、`GET /nav`。
 - **资产快照**：`review.asset_daily` 逐日现金/市值/成本/浮盈；`GET /assets`、`POST /assets/build`。
 - **三域指标**：18 个指标（核心 10 + 探索 8）、DAG/`definition_version`/CI/门禁状态机、`/metrics` 与三段式解释/下钻；月度一键构建（API-083）rounds→assets→nav→metrics。
-- **Dashboard 看板**：`/dashboard` 两个板块——资产概览（持仓/现金/仓位/总收益/峰值成本/费用）与历史概览（平仓统计/盈亏占比/最大收益/最大回撤）；旧五卡以子块合并；未完成功能有占位入口。
+- **Dashboard 看板**：`/dashboard` 两个板块——资产概览（持仓/现金/仓位/总收益/峰值成本/费用 + 板块配置子块）与历史概览（平仓统计/盈亏占比/最大收益/最大回撤）；旧五卡以子块合并；未完成功能有占位入口。
+- **板块数据**：同花顺 THS 行业（扁平一级，互斥，Σ权重=1，分母 `E_map`）+ 概念板块（THS，多归属，不可加总）；`GET /sectors/overview`（集中度 HHI/TopK/主动权重/概念暴露 + `caveat`）、`GET /sectors`（公共目录树）；Dashboard 子块 + `/sectors` 详情页（行业一级、概念警示）；公共缓存落 `market.sector*`，replay 夹具 `fixtures/market/sectors.json`。
 - **质量与契约**：OpenAPI 快照 → `api-check` → 前端 SDK；标度整数零 float；RLS/越权/端点/租户/金标门禁；pytest/vitest。
 
 ## 技术栈
@@ -63,7 +64,7 @@ stock-analyze/
 │   ├── apps/web/            # Vite + React（pages: Dashboard/Metrics/Nav/Assets/Rounds...）
 │   └── packages/api-client/ # 手写传输层 + 生成 TS 类型
 ├── contracts/openapi.json   # 契约快照（make api-snapshot）
-├── fixtures/market/         # 行情/账单夹具（seed-demo 生成，确定性）
+├── fixtures/market/         # 行情/板块/账单夹具（seed-demo 生成，确定性）
 ├── infra/                   # compose / PG init / env 模板
 └── docs/                    # 架构 / PRD / 计划 / 验收 / 设计
 ```
@@ -95,6 +96,9 @@ make seed-demo
 
 # 4b) live 模式先同步行情到本地缓存（replay 模式可跳过）
 make sync-market
+
+# 4c) live 模式再同步板块公共数据（SECTOR_MODE=replay 默认可跳过）
+make sync-sectors
 
 # 5) 起服务（api + worker + web；不会自动起 DB）
 make dev
@@ -136,6 +140,27 @@ make sync-market          # 只补本地缺失区间；已有数据不重复请�
 
 指标/看板页面会显示「行情来自本地缓存（仅收盘后同步，盘中不拉取实时行情）」。`MARKET_MODE=replay` 使用夹具，无需同步。
 
+### Live 板块数据（`SECTOR_MODE=live`，显式同步）
+
+`SECTOR_MODE=replay`（默认）读 `fixtures/market/sectors.json`，无需联网；`live` 时 API **读路径只读** `market.sector*` 缓存，不请求中访问第三方：
+
+```bash
+make sync-sectors                       # 行业 + 概念 + 基准成分权重（全部）
+make sync-sector-industry               # 只同步行业板块（同花顺）
+make sync-sector-concept                # 只同步概念板块（同花顺；板块多、耗时远长于行业）
+make sync-sectors ARGS='--dry-run'      # 只做配置/DB 检查，不联网不写库
+```
+
+- 行业与概念可**分开同步**（`sync-sector-industry` / `sync-sector-concept`），互不依赖：各自只抓自己的目录与成分，一个失败不影响另一个。
+
+- 数据源与兜底链：
+  - **行业目录/成分**：同花顺 THS 扁平一级行业（互斥，Σ权重=1）。目录走 akshare `stock_board_industry_name_ths`，成分股因 akshare 无 THS 成分接口，改为抓取同花顺板块详情页分页表格（`q.10jqka.com.cn/thshy/detail/...`）。
+  - **概念板块**：同花顺 THS（`stock_board_concept_name_ths` 目录 + 详情页成分股抓取），不再走东财/新浪。
+  - **基准成分权重**：中证指数 `csindex`，默认 `hs300`。
+- 按板块独立超时+重试拉取成分；单板失败跳过并 `warning`，不拖垮整批同步。
+- 行业/概念按分类版本 + 时点区间（SCD2）落库；同步失败保留旧快照，`sector_data_state=stale` + `data_as_of` 自愈。
+- 未同步或覆盖不足时 API 返回 200 + `missing[]`（如 `SECTOR_DATA_MISSING` / `SECTOR_BENCHMARK_WEIGHTS_MISSING`），主动权重为 `null`，**不做等权近似**。
+
 ### 首次看板数据
 
 `seed-demo` 导入账单后只会自动建立回合；资产/净值/指标需要构建：
@@ -163,7 +188,9 @@ make api / worker / web
 
 # 数据
 make seed-tenants      # 固定体验账号 + A/B/admin + 账单
-make seed-demo         # 演示数据 + 行情回放（推荐首次使用）
+make seed-demo         # 演示数据 + 行情/板块回放（推荐首次使用）
+make sync-market       # live：收盘后补行情缓存
+make sync-sectors      # live：同步板块公共数据（ARGS='--dry-run' 只检查）
 
 # 质量
 make lint              # ruff + 前端 tsc（当前前端 lint 即 tsc）
@@ -212,22 +239,34 @@ pnpm -r test                 # vitest
 ```
 
 - API client：`packages/api-client/src/http.ts`（手写传输层）+ `src/api/generated/schema.d.ts`（契约生成，勿手改）；改接口后 `make api-snapshot && make sdk`。
-- 页面：登录/注册、**Dashboard**、交易流水、回合/详情、净值、资产、指标/详情、导入/导入记录、设置；`/reports`、`/exports`、`/attribution` 为未完成功能占位页（可见、不返回假数据）。
+- 页面：登录/注册、**Dashboard**、交易流水、回合/详情、净值、资产、指标/详情、**板块（`/sectors`）**、导入/导入记录、设置；`/reports`、`/exports`、`/attribution` 为未完成功能占位页（可见、不返回假数据）。
 
 ## 测试说明
 
 | 套件 | 命令 | 依赖 |
 |---|---|---|
-| 快速单测 | `make test` | 无 |
-| core 覆盖门禁 | `make test-core`（100%） | 无 |
-| API 验收 | `make test-api` | PostgreSQL |
-| 二期主套餐 | `make test-p2` | PostgreSQL |
-| review/rebuild/资产增量 | `make test-review` | PostgreSQL |
-| 指标 golden/oracle/契约 | `make test-metrics` | 无/部分真库 |
-| RLS/越权 | `make test-rls` / `make test-isolation` | PostgreSQL |
+| 快速单测 | `make test` | PostgreSQL（Docker 5433） |
+| core 覆盖门禁 | `make test-core`（100%） | PostgreSQL（Docker 5433） |
+| API 验收 | `make test-api` | PostgreSQL（Docker 5433） |
+| 二期主套餐 | `make test-p2` | PostgreSQL（Docker 5433） |
+| review/rebuild/资产增量 | `make test-review` | PostgreSQL（Docker 5433） |
+| 指标 golden/oracle/契约 | `make test-metrics` | 部分真库（Docker 5433） |
+| 板块 golden/oracle | `make test-p2`（`unit/core/test_sector_*`、`unit/review/test_sector_*`） | PostgreSQL（Docker 5433） |
+| RLS/越权 | `make test-rls` / `make test-isolation` | PostgreSQL（Docker 5433） |
 | 前端 | `cd frontend && pnpm -r test` | Node |
 
 硬约束：不 mock 数据库（RLS 必须真连库）；测试读根 `.env`；跨租户/401/403/404 由隔离矩阵强制。
+
+**清库守卫（防误清本机 5432 开发库）**：自动化测试的 TRUNCATE 只许打到 Docker 开发库
+（`127.0.0.1:5433`）；`.env` 指向本机 5432 时 `make test-*` 直接拒绝。本机开发跑测试：
+
+```bash
+make db-up                          # 起 Docker 开发库（5433，首启自动建角色/库）+ make migrate
+STOCK_DB_PORT=5433 make test-p2     # 显式指向 Docker 库（不改 .env 的 5432 开发配置）
+```
+
+本机 5432 的清库只走人工入口 `make db-reset`（双模式：5433 销毁卷重建；5432 TRUNCATE
+全部数据表+迁移，见 [DATABASE.md §6](docs/DATABASE.md)）。
 
 ## 已知未完成（二期暂停项）
 
@@ -246,6 +285,7 @@ pnpm -r test                 # vitest
 
 - 架构图：[运行时架构（交互版）](docs/architecture/diagrams/stock-analyze-runtime.html) · [SVG](docs/architecture/diagrams/stock-analyze-runtime.svg) · [图规格 JSON](docs/architecture/diagrams/stock-analyze-runtime.spec.json)
 - [Dashboard 设计（Period2-12）](docs/architecture/2026-10-28-dashboard.md)
+- [板块数据接入设计（2026-10-31，API-087/088）](docs/architecture/2026-10-31-sector-data.md)
 - [月度报告设计（Period2-09，暂停）](docs/architecture/2026-10-28-monthly-report.md)
 - [S10 验收记录](docs/reviews/2026-10-27-p207-S10-acceptance.md)
 - [Period2-01/02 实施日志](docs/reviews/Period2-01-02-Implementation-Log.md)

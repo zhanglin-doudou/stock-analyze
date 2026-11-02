@@ -143,3 +143,123 @@ class MarketDataSource(Protocol):
     ) -> Sequence[Bar]: ...
 
     async def get_latest_quotes(self, symbols: Sequence[str]) -> Sequence[Quote]: ...
+
+
+# ── 板块数据端口（2026-10-31 sector-data 设计 §4.1）─────────────────
+# 行业/概念两类 taxonomy：`industry_sw`（申万 L1/L2/L3）、`concept_em`（东财扁平）。
+# 比率 scale=8、板块指数点位 scale=6；端口层禁止 float。
+
+
+@dataclass(frozen=True, slots=True)
+class SectorCapabilities:
+    """板块数据源能力声明；`history_start` 是 fail-closed 的历史下界。"""
+
+    mode: str  # "replay" | "live"
+    taxonomies: tuple[str, ...] = ()
+    benchmark_ids: tuple[str, ...] = ()
+    supports_membership: bool = True
+    supports_board_bars: bool = True
+    supports_benchmark_weights: bool = True
+    history_start: date | None = None
+    # 分 taxonomy 的历史下界（各板块类各自的首个成分观测日）；缺项回退 history_start。
+    history_starts: tuple[tuple[str, date], ...] = ()
+
+    def history_start_for(self, taxonomy: str) -> date | None:
+        for tax, first in self.history_starts:
+            if tax == taxonomy:
+                return first
+        return self.history_start
+
+
+@dataclass(frozen=True, slots=True)
+class SectorInfo:
+    """板块目录行。"""
+
+    taxonomy: str
+    sector_code: str
+    name: str
+    level: int
+    parent_code: str | None
+    classification_version: str
+
+
+@dataclass(frozen=True, slots=True)
+class SectorMembership:
+    """一条板块成分归属（调用方按 `as_of` 取有效行）。"""
+
+    taxonomy: str
+    sector_code: str
+    symbol: str
+
+
+@dataclass(frozen=True, slots=True)
+class SectorBar:
+    """板块指数日线（`close_units` scale=6、`return_units` scale=8）。"""
+
+    taxonomy: str
+    sector_code: str
+    trade_date: date
+    close_units: int
+    return_units: int
+
+
+@dataclass(frozen=True, slots=True)
+class BenchmarkMember:
+    """基准成分权重（`weight_units` scale=8，上游原值）。"""
+
+    benchmark_id: str
+    symbol: str
+    weight_units: int
+    weight_as_of: date
+
+
+@runtime_checkable
+class SectorDataSource(Protocol):
+    """板块数据端口：replay / cached / live 实现同一契约。"""
+
+    @property
+    def capabilities(self) -> SectorCapabilities: ...
+
+    @property
+    def as_of(self) -> date: ...
+
+    @property
+    def provenance(self) -> str: ...
+
+    async def get_catalog(self, taxonomy: str | None = None) -> Sequence[SectorInfo]: ...
+
+    async def get_memberships(
+        self, taxonomy: str, *, as_of: date | None = None, level: int | None = None
+    ) -> Sequence[SectorMembership]: ...
+
+    async def get_board_bars(
+        self, sector_keys: Sequence[tuple[str, str]], start: date, end: date
+    ) -> Sequence[SectorBar]: ...
+
+    async def get_benchmark_members(
+        self, benchmark_id: str, *, as_of: date | None = None
+    ) -> Sequence[BenchmarkMember]: ...
+
+
+@dataclass(frozen=True, slots=True)
+class SyncReport:
+    """一次板块同步的结果摘要（CLI 输出；不进入用户数据）。"""
+
+    as_of: date
+    status: str  # succeeded | failed | skipped
+    entity_count: int = 0
+    member_count: int = 0
+    message: str = ""
+
+
+@runtime_checkable
+class SyncableSectorSource(Protocol):
+    """可同步到 `market.*` 缓存的数据源（仅 live）。"""
+
+    async def sync_to_cache(
+        self,
+        *,
+        today: date,
+        dry_run: bool = False,
+        taxonomies: Sequence[str] | None = None,
+    ) -> SyncReport: ...

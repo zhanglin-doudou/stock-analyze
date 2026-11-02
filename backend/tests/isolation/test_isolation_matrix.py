@@ -253,6 +253,9 @@ ADMIN_FORBIDDEN: list[tuple[str, str]] = [
     ("get", "/metrics/{metric_id}/drilldown"),
     # Period2-12：Dashboard 聚合（身份越权 → 403）
     ("get", "/dashboard"),
+    # 2026-10-31（API-087/088）：板块概览与目录（公共目录也不给 admin）
+    ("get", "/sectors/overview"),
+    ("get", "/sectors"),
 ]
 
 #: 列表型端点：A/B 各自造数据，B 的列表不得包含 A 的行（跨租户列表隔离）
@@ -326,6 +329,9 @@ UNAUTHENTICATED_MATRIX: list[tuple[str, str]] = [
     ("post", "/jobs/rebuild-period"),
     # Period2-12（API-084 Dashboard 聚合）
     ("get", "/dashboard"),
+    # 2026-10-31（API-087/088 板块概览/目录）
+    ("get", "/sectors/overview"),
+    ("get", "/sectors"),
 ]
 
 #: 路径参数占位值（只用于越权/401 用例；资源不存在时恰好也走 404 分支）。

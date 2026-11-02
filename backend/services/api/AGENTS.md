@@ -11,7 +11,7 @@ stock_api 是 FastAPI 应用层：路由 / Pydantic schema / 依赖注入 / 中�
 ### 1. 所有 router 用 StrictQueryRoute（未登记 query 参数 → 400）
 
 ```python
-# 全仓 6/6 router 一致
+# 全仓 14 个业务 router 一致（ops.py 内部两个 APIRouter 也均用 StrictQueryRoute）
 router = APIRouter(tags=["trades"], route_class=StrictQueryRoute)
 
 # 内部实现：收集所有 Query() 声明的参数名 / alias → handler 里校验未登记的
@@ -102,6 +102,25 @@ async def get_tenant(authorization: str | None = Header(default=None)) -> Tenant
 ```
 **禁止**在 router 里手动 `JSONResponse(status_code=404, ...)`——ApiError 走中间件自动格式化。
 
+### 9. 板块端点（API-087/088）：只读 + 公共缓存 + ETag
+
+```python
+@router.get("/sectors/overview", response_model=SectorOverviewOut, operation_id="getSectorsOverview")
+async def get_sectors_overview(
+    ctx: Annotated[TenantContext, Depends(get_tenant)],
+    sector_data: Annotated[SectorDataSource, Depends(get_sector_data)],
+    ...
+) -> SectorOverviewOut:
+    ctx.forbid_admin_trades()   # admin → 403 ADMIN_CANNOT_READ_TRADES
+    # 数据源在 AppState 启动期装配；请求内不联网、不写 market.*
+    # 金额/比率在此层转定点字符串；缺失显式 null + missing[]
+```
+
+- 两个端点都**只读**：不建 job、不写表、不联网；`If-None-Match` 命中返回 304 空 body。
+- 未同步/覆盖不足 → **200 + `missing[]`**（`SECTOR_DATA_MISSING` / `SECTOR_BENCHMARK_WEIGHTS_MISSING` 等），`missing[]` 码不是 `ErrorCode`。
+- 参数非法（`taxonomy`/`level`/未来 `as_of`/`benchmark=nope`/`limit>500`）→ 422；`concept` 的 `level` 只允许 null/0。
+- 概念块 `Σexposure>1` 时必须透出后端 `caveat`；`weight_mode` 行业为 `additive`、概念为 `overlapping`。
+
 ## 文件清单
 
 | 文件 | 职责 |
@@ -119,4 +138,5 @@ async def get_tenant(authorization: str | None = Header(default=None)) -> Tenant
 | `routers/jobs.py` | API-061~064 任务查询 / SSE 事件流 / 取消 |
 | `routers/reconciliation.py` | API-026 余额链对账 |
 | `routers/ops.py` | 运维根路由：/healthz /readyz /version /errors /metrics |
-| `cli.py` | 运维 CLI：seed-tenants / seed-demo / api-check / api-snapshot / sdk / verify-p1 / demo-p1 |
+| `routers/sectors.py` | API-087/088 板块概览与公共目录（只读、ETag/304、200+`missing[]`） |
+| `cli.py` | 运维 CLI：seed-tenants / seed-demo / sync-market / sync-sectors / api-check / api-snapshot / sdk |

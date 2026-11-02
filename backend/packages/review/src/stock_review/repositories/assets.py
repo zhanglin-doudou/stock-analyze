@@ -201,6 +201,23 @@ class AssetRepository:
         )
         return "degraded" if non_ok else "ok"
 
+    async def has_blocked_rows(self, user_id: uuid.UUID) -> bool:
+        """是否存在 `status='blocked'` 的行（缺行情导致的非终态行）。
+
+        blocked 行是「行情缺失期间的占位行」，不代表最终资产；一旦行情补齐必须重算，
+        因此构建决策不能把含 blocked 行的表当作「已构建完成」而 no-op。
+        """
+        return bool(
+            await self._session.scalar(
+                select(
+                    exists().where(
+                        AssetDaily.user_id == user_id,
+                        AssetDaily.status == "blocked",
+                    )
+                )
+            )
+        )
+
     # ── 分页 ────────────────────────────────────────────────
     async def page(
         self,

@@ -38,6 +38,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: "/nav", label: "净值与收益", icon: "nav" },
       { to: "/metrics", label: "指标", icon: "metrics" },
+      { to: "/sectors", label: "板块", icon: "sectors" },
       { to: "/attribution", label: "归因", icon: "attribution", placeholder: true },
     ],
   },
@@ -67,6 +68,7 @@ const STATIC_PAGES: Record<string, PageMeta> = {
   "/rounds": { title: "回合", breadcrumb: ["交易", "回合"] },
   "/nav": { title: "净值与收益", breadcrumb: ["分析", "净值与收益"] },
   "/metrics": { title: "指标", breadcrumb: ["分析", "指标"] },
+  "/sectors": { title: "板块分析", breadcrumb: ["分析", "板块分析"] },
   "/attribution": { title: "归因", breadcrumb: ["分析", "归因"] },
   "/assets": { title: "资产", breadcrumb: ["数据", "资产"] },
   "/import": { title: "导入账单", breadcrumb: ["数据", "导入账单"] },

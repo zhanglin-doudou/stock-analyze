@@ -209,6 +209,7 @@ def _to_out(result: Any) -> DashboardOut:
             reports="/reports",
             exports="/exports",
             attribution=f"/attribution?period={period}",
+            sectors=f"/sectors?taxonomy=industry&level=1&as_of={result.as_of.isoformat()}",
         ),
         assumptions=result.assumptions,
         inputs_hash=result.inputs_hash,

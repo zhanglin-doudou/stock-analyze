@@ -19,13 +19,17 @@ from datetime import date, datetime
 from sqlalchemy import (
     BigInteger,
     Boolean,
+    CheckConstraint,
     Date,
     DateTime,
+    ForeignKeyConstraint,
     Index,
     Integer,
+    SmallInteger,
     String,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -105,4 +109,194 @@ class PullRange(Base):
     )
 
 
-__all__ = ["SCHEMA", "DailyBar", "PullRange"]
+TAXONOMY_INDUSTRY = "industry_sw"
+TAXONOMY_CONCEPT = "concept_em"
+
+
+class Sector(Base):
+    """板块目录（行业 L1/L2/L3 树 + 概念扁平列表）。
+
+    列与迁移 `0011_market_sectors` 逐列一致；`taxonomy` 区分行业/概念，
+    `parent_code` 只对行业 L2/L3 生效（概念恒为 NULL）。
+    """
+
+    __tablename__ = "sector"
+    __table_args__ = (
+        CheckConstraint("level BETWEEN 0 AND 3", name="ck_sector_level_range"),
+        CheckConstraint(
+            "(taxonomy = 'concept_em' AND level = 0 AND parent_code IS NULL) "
+            "OR (taxonomy = 'industry_sw' AND level BETWEEN 1 AND 3)",
+            name="ck_sector_taxonomy_level",
+        ),
+        Index("ix_sector_parent", "taxonomy", "parent_code"),
+        Index("ix_sector_level", "taxonomy", "level", "is_active"),
+        {"schema": SCHEMA},
+    )
+
+    taxonomy: Mapped[str] = mapped_column(String(24), primary_key=True)
+    sector_code: Mapped[str] = mapped_column(String(32), primary_key=True)
+    level: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    name: Mapped[str] = mapped_column(String(64), nullable=False)
+    parent_code: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    classification_version: Mapped[str] = mapped_column(String(24), nullable=False)
+    source: Mapped[str] = mapped_column(String(16), nullable=False)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    pulled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class SectorMember(Base):
+    """板块成分时点区间（半开区间 `[effective_from, effective_to)`）。"""
+
+    __tablename__ = "sector_member"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["taxonomy", "sector_code"],
+            ["market.sector.taxonomy", "market.sector.sector_code"],
+            name="fk_sector_member_sector",
+        ),
+        Index("ix_sector_member_symbol", "symbol", "effective_from"),
+        Index(
+            "ix_sector_member_current",
+            "taxonomy",
+            "sector_code",
+            postgresql_where=text("effective_to IS NULL"),
+        ),
+        Index(
+            "uq_sector_member_industry_current",
+            "symbol",
+            unique=True,
+            postgresql_where=text("taxonomy = 'industry_sw' AND effective_to IS NULL"),
+        ),
+        {"schema": SCHEMA},
+    )
+
+    taxonomy: Mapped[str] = mapped_column(String(24), primary_key=True)
+    sector_code: Mapped[str] = mapped_column(String(32), primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(16), primary_key=True)
+    effective_from: Mapped[date] = mapped_column(Date, primary_key=True)
+    vendor_symbol: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    upstream_effective_on: Mapped[date | None] = mapped_column(Date, nullable=True)
+    effective_to: Mapped[date | None] = mapped_column(Date, nullable=True)
+    observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    source: Mapped[str] = mapped_column(String(16), nullable=False)
+
+
+class BenchmarkMember(Base):
+    """基准成分权重时点区间（`weight_units` scale=8，存上游原值）。"""
+
+    __tablename__ = "benchmark_member"
+    __table_args__ = (
+        CheckConstraint("weight_units >= 0", name="ck_benchmark_member_weight_nonneg"),
+        Index(
+            "ix_benchmark_member_current",
+            "benchmark_id",
+            postgresql_where=text("effective_to IS NULL"),
+        ),
+        {"schema": SCHEMA},
+    )
+
+    benchmark_id: Mapped[str] = mapped_column(String(24), primary_key=True)
+    symbol: Mapped[str] = mapped_column(String(16), primary_key=True)
+    effective_from: Mapped[date] = mapped_column(Date, primary_key=True)
+    weight_units: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    weight_as_of: Mapped[date] = mapped_column(Date, nullable=False)
+    effective_to: Mapped[date | None] = mapped_column(Date, nullable=True)
+    source: Mapped[str] = mapped_column(String(16), nullable=False)
+    pulled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class SectorBar(Base):
+    """板块指数日线（`close_units` scale=6、`return_units` scale=8）。"""
+
+    __tablename__ = "sector_bar"
+    __table_args__ = (
+        CheckConstraint("close_units > 0", name="ck_sector_bar_close_positive"),
+        ForeignKeyConstraint(
+            ["taxonomy", "sector_code"],
+            ["market.sector.taxonomy", "market.sector.sector_code"],
+            name="fk_sector_bar_sector",
+        ),
+        {"schema": SCHEMA},
+    )
+
+    taxonomy: Mapped[str] = mapped_column(String(24), primary_key=True)
+    sector_code: Mapped[str] = mapped_column(String(32), primary_key=True)
+    trade_date: Mapped[date] = mapped_column(Date, primary_key=True)
+    close_units: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    return_units: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    source: Mapped[str] = mapped_column(String(16), nullable=False)
+    pulled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class SectorPullRange(Base):
+    """板块行情覆盖元数据（语义逐条对齐 `market.pull_range`）。"""
+
+    __tablename__ = "sector_pull_range"
+    __table_args__ = (
+        UniqueConstraint(
+            "taxonomy",
+            "sector_code",
+            "range_start",
+            "range_end",
+            name="uq_sector_pull_range_scope",
+        ),
+        {"schema": SCHEMA},
+    )
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    taxonomy: Mapped[str] = mapped_column(String(24), nullable=False)
+    sector_code: Mapped[str] = mapped_column(String(32), nullable=False)
+    range_start: Mapped[date] = mapped_column(Date, nullable=False)
+    range_end: Mapped[date] = mapped_column(Date, nullable=False)
+    data_end: Mapped[date | None] = mapped_column(Date, nullable=True)
+    requested_end: Mapped[date] = mapped_column(Date, nullable=False)
+    complete: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default=text("true"))
+    bar_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    source: Mapped[str] = mapped_column(String(16), nullable=False)
+    checksum: Mapped[str] = mapped_column(String(64), nullable=False)
+    pulled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class SectorSyncState(Base):
+    """板块数据新鲜度/最近成功快照元数据。"""
+
+    __tablename__ = "sector_sync_state"
+    __table_args__ = ({"schema": SCHEMA},)
+
+    dataset_key: Mapped[str] = mapped_column(String(32), primary_key=True)
+    snapshot_id: Mapped[str | None] = mapped_column(String(40), nullable=True)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, server_default="succeeded")
+    as_of: Mapped[date | None] = mapped_column(Date, nullable=True)
+    catalog_as_of: Mapped[date | None] = mapped_column(Date, nullable=True)
+    membership_as_of: Mapped[date | None] = mapped_column(Date, nullable=True)
+    bar_as_of: Mapped[date | None] = mapped_column(Date, nullable=True)
+    weight_as_of: Mapped[date | None] = mapped_column(Date, nullable=True)
+    classification_version: Mapped[str | None] = mapped_column(String(24), nullable=True)
+    entity_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    member_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+    source: Mapped[str] = mapped_column(String(16), nullable=False)
+    checksum: Mapped[str] = mapped_column(String(64), nullable=False)
+    pulled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    error_detail: Mapped[str | None] = mapped_column(String(512), nullable=True)
+
+
+__all__ = [
+    "SCHEMA",
+    "TAXONOMY_CONCEPT",
+    "TAXONOMY_INDUSTRY",
+    "BenchmarkMember",
+    "DailyBar",
+    "PullRange",
+    "Sector",
+    "SectorBar",
+    "SectorMember",
+    "SectorPullRange",
+    "SectorSyncState",
+]

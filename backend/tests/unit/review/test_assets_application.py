@@ -11,6 +11,7 @@ import uuid
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 
+from stock_contracts.clock import FrozenClock
 from stock_ledger.models import Trade
 from stock_platform.ports import Bar
 from stock_review.application.assets import (
@@ -18,7 +19,9 @@ from stock_review.application.assets import (
     MARKET_UNCOVERED_REASON,
     MISSING_PRICE_PREFIX,
     _ratio_units,
+    _session_notice,
     compute_daily_valuations,
+    valuation_end,
 )
 from stock_review.application.valuation import closing_price_ladder
 from stock_review.models import AssetDaily
@@ -38,6 +41,62 @@ def price(value: str) -> int:
 
 def shares(value: str) -> int:
     return int(Decimal(value) * Decimal(10**4))
+
+
+# ── 收盘口径：valuation_end / _session_notice（2026-11-02）────────────────
+
+
+class TestValuationEnd:
+    """资产表只在已收盘的工作日写行：未收盘当日/周末都不是构建终点。"""
+
+    def test_workday_before_close_uses_previous_workday(self) -> None:
+        # 2026-11-02 周一 10:00（上海）→ 终点为上周五 10-30。
+        clock = FrozenClock("2026-11-02T10:00:00+08:00")
+        assert valuation_end(clock) == date(2026, 10, 30)
+
+    def test_workday_at_close_boundary_uses_today(self) -> None:
+        # 15:00 整即视为已收盘。
+        clock = FrozenClock("2026-11-02T15:00:00+08:00")
+        assert valuation_end(clock) == date(2026, 11, 2)
+
+    def test_workday_after_close_uses_today(self) -> None:
+        clock = FrozenClock("2026-11-02T16:30:00+08:00")
+        assert valuation_end(clock) == date(2026, 11, 2)
+
+    def test_monday_morning_rolls_back_over_weekend(self) -> None:
+        # 周一早盘 09:25 → 前一工作日是上周五（跨周末）。
+        clock = FrozenClock("2026-11-02T09:25:00+08:00")
+        assert valuation_end(clock) == date(2026, 10, 30)
+
+    def test_weekend_ignores_time_of_day(self) -> None:
+        # 周六无论几点都回退到周五。
+        for now in ("2026-10-31T09:00:00+08:00", "2026-10-31T16:00:00+08:00"):
+            assert valuation_end(FrozenClock(now)) == date(2026, 10, 30)
+
+    def test_utc_clock_converted_to_shanghai(self) -> None:
+        # UTC 07:00 = 上海 15:00（收盘边界）。
+        assert valuation_end(FrozenClock("2026-11-02T07:00:00+00:00")) == date(2026, 11, 2)
+        # UTC 06:59 = 上海 14:59（未收盘）。
+        assert valuation_end(FrozenClock("2026-11-02T06:59:00+00:00")) == date(2026, 10, 30)
+
+
+class TestSessionNotice:
+    def test_market_open_before_close(self) -> None:
+        clock = FrozenClock("2026-11-02T10:00:00+08:00")
+        assert _session_notice(clock, date(2026, 10, 30)) == "market_open"
+
+    def test_sync_pending_after_close_without_today_bars(self) -> None:
+        clock = FrozenClock("2026-11-02T16:00:00+08:00")
+        assert _session_notice(clock, date(2026, 10, 30)) == "sync_pending"
+        assert _session_notice(clock, None) == "sync_pending"
+
+    def test_none_after_close_with_today_bars(self) -> None:
+        clock = FrozenClock("2026-11-02T16:00:00+08:00")
+        assert _session_notice(clock, date(2026, 11, 2)) is None
+
+    def test_none_on_weekend(self) -> None:
+        clock = FrozenClock("2026-10-31T10:00:00+08:00")
+        assert _session_notice(clock, date(2026, 10, 30)) is None
 
 
 def _trade(

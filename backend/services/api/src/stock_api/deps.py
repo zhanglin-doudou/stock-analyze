@@ -16,7 +16,7 @@ from stock_platform.config import Settings
 from stock_platform.db import Database
 from stock_platform.idempotency import IdempotencyStore
 from stock_platform.jobs import JobQueue
-from stock_platform.ports import MarketDataSource
+from stock_platform.ports import MarketDataSource, SectorDataSource
 from stock_platform.ratelimit import RateLimiter
 from stock_platform.repositories import ApiTokenRepository, UserRepository
 from stock_platform.security import TokenService, hash_token
@@ -37,6 +37,7 @@ class AppState:
     idempotency: IdempotencyStore
     tokens: TokenService
     market_data: MarketDataSource
+    sector_data: SectorDataSource
     object_store: Any = None
     llm: Any = None
     extras: dict[str, Any] = field(default_factory=dict)
@@ -77,6 +78,10 @@ def get_object_store(request: Request) -> Any:
 
 def get_market_data(request: Request) -> MarketDataSource:
     return get_state(request).market_data
+
+
+def get_sector_data(request: Request) -> SectorDataSource:
+    return get_state(request).sector_data
 
 
 async def get_system_session(request: Request) -> AsyncIterator[AsyncSession]:

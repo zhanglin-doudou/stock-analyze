@@ -285,6 +285,8 @@ uv run python tools/ci/gate_endpoint_coverage.py --ops /tmp/ops.json --collect /
 | 回合下钻 | 点数字 → 抽屉 | 请求参数与后端 `drilldown{endpoint,params}` 逐字段一致（前端不拼装） | `.../RoundDrilldown.test.tsx::test_drilldown_uses_backend_params` |
 | 图表 smoke | 净值折线 | `echarts.setOption` 收到的 `series.data` 与 API `points[]` **逐点相等**（验证不二次计算） | `.../NavChart.test.tsx` |
 | 错误态 | 500 / 超时 / 429 | 错误边界 + 重试按钮；429 展示 `Retry-After` | `.../ErrorState.test.tsx` |
+| 板块子块 | `SectorBlock` 渲染 | industry/concept 两次 overview 并行；4 KPI + 偏好条 + `link-sectors`；基准缺失 → 组合权重 Top3 且无主动权重；`[data-board]` 恰 2 个 | `frontend/apps/web/src/pages/Dashboard.test.tsx` |
+| 板块页 | `/sectors` 深链 | taxonomy/level/parent/as_of 回填；行业三级下钻；概念表无基准列 + `caveat` 原样展示；未同步显示 `missing` | `frontend/apps/web/src/pages/Sectors.test.tsx` |
 
 ### 7.2 "前端零口径"架构断言（硬门禁）
 
@@ -297,6 +299,8 @@ uv run python tools/ci/gate_endpoint_coverage.py --ops /tmp/ops.json --collect /
 | F5 | `apps/web` 不得直接 `fetch(`/`axios(`，必须经 `packages/api-client` | `no-restricted-globals` + import 规则 | 绕过生成 SDK = 绕过契约 |
 
 **双保险**：`test_backend_conclusion_verbatim.test.tsx` mock 后端返回 `conclusion:"这段时间的数据不敢给你算收益"` → DOM **原样包含**且不含额外"赚钱/亏"词；另有 `test_no_eslint_disable_in_web.py`（`apps/web` 内出现 `eslint-disable` 即 fail），防止静态规则被绕过。
+
+> 板块页面同属零口径范围：HHI/effective_n 等 ratio 串直接展示，不做 ratio→百分比换算；偏好条宽度复用后端 `weight_pct` 绝对百分比串（去符号），`active_weight_pct` 仅作文本。源码门禁见 `src/charts/zero-caliber.test.ts`。
 
 ### 7.3 认证流（`apps/web/src/lib/auth/`）
 

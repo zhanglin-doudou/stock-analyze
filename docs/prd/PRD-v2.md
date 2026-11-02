@@ -414,7 +414,7 @@ Internet ──TLS──▶   │  nginx  :443  ──静态资源──▶ Reac
 #### FR-R7 归因诊断 —— P0
 
 - 口径同 v1.1：P0 五因子拆解（金额 + 占比 + 结论），P1 行业 Brinson（Carino）。
-- **API 验收**：`GET /api/v1/attribution?period=...&model=five_factor` → 200，`factors[]{code, amount, ratio, rank}` 与 `residual`；因子金额之和 + residual 与区间总损益差额 ≤0.01 元；单因子主导 fixture 下 `rank[0].code` 正确。
+- **API 验收**：`GET /api/v1/attribution?period=...&model=five_factor` → 200，`factors[]{code, amount, ratio, rank}` 与 `residual`；因子金额之和 + residual 与区间总损益差额 ≤0.01 元；单因子主导 fixture 下 `rank[0].code` 正确。JSON `factors[]` 固定含 `code="sector"`（板块配置）；`model=brinson_industry`（P1）行业权重按**期初（BoP，R1）**口径并附 `sectors[]` 明细。
 - **UI 验收**：必须（"为什么亏"卡）。
 
 #### FR-R8 统计可信度与最小样本 —— P0
@@ -429,7 +429,7 @@ Internet ──TLS──▶   │  nginx  :443  ──静态资源──▶ Reac
 
 - 技术约束：React + TypeScript（strict）+ Vite + TanStack Query + React Router + ECharts；**API 客户端由 OpenAPI 生成**；不引入组件库重依赖（"轻前"）。
   > 2026-10-28 前端重构决策（D3/D4）：TanStack Query 于 Phase 1 引入；ECharts 暂不引入，改用自研 SVG（`docs/reviews/2026-10-28-frontend-refactor/README.md` §11）。
-- 页面：登录/注册、看板（5 卡）、回合列表与下钻、指标详情（三段式 + 口径抽屉）、对账、导入向导、月报、日志、设置（Token/基准/隐私开关）、审计。
+- 页面：登录/注册、看板（资产概览 + 历史概览两板块，含板块配置子块）、**板块分析（`/sectors`：行业三级下钻 / 概念暴露）**、回合列表与下钻、指标详情（三段式 + 口径抽屉）、对账、导入向导、月报、日志、设置（Token/基准/隐私开关）、审计。
 - **前端零口径**约束：前端不得实现指标计算与结论拼接（架构约束测试可验证）。
 - **API 验收**（前端依赖的契约）：SPA 所需的全部数据端点已在《API-Catalog》登记且 100% 通过验收套件；前端构建产物由 `GET /` 提供且 `200`。
 - **UI 验收**：必须（全部页面可访问）。
@@ -590,6 +590,8 @@ Internet ──TLS──▶   │  nginx  :443  ──静态资源──▶ Reac
 | A25 | Brinson（P1） | 配置/选择/交互；多期 Carino 链接 |
 | A26 | 统计门槛 | `N<10` 只出原始值；`N<30` 附 CI；日频 `<60` 交易日不出夏普/回撤/IR |
 | A27 | dedupe_key | `hash(user_id + 归一化股东账号 + 日期 + 证券代码 + 摘要 + 数量 + 均价 + 发生金额)`；空账号归一哨兵；同键多笔按出现次序计数去重 |
+| A28 | 板块集中度 | 行业（互斥）按已映射权益市值 `E_map` 归一：`HHI=Σw²`、`effective_n=1/HHI`、Top1/Top3 权重；覆盖率 `coverage=Σmapped/Σequity` 独立于分母；`coverage<90%` → `insufficient`（HHI=null）。**概念多归属不可加总**，只输出 `exposure/overlap/multi_tag`，`Σexposure>1` 时附 `caveat` |
+| A29 | 板块偏好 | 主动权重 `active=w_p−w_b`，行业 `Σactive≈0`；基准成分权重缺失 → `active_*` 全 `null` + `SECTOR_BENCHMARK_WEIGHTS_MISSING`，**禁止等权近似**；基准权重按 `weight_as_of` 归一 |
 
 ---
 

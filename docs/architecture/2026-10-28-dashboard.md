@@ -126,6 +126,7 @@
 | ③ 费用：合计/占比/年化 bp/回本门槛 | 资产概览 · "费用"子块 | **合并**：`total_fees`（全历史）作 headline；`/metrics?period=legacy_period&ids=perf.fee,perf.fee_breakeven` 展示本月占比/回本门槛；"年化 bp"当前无独立字段，列入缺失清单 |
 | ④ 行为：DE/换手/摊平/HHI | 历史概览 · "行为（legacy_period）"子块 | **保留**；由 `/metrics?period=legacy_period&ids=...` 指标卡展示（含 n/CI/可信度），非 ok 不出结论 |
 | ⑤ 最赚/最亏 3 笔 | 历史概览 · "最赚/最亏"子块 | **保留**；最大收益 headline + 3+3 列表（含 `round_id`，可跳回合详情） |
+| **板块配置**（Period2-17，2026-10-31） | 资产概览 · "板块配置"子块 | **新增**：4 KPI（集中度 HHI / 偏好偏离 / 概念暴露 / 覆盖率）+ 偏好 Top3 + 概念多归属 `caveat` + `links.sectors` 深链；基准缺失时退化为组合权重 Top3，主动权重 `null` 不伪造 |
 | **下钻抽屉**（Period2-12） | 历史概览 · 指标卡/数字链接 | **合并为详情页**：点胜率等 → `/metrics/{id}?period=legacy_period`（现有 `MetricDetail` 已渲染 explain/drilldown）；此为验收变更 |
 | **对账横幅**（Period2-12） | 资产概览顶部 | **保留**：读 `GET /reconciliation?period=legacy_period`；有断链/补差时显示横幅 + 链接 `/assets`；无数据则隐藏 |
 | **可信度标签**（FR-R8/Period2-12） | 历史概览指标子块 | **保留**：复用 metric `sample_status/n/ci_low/ci_high`，显示"样本不足/窗口未满/可信/阻断"；全历史 headline 也标 `n/样本状态` |
@@ -382,31 +383,33 @@ def max_drawdown_window(...) -> DrawdownWindow:
   - 导航第一位加"看板"；同时更新 `Login.tsx:22`、`Register.tsx:38` 的 `navigate("/trades")` → `/dashboard`；
   - 更新 `router.test.tsx` 对导航前四项顺序的断言（新增"看板"会改变顺序）。
 - 保留 `/nav`、`/assets`、`/metrics`、`/rounds` 链接，作为下钻入口。
+- 2026-10-31：`/sectors` 页面（`pages/Sectors.tsx`）挂同一 Layout + `RequireAuth`；导航「分析」组新增"板块"；深链 `?taxonomy=industry|concept&level=1|2|3&parent=<code>&as_of=<date>`。
 
-### 5.2 页面结构（严格 2 个板块）
+### 5.2 页面结构（板块级容器恰 2 个）
 
 ```
 <DashboardPage>
   <PageHeader> 数据截至 / 状态徽标 / 刷新 / 入口按钮（月报、导出、归因占位）
-  <section data-testid="asset-overview"> 资产概览
+  <div data-board="asset-overview"> 资产概览（板块级容器）
     <BuildBanner> build_state/data_status / 数据截止 / 去构建 CTA（跳 /assets，不自动 job）
     <ReconciliationBanner> 对账断链/补差（/reconciliation?period=legacy_period）
     <KpiGrid> 现金 / 持仓市值 / 仓位 / 总收益 / 银证转账峰值转入成本 / 峰值成本收益率 / 总费用
     <HoldingsTable> 代码 名称 数量 成本 市值 权重（weight=mv/Σmv，sum≈100%）
+    <SectorBlock data-board-member="asset-overview" lazy> 板块配置（/sectors/overview industry+concept，4 KPI + 偏好 Top3 + 概念 caveat + link-sectors）
     <AssetSubBlocks lazy> 净值与收益（/nav?period=legacy_period，标签：本月）· 费用（/metrics?period=legacy_period&ids=perf.fee,perf.fee_breakeven，标签：本月）
-  </section>
-  <section data-testid="history-overview"> 历史概览
+  </div>
+  <div data-board="history-overview"> 历史概览（板块级容器）
     <KpiGrid> 已平仓股票数 / 盈利 / 亏损 / 最大收益 / 最大收益/最大成本 / 最大回撤
     <WinLossSummary> 计数 + 占比 + 简洁 bar（宽度用后端 bar_pct 字符串）
     <DrawdownCard> 时间段 + 回撤收益率 + 恢复 + n/sample_status
     <CredibilityBadges> 每个月度指标显示 n/CI/sample_status（/metrics）
-    <HistorySubBlocks lazy> 核心指标（/metrics?period=legacy_period&ids=perf.win_rate,perf.pnl_ratio,perf.holding_days,perf.concentration，标签：本月；带 n/CI）· 行为（behavior.de/turnover/averaging_down/hhi）· 最赚/最亏（dashboard，含 round_id 跳转）
-    <Top3Grid two-column> 持仓时长 Top3（top_holding_rounds：持有天数降序，展示「持有 N 天」）· 交易次数 Top3（top_trade_counts：流水 buy/sell 行数，展示「N 笔 / 买 X · 卖 Y · 累计收益 · 总费用」）
-  </section>
+    <HistorySubBlocks lazy> 核心指标 · 行为 · 最赚/最亏
+    <Top3Grid two-column> 持仓时长 Top3 · 交易次数 Top3
+  </div>
 </DashboardPage>
 ```
 
-- 页面只有两个 `<section>`；旧五卡以 `AssetSubBlocks`/`HistorySubBlocks` 子块存在，不新增第三板块。
+- 页面只有 **2 个板块级容器**（`[data-board]` = `asset-overview` / `history-overview`，测试断言恰 2 个）；旧五卡与板块配置都是子块，用 `data-board-member` 标注归属，不新增第三板块。
 - 胜/负占比条：后端在字段中同时返回 CSS-ready 宽度串 `win_bar_pct/loss_bar_pct`（如 `"60.00%"`），前端直接作为 `style.width` 字符串使用，**不得** `parseFloat` 后计算；若不实现条，只显示文本百分比。
 - 状态（按 §3.3 两轴）：
   - `blocked`/`missing` section：不渲染数字（DOM 无金额/百分比），显示原因 + `what_to_do` + "去构建/对账"链接；测试快照断言无数字。
@@ -417,6 +420,7 @@ def max_drawdown_window(...) -> DrawdownWindow:
   - `/nav?period=legacy_period`：时间加权/资金加权/净值 summary（图表 v1 不做则只展示 summary；此 GET 会物化 nav_daily，懒加载并接受既有副作用）；
   - `/metrics?period=legacy_period&ids=perf.win_rate,perf.pnl_ratio,perf.holding_days,perf.concentration,perf.fee,perf.fee_breakeven,behavior.de,behavior.turnover,behavior.averaging_down,behavior.hhi`：旧卡/可信度；
   - `/reconciliation?period=legacy_period`：对账横幅；
+  - `/sectors/overview?taxonomy=industry&level=1&as_of=as_of` + `taxonomy=concept`：板块配置子块（行业 4 KPI/偏好；概念暴露+`caveat`）；
   - `/dashboard`：新字段 + 最赚/最亏；
   - 前端只渲染后端字符串，不计算；不引入 TanStack Query/ECharts（当前 package.json 无这些依赖）。
 
@@ -532,6 +536,7 @@ printf 'SKIP: %s\n' "${SKIPS[@]}"
 | DASH-11 | 指标子块数值与 `/metrics?period={metrics_period}&ids=...` 逐项一致（`metrics_period` 年 1/1→as_of，仅 `status=ok` 字段）；`/nav`、对账横幅仍用 `legacy_period` |
 | DASH-12 | 两轴状态映射/未知枚举兜底；`badge-stale/missing/insufficient` 有样式 |
 | DASH-13 | API-084 在 Catalog/OpenAPI/OPERATION_META/gate 计数/隔离矩阵/手写客户端全部登记；无契约漂移 |
+| DASH-14 | 板块子块：`[data-board]` 恰 2 个、`asset-sector-block[data-board-member="asset-overview"]` 存在；industry/concept 两请求并行且 industry 失败只降级子块；基准缺失 → 组合权重 Top3 且不出现主动权重；概念 `caveat` 原样渲染；`link-sectors` 深链；源码零口径 |
 
 ## 7. 缺失内容清单（二期剩余；评审 P0-6 修订）
 
@@ -548,7 +553,7 @@ printf 'SKIP: %s\n' "${SKIPS[@]}"
 | 5 | API-059/060 导出 | 未实现 | 否 | 否 | `/exports` 占位；Dashboard 按钮 | Period2-10 暂停 |
 | 6 | API-038 选股诊断 | 未实现（E-18 延后） | 否 | 否 | 无（不在 Dashboard） | 历史 design |
 | 7 | **G8 golden approval** | S10：22 个 COVERAGE 骨架 + fee_breakeven 口径 → approval 23 项红；`make gate-golden` 失败 | **是**（费用/五卡"有数"依赖；旧卡可信度） | 否 | 旧费用子块可展示，但验收 SKIP 并注明 | S10 §3.1 |
-| 8 | 基准数据源/`BenchmarkProvider` | `/nav` beta/alpha 为 null；market_live 拒 hs300_tr；无基准序列 | 是（旧卡①不可满足） | 否 | 资产子块"基准暂不可用"占位 | 缺失 §7.1 |
+| 8 | 基准数据源/`BenchmarkProvider` | `/nav` beta/alpha 为 null；market_live 拒 hs300_tr；无基准序列；**板块主动权重同样依赖基准成分权重**（缺失 → `active_*` 全 null + `SECTOR_BENCHMARK_WEIGHTS_MISSING`，子块退化为组合权重 Top3） | 是（旧卡①不可满足） | 否 | 资产子块"基准暂不可用"占位 | 缺失 §7.1 |
 | 9 | 对账数据/横幅 | API-026/027 已有，前端无；Dashboard 需读取 | 否（可本任务做） | **是**（读取+横幅） | 无 | Period2-12 |
 | 10 | 可信度标签/下钻 | 指标有 n/CI/sample_status；详情页已有 explain | 否 | **是**（子块+详情链接） | `/metrics/:id` | Period2-12 |
 | 11 | 指标子块 period | 2026-10-30：指标子块改年度口径 | 否 | **是**（`metrics_period` 后端返回 + 前端自动加载） | 子块标签"年度指标（YYYY）" | 低频操作者月度样本不足 |
@@ -564,7 +569,7 @@ printf 'SKIP: %s\n' "${SKIPS[@]}"
 | 16 | 设置基准/隐私 | 否 | Settings 卡片占位（`Period2-11`） |
 | 17 | 对账页/API-038 选股 | 否 | 不做入口（本期明确） |
 | 18 | 趋势/日志/对话/审计/分享/通知 | 否 | 不做入口（P3） |
-| 19 | 导航/根路由 | **是** | `/dashboard` + 导航"看板"；Login/Register 落地 `/dashboard`；router.test 更新 |
+| 19 | 导航/根路由 | **是** | `/dashboard` + 导航"看板"；Login/Register 落地 `/dashboard`；router.test 更新；2026-10-31 增 `/sectors`（导航"板块"） |
 | 20 | 占位组件 | **是** | `src/ui/ComingSoon.tsx`（新建；仓库当前无此组件） |
 
 ### 7.3 工程/数据/测试基建
@@ -653,6 +658,7 @@ printf 'SKIP: %s\n' "${SKIPS[@]}"
 - `frontend/apps/web/src/router.tsx`、`Layout` 导航、`Dashboard.tsx`、`ui/ComingSoon.tsx`、`Login.tsx`/`Register.tsx`、`router.test.tsx`、`styles.css`（badge 样式）。
 - `docs/DEV-PLAN-v2.md` §3.1：五卡 → 两板块验收；§3.2 Period2-12 描述更新；§A.1 新增 API-084 行，计数 83→84、Period2 29→30、总表 82/82 陈旧数修正（实现时）。
 - `docs/architecture/v2/Testing.md` §7：Dashboard 测试位置（旧 `features/dashboard/` 改为 `pages/Dashboard.test.tsx` 或保留）。
+- 2026-10-31 板块接入：`docs/architecture/2026-10-31-sector-data.md`；API-Catalog 87/88；`contracts/openapi.json` + SDK；`routers/sectors.py` + `SectorBlock`/`/sectors` 页面；本文件 §2/§5/§6/§7/§11/§12 同步。
 - `docs/reviews/2026-10-27-p207-S10-acceptance.md`：新增 Dashboard 验收记录与缺失清单引用。
 
 ---
@@ -667,6 +673,7 @@ printf 'SKIP: %s\n' "${SKIPS[@]}"
 - [ ] `/reports`、`/exports`、`/attribution` 占位入口存在；无假下载/假数字。
 - [ ] 缺失清单 §7 与实际状态一致；验收脚本输出 SKIP 项。
 - [ ] 前端零口径源码正则断言；后端 p95 目标准入（无 5 万行夹具时 SKIP，不伪通过）。
+- [ ] 板块子块与 `/sectors` 页：`[data-board]` 恰 2 个、`links.sectors` 深链、基准缺失降级、概念 `caveat`；API-087/088 契约与测试齐全。
 - [ ] `make test`/`test-p2` 可用部分全绿；`verify-p2` 缺失时明确记录。
 
 ---

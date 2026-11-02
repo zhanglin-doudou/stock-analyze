@@ -1,0 +1,226 @@
+{
+  "as_of": "2026-06-30",
+  "benchmark": {
+    "as_of": "2026-06-30",
+    "id": "hs300"
+  },
+  "benchmark_members": [
+    {
+      "benchmark_id": "hs300",
+      "effective_from": "2026-06-30",
+      "symbol": "600519",
+      "weight": "0.05320000",
+      "weight_as_of": "2026-06-30"
+    },
+    {
+      "benchmark_id": "hs300",
+      "effective_from": "2026-06-30",
+      "symbol": "000858",
+      "weight": "0.01980000",
+      "weight_as_of": "2026-06-30"
+    },
+    {
+      "benchmark_id": "hs300",
+      "effective_from": "2026-06-30",
+      "symbol": "000001",
+      "weight": "0.02100000",
+      "weight_as_of": "2026-06-30"
+    },
+    {
+      "benchmark_id": "hs300",
+      "effective_from": "2026-06-30",
+      "symbol": "300750",
+      "weight": "0.03650000",
+      "weight_as_of": "2026-06-30"
+    },
+    {
+      "benchmark_id": "hs300",
+      "effective_from": "2026-06-30",
+      "symbol": "601318",
+      "weight": "0.04020000",
+      "weight_as_of": "2026-06-30"
+    }
+  ],
+  "classification": {
+    "concept_em": "EM-2026-06",
+    "industry_sw": "SW2021"
+  },
+  "first_sync_on": "2026-06-30",
+  "memberships": [
+    {
+      "effective_from": "2026-06-30",
+      "sector_code": "850121.SI",
+      "symbol": "600519",
+      "taxonomy": "industry_sw"
+    },
+    {
+      "effective_from": "2026-06-30",
+      "sector_code": "850121.SI",
+      "symbol": "000858",
+      "taxonomy": "industry_sw"
+    },
+    {
+      "effective_from": "2026-06-30",
+      "sector_code": "850511.SI",
+      "symbol": "000001",
+      "taxonomy": "industry_sw"
+    },
+    {
+      "effective_from": "2026-06-30",
+      "sector_code": "850811.SI",
+      "symbol": "300750",
+      "taxonomy": "industry_sw"
+    },
+    {
+      "effective_from": "2026-06-30",
+      "sector_code": "850911.SI",
+      "symbol": "601318",
+      "taxonomy": "industry_sw"
+    },
+    {
+      "effective_from": "2026-06-30",
+      "sector_code": "BK0999",
+      "symbol": "600519",
+      "taxonomy": "concept_em"
+    },
+    {
+      "effective_from": "2026-06-30",
+      "sector_code": "BK1100",
+      "symbol": "600519",
+      "taxonomy": "concept_em"
+    },
+    {
+      "effective_from": "2026-06-30",
+      "sector_code": "BK1100",
+      "symbol": "000858",
+      "taxonomy": "concept_em"
+    },
+    {
+      "effective_from": "2026-06-30",
+      "sector_code": "BK0999",
+      "symbol": "300750",
+      "taxonomy": "concept_em"
+    },
+    {
+      "effective_from": "2026-06-30",
+      "sector_code": "BK1010",
+      "symbol": "300750",
+      "taxonomy": "concept_em"
+    },
+    {
+      "effective_from": "2026-06-30",
+      "sector_code": "BK1010",
+      "symbol": "601318",
+      "taxonomy": "concept_em"
+    }
+  ],
+  "schema_version": 1,
+  "sectors": [
+    {
+      "level": 1,
+      "name": "食品饮料",
+      "parent_code": null,
+      "sector_code": "801120.SI",
+      "taxonomy": "industry_sw"
+    },
+    {
+      "level": 1,
+      "name": "银行",
+      "parent_code": null,
+      "sector_code": "801050.SI",
+      "taxonomy": "industry_sw"
+    },
+    {
+      "level": 1,
+      "name": "电子",
+      "parent_code": null,
+      "sector_code": "801080.SI",
+      "taxonomy": "industry_sw"
+    },
+    {
+      "level": 1,
+      "name": "非银金融",
+      "parent_code": null,
+      "sector_code": "801180.SI",
+      "taxonomy": "industry_sw"
+    },
+    {
+      "level": 2,
+      "name": "饮料制造",
+      "parent_code": "801120.SI",
+      "sector_code": "801123.SI",
+      "taxonomy": "industry_sw"
+    },
+    {
+      "level": 2,
+      "name": "国有大型银行",
+      "parent_code": "801050.SI",
+      "sector_code": "801051.SI",
+      "taxonomy": "industry_sw"
+    },
+    {
+      "level": 2,
+      "name": "半导体",
+      "parent_code": "801080.SI",
+      "sector_code": "801081.SI",
+      "taxonomy": "industry_sw"
+    },
+    {
+      "level": 2,
+      "name": "保险",
+      "parent_code": "801180.SI",
+      "sector_code": "801191.SI",
+      "taxonomy": "industry_sw"
+    },
+    {
+      "level": 3,
+      "name": "白酒",
+      "parent_code": "801123.SI",
+      "sector_code": "850121.SI",
+      "taxonomy": "industry_sw"
+    },
+    {
+      "level": 3,
+      "name": "国有大型银行",
+      "parent_code": "801051.SI",
+      "sector_code": "850511.SI",
+      "taxonomy": "industry_sw"
+    },
+    {
+      "level": 3,
+      "name": "半导体",
+      "parent_code": "801081.SI",
+      "sector_code": "850811.SI",
+      "taxonomy": "industry_sw"
+    },
+    {
+      "level": 3,
+      "name": "保险",
+      "parent_code": "801191.SI",
+      "sector_code": "850911.SI",
+      "taxonomy": "industry_sw"
+    },
+    {
+      "level": 0,
+      "name": "人工智能",
+      "parent_code": null,
+      "sector_code": "BK0999",
+      "taxonomy": "concept_em"
+    },
+    {
+      "level": 0,
+      "name": "新能源",
+      "parent_code": null,
+      "sector_code": "BK1010",
+      "taxonomy": "concept_em"
+    },
+    {
+      "level": 0,
+      "name": "白酒概念",
+      "parent_code": null,
+      "sector_code": "BK1100",
+      "taxonomy": "concept_em"
+    }
+  ],
+  "series": {}
+}
