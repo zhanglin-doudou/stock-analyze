@@ -36,6 +36,15 @@ const REASON_CODE_LABELS: Record<string, string> = {
   COVERAGE_LOW: '资金覆盖率不足',
 };
 
+const RATIO_BASIS_LABELS: Record<string, string> = {
+  'amount/total_pnl': '本期总损益',
+};
+const BENCHMARK_LABELS: Record<string, string> = {
+  hs300_tr: '沪深 300 全收益',
+  zz500_tr: '中证 500 全收益',
+  csi1000_tr: '中证 1000 全收益',
+};
+
 const RATIO_HINT =
   '贡献率 = 因子金额 / 本期总损益。总损益为负时，正金额表示“减少亏损”。';
 
@@ -58,6 +67,15 @@ function formatMoney(value: string | null | undefined): string {
 /** 百分比只取后端 `*_pct` 串；缺失时显示占位符（U-03）。 */
 function formatPct(value: string | null | undefined): string {
   return value == null || value === '' ? '—' : value;
+}
+
+/** 只读展示用：assumptions 中字符串项（U-06/U-11）。 */
+function assumptionText(
+  data: Attribution,
+  key: string,
+): string | undefined {
+  const value = data.assumptions?.[key];
+  return typeof value === 'string' && value !== '' ? value : undefined;
 }
 
 function StatusBadge({ status }: { status: string }): ReactElement {
@@ -135,7 +153,8 @@ function SummaryCard({ data }: { data: Attribution }): ReactElement {
       <div className="attr-panel-head">
         <h2>本期结论</h2>
         <span className="muted num">
-          总损益 {formatMoney(data.total_pnl)} · 基准 {data.ratio_basis}
+          总损益 {formatMoney(data.total_pnl)} · 比率分母{' '}
+          {labelFor(RATIO_BASIS_LABELS, data.ratio_basis)}
         </span>
       </div>
       {/* 结论整句只渲染后端 summary（含样本不足/空账户固定句，随 Accept-Language） */}
@@ -302,10 +321,19 @@ export function AttributionPage(): ReactElement {
           </span>
           <span>数据截至 {data?.data_as_of ?? '—'}</span>
           {data ? (
-            <span>
-              总损益口径{' '}
-              {labelFor(TOTAL_PNL_BASIS_LABELS, data.total_pnl_basis)}
-            </span>
+            <>
+              <span>
+                总损益口径{' '}
+                {labelFor(TOTAL_PNL_BASIS_LABELS, data.total_pnl_basis)}
+              </span>
+              <span>
+                基准{' '}
+                {labelFor(
+                  BENCHMARK_LABELS,
+                  assumptionText(data, 'benchmark_id'),
+                )}
+              </span>
+            </>
           ) : null}
         </div>
       </header>
