@@ -431,8 +431,7 @@ async def build_sector_overview(
             raise ApiError(
                 ErrorCode.VALIDATION_ERROR,
                 detail=(
-                    f"行业分类当前仅支持 level {sorted(catalog_levels)}，"
-                    f"请求 level={level} 不存在"
+                    f"行业分类当前仅支持 level {sorted(catalog_levels)}，请求 level={level} 不存在"
                 ),
             )
     dataset_version = (
