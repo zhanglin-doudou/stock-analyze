@@ -185,6 +185,12 @@ describe("AttributionPage", () => {
     expect(screen.getByTestId("attr-factor-selection").textContent).toContain("ⓘ");
     expect(screen.getByTestId("attr-caliber").textContent).toContain("five-factor@1.0");
     expect(screen.getByTestId("attr-caliber").textContent).toContain("沪深 300 全收益");
+    expect(
+      screen.getByTestId("attr-factor-selection").querySelector("a")?.getAttribute("href"),
+    ).toBe("/rounds");
+    expect(
+      screen.getByTestId("attr-factor-sector").querySelector("a")?.getAttribute("href"),
+    ).toBe("/sectors");
 
     const bar = screen.getByTestId("attr-factor-selection").querySelector(".attr-bar > i");
     expect(bar).not.toBeNull();

@@ -201,8 +201,10 @@ function StatusBadge({ status }: { status: string }): ReactElement {
 /** 因子行（零口径）：宽度直接用后端 `presentation.bar_pct`，不解析不换算。 */
 function FactorRow({
   factor,
+  links,
 }: {
   factor: AttributionFactor;
+  links: Attribution['links'];
 }): ReactElement {
   const barPct = (factor.presentation.bar_pct ?? '0%').replace(/^[+−-]/, '');
   const info = FACTOR_DEFINITIONS[factor.code];
@@ -234,6 +236,12 @@ function FactorRow({
       </span>
       <span className="attr-factor-conclusion">
         {displayValue(factor.conclusion)}
+        <Link
+          className="attr-factor-link"
+          to={factor.code === 'sector' ? links.sectors : links.rounds}
+        >
+          查看相关{factor.code === 'sector' ? '板块' : '回合'}
+        </Link>
       </span>
       <div className="attr-bar" aria-hidden="true">
         <i
@@ -334,7 +342,7 @@ function SummaryCard({ data }: { data: Attribution }): ReactElement {
         {[...(data.factors ?? [])]
           .sort((left, right) => left.rank - right.rank)
           .map((factor) => (
-            <FactorRow key={factor.code} factor={factor} />
+            <FactorRow key={factor.code} factor={factor} links={data.links} />
           ))}
       </ul>
       <p className="muted attr-ratio-hint">{RATIO_HINT}</p>
