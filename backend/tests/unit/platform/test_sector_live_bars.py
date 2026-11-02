@@ -337,3 +337,64 @@ async def test_persist_bars_empty_is_noop(live_source: Any) -> None:
         is None
     )
 
+
+# ── 只回填行情（make sync-sector-bars）────────────────────────────
+
+
+async def test_sync_bars_only_resumes_from_bar_as_of(
+    owner_engine: AsyncEngine, live_source: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """只回填日线：从 bar_as_of 次日续传，目录/成分原样不动。"""
+    await _seed_sector(owner_engine)
+    await _seed_state(owner_engine, bar_as_of=date(2026, 6, 29))
+
+    async def fake_fetch(boards: Any, *, start: date, end: date) -> tuple[Any, list[Any]]:
+        assert start == date(2026, 6, 30)
+        assert [code for code, _ in boards] == ["850811.SI"]
+        return (
+            _board_bar_records(
+                "industry_sw", "850811.SI", [{"日期": "2026-06-30", "收盘价": 4040.0}]
+            ),
+            [],
+        )
+
+    monkeypatch.setattr(live_source, "_fetch_board_bars", fake_fetch)
+    report = await live_source.sync_bars_to_cache(today=_TODAY)
+    assert report.status == "succeeded"
+    assert "bar_as_of=2026-06-30" in report.message
+
+    async with AsyncSession(owner_engine) as session:
+        state = await session.get(SectorSyncState, DATASET_KEY)
+        assert state is not None
+        assert state.bar_as_of == date(2026, 6, 30)
+        catalog = await SectorRepository(session).list_catalog(taxonomy="industry_sw")
+        assert [(row.sector_code, row.level) for row in catalog] == [("850811.SI", 3)]
+
+
+async def test_sync_bars_dry_run_has_no_writes(
+    owner_engine: AsyncEngine, live_source: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """--dry-run 只读配置/DB：不联网、不写 bar/水位。"""
+    await _seed_sector(owner_engine)
+    await _seed_state(owner_engine, bar_as_of=date(2026, 6, 29))
+
+    async def boom(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("dry-run 不应联网拉行情")
+
+    monkeypatch.setattr(live_source, "_fetch_board_bars", boom)
+    report = await live_source.sync_bars_to_cache(today=_TODAY, dry_run=True)
+    assert report.status == "skipped"
+    assert "不联网、不写库" in report.message
+
+    async with AsyncSession(owner_engine) as session:
+        assert (await session.execute(select(SectorBar))).scalars().all() == []
+        state = await session.get(SectorSyncState, DATASET_KEY)
+        assert state is not None
+        assert state.bar_as_of == date(2026, 6, 29)
+
+
+async def test_sync_bars_requires_cached_catalog(live_source: Any) -> None:
+    report = await live_source.sync_bars_to_cache(today=_TODAY, start=date(2026, 6, 1))
+    assert report.status == "failed"
+    assert "make sync-sector-industry" in report.message
+

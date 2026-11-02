@@ -15,7 +15,7 @@ import json
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -831,6 +831,67 @@ class AkshareSectorSource:
             member_count=sum(len(items) for items in snapshot.members.values()),
             message=message,
         )
+
+    async def sync_bars_to_cache(
+        self, *, today: date, start: date | None = None, dry_run: bool = False
+    ) -> SyncReport:
+        """只同步行业板块指数日线（``make sync-sector-bars``），不重抓目录/成分。
+
+        与 ``sync_to_cache`` 完全独立：目录/成分/基准权重一行不写，只 upsert
+        ``market.sector_bar`` + ``sector_pull_range`` 并推进 ``bar_as_of``。
+        ``start`` 缺省时从 ``bar_as_of`` 次日续传；行业目录缓存为空则拒绝执行
+        （先 ``make sync-sector-industry``）。
+        """
+        async with self._session_factory(begin=True) as session:
+            repo = SectorRepository(session)
+            catalog = await repo.list_catalog(taxonomy=TAXONOMY_INDUSTRY)
+            state = await repo.sync_state(dataset_key=DATASET_KEY)
+        boards = [(row.sector_code, row.name) for row in catalog]
+        if not boards:
+            return SyncReport(
+                as_of=today,
+                status="failed",
+                message="market.sector 无行业目录缓存：请先 make sync-sector-industry",
+            )
+        effective_start = start
+        if effective_start is None and state is not None:
+            effective_start = (
+                state.bar_as_of + timedelta(days=1) if state.bar_as_of is not None else None
+            )
+        if effective_start is None:
+            return SyncReport(
+                as_of=today,
+                status="failed",
+                message="缺少起始日：无 bar_as_of 水位可续传，请显式传 --start",
+            )
+        if dry_run:
+            return SyncReport(
+                as_of=today,
+                status="skipped",
+                message=(
+                    f"dry-run: 配置/DB 可用；行业板块 {len(boards)} 个；"
+                    f"目标区间 {effective_start.isoformat()}~{today.isoformat()}；不联网、不写库"
+                ),
+            )
+        if effective_start > today:
+            return SyncReport(
+                as_of=today,
+                status="skipped",
+                message=f"bar_as_of 已是最新（{today.isoformat()}），无需回填",
+            )
+        try:
+            bars, skipped = await self._fetch_board_bars(boards, start=effective_start, end=today)
+            bar_as_of = await self._persist_bars(
+                bars, fetch_start=effective_start, requested_end=today
+            )
+        except Exception as exc:
+            await self._record_failure(today=today, detail=f"persist bars failed: {exc}")
+            return SyncReport(as_of=today, status="failed", message=f"板块日线落盘失败: {exc}")
+        coverage = f"，bar_as_of={bar_as_of.isoformat()}" if bar_as_of else "（无数据落盘）"
+        message = f"板块日线 {len(bars)} 根/{len({bar.sector_code for bar in bars})} 板块{coverage}"
+        if skipped:
+            message += f"，单板块失败跳过 {len(skipped)} 个"
+        return SyncReport(as_of=today, status="succeeded" if bars else "skipped", message=message)
 
     async def _build_snapshot(self, wanted: tuple[str, ...]) -> _Snapshot:
         """按 `wanted` 只抓取需要的 taxonomy（行业/概念可分开同步，互不拖累）。"""

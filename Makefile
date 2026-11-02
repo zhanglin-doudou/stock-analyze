@@ -31,6 +31,7 @@ help:
 	@echo "  make sync-sectors           同步板块公共数据（仅 SECTOR_MODE=live；ARGS='--dry-run'）"
 	@echo "  make sync-sector-industry   只同步行业板块（同花顺）"
 	@echo "  make sync-sector-concept    只同步概念板块（同花顺）"
+	@echo "  make sync-sector-bars       只同步行业板块指数日线（ARGS='--start 2026-04-01 [--dry-run]'）"
 	@echo "── 质量 ──────────────────────────────────────────────"
 	@echo "  make lint           ruff + eslint + frontend tsc"
 	@echo "  make typecheck      mypy + tsc + import-linter"
@@ -141,6 +142,10 @@ sync-sector-industry:
 .PHONY: sync-sector-concept
 sync-sector-concept:
 	@$(PY) -m stock_api.cli sync-sector-concept $(ARGS)
+
+.PHONY: sync-sector-bars
+sync-sector-bars:
+	@$(PY) -m stock_api.cli sync-sector-bars $(ARGS)
 
 # ── 质量 ────────────────────────────────────────────────────
 .PHONY: lint

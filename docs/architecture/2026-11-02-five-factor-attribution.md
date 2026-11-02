@@ -313,7 +313,7 @@ V_begin=5700.00（仅持仓市值，现金 0）；期末现金 4628.40、期末�
 
 1. **spike（0.5d）**：`akshare.stock_board_industry_index_ths(symbol=板块名称, start_date, end_date)`（已装、签名已核对；列名/历史长度/停牌/日期覆盖需实测并写 `provenance`）。概念板块本期不回填（M1 不用），P2 再说。
 2. **live 端口**：`SectorLiveDataSource.get_board_bars(keys, start, end)` 按目录 `name` 拉取 → `SectorBar(taxonomy, sector_code, trade_date, close_units, return_units)`；单板块失败跳过并记 `failures[]`（不阻断整批，与成分同步同策略）；限频/退避沿用 `market_live`。
-3. **落盘**：`sync-sectors --start YYYY-MM-DD` 真正生效，写 `market.sector_bar` + `market.sector_pull_range`（区间并集/尾部刷新）+ `sector_sync_state.bar_as_of`；主键幂等 `(taxonomy, sector_code, trade_date)`。
+3. **落盘**：`sync-sectors --start YYYY-MM-DD` 真正生效，写 `market.sector_bar` + `market.sector_pull_range`（区间并集/尾部刷新）+ `sector_sync_state.bar_as_of`；主键幂等 `(taxonomy, sector_code, trade_date)`。（也可只跑行情：`make sync-sector-bars ARGS='--start …'`，不重抓目录/成分）
 4. **replay 夹具**：`sector_fixture.py` 为 demo 持仓的行业生成覆盖**账单全区间 + 前向缓冲**的确定性指数序列（解析曲线，bytes 可复现），`first_sync_on` 保持 2026-06-30；**同时**把 `fixtures/market/quotes.json` 的 replay 个股序列扩到日频（覆盖 2026-04-01~2026-09-30，供买/卖点参考价与 BHAR 等；`generate_market_quotes()` 扩展为日频确定性序列，保持 `as_of=2026-09-30`）。
 5. **覆盖判定**：读路径只读缓存；`board_bars` 覆盖 `[P0, P1]` 的每段参考日（行业指数日期必须与个股参考日一致；缺 → 该标的剔除 + `SECTOR_BAR_MISSING`）。
 6. **验收**：`make sync-sectors ARGS='--start 2025-07-01'`（live 手测可选）幂等；`SectorRepository.board_bars` 非空且 `close_units>0`；replay 下 `fx_attr_*` 板块因子非 0；`make test-p2` 不回归。
@@ -729,7 +729,7 @@ PageHeader：期间选择 + 状态徽标（ok/degraded/blocked）+ 数据截至 
 
 | 任务 | 内容 | 依赖 | 估时 | 验收 |
 |---|---|---|---|---|
-| **08a 数据前置** | spike（0.5d）+ live THS 行业指数 `get_board_bars` + `sync-sectors --start` 落 `sector_bar`/`sector_pull_range`/`bar_as_of` + replay 板块指数/个股日线夹具扩展 | Period2-17 | 1.0~1.5d | `board_bars` 非空且幂等；replay 覆盖 demo 全区间；`make test-p2` 不回归 |
+| **08a 数据前置** | spike（0.5d）+ live THS 行业指数 `get_board_bars` + `sync-sectors --start`（或独立 `make sync-sector-bars`）落 `sector_bar`/`sector_pull_range`/`bar_as_of` + replay 板块指数/个股日线夹具扩展 | Period2-17 | 1.0~1.5d | `board_bars` 非空且幂等；replay 覆盖 demo 全区间；`make test-p2` 不回归 |
 | **08b core 五因子** | `stock_core/attribution/*`（types/allocate/five_factor/ranking/sector_return/model）+ 单测/属性/变异 | 08a 接口 | 1.5~2.0d | §3.8 golden 逐分；随机 1 万组；段级/两级分摊断言；mutation ≥85% |
 | **08c 应用层装配** | `stock_review/attribution/*` + `application/attribution.py`（资产边界/段构建/费用股息分摊/公司行动剔除/coverage/residual/status/inputs_hash） | 08b | 2.0~2.5d | `fx_attr_mixed` 逐分；blocked/degraded/边界矩阵 |
 | **08d API-036 + 契约** | router/schema/openapi_meta/api-snapshot/contract 计数/isolation/sdk+手写类型 | 08c | 1.0~1.5d | 契约/隔离/api-check 全绿；断言 ①~⑦⑨~⑫⑯ |

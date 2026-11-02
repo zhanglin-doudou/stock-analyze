@@ -149,10 +149,12 @@ make sync-market          # 只补本地缺失区间；已有数据不重复请�
 make sync-sectors                       # 行业 + 概念 + 基准成分权重（全部）
 make sync-sector-industry               # 只同步行业板块（同花顺）
 make sync-sector-concept                # 只同步概念板块（同花顺；板块多、耗时远长于行业）
+make sync-sector-bars ARGS='--start 2026-04-01'  # 只回填行业指数日线（不重抓目录/成分）
 make sync-sectors ARGS='--dry-run'      # 只做配置/DB 检查，不联网不写库
 ```
 
 - 行业与概念可**分开同步**（`sync-sector-industry` / `sync-sector-concept`），互不依赖：各自只抓自己的目录与成分，一个失败不影响另一个。
+- 板块指数日线可**单独回填**（`sync-sector-bars`）：只 upsert `market.sector_bar` + `sector_pull_range` 并推进 `bar_as_of`，不重抓目录/成分；缺省从 `bar_as_of` 次日续传。
 
 - 数据源与兜底链：
   - **行业目录/成分**：同花顺 THS 扁平一级行业（互斥，Σ权重=1）。目录走 akshare `stock_board_industry_name_ths`，成分股因 akshare 无 THS 成分接口，改为抓取同花顺板块详情页分页表格（`q.10jqka.com.cn/thshy/detail/...`）。
@@ -192,6 +194,7 @@ make seed-tenants      # 固定体验账号 + A/B/admin + 账单
 make seed-demo         # 演示数据 + 行情/板块回放（推荐首次使用）
 make sync-market       # live：收盘后补行情缓存
 make sync-sectors      # live：同步板块公共数据（ARGS='--dry-run' 只检查）
+make sync-sector-bars  # live：只回填行业指数日线（ARGS='--start 2026-04-01'）
 
 # 质量
 make lint              # ruff + 前端 tsc（当前前端 lint 即 tsc）

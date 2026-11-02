@@ -99,7 +99,7 @@ raise ApiError(ErrorCode.NOT_FOUND, detail=f"trade {trade_id} 不存在")
 
 1. **行业与概念必须分开**：行业（同花顺 THS，扁平一级，成员互斥），权重分母是 `E_map`（已映射权益市值），`Σweight≈1`、`Σactive≈0`；概念（多归属）**不可加总**，只输出 `exposure/overlap`，不输出 `weight/active`，`Σexposure>1` 时响应必须带 `caveat`。
 2. **禁止等权近似**：基准成分权重缺失 → `active_*` 全 `null` + `missing[]` 码 `SECTOR_BENCHMARK_WEIGHTS_MISSING`；禁止用等权/总资产分母冒充。
-3. **`market.*` 是公共缓存（无 RLS）**：同步只能走 CLI `sync-sectors`（`SECTOR_MODE=live`，或用 `sync-sector-industry` / `sync-sector-concept` 分开同步），API 读路径只读缓存、请求内不联网；`platform` 仓储 `SectorRepository` 的公共查询不收 `user_id`（这是显式例外，写进 docstring）。
+3. **`market.*` 是公共缓存（无 RLS）**：同步只能走 CLI `sync-sectors`（`SECTOR_MODE=live`，或用 `sync-sector-industry` / `sync-sector-concept` 分开同步，或用 `sync-sector-bars` 只回填行业指数日线），API 读路径只读缓存、请求内不联网；`platform` 仓储 `SectorRepository` 的公共查询不收 `user_id`（这是显式例外，写进 docstring）。
 4. **占位/缺失一律 200 + `missing[]`**：未同步/覆盖不足/历史成分缺失时返回 200 降级，`missing[]` 码是**响应字段**不是 `ErrorCode`；不可用数值显式 `null`，禁止输出 0。
 5. **分类版本与时点**：`classification_version`（默认 `THS`）随响应透出；成分按 SCD2 时点区间读取，缺失即 fail-closed（`not_covered`），禁止 assumed 近似。**唯一例外（2026-11-02 人工批准）**：五因子归因（M1）默认同样 fail-closed；仅当部署 `SECTOR_LOOKAHEAD_ENABLED=true` 且请求 `classification_lookahead=allow`、经人工批准时，允许用最早可用快照并标 `classification_lookahead=true`/`status=degraded`/`missing[]=SECTOR_CLASSIFICATION_LOOKAHEAD`（详见 [归因设计 §4.3](docs/architecture/2026-11-02-five-factor-attribution.md)）；描述性板块看板与 Brinson（M2）**不得**使用该例外。
 6. **前端零口径**：板块页面只渲染后端 `*_pct`/`*_display`；偏好条宽度用后端绝对百分比串（去符号）作 CSS 宽度，不做 `Number()/parseFloat`。
@@ -184,6 +184,7 @@ make sdk                  # 同步前端 TS 类型
 make sync-sectors ARGS='--dry-run'   # 板块同步自检（配置/表检查，不联网不写库）
 make sync-sector-industry             # 只同步行业板块（THS）
 make sync-sector-concept              # 只同步概念板块（THS，可与行业分开）
+make sync-sector-bars ARGS='--start 2026-04-01'   # 只回填行业指数日线（不重抓目录/成分）
 ```
 
 > `make verify-p1` 仅覆盖一期；`verify-p2` 尚未提供（Period2-14 暂停）。二期验收使用 `test-p2` + `test-metrics` + 各 gate，并在记录中明确 SKIP。

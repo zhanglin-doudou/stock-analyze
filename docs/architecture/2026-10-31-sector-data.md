@@ -462,7 +462,7 @@ class SyncableSectorSource(Protocol):
 
 ### 4.4 同步算法（`make sync-sectors`，幂等）
 
-入口：`stock_api.cli sync-sectors [--start YYYY-MM-DD] [--taxonomies industry,concept] [--dry-run]`；`make sync-sectors` 包装。仅 `SECTOR_MODE=live` 可用，replay 直接提示无需同步。**`--dry-run` 只做配置/DB/表结构检查并打印「将同步的数据集 + 目标 as_of + 预计表数」，不联网、不写库**；不要把它当成「联网预演」（需要真实行数/网络计划时另加 `--plan`，P1，联网只读）。
+入口：`stock_api.cli sync-sectors [--start YYYY-MM-DD] [--taxonomies industry,concept] [--dry-run]`；`make sync-sectors` 包装。仅 `SECTOR_MODE=live` 可用，replay 直接提示无需同步。**`--dry-run` 只做配置/DB/表结构检查并打印「将同步的数据集 + 目标 as_of + 预计表数」，不联网、不写库**；不要把它当成「联网预演」（需要真实行数/网络计划时另加 `--plan`，P1，联网只读）。只回填行业指数日线可走独立入口 `stock_api.cli sync-sector-bars [--start …] [--dry-run]`（`make sync-sector-bars`）：以缓存行业目录为板块集合，不重抓目录/成分，缺省自 `bar_as_of` 次日续传。
 
 1. **读配置与业务日**：`today = clock.business_today()`；读 `market.sector_sync_state` 旧值。
 2. **目录（完整获取）**：按 taxonomy 拉目录 → 组装父子（名称反查父级代码，失败即整批失败）→ **快照校验**（见下方）→ 事务内 `INSERT ... ON CONFLICT (taxonomy, sector_code) DO UPDATE`；上游消失的标 `is_active=false`。
@@ -474,7 +474,7 @@ class SyncableSectorSource(Protocol):
    - 不变 → 不写。
    - 冲突保护：行业当前唯一索引报错 → 说明上游数据异常，**回滚并报错**，不静默修正。
 4. **基准权重**：拉 hs300 成分/权重；与当前区间内容比较，变化才关闭旧区间/开新区间（`effective_from=today`，`weight_as_of` 仅记录权重发布日；读取按 `effective_from` 选版本）。
-5. **板块日线**（P1/归因期次，`--with-bars` 显式开启）：计算「持仓历史代码 ∪ 基准成分」涉及板块集合 → 逐个板块增量拉取（从 `sector_pull_range` 上界+1 到 today）→ upsert `sector_bar` + 更新 `sector_pull_range`；失败只影响 `bar_as_of`，不回滚目录/成分。
+5. **板块日线**（P1/归因期次，`--start` 显式开启；也可只跑行情 `make sync-sector-bars ARGS='--start …'`，以缓存行业目录为板块集合）：计算「持仓历史代码 ∪ 基准成分」涉及板块集合 → 逐个板块增量拉取（从 `sector_pull_range` 上界+1 到 today）→ upsert `sector_bar` + 更新 `sector_pull_range`；失败只影响 `bar_as_of`，不回滚目录/成分。
 6. **状态**：全部成功 → 更新 `sector_sync_state`（`snapshot_id/status/as_of/catalog_as_of/membership_as_of/bar_as_of/weight_as_of/entity_count/member_count/checksum/pulled_at`）；任何一步失败 → **整个快照回滚、不写任何明细、旧状态不推进**，只写/保留 `status='failed'` + `error_detail`，命令退出码非 0。
 7. **审计**：只写系统级日志/`platform.audit_log`（`actor=system`、无用户数据）；不写 per-user 记录。
 
