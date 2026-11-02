@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import type { Attribution } from "@sa/api-client";
 import { AttributionPage } from "./Attribution";
 import pageSource from "./Attribution.tsx?raw";
+import { latestCompletedMonth } from "../lib/date";
 import { api } from "../client";
 
 vi.mock("../client", () => ({
@@ -407,6 +408,23 @@ describe("AttributionPage", () => {
 
     expect(await screen.findByTestId("attr-skeleton")).toBeTruthy();
     expect(screen.getByTestId("attribution-page").getAttribute("aria-busy")).toBe("true");
+  });
+
+  it("快捷区间：上月按钮切换期间；开始晚于结束即时提示（U-14）", async () => {
+    getAttribution.mockResolvedValue(attribution());
+    renderPage();
+
+    await screen.findByTestId("attr-pnl-value");
+    fireEvent.click(screen.getByRole("button", { name: "上月" }));
+    await waitFor(() =>
+      expect(getAttribution).toHaveBeenLastCalledWith({ period: latestCompletedMonth() }),
+    );
+
+    fireEvent.change(screen.getByLabelText("期间类型"), { target: { value: "custom" } });
+    fireEvent.change(await screen.findByLabelText("开始日期"), {
+      target: { value: "2026-07-01" },
+    });
+    expect(screen.getByRole("alert").textContent).toContain("开始日期晚于结束日期");
   });
 
   it("错误态：渲染 RFC 7807 人话", async () => {

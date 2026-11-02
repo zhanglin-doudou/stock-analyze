@@ -44,3 +44,8 @@
   align-items: center;
   gap: var(--s2);
 }
+
+.period-range-error {
+  color: var(--down);
+  font-size: var(--fs-xs);
+}

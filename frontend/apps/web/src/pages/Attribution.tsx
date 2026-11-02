@@ -52,6 +52,35 @@ const BENCHMARK_LABELS: Record<string, string> = {
 const RATIO_HINT =
   '贡献率 = 因子金额 / 本期总损益。总损益为负时，正金额表示“减少亏损”。';
 
+/** 本地日期 → `YYYY-MM-DD`（仅拼字符串，不做业务数值换算）。 */
+function isoDate(date: Date): string {
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${date.getFullYear()}-${month}-${day}`;
+}
+
+/** 近 N 个完整自然月的闭区间（U-14）。 */
+function lastNMonthsRange(count: number): string {
+  const now = new Date();
+  const end = new Date(now.getFullYear(), now.getMonth(), 0);
+  const start = new Date(end.getFullYear(), end.getMonth() - (count - 1), 1);
+  return `${isoDate(start)}..${isoDate(end)}`;
+}
+
+/** 今年年初至今天（U-14）。 */
+function yearToDateRange(): string {
+  const now = new Date();
+  return `${now.getFullYear()}-01-01..${isoDate(now)}`;
+}
+
+const QUICK_RANGES: Array<{ label: string; build: () => string }> = [
+  { label: '近3月', build: () => lastNMonthsRange(3) },
+  { label: '近6月', build: () => lastNMonthsRange(6) },
+  { label: '近12月', build: () => lastNMonthsRange(12) },
+  { label: '今年', build: yearToDateRange },
+  { label: '上月', build: () => latestCompletedMonth() },
+];
+
 /** 原始码值一律转人话；未知码保留可追溯但加“未识别”前缀（U-02）。 */
 function labelFor(map: Record<string, string>, code: string | null | undefined): string {
   if (code == null || code === '') return '—';
@@ -435,8 +464,22 @@ export function AttributionPage(): ReactElement {
           <PeriodInput
             value={period}
             disabled={query.isLoading}
+            defaultEnd={data?.data_as_of ?? undefined}
             onChange={updatePeriod}
           />
+          <nav className="attr-quick" aria-label="快捷区间">
+            {QUICK_RANGES.map((item) => (
+              <button
+                key={item.label}
+                type="button"
+                className="attr-quick-button"
+                disabled={query.isLoading}
+                onClick={() => updatePeriod(item.build())}
+              >
+                {item.label}
+              </button>
+            ))}
+          </nav>
           <span>
             页面状态 <StatusBadge status={data?.status ?? 'missing'} />
           </span>
