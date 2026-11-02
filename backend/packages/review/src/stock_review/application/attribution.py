@@ -88,6 +88,7 @@ from stock_review.attribution.presentation import (
     build_summary,
     factor_conclusion,
     factor_presentation,
+    summary_na_reason,
 )
 from stock_review.attribution.residual import (
     BUCKET_CORPORATE,
@@ -192,6 +193,7 @@ class AttributionResult:
     base_capital_units: int | None
     factors: tuple[AttributionFactor, ...]
     summary: str | None
+    summary_na_reason: str | None
     residual_units: int | None
     residual_ratio_units: int | None
     residual_breakdown: Mapping[str, int] | None
@@ -378,7 +380,9 @@ def _blocked_factors() -> tuple[AttributionFactor, ...]:
             share_units=None,
             rank=index + 1,
             conclusion=None,
-            presentation=FactorPresentation(bar_pct=None, ratio_pct=None, tone="flat"),
+            presentation=FactorPresentation(
+                bar_pct=None, ratio_pct=None, share_pct=None, tone="flat"
+            ),
         )
         for index, code in enumerate(FACTOR_CODES)
     )
@@ -534,6 +538,7 @@ def _blocked_result(
         base_capital_units=None,
         factors=_blocked_factors(),
         summary=None,
+        summary_na_reason="区间数据不可用（blocked），详见数据质量缺失项。",
         residual_units=None,
         residual_ratio_units=None,
         residual_breakdown=None,
@@ -1069,6 +1074,18 @@ async def build_attribution(
         lang=lang,
     )
     assert_copy_compliance(summary, *(factor.conclusion for factor in factors))
+    summary_na = (
+        None
+        if summary is not None
+        else summary_na_reason(
+            total_pnl_units=window.total_pnl_units,
+            n_attributed_segments=decomposition.n_attributed_segments,
+            capital_total_units=coverage.capital_total_units,
+            capital_ratio_units=coverage.capital_ratio_units,
+            valuation_gap_units=gap_units,
+            lang=lang,
+        )
+    )
 
     sector_as_of = board_bar_as_of or pit.membership_as_of or sector_data.as_of
     assumptions = _assumptions(
@@ -1123,6 +1140,7 @@ async def build_attribution(
         base_capital_units=decomposition.base_capital_units,
         factors=tuple(factors),
         summary=summary,
+        summary_na_reason=summary_na,
         residual_units=decomposition.residual_units,
         residual_ratio_units=residual_ratio,
         residual_breakdown=breakdown,

@@ -1336,6 +1336,7 @@ class AttributionPresentationOut(StrictModel):
 
     bar_pct: str | None = None
     ratio_pct: str | None = None
+    share_pct: str | None = None
     tone: Literal["positive", "negative", "flat"]
 
 
@@ -1390,7 +1391,9 @@ class AttributionMissingOut(StrictModel):
     """200 降级项（字段路径 + 机读码 + 人话 + 可执行指引；码不是 ErrorCode）。"""
 
     field: str
+    field_label: str | None = None
     code: str
+    severity: Literal["blocker", "warning"] = "warning"
     reason: str
     what_to_do: str
 
@@ -1424,9 +1427,11 @@ class AttributionOut(StrictModel):
     base_capital: str | None = None
     factors: list[AttributionFactorOut] = Field(default_factory=list)
     summary: str | None = None
+    summary_na_reason: str | None = None
     residual: str | None = None
     residual_ratio: str | None = None
     residual_breakdown: dict[str, str] | None = None
+    residual_breakdown_labels: dict[str, str] | None = None
     sample: AttributionSampleOut
     coverage: AttributionCoverageOut | None = None
     missing: list[AttributionMissingOut] = Field(default_factory=list)

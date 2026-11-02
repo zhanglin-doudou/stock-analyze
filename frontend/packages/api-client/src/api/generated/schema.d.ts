@@ -1286,8 +1286,16 @@ export interface components {
             code: string;
             /** Field */
             field: string;
+            /** Field Label */
+            field_label?: string | null;
             /** Reason */
             reason: string;
+            /**
+             * Severity
+             * @default warning
+             * @enum {string}
+             */
+            severity: "blocker" | "warning";
             /** What To Do */
             what_to_do: string;
         };
@@ -1343,6 +1351,10 @@ export interface components {
             residual_breakdown?: {
                 [key: string]: string;
             } | null;
+            /** Residual Breakdown Labels */
+            residual_breakdown_labels?: {
+                [key: string]: string;
+            } | null;
             /** Residual Ratio */
             residual_ratio?: string | null;
             sample: components["schemas"]["AttributionSampleOut"];
@@ -1353,6 +1365,8 @@ export interface components {
             status: "ok" | "degraded" | "blocked";
             /** Summary */
             summary?: string | null;
+            /** Summary Na Reason */
+            summary_na_reason?: string | null;
             /** Total Pnl */
             total_pnl?: string | null;
             /** Total Pnl Basis */
@@ -1367,6 +1381,8 @@ export interface components {
             bar_pct?: string | null;
             /** Ratio Pct */
             ratio_pct?: string | null;
+            /** Share Pct */
+            share_pct?: string | null;
             /**
              * Tone
              * @enum {string}

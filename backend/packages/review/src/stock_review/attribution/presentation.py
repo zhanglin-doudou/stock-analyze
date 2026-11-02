@@ -98,10 +98,11 @@ def tone(amount_units: int) -> str:
 
 @dataclass(frozen=True, slots=True)
 class FactorPresentation:
-    """`factors[].presentation` 三元组（§6.2）。"""
+    """`factors[].presentation` 三元组（§6.2）+ 占构成百分比（U-03）。"""
 
     bar_pct: str | None
     ratio_pct: str | None
+    share_pct: str | None
     tone: str
 
 
@@ -111,6 +112,7 @@ def factor_presentation(
     return FactorPresentation(
         bar_pct=bar_pct(share_units),
         ratio_pct=pct_str(ratio_units),
+        share_pct=pct_str(share_units),
         tone=tone(amount_units),
     )
 
@@ -220,6 +222,42 @@ def build_summary(
     return head
 
 
+def summary_na_reason(
+    *,
+    total_pnl_units: int,
+    n_attributed_segments: int,
+    capital_total_units: int,
+    capital_ratio_units: int | None,
+    valuation_gap_units: int,
+    lang: str = "zh",
+) -> str | None:
+    """`summary=null` 的人话原因（U-01；仅在 summary 为空时展示）。
+
+    `summary` 的已知非空分支（空账户/样本不足）返回 ``None``。
+    """
+    en = lang == "en"
+    if capital_total_units == 0 or n_attributed_segments < MIN_SAMPLE_SEGMENTS:
+        return None
+    if capital_ratio_units is None or capital_ratio_units < CAPITAL_RATIO_MIN:
+        ratio_text = pct_str(capital_ratio_units) or "—"
+        return (
+            f"Attributed capital weight {ratio_text} is below the 90% gate; "
+            "check data quality before reading factors."
+            if en
+            else f"已归因资金权重 {ratio_text}，低于 90% 门槛；请先查看数据质量的缺失项。"
+        )
+    gap = gap_ratio_units(valuation_gap_units, total_pnl_units)
+    if gap > GAP_RATIO_MAX:
+        return (
+            f"Valuation gap {money_str(abs(valuation_gap_units))} CNY is {pct_str(gap)} "
+            "of period P&L (gate 5%); no conclusion."
+            if en
+            else f"估值差 {money_str(abs(valuation_gap_units))} 元，占区间损益 {pct_str(gap)}"
+            f"（门槛 5%），暂不生成结论。"
+        )
+    return None
+
+
 def assert_copy_compliance(*texts: str | None) -> None:
     """文案门禁断言：无裸术语、无买卖建议（模板回归防线；违规即 bug）。"""
     for text in texts:
@@ -248,5 +286,6 @@ __all__ = [
     "gap_ratio_units",
     "money_str",
     "pct_str",
+    "summary_na_reason",
     "tone",
 ]

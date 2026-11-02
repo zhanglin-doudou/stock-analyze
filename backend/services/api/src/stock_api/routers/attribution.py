@@ -39,6 +39,31 @@ from stock_api.schemas import (
 
 router = APIRouter(tags=["attribution"], route_class=StrictQueryRoute)
 
+_FIELD_LABELS: dict[str, str] = {
+    "total_pnl": "总损益",
+    "factors": "因子归因",
+    "residual": "未解释残差",
+    "classification_as_of": "板块分类时点",
+    "coverage": "覆盖率",
+    "data_as_of": "数据截至",
+}
+_BUCKET_LABELS: dict[str, str] = {
+    "corporate_action_pnl": "公司行动",
+    "unattributed_price_pnl": "未归因标的损益",
+    "dividend_without_position": "无持仓分红",
+    "interest": "利息",
+    "other_cashflow": "其他现金流",
+    "valuation_gap": "估值差（未能解释）",
+}
+_BLOCKER_CODES: frozenset[str] = frozenset(
+    {
+        "ASSET_SERIES_MISSING",
+        "ASSET_ROW_BLOCKED",
+        "SECTOR_DATA_MISSING",
+        "SECTOR_HISTORY_NOT_COVERED",
+    }
+)
+
 
 def _money(value: int | None) -> str | None:
     return None if value is None else str(Money(value))
@@ -60,6 +85,7 @@ def _factor_out(factor: AttributionFactor) -> AttributionFactorOut:
         presentation=AttributionPresentationOut(
             bar_pct=factor.presentation.bar_pct,
             ratio_pct=factor.presentation.ratio_pct,
+            share_pct=factor.presentation.share_pct,
             tone=factor.presentation.tone,
         ),
     )
@@ -67,8 +93,10 @@ def _factor_out(factor: AttributionFactor) -> AttributionFactorOut:
 
 def _to_out(result: AttributionResult) -> AttributionOut:
     breakdown: dict[str, str] | None = None
+    breakdown_labels: dict[str, str] | None = None
     if result.residual_breakdown is not None:
         breakdown = {key: str(Money(v)) for key, v in result.residual_breakdown.items()}
+        breakdown_labels = {key: _BUCKET_LABELS.get(key, key) for key in breakdown}
     coverage: AttributionCoverageOut | None = None
     if result.coverage is not None:
         coverage = AttributionCoverageOut(
@@ -104,9 +132,11 @@ def _to_out(result: AttributionResult) -> AttributionOut:
         base_capital=_money(result.base_capital_units),
         factors=[_factor_out(factor) for factor in result.factors],
         summary=result.summary,
+        summary_na_reason=result.summary_na_reason,
         residual=_money(result.residual_units),
         residual_ratio=_ratio(result.residual_ratio_units),
         residual_breakdown=breakdown,
+        residual_breakdown_labels=breakdown_labels,
         sample=AttributionSampleOut(
             n_segments=result.sample.n_segments,
             n_attributed_segments=result.sample.n_attributed_segments,
@@ -118,7 +148,12 @@ def _to_out(result: AttributionResult) -> AttributionOut:
         coverage=coverage,
         missing=[
             AttributionMissingOut(
-                field=item.field, code=item.code, reason=item.reason, what_to_do=item.what_to_do
+                field=item.field,
+                field_label=_FIELD_LABELS.get(item.field, item.field),
+                code=item.code,
+                severity="blocker" if item.code in _BLOCKER_CODES else "warning",
+                reason=item.reason,
+                what_to_do=item.what_to_do,
             )
             for item in result.missing
         ],

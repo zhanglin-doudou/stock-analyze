@@ -723,8 +723,28 @@
             "title": "Field",
             "type": "string"
           },
+          "field_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Field Label"
+          },
           "reason": {
             "title": "Reason",
+            "type": "string"
+          },
+          "severity": {
+            "default": "warning",
+            "enum": [
+              "blocker",
+              "warning"
+            ],
+            "title": "Severity",
             "type": "string"
           },
           "what_to_do": {
@@ -866,6 +886,20 @@
             ],
             "title": "Residual Breakdown"
           },
+          "residual_breakdown_labels": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Residual Breakdown Labels"
+          },
           "residual_ratio": {
             "anyOf": [
               {
@@ -899,6 +933,17 @@
               }
             ],
             "title": "Summary"
+          },
+          "summary_na_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary Na Reason"
           },
           "total_pnl": {
             "anyOf": [
@@ -957,6 +1002,17 @@
               }
             ],
             "title": "Ratio Pct"
+          },
+          "share_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Share Pct"
           },
           "tone": {
             "enum": [
