@@ -232,6 +232,9 @@ class _Mirror:
     money_funds: dict[str, tuple[int, int]]
     anchors: dict[str, int]
     cost_fallback: frozenset[str]
+    # 资产口径（比例成本）区间已实现损益：卖出净额 − 结转成本。与 `assets._build` 同原语，
+    # 供 §3.2.1 对账使用；货基行不结转成本（余额变化在 total_pnl 中自行抵消）。
+    realized_units: int
 
 
 def _mirror_view(
@@ -255,6 +258,7 @@ def _mirror_view(
     mf_bal: dict[str, int] = {}
     begin_snap: tuple[dict[str, int], dict[str, int], dict[str, int]] | None = None
     end_snap: tuple[dict[str, int], dict[str, int], dict[str, int]] | None = None
+    realized = 0
 
     def capture() -> tuple[dict[str, int], dict[str, int], dict[str, int]]:
         return (dict(holdings), dict(costs), dict(mf_bal))
@@ -282,9 +286,15 @@ def _mirror_view(
             costs[code] = costs.get(code, 0) + (-trade.amount_units)
         elif trade_category == "sell":
             old_qty = holdings.get(code, 0) - delta
+            released = 0
             if old_qty > 0 and delta < 0:
                 old_cost = costs.get(code, 0)
-                costs[code] = max(0, old_cost + (old_cost * delta) // old_qty)
+                new_cost = max(0, old_cost + (old_cost * delta) // old_qty)
+                costs[code] = new_cost
+                released = old_cost - new_cost
+            if begin_date < trade.trade_date <= end_date:
+                # 资产表比例成本口径的已实现损益：卖出净额 − 结转成本。
+                realized += trade.amount_units - released
     if begin_snap is None:
         begin_snap = capture()
     if end_snap is None:
@@ -352,6 +362,7 @@ def _mirror_view(
         money_funds=money_funds,
         anchors=anchors,
         cost_fallback=frozenset(fb_b),
+        realized_units=realized,
     )
 
 
@@ -686,7 +697,7 @@ async def build_attribution(
     assert window.total_pnl_units is not None and window.begin_date is not None
     assert window.end_date is not None
 
-    # ── 4. 桥接对账（§3.2.1；bridge 不可用时不做假对账）────────────
+    # ── 4. 桥接对账（§3.2.1）：取桥接分类现金流；与资产口径已实现损益在镜像后比对 ──
     missing: list[MissingEntry] = list(window.missing)
     bridge = await bridge_for_period(
         session,
@@ -695,28 +706,6 @@ async def build_attribution(
         period_end=resolved.end,
         clock=clock,
     )
-    if (
-        bridge.status != "blocked"
-        and window.unrealized_begin_units is not None
-        and window.unrealized_end_units is not None
-    ):
-        bridge_profit = (
-            bridge.realized_pnl_units
-            + bridge.dividends_units
-            + bridge.interest_units
-            - bridge.fees_units
-            + bridge.other_units
-        )
-        delta_unreal = window.unrealized_end_units - window.unrealized_begin_units
-        if abs(window.total_pnl_units - (bridge_profit + delta_unreal)) > _BRIDGE_TOLERANCE_UNITS:
-            missing.append(
-                MissingEntry(
-                    field="total_pnl",
-                    code="BRIDGE_MISMATCH",
-                    reason="MTM 损益与桥接恒等式差额超过 1 分（对账断链）",
-                    what_to_do="对账页检查断链",
-                )
-            )
 
     # ── 5. PIT（§4.3）：blocked 短路（不读行情/板块）──────────────
     sync_state = await SectorRepository(session).sync_state(dataset_key=_SECTOR_DATASET_KEY)
@@ -853,6 +842,40 @@ async def build_attribution(
         if not code or code == "CASH":
             continue
         dividends[code] = dividends.get(code, 0) + trade.amount_units
+
+    # 桥接对账（§3.2.1）：`trading_pnl` 必须与 `asset_daily` 同一成本原语（比例成本），
+    # 不能用 API-027 的 FIFO 已实现损益与资产表浮盈亏混算（验收 P0-A）。
+    if (
+        bridge.status != "blocked"
+        and window.unrealized_begin_units is not None
+        and window.unrealized_end_units is not None
+    ):
+        asset_profit = (
+            mirror.realized_units
+            + bridge.dividends_units
+            + bridge.interest_units
+            - bridge.fees_units
+            + bridge.other_units
+        )
+        # 货基按余额覆盖（资产口径）：Σ行金额 + Δ余额 即现金流与持仓之间的口径修正项
+        # （余额由份额×净值回推，与行金额存在尾差，验收 P0-A 的 40.76 元即此项）。
+        mf_amounts = sum(
+            trade.amount_units
+            for trade in trades
+            if is_money_fund_row(trade) and window.begin_date < trade.trade_date <= window.end_date
+        )
+        mf_delta = sum(end - start for start, end in mirror.money_funds.values())
+        asset_profit += mf_amounts + mf_delta
+        delta_unreal = window.unrealized_end_units - window.unrealized_begin_units
+        if abs(window.total_pnl_units - (asset_profit + delta_unreal)) > _BRIDGE_TOLERANCE_UNITS:
+            missing.append(
+                MissingEntry(
+                    field="total_pnl",
+                    code="BRIDGE_MISMATCH",
+                    reason="MTM 损益与资产口径桥接式差额超过 1 分（对账断链）",
+                    what_to_do="对账页检查断链",
+                )
+            )
 
     # ── 10. 段装配 → 残差拆桶 → 五因子分解（§3.3/§3.4/§3.6）────────
     bundle = build_symbol_plans(

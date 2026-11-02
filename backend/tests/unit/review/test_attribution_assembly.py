@@ -35,6 +35,7 @@ from stock_core.attribution.ranking import (
 )
 from stock_core.fifo import build_rounds
 from stock_ledger.models import Trade
+from stock_review.application.attribution import _mirror_view
 from stock_review.application.rebuild import trades_to_events
 from stock_review.attribution.context import (
     BEGIN_SOURCE_STATEMENT,
@@ -232,6 +233,23 @@ def test_golden_asset_window_mtm() -> None:
     assert window.begin_date == P0_DATE
     assert window.end_date == T1
     assert window.beginning_value_source == BEGIN_SOURCE_STATEMENT
+
+
+def test_mirror_view_uses_asset_basis_and_window_snapshots() -> None:
+    """镜像 = 资产表比例成本口径：期初 600 股 / 期末 200 股，已实现 666.48 元（P0-A）。"""
+    mirror = _mirror_view(
+        _golden_trades(),
+        begin_date=P0_DATE,
+        end_date=T1,
+        ladder=LADDER,
+        canonical=lambda code: code,
+        bond_divisors={},
+        new_stocks=set(),
+        begin_balances={},
+    )
+    assert mirror.holdings["600000"] == (6_000_000, 2_000_000)
+    # 两笔卖出净额 6713.40 / 2597.40，比例结转成本 6483.24 / 2161.08 → 230.16 / 436.32。
+    assert mirror.realized_units == 23_016 + 43_632
 
 
 def test_golden_segments_and_five_factors() -> None:
