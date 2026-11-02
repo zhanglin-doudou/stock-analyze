@@ -644,7 +644,9 @@ async def build_attribution(
     )
 
     # ── 3. 取数 + 资产窗口（§3.2；blocked 短路，不读行情/板块）─────
-    trades = await TradeRepository(session).list_all(user_id)
+    # 稳定序（日期 → 行号 → 补差行优先 → id）：`_mirror_view` 的期初/期末快照按顺序截取，
+    # 与资产表 `_build` 同序；`list_all` 无序会导致持仓/成本错位（验收 P0-B）。
+    trades = await TradeRepository(session).balances_ordered(user_id)
     assets = await AssetRepository(session).series(
         user_id, definition_version=ASSET_DEFINITION_VERSION
     )
