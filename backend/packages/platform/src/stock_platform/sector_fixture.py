@@ -8,7 +8,11 @@
 from __future__ import annotations
 
 import json
+from datetime import date, timedelta
+from decimal import Decimal
 from typing import Any
+
+from stock_core.values import Price, Ratio
 
 AS_OF = "2026-06-30"
 FIRST_SYNC_ON = "2026-06-30"
@@ -70,6 +74,74 @@ _BENCHMARK_WEIGHTS: tuple[tuple[str, str], ...] = (
     ("601318", "0.04020000"),
 )
 
+# ── 行业指数日线（五因子归因的 sector 数据源，设计 §4.2-4）──────────
+# 覆盖账单全区间（2026-04-01~2026-06-30）+ 前向缓冲（至 2026-09-30）；起点回扩
+# 至 2026-01-30（旧 quotes 夹具首日），与 quotes.json 同跨度同工作日序列，
+# 保证行业指数与个股参考日一致）；first_sync_on 仍为 2026-06-30（PIT 边界只看
+# 成分快照，不看行情）。
+SERIES_START = "2026-01-30"
+SERIES_END = "2026-09-30"
+# 价格锚点：锚日及之后与旧夹具（2026-04-01 起）逐日一致，扩历史只反向贴新增点。
+_PRICE_ANCHOR = "2026-04-01"
+
+
+def _business_days(start: str, end: str) -> tuple[str, ...]:
+    """工作日序列（周一~周五；夹具不考虑节假日，仅供确定性回放）。"""
+    cursor = date.fromisoformat(start)
+    last = date.fromisoformat(end)
+    days: list[str] = []
+    while cursor <= last:
+        if cursor.weekday() < 5:
+            days.append(cursor.isoformat())
+        cursor += timedelta(days=1)
+    return tuple(days)
+
+
+_SERIES_DATES: tuple[str, ...] = _business_days(SERIES_START, SERIES_END)
+
+# (sector_code, 首日收盘, 日漂移)：各行业漂移互不相同、且与个股曲线刻意
+# 不同步——保证归因的 sector 因子非 0。收盘按 THS 指数惯例保留 3 位小数。
+_SECTOR_SERIES_SPEC: tuple[tuple[str, str, str], ...] = (
+    ("850121.SI", "2850.000", "0.0011"),  # 白酒
+    ("850511.SI", "1950.000", "-0.0004"),  # 国有大型银行
+    ("850811.SI", "4120.000", "0.0018"),  # 半导体
+    ("850911.SI", "1330.000", "0.0006"),  # 保险
+)
+
+
+def _sector_rows(anchor_close: str, daily_drift: str) -> list[dict[str, str]]:
+    """按固定工作日序列推导一条日线序列（收盘价与环比收益，全定点字符串）。
+
+    以 `_PRICE_ANCHOR` 为锚：锚日及之后按原逐日复利（与旧夹具逐位一致），锚日
+    之前按同一漂移反向贴现——保证扩历史不改变既有日期价格。
+    """
+    factor = Decimal("1") + Decimal(daily_drift)
+    anchor_index = _SERIES_DATES.index(_PRICE_ANCHOR)
+    anchor = Price.from_str(anchor_close)
+    forward: list[Price] = [anchor]
+    for _ in range(anchor_index + 1, len(_SERIES_DATES)):
+        forward.append(
+            Price.from_decimal((forward[-1].to_decimal() * factor).quantize(Decimal("0.001")))
+        )
+    backward: list[Price] = []
+    cursor = anchor
+    for _ in range(anchor_index):
+        cursor = Price.from_decimal((cursor.to_decimal() / factor).quantize(Decimal("0.001")))
+        backward.append(cursor)
+    closes: list[Price] = list(reversed(backward)) + forward
+
+    rows: list[dict[str, str]] = []
+    for index, (day, close) in enumerate(zip(_SERIES_DATES, closes, strict=True)):
+        daily = (
+            Ratio.zero()
+            if index == 0
+            else Ratio.from_decimal(
+                close.to_decimal() / closes[index - 1].to_decimal() - Decimal("1")
+            )
+        )
+        rows.append({"date": day, "close": str(close), "return": str(daily)})
+    return rows
+
 
 def generate_sector_fixture() -> bytes:
     """返回确定性 JSON bytes（固定排序、固定日期、无运行时刻戳）。"""
@@ -110,11 +182,22 @@ def generate_sector_fixture() -> bytes:
             }
             for symbol, weight in _BENCHMARK_WEIGHTS
         ],
-        "series": {},
+        "series": {
+            sector_code: _sector_rows(first_close, daily_drift)
+            for sector_code, first_close, daily_drift in _SECTOR_SERIES_SPEC
+        },
     }
     return (json.dumps(payload, ensure_ascii=False, indent=2, sort_keys=True) + "\n").encode(
         "utf-8"
     )
 
 
-__all__ = ["AS_OF", "BENCHMARK", "CLASSIFICATION", "FIRST_SYNC_ON", "generate_sector_fixture"]
+__all__ = [
+    "AS_OF",
+    "BENCHMARK",
+    "CLASSIFICATION",
+    "FIRST_SYNC_ON",
+    "SERIES_END",
+    "SERIES_START",
+    "generate_sector_fixture",
+]

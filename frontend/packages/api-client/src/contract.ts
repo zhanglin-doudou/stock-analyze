@@ -325,6 +325,19 @@ export type SectorTaxonomy = SectorsOverview["taxonomy"];
 /** 板块统计轴状态：ok | degraded | stale | insufficient | missing | blocked。 */
 export type SectorStatus = SectorsOverview["status"];
 
+// 2026-11-02：五因子归因（API-036；设计 §6.2/§8.1）
+/** API-036 响应：金额/比率/百分比全部为后端定点字符串（前端只渲染）。 */
+export type Attribution = ApiSchemas["AttributionOut"];
+export type AttributionStatus = Attribution["status"];
+export type AttributionFactor = NonNullable<Attribution["factors"]>[number];
+/** 呈现三元组：`bar_pct` 直接作 CSS 宽度，`tone` 只决定颜色语义。 */
+export type AttributionPresentation = AttributionFactor["presentation"];
+export type AttributionSample = Attribution["sample"];
+export type AttributionCoverage = NonNullable<Attribution["coverage"]>;
+export type AttributionMissing = NonNullable<Attribution["missing"]>[number];
+export type AttributionUnattributed = NonNullable<NonNullable<AttributionCoverage["unattributed"]>[number]>;
+export type AttributionLinks = Attribution["links"];
+
 // ── 编译期断言：后端契约变化必须在这里/typecheck 里炸出来 ─────────────────
 
 /** http.ts / UI 读取的核心字段必须仍存在于 generated schema。 */

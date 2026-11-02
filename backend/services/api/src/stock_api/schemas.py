@@ -1326,3 +1326,142 @@ class MetricDrilldownOut(BaseModel):
     truncated: bool = False
     assumptions: dict[str, Any] = Field(default_factory=dict)
     data_as_of: date | None = None
+
+
+# ── 归因（API-036，2026-11-02 五因子设计 §6.2）───────────────
+
+
+class AttributionPresentationOut(StrictModel):
+    """因子呈现三元组：`bar_pct` 由 share 取绝对值派生（前端直接作 CSS 宽度）。"""
+
+    bar_pct: str | None = None
+    ratio_pct: str | None = None
+    tone: Literal["positive", "negative", "flat"]
+
+
+class AttributionFactorOut(StrictModel):
+    """`factors[]` 单项：固定 5 项、固定顺序 [selection, sector, buy_timing, sell_timing, fee]。"""
+
+    code: str
+    name: str
+    amount: str | None = None
+    ratio: str | None = None
+    share: str | None = None
+    rank: int
+    conclusion: str | None = None
+    presentation: AttributionPresentationOut
+
+
+class AttributionSampleOut(StrictModel):
+    """样本规模与结论门禁（insufficient 只封 summary/conclusion，金额照给）。"""
+
+    n_segments: int
+    n_attributed_segments: int
+    n_rounds: int
+    n_symbols: int
+    min_n: int
+    sample_status: Literal["ok", "insufficient"]
+
+
+class AttributionUnattributedOut(StrictModel):
+    """一条未归因标的披露（amount = 其残差桶金额，可为 0）。"""
+
+    security_code: str
+    symbol_class: str
+    reason_code: str | None = None
+    amount: str
+
+
+class AttributionCoverageOut(StrictModel):
+    """§4.4 覆盖披露：资本 / 段 / 标的三层归因覆盖 + 未归因明细。"""
+
+    capital_total: str
+    capital_attributed: str
+    capital_ratio: str | None = None
+    base_basis: Literal["market", "mixed"]
+    segments_total: int
+    segments_attributed: int
+    symbols_total: int
+    symbols_attributed: int
+    unattributed: list[AttributionUnattributedOut] = Field(default_factory=list)
+
+
+class AttributionMissingOut(StrictModel):
+    """200 降级项（字段路径 + 机读码 + 人话 + 可执行指引；码不是 ErrorCode）。"""
+
+    field: str
+    code: str
+    reason: str
+    what_to_do: str
+
+
+class AttributionLinksOut(StrictModel):
+    dashboard: str
+    sectors: str
+    rounds: str
+    reports: str
+
+
+class AttributionOut(StrictModel):
+    """五因子归因响应（§6.2；金额 2 位 / 比率 scale=8 定点字符串）。
+
+    blocked 缺省语义（§6.3 评审 P0-7 冻结）：`status="blocked"` 时
+    `total_pnl/base_capital/residual/residual_ratio/residual_breakdown/coverage`
+    整键省略，`factors[].amount/ratio/share` 逐项省略（code/name/rank/conclusion 保留）；
+    非 blocked 时 ratio=None 显式输出 null（PNL_NEAR_ZERO，附 `ratio_na_reason`）。
+    """
+
+    model: str
+    ratio_basis: str
+    period: str
+    period_start: date
+    period_end: date
+    status: Literal["ok", "degraded", "blocked"]
+    definition_version: str
+    total_pnl_basis: str
+    total_pnl: str | None = None
+    ratio_na_reason: str | None = None
+    base_capital: str | None = None
+    factors: list[AttributionFactorOut] = Field(default_factory=list)
+    summary: str | None = None
+    residual: str | None = None
+    residual_ratio: str | None = None
+    residual_breakdown: dict[str, str] | None = None
+    sample: AttributionSampleOut
+    coverage: AttributionCoverageOut | None = None
+    missing: list[AttributionMissingOut] = Field(default_factory=list)
+    assumptions: dict[str, Any] = Field(default_factory=dict)
+    data_as_of: date | None = None
+    inputs_hash: str
+    links: AttributionLinksOut
+
+
+# blocked 时整键省略的键（§6.3 评审 P0-7 冻结）。
+_BLOCKED_OMIT_KEYS: tuple[str, ...] = (
+    "total_pnl",
+    "summary",
+    "base_capital",
+    "residual",
+    "residual_ratio",
+    "residual_breakdown",
+    "coverage",
+)
+
+
+def attribution_payload(out: AttributionOut) -> dict[str, Any]:
+    """序列化归因响应（逐层 `mode="json"` 转定点字符串/日期）。
+
+    `blocked` 时整键省略（§6.3）：不渲染任何金额；`factors[]` 逐项省略
+    amount/ratio/share，保留 code/name/rank/conclusion。放在路由层而非
+    `@model_serializer`，否则 pydantic 会把 OpenAPI 响应退化成
+    `additionalProperties: true`，前端 SDK 丢失全部字段。
+    """
+    payload = out.model_dump(mode="json")
+    if out.status == "blocked":
+        for key in _BLOCKED_OMIT_KEYS:
+            payload.pop(key, None)
+        for factor in payload["factors"]:
+            factor.pop("amount", None)
+            factor.pop("ratio", None)
+            factor.pop("share", None)
+    return payload

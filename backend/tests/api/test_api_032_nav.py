@@ -189,7 +189,7 @@ async def test_api_032_twr_matches_oracle(client, account_factory, owner_engine)
 
 @pytest.mark.asyncio
 async def test_api_032_first_point_prev_assets_from_holdings(client, account_factory, owner_engine):
-    """月度首日补齐昨日资产：期初持仓按上一交易日（05-29）收盘价估值。"""
+    """月度首日：当日按 06-01 收盘估值，昨日资产按上一交易日（05-29）收盘价估值。"""
     acc = await account_factory()
     await _seed_trade(
         owner_engine,
@@ -207,11 +207,11 @@ async def test_api_032_first_point_prev_assets_from_holdings(client, account_fac
     assert r.status_code == 200, r.text
     first = r.json()["points"][0]
     assert first["date"] == "2026-06-01"
-    # 06-01 当日也按 05-29 收盘估值（夹具无 06-01 bar）→ 昨日资产 = 当日资产
-    assert first["total_assets"] == "170093.000"
+    # 日频夹具下 06-01 有 bar（1701.17）；昨日资产按 05-29（1700.93）估值。
+    assert first["total_assets"] == "170117.000"
     assert first["prev_total_assets"] == "170093.000"
-    assert first["daily_pnl"] == "0.000"
-    assert first["twr_daily_pct"] == "0.00%"
+    assert first["daily_pnl"] == "24.000"
+    assert first["twr_daily_pct"] == "0.01%"
 
 
 @pytest.mark.asyncio

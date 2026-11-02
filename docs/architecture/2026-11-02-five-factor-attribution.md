@@ -594,7 +594,7 @@ Authorization: Bearer <jwt|pat>
 | 契约元数据 | `backend/services/api/src/stock_api/openapi_meta.py` | 增 `attribution_get` 的 `OPERATION_META`（api_id=API-036、scope=read、error_codes 含 INVALID_PERIOD/MODEL_NOT_AVAILABLE/UNKNOWN_BENCHMARK/VALIDATION_ERROR + 认证族）；`MONEY_FIELDS` 只增**新**字段（`base_capital`、`valuation_gap`、`corporate_action_pnl`、`unattributed_price_pnl`、`dividend_without_position`、`other_cashflow`；`amount/residual/total_pnl` 已有）；`RATIO_FIELDS` 增 `residual_ratio/share`；`EXAMPLE_OVERRIDES` 给 attribution 200 示例（含 `presentation`） |
 | SDK + 手写类型 | `frontend/packages/api-client` | `make sdk` 再生成 + 手写 `AttributionOut` 接口/`http.ts` group + `contract.ts` 编译期 shape 钉扎（仿 MetricItem，含 blocked 省略键断言） |
 | 越权矩阵 | `backend/tests/isolation/test_isolation_matrix.py` | `ADMIN_FORBIDDEN += ("get","/attribution")`；`UNAUTHENTICATED_MATRIX += ("get","/attribution")`；`_REQUIRED_QUERY["/attribution"]="?period=2026-06"`（否则 400 而非 401/403）；无资源 ID → 资源型用例不适用 |
-| API 验收 | `backend/tests/api/test_attribution.py` | 每 API-ID ≥3 条：happy / 越权 / 关键错误码（AGENTS 坑 4） |
+| API 验收 | `backend/tests/api/test_api_036_attribution.py` | 每 API-ID ≥3 条：happy / 越权 / 关键错误码（AGENTS 坑 4） |
 | 前端 | `frontend/apps/web/src/router.tsx:86-94`、`layout/navigation.ts:42`、`pages/Attribution.tsx`（新） | 替换 `FeaturePlaceholder`；导航去 `placeholder:true`；RTL 断言渲染后端字段 |
 | 门禁/CI | `Makefile`、`.github/workflows/*`、`pyproject.toml [tool.mutmut]`、`mutation_baseline.json` | core 覆盖 `--cov-fail-under=100` 已有；attribution 纳入 mutmut 范围（≥85%）并更新 baseline；golden 走**独立** gate（不进 `tests/golden/` loader） |
 
@@ -672,7 +672,9 @@ make sdk                  # 前端 TS 类型再生成
 
 ```bash
 # 以 pytest fixture 为准（fx_attr_* 不依赖手工造库；replay 注入行情/板块）
-pytest backend/tests/attribution backend/tests/api/test_attribution.py \
+pytest backend/tests/unit/core/test_attribution.py \
+       backend/tests/unit/review/test_attribution_assembly.py \
+       backend/tests/api/test_api_036_attribution.py \
        backend/tests/isolation -q
 
 # 手工冒烟（仅验证端点可达/恒等/错误码，不把 status=="ok" 写死——demo 可能因债券/货基为 degraded）

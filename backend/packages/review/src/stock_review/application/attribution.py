@@ -1,0 +1,1114 @@
+"""五因子归因编排（设计 §5.3，API-036 唯一应用层入口）。
+
+分层（§5.1）：本模块只做**取数编排 + DTO 组装**，口径全部在
+`stock_review.attribution`（纯装配）与 `stock_core.attribution`（纯函数）：
+
+1. 校验（model/benchmark/lookahead）→ 422；
+2. `resolve_period`（复用 metrics.context；月/年/自定义 ≤366 天）；
+3. 资产窗口（§3.2 D-01 MTM）`resolve_asset_window`，blocked 短路（不读行情/板块）；
+4. 桥接对账（§3.2.1）：`|MTM − (bridge_profit + Δunreal)| > 1 分` → `BRIDGE_MISMATCH`；
+5. PIT（§4.3 D-07）：`classification_as_of = min(period_end, membership_as_of)`，
+   `period_end < first_sync_on` 且未开 look-ahead → blocked；
+6. FIFO 重放 ×2（≤T1 / <T0）→ 公司行动识别 → 行情（只读缓存）→ 行业映射/指数；
+7. 镜像推演（资产表同口径）→ `build_symbol_plans`（两级分摊）→ `split_residual`
+   （六桶）→ `decompose`（Σfactors + residual == total_pnl）→ coverage/状态机/文案；
+8. `AttributionResult`（金额 int，API 层转定点字符串）。
+
+读路径不联网：行情 `load_prices(cached_only=True)`、板块走 `SectorDataSource`
+端口（live 读 `market.*` 缓存 / replay 读夹具）；缺数据降级 200 + `missing[]`。
+"""
+
+from __future__ import annotations
+
+import uuid
+from collections.abc import Callable, Mapping, Sequence
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta
+from functools import partial
+from typing import Any, Final
+
+from sqlalchemy.ext.asyncio import AsyncSession
+from stock_contracts.clock import Clock
+from stock_contracts.errors import ApiError, ErrorCode
+from stock_core.attribution import (
+    FACTOR_CODES,
+    FACTOR_NAMES,
+    FactorCode,
+    decompose,
+)
+from stock_core.attribution.ranking import (
+    RATIO_SCALE,
+    rank_factors,
+    ratio_na_reason,
+    ratio_of,
+    shares_of,
+    total_abs_amounts,
+)
+from stock_core.fifo import build_rounds
+from stock_ledger.models import Trade
+from stock_ledger.repositories.trades import TradeRepository
+from stock_platform.ports import MarketDataSource, SectorDataSource
+from stock_platform.repositories.sectors import SectorRepository
+from stock_platform.symbols import is_bond
+
+from stock_review.application.assets import (
+    ASSET_DEFINITION_VERSION,
+    get_asset_build_state,
+    latest_workday,
+    valuation_end,
+)
+from stock_review.application.bond_alias import build_bond_alias, canonical_code
+from stock_review.application.bridge import bridge_for_period
+from stock_review.application.metrics import KNOWN_BENCHMARKS
+from stock_review.application.rebuild import trades_to_events
+from stock_review.application.valuation import (
+    PRICE_LOOKBACK,
+    QTY_PRICE_SCALE,
+    bond_face_divisors,
+    bond_value_units,
+    category,
+    close_on_or_before,
+    holding_delta,
+    initial_money_fund_balances,
+    is_money_fund_row,
+    load_prices,
+    new_stock_pending_codes,
+)
+from stock_review.attribution.context import MissingEntry, resolve_asset_window
+from stock_review.attribution.corporate import corporate_action_symbols
+from stock_review.attribution.coverage import (
+    MIN_SAMPLE_SEGMENTS,
+    Coverage,
+    build_coverage,
+)
+from stock_review.attribution.presentation import (
+    FactorPresentation,
+    assert_copy_compliance,
+    build_summary,
+    factor_conclusion,
+    factor_presentation,
+)
+from stock_review.attribution.residual import (
+    BUCKET_CORPORATE,
+    BUCKET_DIVIDEND,
+    BUCKET_GAP,
+    BUCKET_INTEREST,
+    BUCKET_OTHER,
+    BUCKET_UNATTRIBUTED,
+    split_residual,
+)
+from stock_review.attribution.segments import (
+    REASON_BAR,
+    REASON_CORPORATE,
+    REASON_DATA_ERROR,
+    REASON_FEE,
+    REASON_MAPPING,
+    REASON_PRICE,
+    build_symbol_plans,
+)
+from stock_review.metrics.context import Period, resolve_period
+from stock_review.metrics.hash import inputs_hash
+from stock_review.models import AssetDaily
+from stock_review.repositories.assets import AssetRepository
+
+__all__ = [
+    "ATTRIBUTION_DEFINITION_VERSION",
+    "AttributionFactor",
+    "AttributionResult",
+    "AttributionSample",
+    "build_attribution",
+]
+
+# 归因口径版本（§5.6；口径变更需 docs/migrations/ATTRIBUTION-* 并 bump）。
+ATTRIBUTION_DEFINITION_VERSION: Final[str] = "1.0"
+# 公开 taxonomy 值（application/sectors.py 的 `_DB_TAXONOMY` 是私有的，不跨模块 import）。
+_DB_TAXONOMY_INDUSTRY: Final[str] = "industry_sw"
+# 归因读的同步状态数据集：live 同步链写 `sector`（sector_live.DATASET_KEY）；
+# 描述性板块看板用 `sector_all`（sectors.DATASET_KEY），两者互不覆盖。
+_SECTOR_DATASET_KEY: Final[str] = "sector"
+# 桥接容差（§3.2.1：|MTM − 桥接式| ≤ 1 分）。
+_BRIDGE_TOLERANCE_UNITS: Final[int] = 1
+# RESIDUAL_LARGE 阈值（§3.6/§4.4）：|gap| > max(1 元, 0.1%×V_end)。
+_RESIDUAL_MIN_UNITS: Final[int] = 100
+# NOT_PIT 判定（§4.3）：快照日距期末 >90 天 → degraded。
+_NOT_PIT_DAYS: Final[int] = 90
+
+# factors[].code 的固定产品名（FACTOR_NAMES 键为 str，FactorCode 是 StrEnum）。
+
+
+@dataclass(frozen=True, slots=True)
+class AttributionFactor:
+    """`factors[]` 单项（§6.2）。
+
+    blocked 缺省语义（§6.3 评审 P0-7，冻结）：`amount/ratio/share` 为 ``None``
+    且 API 层**省略键**（amount 缺省；ratio/share 亦缺省），`conclusion=None`
+    显式输出 null，`presentation` 给 `(None, None, "flat")`；`code/name/rank` 保留。
+    """
+
+    code: str
+    name: str
+    amount_units: int | None
+    ratio_units: int | None
+    share_units: int | None
+    rank: int
+    conclusion: str | None
+    presentation: FactorPresentation
+
+
+@dataclass(frozen=True, slots=True)
+class AttributionSample:
+    """`sample` 块（§6.2）：样本规模与结论门禁状态（金额照给，只影响 summary）。"""
+
+    n_segments: int
+    n_attributed_segments: int
+    n_rounds: int
+    n_symbols: int
+    min_n: int
+    sample_status: str  # "ok" | "insufficient"
+
+
+@dataclass(frozen=True, slots=True)
+class AttributionResult:
+    """`GET /attribution` 应用层结果（§6.2；金额标度整数，API 层格式化）。
+
+    `None` 的语义区分（§6.3 blocked 缺省冻结）：
+    - `total_pnl/base_capital/residual_units/residual_breakdown/coverage` 为
+      ``None`` = **blocked，API 层省略整个键**；
+    - `ratio_units/share_units/ratio_na_reason` 为 ``None`` = 显式 null（ratio
+      不可给时附 `ratio_na_reason` 机读原因）。
+    """
+
+    model: str
+    ratio_basis: str
+    period: str
+    period_start: date
+    period_end: date
+    status: str  # "ok" | "degraded" | "blocked"
+    definition_version: str
+    total_pnl_basis: str
+    total_pnl_units: int | None
+    ratio_na_reason: str | None
+    base_capital_units: int | None
+    factors: tuple[AttributionFactor, ...]
+    summary: str | None
+    residual_units: int | None
+    residual_ratio_units: int | None
+    residual_breakdown: Mapping[str, int] | None
+    sample: AttributionSample
+    coverage: Coverage | None
+    missing: tuple[MissingEntry, ...]
+    assumptions: Mapping[str, Any]
+    data_as_of: date | None
+    inputs_hash: str
+    links: Mapping[str, str]
+
+
+@dataclass(frozen=True, slots=True)
+class _Pit:
+    """PIT 解析结果（§4.3；`blocked=True` 时 `classification_as_of` 无意义）。"""
+
+    classification_as_of: date | None
+    membership_as_of: date | None
+    lookahead_used: bool
+    stale: bool  # 快照日距期末 >90 天 → SECTOR_CLASSIFICATION_NOT_PIT
+    blocked: bool
+
+
+@dataclass(frozen=True, slots=True)
+class _Mirror:
+    """镜像推演快照（资产表同口径；供 `split_residual` / coverage 使用）。
+
+    - `holdings`：{code: (begin_qty, end_qty)}（split_residual 的 `holdings_at`）；
+    - `bucket_mv`：{code: (begin_mv, end_mv)}——仅收**两端都可估值**的标的
+      （市值或成本兜底）；任一端不可估值 → 不进桶，由 valuation_gap 吸收；
+    - `money_funds`：{code: (begin_bal, end_bal)}——begin 为首条窗口货基行之前的
+      余额（`initial_money_fund_balances` 口径），end 为 end_date 前最后余额；
+    - `anchors`：{code: 期初锚}（有价按市值、无价按净成本；coverage 资本分母）；
+    - `cost_fallback`：期初按成本兜底估值的标的（coverage.base_basis="mixed"）。
+    """
+
+    holdings: dict[str, tuple[int, int]]
+    bucket_mv: dict[str, tuple[int, int]]
+    money_funds: dict[str, tuple[int, int]]
+    anchors: dict[str, int]
+    cost_fallback: frozenset[str]
+
+
+def _mirror_view(
+    trades: Sequence[Trade],
+    *,
+    begin_date: date,
+    end_date: date,
+    ladder: dict[str, list[tuple[date, int]]],
+    canonical: Callable[[str], str],
+    bond_divisors: Mapping[str, int],
+    new_stocks: set[str],
+    begin_balances: Mapping[str, int],
+) -> _Mirror:
+    """单遍扫描 trades，在 `begin_date`/`end_date` 两个时点快照（资产表同口径）。
+
+    持仓/成本推演与 `assets._build` 循环一致：货基行只覆盖余额、可转债发债代码
+    归一、卖出按数量比例结转成本、新股中签通知行不建仓。
+    """
+    holdings: dict[str, int] = {}
+    costs: dict[str, int] = {}
+    mf_bal: dict[str, int] = {}
+    begin_snap: tuple[dict[str, int], dict[str, int], dict[str, int]] | None = None
+    end_snap: tuple[dict[str, int], dict[str, int], dict[str, int]] | None = None
+
+    def capture() -> tuple[dict[str, int], dict[str, int], dict[str, int]]:
+        return (dict(holdings), dict(costs), dict(mf_bal))
+
+    for trade in trades:
+        if begin_snap is None and trade.trade_date > begin_date:
+            begin_snap = capture()
+        if end_snap is None and trade.trade_date > end_date:
+            end_snap = capture()
+            break
+        if is_money_fund_row(trade):
+            code = (trade.security_code or "").strip()
+            if code:
+                mf_bal[code] = max(0, int(trade.money_fund_balance_units or 0))
+            continue
+        raw = (trade.security_code or "").strip()
+        if not raw:
+            continue
+        code = canonical(raw)
+        trade_category = category(trade)
+        delta = holding_delta(trade_category, trade.quantity_units, amount_units=trade.amount_units)
+        if delta:
+            holdings[code] = holdings.get(code, 0) + delta
+        if trade_category in {"buy", "rights", "new_stock"} and trade.amount_units != 0:
+            costs[code] = costs.get(code, 0) + (-trade.amount_units)
+        elif trade_category == "sell":
+            old_qty = holdings.get(code, 0) - delta
+            if old_qty > 0 and delta < 0:
+                old_cost = costs.get(code, 0)
+                costs[code] = max(0, old_cost + (old_cost * delta) // old_qty)
+    if begin_snap is None:
+        begin_snap = capture()
+    if end_snap is None:
+        end_snap = capture()
+    held_b, cost_b, _mf_b = begin_snap
+    held_e, cost_e, mf_e = end_snap
+
+    def value_at(
+        held: Mapping[str, int], cost_snap: Mapping[str, int], on: date
+    ) -> tuple[dict[str, int], set[str]]:
+        """持仓 → {code: 市值}；缺价债券/待上市新股按成本兜底；其余缺价省略。"""
+        values: dict[str, int] = {}
+        fallback: set[str] = set()
+        for code, qty in held.items():
+            if qty == 0:
+                continue
+            close = close_on_or_before(ladder, code, on)
+            if close is None:
+                cost = max(0, cost_snap.get(code, 0))
+                if cost and (is_bond(code) or code in new_stocks):
+                    values[code] = cost
+                    fallback.add(code)
+                continue
+            if is_bond(code):
+                values[code] = bond_value_units(code, qty, close, bond_divisors)
+            else:
+                values[code] = qty * close // QTY_PRICE_SCALE
+        return values, fallback
+
+    mv_b, fb_b = value_at(held_b, cost_b, begin_date)
+    mv_e, _fb_e = value_at(held_e, cost_e, end_date)
+
+    holdings_map: dict[str, tuple[int, int]] = {}
+    bucket_mv: dict[str, tuple[int, int]] = {}
+    anchors: dict[str, int] = {}
+    codes = (set(held_b) | set(held_e)) - {"CASH"}
+    for code in sorted(codes):
+        begin_qty = held_b.get(code, 0)
+        end_qty = held_e.get(code, 0)
+        if begin_qty == 0 and end_qty == 0:
+            continue
+        holdings_map[code] = (begin_qty, end_qty)
+        if begin_qty != 0 and code not in mv_b:
+            continue  # 期初不可估值 → 整标的进 valuation_gap（不进 MV 桶）
+        if end_qty != 0 and code not in mv_e:
+            continue  # 期末不可估值 → 同上
+        bucket_mv[code] = (
+            mv_b.get(code, 0) if begin_qty else 0,
+            mv_e.get(code, 0) if end_qty else 0,
+        )
+        anchor = mv_b.get(code, 0) if begin_qty else 0
+        if anchor:
+            anchors[code] = anchor
+
+    # 货基余额（begin = 首条窗口行之前；end = end_date 前最后余额）。
+    mf_codes = (set(begin_balances) | set(mf_e)) - {""}
+    money_funds = {
+        code: (begin_balances.get(code, 0), mf_e.get(code, 0))
+        for code in sorted(mf_codes)
+        if begin_balances.get(code, 0) != 0 or mf_e.get(code, 0) != 0
+    }
+    return _Mirror(
+        holdings=holdings_map,
+        bucket_mv=bucket_mv,
+        money_funds=money_funds,
+        anchors=anchors,
+        cost_fallback=frozenset(fb_b),
+    )
+
+
+def _blocked_factors() -> tuple[AttributionFactor, ...]:
+    """blocked 因子骨架：固定 5 项 + 固定序 rank，数值/文案全缺省（§6.3）。"""
+    return tuple(
+        AttributionFactor(
+            code=str(code),
+            name=FACTOR_NAMES[str(code)],
+            amount_units=None,
+            ratio_units=None,
+            share_units=None,
+            rank=index + 1,
+            conclusion=None,
+            presentation=FactorPresentation(bar_pct=None, ratio_pct=None, tone="flat"),
+        )
+        for index, code in enumerate(FACTOR_CODES)
+    )
+
+
+def _assumptions(
+    *,
+    beginning_value_source: str,
+    classification_version: str | None,
+    classification_as_of: date | None,
+    lookahead_used: bool,
+    board_bar_as_of: date | None,
+    benchmark_id: str,
+    data_sources: Mapping[str, date | None],
+) -> dict[str, Any]:
+    """`assumptions` 18 键（§6.2；全部进 `inputs_hash`）。"""
+    return {
+        "total_pnl_basis": "asset_daily_mtm",
+        "beginning_value_source": beginning_value_source,
+        "cashflow_basis": "transfer_rows",
+        "fee_basis": "commission+stamp_tax+other_fee",
+        "dividend_basis": "cash_ledger_rows_net_after_tax",
+        "sector_basis": "ths_industry_index",
+        "classification_version": classification_version,
+        "classification_as_of": classification_as_of,
+        "classification_lookahead": lookahead_used,
+        "board_bar_as_of": board_bar_as_of,
+        "benchmark_id": benchmark_id,
+        "benchmark_total_return_proxy": True,
+        "ratio_basis": "amount/total_pnl",
+        "attributed_universe": "a_share_stock",
+        "corporate_action_policy": "exclude_symbol",
+        "rounding": "scaled_int_half_up_1e-8; residual_plug",
+        "adjust": "none",
+        "data_sources": dict(data_sources),
+    }
+
+
+def _fingerprints(
+    trades: Sequence[Trade], assets: Sequence[AssetDaily]
+) -> tuple[int, datetime | None, date | None, date | None, int, datetime | None]:
+    """(trades 行数, max updated_at, 资产首日, 资产末日, 资产行数, max rebuilt_at)。"""
+    trade_updated = max((t.updated_at for t in trades if t.updated_at is not None), default=None)
+    asset_first = assets[0].trade_date if assets else None
+    asset_last = assets[-1].trade_date if assets else None
+    asset_rebuilt = max((a.rebuilt_at for a in assets if a.rebuilt_at is not None), default=None)
+    return (
+        len(trades),
+        trade_updated,
+        asset_first,
+        asset_last,
+        len(assets),
+        asset_rebuilt,
+    )
+
+
+def _hash_payload(
+    *,
+    model: str,
+    period: Period,
+    benchmark_id: str,
+    lookahead_used: bool,
+    trade_count: int,
+    trade_updated: Any,
+    asset_first: date | None,
+    asset_last: date | None,
+    asset_rows: int,
+    asset_rebuilt: Any,
+    market_as_of: date | None,
+    sector: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    """`inputs_hash` 输入（§5.6；规范化 JSON sha256）。"""
+    payload: dict[str, Any] = {
+        "model": model,
+        "definition_version": ATTRIBUTION_DEFINITION_VERSION,
+        "period": period.label,
+        "benchmark": benchmark_id,
+        "classification_lookahead": lookahead_used,
+        "trades": {"count": trade_count, "max_updated_at": trade_updated},
+        "assets": {
+            "first": asset_first,
+            "last": asset_last,
+            "rows": asset_rows,
+            "max_rebuilt_at": asset_rebuilt,
+        },
+        "market_as_of": market_as_of,
+    }
+    if sector is not None:
+        payload["sector"] = dict(sector)
+    return payload
+
+
+def _blocked_result(
+    *,
+    period: Period,
+    missing: Sequence[MissingEntry],
+    benchmark_id: str,
+    trades: Sequence[Trade],
+    assets: Sequence[AssetDaily],
+    asset_data_as_of: date | None,
+    market_as_of: date | None,
+    sector_as_of: date | None,
+    lookahead_used: bool,
+    classification_version: str | None,
+    classification_as_of: date | None,
+    beginning_value_source: str,
+    sector_fingerprint: Mapping[str, Any] | None,
+    sample: AttributionSample | None = None,
+) -> AttributionResult:
+    """blocked 组装（金额键全缺省，§6.3；三处短路共用）。"""
+    assumptions = _assumptions(
+        beginning_value_source=beginning_value_source,
+        classification_version=classification_version,
+        classification_as_of=classification_as_of,
+        lookahead_used=lookahead_used,
+        board_bar_as_of=None,
+        benchmark_id=benchmark_id,
+        data_sources={
+            "asset_daily": asset_data_as_of,
+            "market": market_as_of,
+            "sector": sector_as_of,
+        },
+    )
+    trade_count, trade_updated, asset_first, asset_last, asset_rows, asset_rebuilt = _fingerprints(
+        trades, assets
+    )
+    payload = _hash_payload(
+        model="five_factor",
+        period=period,
+        benchmark_id=benchmark_id,
+        lookahead_used=lookahead_used,
+        trade_count=trade_count,
+        trade_updated=trade_updated,
+        asset_first=asset_first,
+        asset_last=asset_last,
+        asset_rows=asset_rows,
+        asset_rebuilt=asset_rebuilt,
+        market_as_of=market_as_of,
+        sector=sector_fingerprint,
+    )
+    as_of_candidates = [d for d in (asset_data_as_of, market_as_of, sector_as_of) if d is not None]
+    return AttributionResult(
+        model="five_factor",
+        ratio_basis="amount/total_pnl",
+        period=period.label,
+        period_start=period.start,
+        period_end=period.end,
+        status="blocked",
+        definition_version=ATTRIBUTION_DEFINITION_VERSION,
+        total_pnl_basis="asset_daily_mtm",
+        total_pnl_units=None,
+        ratio_na_reason=None,
+        base_capital_units=None,
+        factors=_blocked_factors(),
+        summary=None,
+        residual_units=None,
+        residual_ratio_units=None,
+        residual_breakdown=None,
+        sample=sample
+        or AttributionSample(
+            n_segments=0,
+            n_attributed_segments=0,
+            n_rounds=0,
+            n_symbols=0,
+            min_n=MIN_SAMPLE_SEGMENTS,
+            sample_status="insufficient",
+        ),
+        coverage=None,
+        missing=tuple(missing),
+        assumptions=assumptions,
+        data_as_of=min(as_of_candidates) if as_of_candidates else None,
+        inputs_hash=inputs_hash(payload),
+        links={
+            "dashboard": "/dashboard",
+            "sectors": "/sectors",
+            "rounds": "/rounds",
+            "reports": "/reports",
+        },
+    )
+
+
+def _exclusion_missing(reason: str, codes: Sequence[str]) -> MissingEntry | None:
+    """标的剔除 → `missing[]` 披露条目（资产类别排除不进 missing[]）。"""
+    label = {
+        REASON_MAPPING: ("缺行业归属", "同步成分/确认 A 股"),
+        REASON_BAR: ("行业指数日线缺失", "运行 make sync-sectors ARGS='--start …'"),
+        REASON_PRICE: ("参考价缺失", "补行情"),
+        REASON_CORPORATE: ("区间内送转/配股", "等待复权能力（P2）"),
+        REASON_FEE: ("费用口径未知", "人工核对流水"),
+        REASON_DATA_ERROR: ("FIFO 数据异常", "对账/修正流水"),
+    }.get(reason)
+    if label is None:
+        return None
+    shown = sorted(codes)[:8]
+    suffix = f" 等 {len(codes)} 只" if len(codes) > len(shown) else ""
+    return MissingEntry(
+        field="factors",
+        code=reason,
+        reason=f"{len(codes)} 个标的（{label[0]}）：{','.join(shown)}{suffix}",
+        what_to_do=label[1],
+    )
+
+
+def _pit_view(
+    *,
+    sector_data: SectorDataSource,
+    membership_as_of: date | None,
+    period_end: date,
+    lookahead_requested: bool,
+) -> _Pit:
+    """PIT 算法（§4.3，冻结）：first_sync_on / membership_as_of → classification_as_of。"""
+    first_sync_on = sector_data.capabilities.history_start_for(_DB_TAXONOMY_INDUSTRY)
+    not_covered = membership_as_of is None or (
+        first_sync_on is not None and period_end < first_sync_on
+    )
+    if not_covered:
+        if lookahead_requested:
+            # 最早可用快照 + degraded 披露（SECTOR_CLASSIFICATION_LOOKAHEAD）。
+            return _Pit(
+                classification_as_of=membership_as_of,
+                membership_as_of=membership_as_of,
+                lookahead_used=True,
+                stale=False,
+                blocked=False,
+            )
+        return _Pit(
+            classification_as_of=None,
+            membership_as_of=membership_as_of,
+            lookahead_used=False,
+            stale=False,
+            blocked=True,
+        )
+    assert membership_as_of is not None  # not_covered=False 蕴含非 None
+    classification_as_of = min(period_end, membership_as_of)
+    stale = abs((period_end - classification_as_of).days) > _NOT_PIT_DAYS
+    return _Pit(
+        classification_as_of=classification_as_of,
+        membership_as_of=membership_as_of,
+        lookahead_used=False,
+        stale=stale,
+        blocked=False,
+    )
+
+
+async def build_attribution(
+    session: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    period: str | None,
+    model: str = "five_factor",
+    benchmark: str | None = None,
+    classification_lookahead: bool = False,
+    clock: Clock,
+    market_data: MarketDataSource,
+    sector_data: SectorDataSource,
+    lang: str = "zh",
+    lookahead_enabled: bool = False,
+) -> AttributionResult:
+    """装配五因子归因结果（§5.3 步骤 1-8；降级不抛 5xx，校验失败 422）。"""
+    # ── 1. 请求校验（§6.1）──────────────────────────────────────
+    if model != "five_factor":
+        raise ApiError(ErrorCode.MODEL_NOT_AVAILABLE, detail=f"未知归因模型: {model}")
+    if classification_lookahead and not lookahead_enabled:
+        raise ApiError(
+            ErrorCode.MODEL_NOT_AVAILABLE,
+            detail="classification_lookahead 需要部署开启 SECTOR_LOOKAHEAD_ENABLED",
+        )
+    if benchmark is not None and benchmark not in KNOWN_BENCHMARKS:
+        raise ApiError(ErrorCode.UNKNOWN_BENCHMARK, detail=f"未知 benchmark: {benchmark}")
+    benchmark_id = benchmark or "hs300_tr"
+
+    # ── 2. 区间解析（复用 metrics.context）────────────────────────
+    resolved = resolve_period(
+        period=period, date_from=None, date_to=None, today=clock.business_today()
+    )
+
+    # ── 3. 取数 + 资产窗口（§3.2；blocked 短路，不读行情/板块）─────
+    trades = await TradeRepository(session).list_all(user_id)
+    assets = await AssetRepository(session).series(
+        user_id, definition_version=ASSET_DEFINITION_VERSION
+    )
+    build_state, _definition = await get_asset_build_state(
+        session, user_id=user_id, clock=clock, market_data=market_data
+    )
+    asset_data_as_of = build_state.data_as_of
+    valuation_end_date = valuation_end(clock)
+    window = resolve_asset_window(
+        assets,
+        t0=resolved.start,
+        t1=resolved.end,
+        data_as_of=asset_data_as_of,
+        valuation_end_date=valuation_end_date,
+    )
+    trade_count, trade_updated, asset_first, asset_last, asset_rows, asset_rebuilt = _fingerprints(
+        trades, assets
+    )
+
+    if window.status == "blocked":
+        return _blocked_result(
+            period=resolved,
+            missing=window.missing,
+            benchmark_id=benchmark_id,
+            trades=trades,
+            assets=assets,
+            asset_data_as_of=asset_data_as_of,
+            market_as_of=market_data.as_of,
+            sector_as_of=None,
+            lookahead_used=False,
+            classification_version=None,
+            classification_as_of=None,
+            beginning_value_source=window.beginning_value_source,
+            sector_fingerprint=None,
+        )
+
+    assert window.total_pnl_units is not None and window.begin_date is not None
+    assert window.end_date is not None
+
+    # ── 4. 桥接对账（§3.2.1；bridge 不可用时不做假对账）────────────
+    missing: list[MissingEntry] = list(window.missing)
+    bridge = await bridge_for_period(
+        session,
+        user_id=user_id,
+        period_start=resolved.start,
+        period_end=resolved.end,
+        clock=clock,
+    )
+    if (
+        bridge.status != "blocked"
+        and window.unrealized_begin_units is not None
+        and window.unrealized_end_units is not None
+    ):
+        bridge_profit = (
+            bridge.realized_pnl_units
+            + bridge.dividends_units
+            + bridge.interest_units
+            - bridge.fees_units
+            + bridge.other_units
+        )
+        delta_unreal = window.unrealized_end_units - window.unrealized_begin_units
+        if abs(window.total_pnl_units - (bridge_profit + delta_unreal)) > _BRIDGE_TOLERANCE_UNITS:
+            missing.append(
+                MissingEntry(
+                    field="total_pnl",
+                    code="BRIDGE_MISMATCH",
+                    reason="MTM 损益与桥接恒等式差额超过 1 分（对账断链）",
+                    what_to_do="对账页检查断链",
+                )
+            )
+
+    # ── 5. PIT（§4.3）：blocked 短路（不读行情/板块）──────────────
+    sync_state = await SectorRepository(session).sync_state(dataset_key=_SECTOR_DATASET_KEY)
+    membership_as_of = (
+        sync_state.membership_as_of
+        if sync_state is not None and sync_state.membership_as_of is not None
+        else sector_data.as_of
+    )
+    pit = _pit_view(
+        sector_data=sector_data,
+        membership_as_of=membership_as_of,
+        period_end=resolved.end,
+        lookahead_requested=classification_lookahead,
+    )
+    sector_fingerprint: dict[str, Any] = {
+        "checksum": sync_state.checksum if sync_state is not None else None,
+        "membership_as_of": pit.membership_as_of,
+        "bar_as_of": sync_state.bar_as_of if sync_state is not None else None,
+    }
+    if pit.blocked:
+        missing.append(
+            MissingEntry(
+                field="classification_as_of",
+                code="SECTOR_HISTORY_NOT_COVERED",
+                reason="板块成分首次同步日晚于区间终点（无时点行业归属）",
+                what_to_do="缩短区间 / 人工批准 look-ahead",
+            )
+        )
+        return _blocked_result(
+            period=resolved,
+            missing=missing,
+            benchmark_id=benchmark_id,
+            trades=trades,
+            assets=assets,
+            asset_data_as_of=asset_data_as_of,
+            market_as_of=market_data.as_of,
+            sector_as_of=pit.membership_as_of,
+            lookahead_used=False,
+            classification_version=None,
+            classification_as_of=None,
+            beginning_value_source=window.beginning_value_source,
+            sector_fingerprint=sector_fingerprint,
+        )
+    if pit.lookahead_used:
+        missing.append(
+            MissingEntry(
+                field="classification_as_of",
+                code="SECTOR_CLASSIFICATION_LOOKAHEAD",
+                reason="区间早于成分首次同步日，已按人工批准使用最早可用快照",
+                what_to_do="确认口径例外已批准",
+            )
+        )
+    elif pit.stale:
+        missing.append(
+            MissingEntry(
+                field="classification_as_of",
+                code="SECTOR_CLASSIFICATION_NOT_PIT",
+                reason=f"行业快照日 {pit.classification_as_of.isoformat() if pit.classification_as_of else '?'} 距期末超过 90 天",
+                what_to_do="同步最新成分",
+            )
+        )
+
+    # ── 6. FIFO 重放 ×2 + 公司行动（§5.3 步骤 3-4）────────────────
+    bond_alias, _unresolved = build_bond_alias(
+        (trade.security_code, trade.security_name) for trade in trades
+    )
+    canonical = partial(canonical_code, bond_alias)
+    res_all = build_rounds(
+        trades_to_events([t for t in trades if t.trade_date <= resolved.end], bond_alias=bond_alias)
+    )
+    res_pre = build_rounds(
+        trades_to_events(
+            [t for t in trades if t.trade_date < resolved.start], bond_alias=bond_alias
+        )
+    )
+    corporate = corporate_action_symbols(
+        trades, t0=resolved.start, t1=resolved.end, canonical=canonical
+    )
+
+    # ── 7. 行情（只读缓存；P0 参考日可早于 T0）────────────────────
+    universe = {
+        canonical(trade.security_code)
+        for trade in trades
+        if (trade.security_code or "").strip() and not is_money_fund_row(trade)
+    }
+    universe.discard("CASH")
+    universe.discard("")
+    price_start = min(resolved.start, window.begin_date) - PRICE_LOOKBACK
+    ladder, _market_causes = await load_prices(
+        market_data, sorted(universe), price_start, resolved.end, cached_only=True
+    )
+
+    # ── 8. 行业映射 / 目录 / 指数日线（§4.1；端口注入，replay 读夹具）─
+    memberships_rows = await sector_data.get_memberships(
+        _DB_TAXONOMY_INDUSTRY, as_of=pit.classification_as_of, level=1
+    )
+    memberships = {row.symbol: row.sector_code for row in memberships_rows}
+    catalog_rows = await sector_data.get_catalog(_DB_TAXONOMY_INDUSTRY)
+    classification_version = catalog_rows[0].classification_version if catalog_rows else None
+    sector_codes = sorted({memberships[symbol] for symbol in universe if symbol in memberships})
+    bars = await sector_data.get_board_bars(
+        [(_DB_TAXONOMY_INDUSTRY, code) for code in sector_codes], price_start, resolved.end
+    )
+    sector_ladder: dict[str, list[tuple[date, int]]] = {}
+    for bar in bars:
+        sector_ladder.setdefault(bar.sector_code, []).append((bar.trade_date, bar.close_units))
+    for entries in sector_ladder.values():
+        entries.sort(key=lambda item: item[0])
+    board_bar_as_of = max(
+        (entry[0] for entries in sector_ladder.values() for entry in entries), default=None
+    )
+
+    # ── 9. 镜像推演 + 股息汇总（资产表同口径）──────────────────────
+    mirror = _mirror_view(
+        trades,
+        begin_date=window.begin_date,
+        end_date=window.end_date,
+        ladder=ladder,
+        canonical=canonical,
+        bond_divisors=bond_face_divisors(trades),
+        new_stocks={canonical(code) for code in new_stock_pending_codes(trades)},
+        begin_balances={
+            canonical(code): balance
+            for code, balance in initial_money_fund_balances(trades, resolved.start).items()
+        },
+    )
+    dividends: dict[str, int] = {}
+    for trade in trades:
+        if not (resolved.start <= trade.trade_date <= resolved.end):
+            continue
+        if category(trade) != "dividend" or is_money_fund_row(trade):
+            continue
+        code = canonical(trade.security_code)
+        if not code or code == "CASH":
+            continue
+        dividends[code] = dividends.get(code, 0) + trade.amount_units
+
+    # ── 10. 段装配 → 残差拆桶 → 五因子分解（§3.3/§3.4/§3.6）────────
+    bundle = build_symbol_plans(
+        trades=trades,
+        t0=resolved.start,
+        t1=resolved.end,
+        res_all=res_all,
+        res_pre=res_pre,
+        ladder=ladder,
+        memberships=memberships,
+        sector_ladder=sector_ladder,
+        corporate=corporate,
+        canonical=canonical,
+        expected_p0_date=latest_workday(resolved.start - timedelta(days=1)),
+        expected_p1_date=latest_workday(min(valuation_end_date, resolved.end)),
+        dividends=dividends,
+        fallback_anchors=mirror.anchors,
+    )
+    split = split_residual(
+        plans=bundle.plans,
+        trades=trades,
+        t0=resolved.start,
+        t1=resolved.end,
+        begin_date=window.begin_date,
+        end_date=window.end_date,
+        bucket_mv=mirror.bucket_mv,
+        money_fund_balances=mirror.money_funds,
+        holdings_at=mirror.holdings,
+        corporate=corporate,
+        canonical=canonical,
+    )
+    all_segments = [segment for plan in bundle.plans for segment in plan.segments]
+    decomposition = decompose(
+        all_segments,
+        window.total_pnl_units,
+        extra_fee_units=split.fee_bucketed_units + split.fee_indep_units,
+    )
+    gap_units = decomposition.residual_units - sum(split.buckets.values())
+    assert window.v_end_units is not None
+    residual_threshold = max(_RESIDUAL_MIN_UNITS, window.v_end_units // 1000)
+
+    # ── 11. 状态机（§4.4）：存在候选但零可归因段（板块数据全缺）→ blocked
+    stock_plans = [plan for plan in bundle.plans if plan.symbol_class == "stock"]
+    sector_cause_only = all(
+        plan.reason_code in (REASON_MAPPING, REASON_BAR)
+        for plan in stock_plans
+        if not plan.attributed
+    )
+    sample = AttributionSample(
+        n_segments=decomposition.n_segments,
+        n_attributed_segments=decomposition.n_attributed_segments,
+        n_rounds=len(res_all.rounds),
+        n_symbols=len(bundle.plans),
+        min_n=MIN_SAMPLE_SEGMENTS,
+        sample_status=(
+            "ok" if decomposition.n_attributed_segments >= MIN_SAMPLE_SEGMENTS else "insufficient"
+        ),
+    )
+    if decomposition.n_attributed_segments == 0 and bundle.has_candidate and sector_cause_only:
+        missing.append(
+            MissingEntry(
+                field="factors",
+                code="SECTOR_DATA_MISSING",
+                reason="存在 A 股候选标的但零个可归因段（行业映射/指数数据全缺）",
+                what_to_do="运行 make sync-sectors",
+            )
+        )
+        return _blocked_result(
+            period=resolved,
+            missing=missing,
+            benchmark_id=benchmark_id,
+            trades=trades,
+            assets=assets,
+            asset_data_as_of=asset_data_as_of,
+            market_as_of=market_data.as_of,
+            sector_as_of=board_bar_as_of or pit.membership_as_of or sector_data.as_of,
+            lookahead_used=pit.lookahead_used,
+            classification_version=classification_version,
+            classification_as_of=pit.classification_as_of,
+            beginning_value_source=window.beginning_value_source,
+            sector_fingerprint=sector_fingerprint,
+            sample=sample,
+        )
+
+    # ── 12. coverage / missing 汇总 ───────────────────────────────
+    excluded_codes = {plan.security_code for plan in bundle.plans if not plan.attributed}
+    base_basis = "mixed" if mirror.cost_fallback & excluded_codes else "market"
+    coverage = build_coverage(
+        plans=bundle.plans,
+        decomposition=decomposition,
+        per_symbol=split.per_symbol,
+        base_basis=base_basis,
+    )
+    for reason, codes in bundle.excluded_by_reason.items():
+        entry = _exclusion_missing(reason, codes)
+        if entry is not None:
+            missing.append(entry)
+    if bundle.price_fallback_symbols:
+        missing.append(
+            MissingEntry(
+                field="factors",
+                code="PRICE_REF_FALLBACK",
+                reason=f"{len(bundle.price_fallback_symbols)} 个标的的参考价用了 45 天窗口内的前收："
+                f"{','.join(sorted(bundle.price_fallback_symbols)[:8])}",
+                what_to_do="补行情",
+            )
+        )
+    if bundle.sector_fallback_symbols:
+        missing.append(
+            MissingEntry(
+                field="factors",
+                code="SECTOR_BAR_FALLBACK",
+                reason=f"{len(bundle.sector_fallback_symbols)} 个标的的行业指数参考日与个股参考日不一致："
+                f"{','.join(sorted(bundle.sector_fallback_symbols)[:8])}",
+                what_to_do="补板块日线",
+            )
+        )
+    if abs(gap_units) > residual_threshold:
+        missing.append(
+            MissingEntry(
+                field="residual",
+                code="RESIDUAL_LARGE",
+                reason=f"无法解释的残差 {abs(gap_units)} 分超过阈值 {residual_threshold} 分",
+                what_to_do="看 residual_breakdown",
+            )
+        )
+
+    unexplained_bucket = any(
+        value != 0 for key, value in split.buckets.items() if key != BUCKET_GAP
+    )
+    status = (
+        "degraded"
+        if (missing or unexplained_bucket or abs(gap_units) > residual_threshold)
+        else "ok"
+    )
+
+    # ── 13. 因子 / 结论 / assumptions / hash ──────────────────────
+    factor_amounts: dict[FactorCode, int] = {
+        code: decomposition.factors[code] for code in FACTOR_CODES
+    }
+    ranked_codes = rank_factors(factor_amounts)
+    shares = shares_of(factor_amounts)
+    total_abs = total_abs_amounts(factor_amounts)
+    na_reason = ratio_na_reason(window.total_pnl_units, total_abs)
+
+    factors: list[AttributionFactor] = []
+    for code in FACTOR_CODES:
+        amount = factor_amounts[code]
+        rank = ranked_codes.index(code) + 1
+        ratio = ratio_of(amount, window.total_pnl_units) if na_reason is None else None
+        share = shares[code]
+        factors.append(
+            AttributionFactor(
+                code=str(code),
+                name=FACTOR_NAMES[str(code)],
+                amount_units=amount,
+                ratio_units=ratio,
+                share_units=share,
+                rank=rank,
+                conclusion=factor_conclusion(amount, lang=lang),
+                presentation=factor_presentation(
+                    amount_units=amount, ratio_units=ratio, share_units=share
+                ),
+            )
+        )
+    # 比率域 residual 是 plug（与金额域同构）：Σratio + residual_ratio == 1e8 精确（§7.2 ③），
+    # 逐项 half-up 的尾差由 residual_ratio 吸收。
+    residual_ratio = (
+        RATIO_SCALE - sum(f.ratio_units for f in factors if f.ratio_units is not None)
+        if na_reason is None
+        else None
+    )
+    has_trade_rows = any(
+        resolved.start <= trade.trade_date <= resolved.end and category(trade) in {"buy", "sell"}
+        for trade in trades
+    )
+    ranked = [
+        (FACTOR_NAMES[str(code)], factor_amounts[code], shares[code]) for code in ranked_codes
+    ]
+    summary = build_summary(
+        total_pnl_units=window.total_pnl_units,
+        ranked=ranked,
+        residual_units=decomposition.residual_units,
+        n_attributed_segments=decomposition.n_attributed_segments,
+        capital_total_units=coverage.capital_total_units,
+        capital_ratio_units=coverage.capital_ratio_units,
+        valuation_gap_units=gap_units,
+        has_trade_rows=has_trade_rows,
+        lang=lang,
+    )
+    assert_copy_compliance(summary, *(factor.conclusion for factor in factors))
+
+    sector_as_of = board_bar_as_of or pit.membership_as_of or sector_data.as_of
+    assumptions = _assumptions(
+        beginning_value_source=window.beginning_value_source,
+        classification_version=classification_version,
+        classification_as_of=pit.classification_as_of,
+        lookahead_used=pit.lookahead_used,
+        board_bar_as_of=board_bar_as_of,
+        benchmark_id=benchmark_id,
+        data_sources={
+            "asset_daily": asset_data_as_of,
+            "market": market_data.as_of,
+            "sector": sector_as_of,
+        },
+    )
+    payload = _hash_payload(
+        model="five_factor",
+        period=resolved,
+        benchmark_id=benchmark_id,
+        lookahead_used=pit.lookahead_used,
+        trade_count=trade_count,
+        trade_updated=trade_updated,
+        asset_first=asset_first,
+        asset_last=asset_last,
+        asset_rows=asset_rows,
+        asset_rebuilt=asset_rebuilt,
+        market_as_of=market_data.as_of,
+        sector=sector_fingerprint,
+    )
+    as_of_candidates = [
+        d for d in (asset_data_as_of, market_data.as_of, sector_as_of) if d is not None
+    ]
+    breakdown = {
+        BUCKET_CORPORATE: split.buckets[BUCKET_CORPORATE],
+        BUCKET_UNATTRIBUTED: split.buckets[BUCKET_UNATTRIBUTED],
+        BUCKET_DIVIDEND: split.buckets[BUCKET_DIVIDEND],
+        BUCKET_INTEREST: split.buckets[BUCKET_INTEREST],
+        BUCKET_OTHER: split.buckets[BUCKET_OTHER],
+        BUCKET_GAP: gap_units,
+    }
+    return AttributionResult(
+        model="five_factor",
+        ratio_basis="amount/total_pnl",
+        period=resolved.label,
+        period_start=resolved.start,
+        period_end=resolved.end,
+        status=status,
+        definition_version=ATTRIBUTION_DEFINITION_VERSION,
+        total_pnl_basis="asset_daily_mtm",
+        total_pnl_units=window.total_pnl_units,
+        ratio_na_reason=na_reason,
+        base_capital_units=decomposition.base_capital_units,
+        factors=tuple(factors),
+        summary=summary,
+        residual_units=decomposition.residual_units,
+        residual_ratio_units=residual_ratio,
+        residual_breakdown=breakdown,
+        sample=sample,
+        coverage=coverage,
+        missing=tuple(missing),
+        assumptions=assumptions,
+        data_as_of=min(as_of_candidates) if as_of_candidates else None,
+        inputs_hash=inputs_hash(payload),
+        links={
+            "dashboard": "/dashboard",
+            "sectors": "/sectors",
+            "rounds": "/rounds",
+            "reports": "/reports",
+        },
+    )

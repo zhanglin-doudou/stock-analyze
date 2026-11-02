@@ -1071,8 +1071,10 @@ async def _sync_sectors(
     try:
         source = create_live_sector_source(settings, session_factory=db.session, clock=clock)
         if start is not None:
-            emit(f"  提示：--start {start.isoformat()} 仅用于板块日线回填（P1），当前忽略")
-        report = await source.sync_to_cache(today=today, dry_run=dry_run, taxonomies=taxonomies)
+            emit(f"  板块日线回填：自 {start.isoformat()} 起（仅行业板块，概念不回填）")
+        report = await source.sync_to_cache(
+            today=today, dry_run=dry_run, taxonomies=taxonomies, bars_start=start
+        )
     except Exception as exc:
         emit(f"\n❌ sync-sectors 失败：{type(exc).__name__}: {exc}")
         return 1

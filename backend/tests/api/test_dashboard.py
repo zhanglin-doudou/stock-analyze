@@ -352,17 +352,17 @@ async def test_api_084_happy_path_two_sections(
 
     asset = body["asset_overview"]
     assert asset["status"] == "ok"
-    assert asset["market_value"] == "170620.00"
+    assert asset["market_value"] == "170643.00"
     assert asset["cash"] == "-70000.00"
     assert asset["money_fund"] == "0.00"
     assert asset["balance"] == "-70000.00"
-    assert asset["total_assets"] == "100620.00"
-    assert asset["position_pct"] == "169.57%"
-    assert asset["total_profit"] == "620.00"
+    assert asset["total_assets"] == "100643.00"
+    assert asset["position_pct"] == "169.55%"
+    assert asset["total_profit"] == "643.00"
     # 峰值转入成本 = 银证转账累计净额峰值（04-01 转入 100000.00）。
     assert asset["max_invested_cost"] == "100000.00"
-    # 峰值成本收益率 = 当前收益额 / 峰值转入成本 = 620 / 100000。
-    assert asset["max_cost_return_pct"] == "0.62%"
+    # 峰值成本收益率 = 当前收益额 / 峰值转入成本 = 643 / 100000。
+    assert asset["max_cost_return_pct"] == "0.64%"
     assert asset["total_fees"] == "0.00"
     # 账单覆盖区间 = 首末流水日（04-01 银证转入 → 06-30 买入）。
     assert asset["bill_start_date"] == "2026-04-01"
@@ -376,12 +376,12 @@ async def test_api_084_happy_path_two_sections(
     assert asset["annualized_return_pct"] is not None
     assert _PCT_RE.match(asset["annualized_return_pct"])
     # 2026-10-28（Phase 3）：后端补展示串（千分位）；raw 定点串保留兼容。
-    assert asset["market_value_display"] == "170,620.00"
+    assert asset["market_value_display"] == "170,643.00"
     assert asset["cash_display"] == "-70,000.00"
     assert asset["money_fund_display"] == "0.00"
     assert asset["balance_display"] == "-70,000.00"
-    assert asset["total_assets_display"] == "100,620.00"
-    assert asset["total_profit_display"] == "620.00"
+    assert asset["total_assets_display"] == "100,643.00"
+    assert asset["total_profit_display"] == "643.00"
     assert asset["max_invested_cost_display"] == "100,000.00"
     assert asset["total_fees_display"] == "0.00"
     for field in (
@@ -402,10 +402,10 @@ async def test_api_084_happy_path_two_sections(
     assert holding["security_code"] == "600519"
     assert holding["quantity"] == "100.0000"
     assert holding["cost"] == "170000.00"
-    assert holding["market_value"] == "170620.00"
+    assert holding["market_value"] == "170643.00"
     assert holding["weight_pct"] == "1.00000000"
     assert holding["cost_display"] == "170,000.00"
-    assert holding["market_value_display"] == "170,620.00"
+    assert holding["market_value_display"] == "170,643.00"
     assert holding["weight_display"] == "100.00%"
     assert _QTY_RE.match(holding["quantity"])
     assert _RATIO_RE.match(holding["weight_pct"])

@@ -542,6 +542,518 @@
         "title": "AssetPointOut",
         "type": "object"
       },
+      "AttributionCoverageOut": {
+        "additionalProperties": false,
+        "description": "§4.4 覆盖披露：资本 / 段 / 标的三层归因覆盖 + 未归因明细。",
+        "properties": {
+          "base_basis": {
+            "enum": [
+              "market",
+              "mixed"
+            ],
+            "title": "Base Basis",
+            "type": "string"
+          },
+          "capital_attributed": {
+            "title": "Capital Attributed",
+            "type": "string"
+          },
+          "capital_ratio": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Capital Ratio"
+          },
+          "capital_total": {
+            "title": "Capital Total",
+            "type": "string"
+          },
+          "segments_attributed": {
+            "title": "Segments Attributed",
+            "type": "integer"
+          },
+          "segments_total": {
+            "title": "Segments Total",
+            "type": "integer"
+          },
+          "symbols_attributed": {
+            "title": "Symbols Attributed",
+            "type": "integer"
+          },
+          "symbols_total": {
+            "title": "Symbols Total",
+            "type": "integer"
+          },
+          "unattributed": {
+            "items": {
+              "$ref": "#/components/schemas/AttributionUnattributedOut"
+            },
+            "title": "Unattributed",
+            "type": "array"
+          }
+        },
+        "required": [
+          "capital_total",
+          "capital_attributed",
+          "base_basis",
+          "segments_total",
+          "segments_attributed",
+          "symbols_total",
+          "symbols_attributed"
+        ],
+        "title": "AttributionCoverageOut",
+        "type": "object"
+      },
+      "AttributionFactorOut": {
+        "additionalProperties": false,
+        "description": "`factors[]` 单项：固定 5 项、固定顺序 [selection, sector, buy_timing, sell_timing, fee]。",
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount"
+          },
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "conclusion": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Conclusion"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "presentation": {
+            "$ref": "#/components/schemas/AttributionPresentationOut"
+          },
+          "rank": {
+            "title": "Rank",
+            "type": "integer"
+          },
+          "ratio": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ratio"
+          },
+          "share": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Share"
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "rank",
+          "presentation"
+        ],
+        "title": "AttributionFactorOut",
+        "type": "object"
+      },
+      "AttributionLinksOut": {
+        "additionalProperties": false,
+        "properties": {
+          "dashboard": {
+            "title": "Dashboard",
+            "type": "string"
+          },
+          "reports": {
+            "title": "Reports",
+            "type": "string"
+          },
+          "rounds": {
+            "title": "Rounds",
+            "type": "string"
+          },
+          "sectors": {
+            "title": "Sectors",
+            "type": "string"
+          }
+        },
+        "required": [
+          "dashboard",
+          "sectors",
+          "rounds",
+          "reports"
+        ],
+        "title": "AttributionLinksOut",
+        "type": "object"
+      },
+      "AttributionMissingOut": {
+        "additionalProperties": false,
+        "description": "200 降级项（字段路径 + 机读码 + 人话 + 可执行指引；码不是 ErrorCode）。",
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "field": {
+            "title": "Field",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "what_to_do": {
+            "title": "What To Do",
+            "type": "string"
+          }
+        },
+        "required": [
+          "field",
+          "code",
+          "reason",
+          "what_to_do"
+        ],
+        "title": "AttributionMissingOut",
+        "type": "object"
+      },
+      "AttributionOut": {
+        "additionalProperties": false,
+        "description": "五因子归因响应（§6.2；金额 2 位 / 比率 scale=8 定点字符串）。\n\nblocked 缺省语义（§6.3 评审 P0-7 冻结）：`status=\"blocked\"` 时\n`total_pnl/base_capital/residual/residual_ratio/residual_breakdown/coverage`\n整键省略，`factors[].amount/ratio/share` 逐项省略（code/name/rank/conclusion 保留）；\n非 blocked 时 ratio=None 显式输出 null（PNL_NEAR_ZERO，附 `ratio_na_reason`）。",
+        "properties": {
+          "assumptions": {
+            "additionalProperties": true,
+            "title": "Assumptions",
+            "type": "object"
+          },
+          "base_capital": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Capital"
+          },
+          "coverage": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AttributionCoverageOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "data_as_of": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data As Of"
+          },
+          "definition_version": {
+            "title": "Definition Version",
+            "type": "string"
+          },
+          "factors": {
+            "items": {
+              "$ref": "#/components/schemas/AttributionFactorOut"
+            },
+            "title": "Factors",
+            "type": "array"
+          },
+          "inputs_hash": {
+            "title": "Inputs Hash",
+            "type": "string"
+          },
+          "links": {
+            "$ref": "#/components/schemas/AttributionLinksOut"
+          },
+          "missing": {
+            "items": {
+              "$ref": "#/components/schemas/AttributionMissingOut"
+            },
+            "title": "Missing",
+            "type": "array"
+          },
+          "model": {
+            "title": "Model",
+            "type": "string"
+          },
+          "period": {
+            "title": "Period",
+            "type": "string"
+          },
+          "period_end": {
+            "format": "date",
+            "title": "Period End",
+            "type": "string"
+          },
+          "period_start": {
+            "format": "date",
+            "title": "Period Start",
+            "type": "string"
+          },
+          "ratio_basis": {
+            "title": "Ratio Basis",
+            "type": "string"
+          },
+          "ratio_na_reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ratio Na Reason"
+          },
+          "residual": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Residual"
+          },
+          "residual_breakdown": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Residual Breakdown"
+          },
+          "residual_ratio": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Residual Ratio"
+          },
+          "sample": {
+            "$ref": "#/components/schemas/AttributionSampleOut"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "degraded",
+              "blocked"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          },
+          "total_pnl": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Pnl"
+          },
+          "total_pnl_basis": {
+            "title": "Total Pnl Basis",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model",
+          "ratio_basis",
+          "period",
+          "period_start",
+          "period_end",
+          "status",
+          "definition_version",
+          "total_pnl_basis",
+          "sample",
+          "inputs_hash",
+          "links"
+        ],
+        "title": "AttributionOut",
+        "type": "object"
+      },
+      "AttributionPresentationOut": {
+        "additionalProperties": false,
+        "description": "因子呈现三元组：`bar_pct` 由 share 取绝对值派生（前端直接作 CSS 宽度）。",
+        "properties": {
+          "bar_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bar Pct"
+          },
+          "ratio_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ratio Pct"
+          },
+          "tone": {
+            "enum": [
+              "positive",
+              "negative",
+              "flat"
+            ],
+            "title": "Tone",
+            "type": "string"
+          }
+        },
+        "required": [
+          "tone"
+        ],
+        "title": "AttributionPresentationOut",
+        "type": "object"
+      },
+      "AttributionSampleOut": {
+        "additionalProperties": false,
+        "description": "样本规模与结论门禁（insufficient 只封 summary/conclusion，金额照给）。",
+        "properties": {
+          "min_n": {
+            "title": "Min N",
+            "type": "integer"
+          },
+          "n_attributed_segments": {
+            "title": "N Attributed Segments",
+            "type": "integer"
+          },
+          "n_rounds": {
+            "title": "N Rounds",
+            "type": "integer"
+          },
+          "n_segments": {
+            "title": "N Segments",
+            "type": "integer"
+          },
+          "n_symbols": {
+            "title": "N Symbols",
+            "type": "integer"
+          },
+          "sample_status": {
+            "enum": [
+              "ok",
+              "insufficient"
+            ],
+            "title": "Sample Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "n_segments",
+          "n_attributed_segments",
+          "n_rounds",
+          "n_symbols",
+          "min_n",
+          "sample_status"
+        ],
+        "title": "AttributionSampleOut",
+        "type": "object"
+      },
+      "AttributionUnattributedOut": {
+        "additionalProperties": false,
+        "description": "一条未归因标的披露（amount = 其残差桶金额，可为 0）。",
+        "properties": {
+          "amount": {
+            "title": "Amount",
+            "type": "string"
+          },
+          "reason_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Code"
+          },
+          "security_code": {
+            "title": "Security Code",
+            "type": "string"
+          },
+          "symbol_class": {
+            "title": "Symbol Class",
+            "type": "string"
+          }
+        },
+        "required": [
+          "security_code",
+          "symbol_class",
+          "amount"
+        ],
+        "title": "AttributionUnattributedOut",
+        "type": "object"
+      },
       "AuthOut": {
         "description": "注册/登录统一返回体（API-001 201 / API-002 200）。",
         "properties": {
@@ -7871,6 +8383,381 @@
           "MULTIPLE_CREDENTIALS",
           "ADMIN_CANNOT_READ_TRADES",
           "UNKNOWN_QUERY_PARAM",
+          "VALIDATION_ERROR"
+        ],
+        "x-idempotent": false,
+        "x-required-scope": "read"
+      }
+    },
+    "/api/v1/attribution": {
+      "get": {
+        "description": "API-036：五因子归因（FR-R7；数据不可用 → 200 blocked/degraded + missing[]）。",
+        "operationId": "getAttribution",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "period",
+            "required": true,
+            "schema": {
+              "title": "Period",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "model",
+            "required": false,
+            "schema": {
+              "default": "five_factor",
+              "enum": [
+                "five_factor",
+                "brinson_industry"
+              ],
+              "title": "Model",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "benchmark",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Benchmark"
+            }
+          },
+          {
+            "in": "query",
+            "name": "classification_lookahead",
+            "required": false,
+            "schema": {
+              "default": "deny",
+              "enum": [
+                "deny",
+                "allow"
+              ],
+              "title": "Classification Lookahead",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Accept-Language",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Accept-Language"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-api-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "assumptions": {
+                    "adjust": "none",
+                    "attributed_universe": "a_share_equity",
+                    "beginning_value_source": "prev_total",
+                    "benchmark_id": "hs300_tr",
+                    "benchmark_total_return_proxy": "index_close",
+                    "board_bar_as_of": "2026-06-30",
+                    "cashflow_basis": "transfer_rows",
+                    "classification_as_of": "2026-06-30",
+                    "classification_lookahead": false,
+                    "classification_version": "THS",
+                    "corporate_action_policy": "exclude_symbol",
+                    "data_sources": {
+                      "assets": "2026-06-30",
+                      "market": "2026-06-30",
+                      "sector": "2026-06-30"
+                    },
+                    "dividend_basis": "cash_ledger_rows_net_after_tax",
+                    "fee_basis": "commission+stamp_tax+other_fee",
+                    "ratio_basis": "amount/total_pnl",
+                    "rounding": "scaled_int_half_up_1e-8; residual_plug",
+                    "sector_basis": "ths_industry_index",
+                    "total_pnl_basis": "asset_daily_mtm"
+                  },
+                  "base_capital": "5000.00",
+                  "coverage": {
+                    "base_basis": "market",
+                    "capital_attributed": "5000.00",
+                    "capital_ratio": "1.00000000",
+                    "capital_total": "5000.00",
+                    "segments_attributed": 7,
+                    "segments_total": 7,
+                    "symbols_attributed": 1,
+                    "symbols_total": 1,
+                    "unattributed": []
+                  },
+                  "data_as_of": "2026-06-30",
+                  "definition_version": "1.0",
+                  "factors": [
+                    {
+                      "amount": "600.00",
+                      "code": "selection",
+                      "conclusion": "贡献 600.00 元",
+                      "name": "选股",
+                      "presentation": {
+                        "bar_pct": "60.0%",
+                        "ratio_pct": "60.0%",
+                        "tone": "positive"
+                      },
+                      "rank": 1,
+                      "ratio": "0.60000000",
+                      "share": "0.60000000"
+                    },
+                    {
+                      "amount": "250.00",
+                      "code": "sector",
+                      "conclusion": "贡献 250.00 元",
+                      "name": "板块配置",
+                      "presentation": {
+                        "bar_pct": "25.0%",
+                        "ratio_pct": "25.0%",
+                        "tone": "positive"
+                      },
+                      "rank": 2,
+                      "ratio": "0.25000000",
+                      "share": "0.25000000"
+                    },
+                    {
+                      "amount": "100.00",
+                      "code": "buy_timing",
+                      "conclusion": "贡献 100.00 元",
+                      "name": "买点",
+                      "presentation": {
+                        "bar_pct": "10.0%",
+                        "ratio_pct": "10.0%",
+                        "tone": "positive"
+                      },
+                      "rank": 3,
+                      "ratio": "0.10000000",
+                      "share": "0.10000000"
+                    },
+                    {
+                      "amount": "80.00",
+                      "code": "sell_timing",
+                      "conclusion": "贡献 80.00 元",
+                      "name": "卖点",
+                      "presentation": {
+                        "bar_pct": "8.0%",
+                        "ratio_pct": "8.0%",
+                        "tone": "positive"
+                      },
+                      "rank": 4,
+                      "ratio": "0.08000000",
+                      "share": "0.08000000"
+                    },
+                    {
+                      "amount": "-30.00",
+                      "code": "fee",
+                      "conclusion": "影响 -30.00 元",
+                      "name": "费用",
+                      "presentation": {
+                        "bar_pct": "3.0%",
+                        "ratio_pct": "-3.0%",
+                        "tone": "negative"
+                      },
+                      "rank": 5,
+                      "ratio": "-0.03000000",
+                      "share": "-0.03000000"
+                    }
+                  ],
+                  "inputs_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+                  "links": {
+                    "dashboard": "/dashboard",
+                    "reports": "/reports",
+                    "rounds": "/rounds",
+                    "sectors": "/sectors"
+                  },
+                  "missing": [],
+                  "model": "five_factor",
+                  "period": "2026-06",
+                  "period_end": "2026-06-30",
+                  "period_start": "2026-06-01",
+                  "ratio_basis": "amount/total_pnl",
+                  "ratio_na_reason": null,
+                  "residual": "0.00",
+                  "residual_breakdown": {
+                    "corporate_action_pnl": "0.00",
+                    "dividend_without_position": "0.00",
+                    "interest": "0.00",
+                    "other_cashflow": "0.00",
+                    "unattributed_price_pnl": "0.00",
+                    "valuation_gap": "0.00"
+                  },
+                  "residual_ratio": "0.00000000",
+                  "sample": {
+                    "min_n": 10,
+                    "n_attributed_segments": 7,
+                    "n_rounds": 1,
+                    "n_segments": 7,
+                    "n_symbols": 1,
+                    "sample_status": "insufficient"
+                  },
+                  "status": "ok",
+                  "total_pnl": "1000.00",
+                  "total_pnl_basis": "asset_daily_mtm"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/AttributionOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "UNKNOWN_QUERY_PARAM",
+                  "detail": "请求包含未知参数。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 400,
+                  "title": "UNKNOWN_QUERY_PARAM",
+                  "type": "https://stock-analyze.local/errors/UNKNOWN_QUERY_PARAM",
+                  "user_message": "请求包含未知参数。",
+                  "what_to_do": "移除未知参数后重试。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "请求参数错误"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "TOKEN_EXPIRED",
+                  "detail": "访问凭证已过期。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 401,
+                  "title": "TOKEN_EXPIRED",
+                  "type": "https://stock-analyze.local/errors/TOKEN_EXPIRED",
+                  "user_message": "访问凭证已过期。",
+                  "what_to_do": "用 refresh_token 换新 access，或重建 PAT。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "未认证或凭证无效"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "ADMIN_CANNOT_READ_TRADES",
+                  "detail": "管理员账号不能查看交易明细。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 403,
+                  "title": "ADMIN_CANNOT_READ_TRADES",
+                  "type": "https://stock-analyze.local/errors/ADMIN_CANNOT_READ_TRADES",
+                  "user_message": "管理员账号不能查看交易明细。",
+                  "what_to_do": "用数据所有者账号访问。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "权限不足"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "example": {
+                  "code": "INVALID_PERIOD",
+                  "detail": "时间区间不合法。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 422,
+                  "title": "INVALID_PERIOD",
+                  "type": "https://stock-analyze.local/errors/INVALID_PERIOD",
+                  "user_message": "时间区间不合法。",
+                  "what_to_do": "用 YYYY-MM 或 from/to（半开区间）。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Attribution Endpoint",
+        "tags": [
+          "attribution"
+        ],
+        "x-async": false,
+        "x-error-codes": [
+          "TOKEN_EXPIRED",
+          "TOKEN_REVOKED",
+          "MULTIPLE_CREDENTIALS",
+          "ADMIN_CANNOT_READ_TRADES",
+          "UNKNOWN_QUERY_PARAM",
+          "INVALID_PERIOD",
+          "MODEL_NOT_AVAILABLE",
+          "UNKNOWN_BENCHMARK",
           "VALIDATION_ERROR"
         ],
         "x-idempotent": false,

@@ -15,7 +15,7 @@ import json
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Any
 
@@ -24,7 +24,7 @@ from bs4 import BeautifulSoup
 from sqlalchemy import func, select
 from stock_contracts.clock import Clock
 from stock_core.sector import SectorNode, resolve_level
-from stock_core.values import Ratio
+from stock_core.values import Price, Ratio
 
 from stock_platform.config import Settings
 from stock_platform.market_live import SessionFactory
@@ -34,6 +34,10 @@ from stock_platform.market_models import (
     BenchmarkMember,
     Sector,
     SectorMember,
+    SectorPullRange,
+)
+from stock_platform.market_models import (
+    SectorBar as SectorBarRow,
 )
 from stock_platform.obs import get_logger
 from stock_platform.ports import (
@@ -279,6 +283,72 @@ def _weight_units(raw: object) -> int:
 
 def _records(frame: Any) -> list[dict[str, Any]]:
     return [dict(item) for item in frame.to_dict("records")]
+
+
+def _bar_date(raw: object, sector_code: str) -> date:
+    """THS 指数「日期」列 → date（str / datetime / pandas Timestamp 均可）。"""
+    if isinstance(raw, datetime):
+        return raw.date()
+    if isinstance(raw, date):
+        return raw
+    try:
+        return date.fromisoformat(str(raw or "").strip()[:10])
+    except ValueError as exc:
+        raise SectorValidationError(f"行业指数 {sector_code} 日期无法解析: {raw!r}") from exc
+
+
+def _bar_close(raw: object, sector_code: str, trade_date: date) -> Decimal:
+    """THS 指数「收盘价」（float，如 9048.101）→ Decimal（经 str 取最短十进制表示）。"""
+    text = str(raw).strip() if raw is not None else ""
+    if not text:
+        raise SectorValidationError(f"行业指数 {sector_code} {trade_date} 收盘价为空")
+    try:
+        value = Decimal(text)
+    except InvalidOperation as exc:
+        raise SectorValidationError(
+            f"行业指数 {sector_code} {trade_date} 收盘价无法解析: {raw!r}"
+        ) from exc
+    if value <= 0:
+        raise SectorValidationError(f"行业指数 {sector_code} {trade_date} 收盘价非正数: {raw!r}")
+    return value
+
+
+def _board_bar_records(
+    taxonomy: str, sector_code: str, records: Sequence[dict[str, Any]]
+) -> list[SectorBar]:
+    """THS 行业指数日 K 行 → SectorBar（close scale=6 / return scale=8）。
+
+    窗口首行无前收盘 → return 0；若日后回补更早历史，重拉会整体重算覆盖。
+    """
+    out: list[SectorBar] = []
+    prev_close: Decimal | None = None
+    for rec in records:
+        trade_date = _bar_date(rec.get("日期"), sector_code)
+        close = _bar_close(rec.get("收盘价"), sector_code, trade_date)
+        daily = (
+            Ratio.zero()
+            if prev_close is None
+            else Ratio.from_decimal(close / prev_close - Decimal("1"))
+        )
+        out.append(
+            SectorBar(
+                taxonomy=taxonomy,
+                sector_code=sector_code,
+                trade_date=trade_date,
+                close_units=Price.from_decimal(close).units,
+                return_units=daily.units,
+            )
+        )
+        prev_close = close
+    return out
+
+
+def _bars_checksum(bars: Sequence[SectorBar]) -> str:
+    payload = sorted(
+        (bar.trade_date.isoformat(), bar.close_units, bar.return_units) for bar in bars
+    )
+    raw = json.dumps(payload, separators=(",", ":"))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
 class AkshareSectorSource:
@@ -625,8 +695,57 @@ class AkshareSectorSource:
         start: date,
         end: date,
     ) -> Sequence[SectorBar]:
-        del sector_keys, start, end
-        return ()
+        """按目录 name 拉取行业指数日线（同步/排障用；概念本期不回填，设计 §4.2-1）。
+
+        单板块失败跳过不阻断（与成分同步同策略）；目录缺失的代码忽略，
+        由读路径按覆盖判定降级。
+        """
+        codes = [code for taxonomy, code in sector_keys if taxonomy == TAXONOMY_INDUSTRY]
+        if not codes:
+            return ()
+        catalog = await self._fetch_industry_catalog()
+        names = {row.sector_code: row.name for row in catalog}
+        boards = [(code, names[code]) for code in codes if code in names]
+        bars, _skipped = await self._fetch_board_bars(boards, start=start, end=end)
+        return bars
+
+    async def _fetch_board_bars(
+        self, boards: Sequence[tuple[str, str]], *, start: date, end: date
+    ) -> tuple[tuple[SectorBar, ...], list[str]]:
+        """按 (sector_code, name) 拉取行业指数日线；单板块失败跳过（与成分同步同策略）。
+
+        返回 (bars, skipped_codes)；跳过板块由读路径按覆盖缺口自然重试。
+        """
+        interval = self._settings.sector_ths_call_interval_seconds
+        start_text = start.strftime("%Y%m%d")
+        end_text = end.strftime("%Y%m%d")
+        bars: list[SectorBar] = []
+        skipped: list[str] = []
+        for sector_code, name in boards:
+            try:
+                frame = await self._call(
+                    self._ak.stock_board_industry_index_ths,
+                    name,
+                    start_text,
+                    end_text,
+                    interval=interval,
+                )
+            except Exception as exc:
+                skipped.append(sector_code)
+                log.warning(
+                    "industry bars fetch skipped",
+                    sector_code=sector_code,
+                    error=str(exc)[:120],
+                )
+                continue
+            bars.extend(_board_bar_records(TAXONOMY_INDUSTRY, sector_code, _records(frame)))
+        if skipped:
+            log.warning(
+                "industry bars fetch done",
+                ok=len(boards) - len(skipped),
+                skipped=len(skipped),
+            )
+        return tuple(bars), skipped
 
     async def get_benchmark_members(
         self, benchmark_id: str, *, as_of: date | None = None
@@ -652,6 +771,7 @@ class AkshareSectorSource:
         today: date,
         dry_run: bool = False,
         taxonomies: Sequence[str] | None = None,
+        bars_start: date | None = None,
     ) -> SyncReport:
         wanted = _wanted_taxonomies(taxonomies)
         if dry_run:
@@ -677,12 +797,39 @@ class AkshareSectorSource:
         except Exception as exc:
             await self._record_failure(today=today, detail=f"persist failed: {exc}")
             return SyncReport(as_of=today, status="failed", message=str(exc))
+
+        status = "succeeded" if written else "skipped"
+        message = snapshot.checksum if written else "checksum unchanged（no-op）"
+        if bars_start is not None and TAXONOMY_INDUSTRY in wanted:
+            # 板块日线回填（--start 生效，设计 §4.2-3）：只回填行业（概念 M1 不用）。
+            # 与目录/成分相互独立：日线落盘失败不影响已成功提交的目录快照，下次重跑幂等续传。
+            boards = [
+                (row.sector_code, row.name)
+                for row in snapshot.catalog
+                if row.taxonomy == TAXONOMY_INDUSTRY
+            ]
+            try:
+                bars, skipped = await self._fetch_board_bars(boards, start=bars_start, end=today)
+                bar_as_of = await self._persist_bars(
+                    bars, fetch_start=bars_start, requested_end=today
+                )
+            except Exception as exc:
+                await self._record_failure(today=today, detail=f"persist bars failed: {exc}")
+                return SyncReport(as_of=today, status="failed", message=f"板块日线落盘失败: {exc}")
+            coverage = f"，bar_as_of={bar_as_of.isoformat()}" if bar_as_of else "（无数据落盘）"
+            message += (
+                f"；板块日线 {len(bars)} 根/{len({bar.sector_code for bar in bars})} 板块{coverage}"
+            )
+            if skipped:
+                message += f"，单板块失败跳过 {len(skipped)} 个"
+            if bars:
+                status = "succeeded"
         return SyncReport(
             as_of=today,
-            status="succeeded" if written else "skipped",
+            status=status,
             entity_count=len(snapshot.catalog),
             member_count=sum(len(items) for items in snapshot.members.values()),
-            message=snapshot.checksum if written else "checksum unchanged（no-op）",
+            message=message,
         )
 
     async def _build_snapshot(self, wanted: tuple[str, ...]) -> _Snapshot:
@@ -824,8 +971,99 @@ class AkshareSectorSource:
                 source=snapshot.concept_source,
                 checksum=snapshot.checksum,
                 pulled_at=pulled_at,
+                # 目录同步不改写日线新鲜度（bar_as_of 只由 _persist_bars 推进）。
+                bar_as_of=state.bar_as_of if state is not None else None,
             )
         return True
+
+    async def _persist_bars(
+        self,
+        bars: Sequence[SectorBar],
+        *,
+        fetch_start: date,
+        requested_end: date,
+    ) -> date | None:
+        """落盘行业指数日线 + 覆盖元数据（SectorPullRange 语义对齐 ``market.pull_range``）。
+
+        幂等：bar 主键 ``(taxonomy, sector_code, trade_date)`` merge upsert；
+        pull_range 同 ``(fetch_start, range_end)`` 刷新、区间推进各自成新行（并集）；
+        ``bar_as_of`` 只前进不回退。返回最新 bar 日期（无数据返回 ``None``）。
+        """
+        if not bars:
+            return None
+        pulled_at = self._clock.now()
+        by_board: dict[tuple[str, str], list[SectorBar]] = {}
+        for bar in bars:
+            by_board.setdefault((bar.taxonomy, bar.sector_code), []).append(bar)
+        async with self._session_factory(begin=True) as session:
+            repo = SectorRepository(session)
+            state = await repo.sync_state(dataset_key=DATASET_KEY)
+            max_bar_date: date | None = None
+            for (taxonomy, sector_code), rows in sorted(by_board.items()):
+                data_end = max(row.trade_date for row in rows)
+                max_bar_date = data_end if max_bar_date is None else max(max_bar_date, data_end)
+                # 只覆盖到上游实际数据；区间推进后旧行保留（并集），尾部由下次同步刷新。
+                range_end = max(fetch_start, min(data_end, requested_end))
+                await repo.upsert_bars(
+                    [
+                        SectorBarRow(
+                            taxonomy=row.taxonomy,
+                            sector_code=row.sector_code,
+                            trade_date=row.trade_date,
+                            close_units=row.close_units,
+                            return_units=row.return_units,
+                            source=SOURCE_THS,
+                            pulled_at=pulled_at,
+                        )
+                        for row in rows
+                    ]
+                )
+                await session.merge(
+                    SectorPullRange(
+                        id=hashlib.sha256(
+                            f"{taxonomy}|{sector_code}|"
+                            f"{fetch_start.isoformat()}|{range_end.isoformat()}".encode()
+                        ).hexdigest()[:32],
+                        taxonomy=taxonomy,
+                        sector_code=sector_code,
+                        range_start=fetch_start,
+                        range_end=range_end,
+                        data_end=data_end,
+                        requested_end=requested_end,
+                        complete=range_end >= requested_end,
+                        bar_count=len(rows),
+                        source=SOURCE_THS,
+                        checksum=_bars_checksum(rows),
+                        pulled_at=pulled_at,
+                    )
+                )
+            bar_as_of: date | None = None
+            if max_bar_date is not None:
+                bar_as_of = (
+                    max(max_bar_date, state.bar_as_of)
+                    if state is not None and state.bar_as_of is not None
+                    else max_bar_date
+                )
+            if state is not None:
+                # 只推进 bar_as_of，其余字段原样保留（含 status/as_of/checksum）。
+                await repo.upsert_sync_state(
+                    dataset_key=DATASET_KEY,
+                    status=state.status,
+                    as_of=state.as_of,
+                    snapshot_id=state.snapshot_id,
+                    catalog_as_of=state.catalog_as_of,
+                    membership_as_of=state.membership_as_of,
+                    weight_as_of=state.weight_as_of,
+                    classification_version=state.classification_version,
+                    entity_count=state.entity_count,
+                    member_count=state.member_count,
+                    source=state.source,
+                    checksum=state.checksum,
+                    pulled_at=pulled_at,
+                    error_detail=state.error_detail,
+                    bar_as_of=bar_as_of,
+                )
+        return bar_as_of
 
     async def _record_failure(self, *, today: date, detail: str) -> None:
         """失败只写状态（旧 as_of/checksum 不推进），供读路径提示 SECTOR_SYNC_FAILED。"""

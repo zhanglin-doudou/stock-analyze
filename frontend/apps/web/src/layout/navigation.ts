@@ -39,7 +39,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { to: "/nav", label: "净值与收益", icon: "nav" },
       { to: "/metrics", label: "指标", icon: "metrics" },
       { to: "/sectors", label: "板块", icon: "sectors" },
-      { to: "/attribution", label: "归因", icon: "attribution", placeholder: true },
+      { to: "/attribution", label: "归因", icon: "attribution" },
     ],
   },
   {

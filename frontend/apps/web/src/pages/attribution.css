@@ -1,0 +1,143 @@
+/*
+ * 归因页样式（08f）：只消费 styles/tokens.css；条形宽度用后端 `presentation.bar_pct`。
+ */
+
+.attr-page {
+  color: var(--text);
+  font-size: var(--fs-body);
+}
+
+.attr-panel {
+  margin-bottom: var(--s5);
+}
+
+.attr-panel-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s3);
+  margin-bottom: var(--s4);
+}
+
+.attr-panel-head h2 {
+  margin: 0;
+  font-family: var(--font-display);
+  font-size: var(--fs-h3);
+  font-weight: var(--fw-medium);
+}
+
+.attr-summary {
+  margin: 0 0 var(--s4);
+  padding: var(--s3) var(--s4);
+  border-left: 2px solid var(--accent);
+  background: var(--surface-2, var(--surface));
+  line-height: var(--lh-normal);
+}
+
+.attr-factors {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.attr-factor {
+  display: grid;
+  grid-template-columns: 28px 1fr;
+  gap: var(--s3);
+  padding: var(--s3) 0;
+  border-top: 1px solid var(--line);
+}
+
+.attr-rank {
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  text-align: right;
+}
+
+.attr-factor-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--s3);
+}
+
+.attr-factor-head strong {
+  font-weight: var(--fw-medium);
+}
+
+.attr-factor-amount {
+  margin-left: auto;
+}
+
+/* 宽度直接复用后端绝对百分比串；不做数值解析/换算 */
+.attr-bar {
+  margin-top: 6px;
+  height: 4px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.attr-bar > i {
+  display: block;
+  height: 100%;
+  width: var(--w);
+  max-width: 100%;
+  background: var(--text-2);
+}
+
+.attr-bar > i[data-tone="positive"] {
+  background: var(--up);
+}
+
+.attr-bar > i[data-tone="negative"] {
+  background: var(--down);
+}
+
+.attr-factor-conclusion {
+  margin: 6px 0 0;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
+
+.attr-kpis {
+  margin-bottom: var(--s4);
+}
+
+.attr-buckets,
+.attr-unattributed,
+.attr-missing {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.attr-buckets li,
+.attr-unattributed li,
+.attr-missing li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--s3);
+  padding: var(--s2) 0;
+  border-top: 1px solid var(--line);
+}
+
+.attr-missing li strong {
+  flex: 1 1 320px;
+  font-weight: var(--fw-medium);
+}
+
+.attr-what-to-do {
+  flex: 1 1 100%;
+  font-size: var(--fs-sm);
+  color: var(--muted);
+}
+
+.attr-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s4);
+  margin-top: var(--s4);
+  font-size: var(--fs-sm);
+}

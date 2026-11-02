@@ -5,7 +5,7 @@
 ## 0. 当前阶段与固定本地账号（2026-11-02）
 
 - **一期**：已完成；**二期核心**（回合、净值、资产、18 指标、Dashboard、API-083 月度编排、板块数据 API-087/088 + `/sectors`）已落地/验收。
-- **Period2-08 五因子归因**：**设计已人工批准（2026-11-02）**——[设计 v1.0](docs/architecture/2026-11-02-five-factor-attribution.md) / [交叉评审](docs/reviews/2026-11-02-DevDesign-Review-five-factor-attribution.md)；**实现未开始**，前置 08a（THS 行业指数日线落 `market.sector_bar` + replay 日线）。
+- **Period2-08 五因子归因**：**08a~08g 已落地并验收（2026-11-02）**——[设计 v1.0](docs/architecture/2026-11-02-five-factor-attribution.md) / [交叉评审](docs/reviews/2026-11-02-DevDesign-Review-five-factor-attribution.md)；含 `GET /attribution`（API-036）与 `/attribution` 页面。**月报同源接入属 Period2-09（09b），未开始**（设计 §8.2 L715-720）。
 - **其余二期项**（月报/导出/设置增强/报告页/verify-p2）暂停，未完成功能只用占位入口，禁止伪造数据/下载。
 - **固定本地测试 / 体验账号**：`1234@dev.com` / `1234`（仅本地；由 `make seed-tenants` / `make seed-demo` 创建）。
   - 隔离对照：`a@demo.example.com` / `b@demo.example.com`，管理员：`admin@demo.example.com`；本地 seed 口令统一为 `1234`。

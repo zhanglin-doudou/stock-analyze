@@ -6,7 +6,7 @@
 > 事实基线（2026-10-28）：
 > - 前端**没有** `Dashboard` 页面；`/` 目前重定向 `/trades`（`frontend/apps/web/src/router.tsx`）。
 > - 后端已有 `GET /nav`、`GET /metrics`、`GET /rounds`、`GET /reconciliation/bridge`、`GET /assets`、`POST /jobs/rebuild-period`（API-083）；**没有** Dashboard 聚合端点。
-> - Period2-08（归因）、Period2-09（月报）、Period2-10（导出）、Period2-11（设置）、Period2-13（报告/导出页）、Period2-14/15（验收/零口径门禁）未完成；`make rebuild`、`make demo-broken`、`make verify-p2` 不存在。
+> - Period2-08（归因，08a~08f 已于 2026-11-02 落地）、Period2-09（月报）、Period2-10（导出）、Period2-11（设置）、Period2-13（报告/导出页）、Period2-14/15（验收/零口径门禁）未完成；`make rebuild`、`make demo-broken`、`make verify-p2` 不存在。
 > - 因此本设计同时交付：**Dashboard 页面 + 验收剧本修订 + 未完成功能的前端入口预留 + 缺失内容清单**；剩余二期任务不实现。
 
 ---
@@ -432,7 +432,7 @@ def max_drawdown_window(...) -> DrawdownWindow:
 |---|---|---|---|---|
 | 生成本月复盘 | Dashboard 页头按钮 → `/reports` | 占位页 | Period2-09/13 | 点击进入占位页，显示"报告功能暂停"，无假 HTML 下载 |
 | 导出数据 | Dashboard 页头按钮 → `/exports` | 占位页 | Period2-10/13 | 同上 |
-| 归因 | 历史概览"归因"子块 → `/attribution` | 占位页 | Period2-08 | 显示"归因暂未上线"，不显示因子数值 |
+| 归因 | 历史概览"归因"子块 → `/attribution` | 实页（08f，2026-11-02） | Period2-08（已完成） | 渲染后端因子/残差；blocked 不显示金额；无前端口径换算 |
 | 基准/隐私设置 | Settings 页新增"偏好设置（建设中）"卡片 | 占位 | Period2-11 | 卡片存在，无假保存 |
 | 月报列表/下载 | `/reports` 占位页可含未来入口说明 | 占位 | Period2-09 | 无 404/白屏 |
 | 导出任务/下载 | `/exports` 占位页 | 占位 | Period2-10 | 无 404/白屏 |
@@ -541,13 +541,13 @@ printf 'SKIP: %s\n' "${SKIPS[@]}"
 ## 7. 缺失内容清单（二期剩余；评审 P0-6 修订）
 
 > 每项：是否阻塞本任务验收 / 本次是否修 / 入口预留 / 依据。**"暂停"不等于"验收通过"**；未完成功能一律不可显示假数字/假下载。>
-> **2026-11-02 状态更新**：Period2-08 五因子归因**设计已人工批准**（[设计 v1.0](2026-11-02-five-factor-attribution.md) / [交叉评审](../reviews/2026-11-02-DevDesign-Review-five-factor-attribution.md)），**实现未开始**；本清单第 1 项仍为「未实现」、占位状态不变，归因实现与验收按 Period2-08 任务表另行执行。
+> **2026-11-02 状态更新（08g）**：Period2-08 五因子归因**08a~08f 已实现并验收**（`GET /attribution`、`stock_core/attribution`、`/attribution` 页面）；月报 §8.2 同源接入属 **Period2-09（09b）**，仍未开始（依据归因设计 §8.2 L715-720、§9 L735）。本清单第 1 项改为「已实现」、第 15 项占位已替换为实页。
 
 ### 7.1 后端端点/口径
 
 | # | 缺失项 | 状态/证据 | 阻塞本任务？ | 本次修？ | 入口/占位 | 依据 |
 |---|---|---|---|---|---|---|
-| 1 | API-036 `/attribution` + 五因子 | 未实现（设计已批准 2026-11-02，实现未开始） | 否（归因区块可 unavailable） | 否 | `/attribution` 占位 + 历史子块说明 | [Period2-08 设计](2026-11-02-five-factor-attribution.md)；08a 前置 |
+| 1 | API-036 `/attribution` + 五因子 | **已实现（08a~08f，2026-11-02）**；月报同源接入属 09b | 否 | 否（本任务外） | `/attribution` 实页；历史子块链接可用 | [Period2-08 设计](2026-11-02-five-factor-attribution.md) |
 | 2 | API-039~042 报告 + report 表/异步/HTML | 未实现 | 否（入口占位） | 否 | `/reports` 占位；Dashboard 按钮 | Period2-09 暂停 |
 | 3 | API-055~057 设置（基准/隐私） | 仅 PAT 设置 | 否（基准缺失已入第 11 项） | 否 | Settings "偏好设置（建设中）" | Period2-11 暂停 |
 | 4 | API-058 行为规则阈值 | 未实现；**属三期**（不是 055~057） | 否 | 否 | 不做入口 | DEV-PLAN A.1：Period3-03 |
@@ -566,7 +566,7 @@ printf 'SKIP: %s\n' "${SKIPS[@]}"
 |---|---|---|---|
 | 13 | Period2-13 报告列表/预览/下载 | 否 | `/reports` 占位（`data-dependency="Period2-09/13"`） |
 | 14 | Period2-13 导出任务/下载 | 否 | `/exports` 占位（`Period2-10/13`） |
-| 15 | 归因页 | 否 | `/attribution` 占位（`Period2-08`） |
+| 15 | 归因页 | **是（08f，2026-11-02）** | `/attribution` 实页（正常/degraded/blocked/空账户态） |
 | 16 | 设置基准/隐私 | 否 | Settings 卡片占位（`Period2-11`） |
 | 17 | 对账页/API-038 选股 | 否 | 不做入口（本期明确） |
 | 18 | 趋势/日志/对话/审计/分享/通知 | 否 | 不做入口（P3） |

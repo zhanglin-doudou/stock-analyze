@@ -352,7 +352,7 @@ backend/tests/fixtures/
 ├── tenants/{a,b,admin}.yaml         # A=主租户 …000a；B=诱饵租户；admin=无业务数据
 ├── bills/a/<NN>_<scene>.{xlsx,csv}  # 28+2 条，owner=A
 ├── market/mkt-replay-cn_daily-20260101-v1/{meta.json,calendar.parquet,daily_hfq.parquet,factors.parquet}
-├── expected/{rounds,nav,metrics,attribution}/a/<NN>_*.{yaml,json}
+├── expected/{rounds,nav,metrics}/a/<NN>_*.{yaml,json}   # 归因黄金向量为内联单测，见 §10 覆盖范围
 └── private/                         # .gitignore，真实脱敏账单仅本地
 ```
 
@@ -487,8 +487,8 @@ backend/tests/fixtures/
 
 | 项 | 约定 |
 |---|---|
-| 范围 | `backend/packages/core/src/core/`（`fifo.py/nav.py/metrics/*/attribution.py/values/*`）+ **v2 新增** `platform/rls.py`（RLS 谓词构造）、`platform/security/policy.py`（scope 判定） |
-| 门槛 | 全局 **≥80%**；`values/decimal_math.py`、`metrics/tolerance.py` ≥95%；`fifo.py`/`nav.py` ≥90%；`attribution.py` ≥85%；**`rls.py`/`policy.py` 100%（安全代码不允许等价变异体豁免）** |
+| 范围 | `backend/packages/core/src/stock_core/`（`fifo.py/nav.py/metrics/*/attribution/*`、`values/*`）+ **v2 新增** `platform/rls.py`（RLS 谓词构造）、`platform/security/policy.py`（scope 判定） |
+| 门槛 | 全局 **≥80%**；`values/decimal_math.py`、`metrics/tolerance.py` ≥95%；`fifo.py`/`nav.py` ≥90%；`stock_core/attribution/*` ≥85%（黄金向量内联于 `backend/tests/unit/core/test_attribution.py` 与 `backend/tests/unit/review/test_attribution_assembly.py`，不进 `tests/golden/` loader）；**`rls.py`/`policy.py` 100%（安全代码不允许等价变异体豁免）** |
 | 运行 | nightly 全量（≤40min）；PR 只跑 `git diff` 涉及文件（≤10min） |
 | 失败 | score 下降 >2pp 或跌破门槛 → issue `quality-gate`，不阻断当次合并但**阻断 release** |
 

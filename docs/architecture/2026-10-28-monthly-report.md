@@ -564,8 +564,9 @@ pending ──job lease──► running ──success──► succeeded(blocke
 - 图表：v1 可选内联 SVG 净值曲线（纯函数生成）；没有则省略，不引 JS。
 
 ### 8.2 归因（09a 占位 / 09b 接入）
+> **2026-11-02 状态**：08f 已交付 `GET /attribution` 与 `/attribution` 页面，但**本节的月报同源接入未实现，归属 09b**（归因设计 §8.2 L715-720、§9 L735：「09b 同源接入点」）。09a 仍按占位交付。
 - 09a：区块渲染"本期归因暂不可用（五因子模块尚未上线）" + 说明；不显示任何因子金额/占比；`section.status=unavailable`。
-- 09b（08 完成后）：调用 `GET /attribution` 同源应用函数；展示五因子金额/占比/排序 + residual；不重算。
+- 09b：调用 `build_attribution()`（同源应用函数，不走 HTTP）；展示五因子金额/占比/排序 + residual；不重算。
 - 若归因 blocked/stale → 区块降级，报告仍可读；blocked 报告不展示归因数值。
 
 ### 8.3 最赚/最亏回合

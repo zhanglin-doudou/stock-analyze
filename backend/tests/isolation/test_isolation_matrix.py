@@ -256,6 +256,8 @@ ADMIN_FORBIDDEN: list[tuple[str, str]] = [
     # 2026-10-31（API-087/088）：板块概览与目录（公共目录也不给 admin）
     ("get", "/sectors/overview"),
     ("get", "/sectors"),
+    # 2026-11-02（API-036）：五因子归因（身份越权 → 403）
+    ("get", "/attribution"),
 ]
 
 #: 列表型端点：A/B 各自造数据，B 的列表不得包含 A 的行（跨租户列表隔离）
@@ -332,6 +334,8 @@ UNAUTHENTICATED_MATRIX: list[tuple[str, str]] = [
     # 2026-10-31（API-087/088 板块概览/目录）
     ("get", "/sectors/overview"),
     ("get", "/sectors"),
+    # 2026-11-02（API-036 五因子归因）
+    ("get", "/attribution"),
 ]
 
 #: 路径参数占位值（只用于越权/401 用例；资源不存在时恰好也走 404 分支）。
@@ -356,6 +360,8 @@ _REQUIRED_QUERY: dict[str, str] = {
     "/metrics/{metric_id}": "?period=2026-06",
     "/metrics/{metric_id}/explain": "?period=2026-06",
     "/metrics/{metric_id}/drilldown": "?period=2026-06",
+    # 2026-11-02（API-036）：period 必填，缺了会 422 而非 401/403
+    "/attribution": "?period=2026-06",
 }
 
 
