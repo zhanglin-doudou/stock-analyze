@@ -42,6 +42,21 @@ function labelFor(map: Record<string, string>, code: string | null | undefined):
   return map[code] ?? `未识别项（${code}）`;
 }
 
+/** 纯字符串加千分位与“元”，不解析数值（零口径，U-03）。 */
+function formatMoney(value: string | null | undefined): string {
+  if (value == null || value === '') return '—';
+  const negative = value.startsWith('-');
+  const body = negative ? value.slice(1) : value;
+  const [integer, decimal] = body.split('.');
+  const grouped = integer.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return `${negative ? '-' : ''}${grouped}${decimal != null ? `.${decimal}` : ''} 元`;
+}
+
+/** 百分比只取后端 `*_pct` 串；缺失时显示占位符（U-03）。 */
+function formatPct(value: string | null | undefined): string {
+  return value == null || value === '' ? '—' : value;
+}
+
 function StatusBadge({ status }: { status: string }): ReactElement {
   return (
     <span className={`dash-badge is-${status}`} data-testid="attr-status-badge">
@@ -62,10 +77,14 @@ function FactorRow({ factor }: { factor: AttributionFactor }): ReactElement {
         <div className="attr-factor-head">
           <strong>{factor.name}</strong>
           <span className="attr-factor-amount num">
-            {displayValue(factor.amount)}
+            {formatMoney(factor.amount)}
           </span>
-          <span className="muted num">{displayValue(factor.ratio)}</span>
-          <span className="muted num">占构成 {displayValue(factor.share)}</span>
+          <span className="muted num">
+            {formatPct(factor.presentation.ratio_pct)}
+          </span>
+          <span className="muted num">
+            占构成 {formatPct(factor.presentation.share_pct)}
+          </span>
         </div>
         <div className="attr-bar" aria-hidden="true">
           <i
@@ -113,7 +132,7 @@ function SummaryCard({ data }: { data: Attribution }): ReactElement {
       <div className="attr-panel-head">
         <h2>本期结论</h2>
         <span className="muted num">
-          总损益 {displayValue(data.total_pnl)} · 基准 {data.ratio_basis}
+          总损益 {formatMoney(data.total_pnl)} · 基准 {data.ratio_basis}
         </span>
       </div>
       {/* 结论整句只渲染后端 summary（含样本不足/空账户固定句，随 Accept-Language） */}
@@ -147,15 +166,15 @@ function ResidualCard({ data }: { data: Attribution }): ReactElement {
       <div className="attr-panel-head">
         <h2>残差</h2>
         <span className="muted num">
-          残差 {displayValue(data.residual)} · 残差比{' '}
-          {displayValue(data.residual_ratio)}
+          残差 {formatMoney(data.residual)} · 残差比{' '}
+          {formatPct(data.residual_ratio_pct)}
         </span>
       </div>
       <div className="dash-kpi-grid attr-kpis">
         <div className="dash-kpi">
           <span className="dash-kpi-label">资金覆盖率</span>
           <strong className="num" data-testid="attr-capital-ratio">
-            {displayValue(data.coverage?.capital_ratio)}
+            {formatPct(data.coverage?.capital_ratio_pct)}
           </strong>
           <span className="dash-kpi-hint">
             {data.coverage
@@ -178,7 +197,7 @@ function ResidualCard({ data }: { data: Attribution }): ReactElement {
             <span className="muted">
               {data.residual_breakdown_labels?.[key] ?? key}
             </span>
-            <span className="num">{displayValue(value)}</span>
+            <span className="num">{formatMoney(value)}</span>
           </li>
         ))}
       </ul>
@@ -193,7 +212,7 @@ function ResidualCard({ data }: { data: Attribution }): ReactElement {
               <span className="muted">
                 {labelFor(REASON_CODE_LABELS, item.reason_code)}
               </span>
-              <span className="num">{displayValue(item.amount)}</span>
+              <span className="num">{formatMoney(item.amount)}</span>
             </li>
           ))}
         </ul>

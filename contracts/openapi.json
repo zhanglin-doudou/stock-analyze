@@ -558,6 +558,10 @@
             "title": "Capital Attributed",
             "type": "string"
           },
+          "capital_excluded": {
+            "title": "Capital Excluded",
+            "type": "string"
+          },
           "capital_ratio": {
             "anyOf": [
               {
@@ -568,6 +572,17 @@
               }
             ],
             "title": "Capital Ratio"
+          },
+          "capital_ratio_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Capital Ratio Pct"
           },
           "capital_total": {
             "title": "Capital Total",
@@ -600,6 +615,7 @@
         "required": [
           "capital_total",
           "capital_attributed",
+          "capital_excluded",
           "base_basis",
           "segments_total",
           "segments_attributed",
@@ -910,6 +926,17 @@
               }
             ],
             "title": "Residual Ratio"
+          },
+          "residual_ratio_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Residual Ratio Pct"
           },
           "sample": {
             "$ref": "#/components/schemas/AttributionSampleOut"

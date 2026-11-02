@@ -22,6 +22,7 @@ from stock_review.application.attribution import (
     AttributionResult,
     build_attribution,
 )
+from stock_review.attribution.presentation import pct_str
 
 from stock_api.deps import get_market_data, get_sector_data, get_state, get_tenant
 from stock_api.routing import StrictQueryRoute
@@ -102,7 +103,14 @@ def _to_out(result: AttributionResult) -> AttributionOut:
         coverage = AttributionCoverageOut(
             capital_total=str(Money(result.coverage.capital_total_units)),
             capital_attributed=str(Money(result.coverage.capital_attributed_units)),
+            capital_excluded=str(
+                Money(
+                    result.coverage.capital_total_units
+                    - result.coverage.capital_attributed_units
+                )
+            ),
             capital_ratio=_ratio(result.coverage.capital_ratio_units),
+            capital_ratio_pct=pct_str(result.coverage.capital_ratio_units),
             base_basis=result.coverage.base_basis,
             segments_total=result.coverage.segments_total,
             segments_attributed=result.coverage.segments_attributed,
@@ -135,6 +143,7 @@ def _to_out(result: AttributionResult) -> AttributionOut:
         summary_na_reason=result.summary_na_reason,
         residual=_money(result.residual_units),
         residual_ratio=_ratio(result.residual_ratio_units),
+        residual_ratio_pct=pct_str(result.residual_ratio_units),
         residual_breakdown=breakdown,
         residual_breakdown_labels=breakdown_labels,
         sample=AttributionSampleOut(

@@ -1230,8 +1230,12 @@ export interface components {
             base_basis: "market" | "mixed";
             /** Capital Attributed */
             capital_attributed: string;
+            /** Capital Excluded */
+            capital_excluded: string;
             /** Capital Ratio */
             capital_ratio?: string | null;
+            /** Capital Ratio Pct */
+            capital_ratio_pct?: string | null;
             /** Capital Total */
             capital_total: string;
             /** Segments Attributed */
@@ -1357,6 +1361,8 @@ export interface components {
             } | null;
             /** Residual Ratio */
             residual_ratio?: string | null;
+            /** Residual Ratio Pct */
+            residual_ratio_pct?: string | null;
             sample: components["schemas"]["AttributionSampleOut"];
             /**
              * Status

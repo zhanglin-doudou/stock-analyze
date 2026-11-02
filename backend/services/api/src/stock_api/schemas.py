@@ -1378,7 +1378,9 @@ class AttributionCoverageOut(StrictModel):
 
     capital_total: str
     capital_attributed: str
+    capital_excluded: str
     capital_ratio: str | None = None
+    capital_ratio_pct: str | None = None
     base_basis: Literal["market", "mixed"]
     segments_total: int
     segments_attributed: int
@@ -1430,6 +1432,7 @@ class AttributionOut(StrictModel):
     summary_na_reason: str | None = None
     residual: str | None = None
     residual_ratio: str | None = None
+    residual_ratio_pct: str | None = None
     residual_breakdown: dict[str, str] | None = None
     residual_breakdown_labels: dict[str, str] | None = None
     sample: AttributionSampleOut

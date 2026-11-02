@@ -22,7 +22,7 @@ const FACTORS: Attribution["factors"] = [
     share: "0.5940",
     rank: 1,
     conclusion: "拖累 1,900.00 元",
-    presentation: { bar_pct: "59.40%", ratio_pct: "-59.37%", tone: "negative" },
+    presentation: { bar_pct: "59.40%", ratio_pct: "-59.37%", share_pct: "59.40%", tone: "negative" },
   },
   {
     code: "sector",
@@ -32,7 +32,7 @@ const FACTORS: Attribution["factors"] = [
     share: "0.2560",
     rank: 2,
     conclusion: "贡献 820.00 元",
-    presentation: { bar_pct: "25.60%", ratio_pct: "25.62%", tone: "positive" },
+    presentation: { bar_pct: "25.60%", ratio_pct: "25.62%", share_pct: "25.60%", tone: "positive" },
   },
   {
     code: "buy_timing",
@@ -42,7 +42,7 @@ const FACTORS: Attribution["factors"] = [
     share: "0.0375",
     rank: 3,
     conclusion: "拖累 120.00 元",
-    presentation: { bar_pct: "3.75%", ratio_pct: "-3.75%", tone: "negative" },
+    presentation: { bar_pct: "3.75%", ratio_pct: "-3.75%", share_pct: "3.75%", tone: "negative" },
   },
   {
     code: "sell_timing",
@@ -52,7 +52,7 @@ const FACTORS: Attribution["factors"] = [
     share: "0.0000",
     rank: 4,
     conclusion: "影响较小",
-    presentation: { bar_pct: "0.00%", ratio_pct: "0.00%", tone: "flat" },
+    presentation: { bar_pct: "0.00%", ratio_pct: "0.00%", share_pct: "0.00%", tone: "flat" },
   },
   {
     code: "fee",
@@ -62,7 +62,7 @@ const FACTORS: Attribution["factors"] = [
     share: "0.1281",
     rank: 5,
     conclusion: "拖累 410.00 元",
-    presentation: { bar_pct: "12.81%", ratio_pct: "-12.81%", tone: "negative" },
+    presentation: { bar_pct: "12.81%", ratio_pct: "-12.81%", share_pct: "12.81%", tone: "negative" },
   },
 ];
 
@@ -84,6 +84,8 @@ function attribution(overrides: Partial<Attribution> = {}): Attribution {
       "本期亏损 3,200.00 元，主要来自「选股」（-1,900.00 元，占构成 59.4%）；其次为「行业」（820.00 元）。未归属 120.00 元，见残差明细。",
     residual: "120.00",
     residual_ratio: "0.0375",
+    residual_ratio_pct: "3.75%",
+    residual_breakdown_labels: {},
     residual_breakdown: {
       corporate_action: "0.00",
       unattributed: "120.00",
@@ -103,7 +105,9 @@ function attribution(overrides: Partial<Attribution> = {}): Attribution {
     coverage: {
       capital_total: "1054000.00",
       capital_attributed: "1042000.00",
+      capital_excluded: "12000.00",
       capital_ratio: "0.9886",
+      capital_ratio_pct: "98.9%",
       base_basis: "mixed",
       segments_total: 14,
       segments_attributed: 12,
@@ -163,7 +167,7 @@ describe("AttributionPage", () => {
     expect(screen.getByTestId("attr-factor-selection").textContent).toContain("选股");
     expect(screen.getByTestId("attr-factor-selection").textContent).toContain("拖累 1,900.00 元");
     expect(screen.getByTestId("attr-factor-fee").textContent).toContain("费用");
-    expect(screen.getByTestId("attr-capital-ratio").textContent).toContain("0.9886");
+    expect(screen.getByTestId("attr-capital-ratio").textContent).toContain("98.9%");
 
     const bar = screen.getByTestId("attr-factor-selection").querySelector(".attr-bar > i");
     expect(bar).not.toBeNull();
@@ -255,7 +259,9 @@ describe("AttributionPage", () => {
     renderPage();
 
     expect((await screen.findByTestId("attr-summary-text")).textContent).toContain("样本不足");
-    expect(screen.getByTestId("attr-factor-selection").textContent).toContain("-1900.00");
+    expect(screen.getByTestId("attr-factor-selection").textContent).toContain(
+      "-1,900.00 元",
+    );
   });
 
   it("空账户态：渲染后端固定句与零金额，不渲染缺失项", async () => {
