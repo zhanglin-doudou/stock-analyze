@@ -321,6 +321,36 @@ describe("AttributionPage", () => {
     expect(screen.queryByTestId("attr-missing")).toBeNull();
   });
 
+  it("残差去向：桶按金额降序、正负含义、残差比 >100% 提示（U-08）", async () => {
+    getAttribution.mockResolvedValue(
+      attribution({
+        residual: "109609.30",
+        residual_ratio_pct: "130.18%",
+        residual_breakdown: {
+          interest: "5.97",
+          unattributed_price_pnl: "445625.33",
+          valuation_gap: "-336022.00",
+        },
+        residual_breakdown_labels: {
+          interest: "利息",
+          unattributed_price_pnl: "未归因标的损益",
+          valuation_gap: "估值差（未能解释）",
+        },
+      }),
+    );
+    renderPage();
+
+    await screen.findByText("残差去向");
+    const amounts = Array.from(
+      screen.getByTestId("attr-residual-buckets").querySelectorAll("li > span:last-child"),
+    ).map((node) => node.textContent ?? "");
+    expect(amounts[0]).toContain("445,625.33");
+    expect(amounts[1]).toContain("5.97");
+    expect(amounts[2]).toContain("-336,022.00");
+    expect(screen.getByTestId("attr-residual").textContent).toContain("正数=未归因收益");
+    expect(screen.getByTestId("attr-residual").textContent).toContain("残差大于本期总损益");
+  });
+
   it("错误态：渲染 RFC 7807 人话", async () => {
     getAttribution.mockRejectedValue({
       code: "VALIDATION_ERROR",

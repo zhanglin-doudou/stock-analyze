@@ -154,6 +154,27 @@
   font-size: var(--fs-xs);
 }
 
+.attr-residual-note {
+  margin: 0 0 var(--s3);
+  font-size: var(--fs-sm);
+  color: var(--muted);
+  line-height: var(--lh-normal);
+}
+
+.attr-ratio-warn {
+  margin-left: 4px;
+  color: var(--down);
+}
+
+.attr-unattributed-details {
+  margin-top: var(--s3);
+}
+
+.attr-unattributed-details > summary {
+  cursor: pointer;
+  font-size: var(--fs-sm);
+}
+
 .attr-what-to-do {
   flex: 1 1 100%;
   font-size: var(--fs-sm);

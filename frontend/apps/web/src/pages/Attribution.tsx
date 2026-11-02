@@ -69,6 +69,36 @@ function formatPct(value: string | null | undefined): string {
   return value == null || value === '' ? '—' : value;
 }
 
+/**
+ * 定点小数字符串比较（仅用于展示排序，不解析数值；零口径）。
+ * 支持 `-12.34` / `0.00` / `1234.56` 这类后端金额串。
+ */
+function compareDecimalStrings(left: string, right: string): number {
+  const signOf = (value: string): number => (value.startsWith('-') ? -1 : 1);
+  const absOf = (value: string): string => (value.startsWith('-') ? value.slice(1) : value);
+  const compareAbs = (a: string, b: string): number => {
+    const [aInt = '', aDec = ''] = a.split('.');
+    const [bInt = '', bDec = ''] = b.split('.');
+    if (aInt.length !== bInt.length) return aInt.length - bInt.length;
+    if (aInt !== bInt) return aInt < bInt ? -1 : 1;
+    if (aDec !== bDec) return aDec < bDec ? -1 : 1;
+    return 0;
+  };
+  const leftSign = signOf(left);
+  const rightSign = signOf(right);
+  if (leftSign !== rightSign) return leftSign - rightSign;
+  const compared = compareAbs(absOf(left), absOf(right));
+  return leftSign < 0 ? -compared : compared;
+}
+
+/** `130.18%` → true（仅字符串比较，不解析数值；U-08）。 */
+function pctExceeds100(value: string | null | undefined): boolean {
+  if (value == null || value === '') return false;
+  const body = value.endsWith('%') ? value.slice(0, -1) : value;
+  const [integer = ''] = body.replace(/^[+−-]/, '').split('.');
+  return integer.length > 3 || (integer.length === 3 && integer >= '100');
+}
+
 /** 只读展示用：assumptions 中字符串项（U-06/U-11）。 */
 function assumptionText(
   data: Attribution,
@@ -185,17 +215,27 @@ function SummaryCard({ data }: { data: Attribution }): ReactElement {
 }
 
 function ResidualCard({ data }: { data: Attribution }): ReactElement {
-  const buckets = Object.entries(data.residual_breakdown ?? {});
+  // 桶按金额从大到小排序（只做展示排序，不解析数值；U-08）。
+  const buckets = Object.entries(data.residual_breakdown ?? {}).sort((left, right) =>
+    compareDecimalStrings(right[1], left[1]),
+  );
   const unattributed = (data.coverage?.unattributed ?? []).slice(0, 5);
   return (
     <section className="dash-panel attr-panel" data-testid="attr-residual">
       <div className="attr-panel-head">
-        <h2>残差</h2>
+        <h2>残差去向</h2>
         <span className="muted num">
           残差 {formatMoney(data.residual)} · 残差比{' '}
           {formatPct(data.residual_ratio_pct)}
+          {pctExceeds100(data.residual_ratio_pct) ? (
+            <span className="attr-ratio-warn">（残差大于本期总损益）</span>
+          ) : null}
         </span>
       </div>
+      <p className="attr-residual-note">
+        残差是五因子未能解释的损益。正数=未归因收益（抬高本期损益），
+        负数=估值差/账面与市值口径差异（拉低本期损益）。
+      </p>
       <div className="dash-kpi-grid attr-kpis">
         <div className="dash-kpi">
           <span className="dash-kpi-label">资金覆盖率</span>
@@ -228,20 +268,25 @@ function ResidualCard({ data }: { data: Attribution }): ReactElement {
         ))}
       </ul>
       {unattributed.length > 0 ? (
-        <ul className="attr-unattributed" data-testid="attr-unattributed">
-          {unattributed.map((item) => (
-            <li key={item.security_code}>
-              <strong>{item.security_code}</strong>
-              <span className="muted">
-                {labelFor(SYMBOL_CLASS_LABELS, item.symbol_class)}
-              </span>
-              <span className="muted">
-                {labelFor(REASON_CODE_LABELS, item.reason_code)}
-              </span>
-              <span className="num">{formatMoney(item.amount)}</span>
-            </li>
-          ))}
-        </ul>
+        <details className="attr-unattributed-details">
+          <summary className="muted">
+            未归因标的明细（共 {data.coverage?.unattributed?.length ?? 0} 只，展示前 5）
+          </summary>
+          <ul className="attr-unattributed" data-testid="attr-unattributed">
+            {unattributed.map((item) => (
+              <li key={item.security_code}>
+                <strong>{item.security_code}</strong>
+                <span className="muted">
+                  {labelFor(SYMBOL_CLASS_LABELS, item.symbol_class)}
+                </span>
+                <span className="muted">
+                  {labelFor(REASON_CODE_LABELS, item.reason_code)}
+                </span>
+                <span className="num">{formatMoney(item.amount)}</span>
+              </li>
+            ))}
+          </ul>
+        </details>
       ) : null}
     </section>
   );
