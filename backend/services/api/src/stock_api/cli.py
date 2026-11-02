@@ -28,7 +28,7 @@ from typing import Any
 from sqlalchemy import func, select, text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import create_async_engine
-from stock_contracts.clock import FrozenClock, SystemClock
+from stock_contracts.clock import SHANGHAI, FrozenClock, SystemClock
 from stock_contracts.enums import ImportBatchStatus, Role
 from stock_contracts.errors import CATALOG
 from stock_ledger.application.imports import commit_batch
@@ -41,7 +41,7 @@ from stock_ledger.repositories.rules import seed_system_rules
 from stock_platform.config import REPO_ROOT, get_settings
 from stock_platform.db import Database
 from stock_platform.jobs import JobQueue
-from stock_platform.market_live import validate_symbols
+from stock_platform.market_live import CURRENT_DAY_PULL_AFTER, validate_symbols
 from stock_platform.repositories.users import UserRepository
 from stock_platform.sector_fixture import generate_sector_fixture
 from stock_platform.sector_source import create_live_sector_source
@@ -975,6 +975,13 @@ async def _sync_market(
             return 0
         bars, failed = await market.sync_daily_bars(wanted, sync_start, clock.today())
         emit(f"✅ 行情同步完成：{bars} 根 bar，{len(wanted)} 个标的")
+        now_sh = clock.now().astimezone(SHANGHAI)
+        if (now_sh.hour, now_sh.minute) < CURRENT_DAY_PULL_AFTER:
+            pull_after = f"{CURRENT_DAY_PULL_AFTER[0]:02d}:{CURRENT_DAY_PULL_AFTER[1]:02d}"
+            emit(
+                f"ℹ️  当前在东八区 {pull_after}（收盘数据发布窗口）前：本次已自动截到昨天，"
+                f"当天行情请在 {pull_after} 后重跑 make sync-market。"
+            )
         if failed:
             emit(f"⚠️  失败 {len(failed)} 个：{', '.join(failed)}")
         return 0
