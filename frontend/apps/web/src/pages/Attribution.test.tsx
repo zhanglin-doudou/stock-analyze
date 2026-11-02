@@ -180,6 +180,7 @@ describe("AttributionPage", () => {
           {
             code: "SECTOR_BENCHMARK_WEIGHTS_MISSING",
             field: "factors.sector.amount",
+            severity: "warning",
             reason: "基准成分权重缺失，行业因子不输出金额。",
             what_to_do: "请先同步板块基准权重后重试。",
           },
@@ -220,6 +221,7 @@ describe("AttributionPage", () => {
           {
             code: "ASSET_ROW_BLOCKED",
             field: "period_start",
+            severity: "blocker",
             reason: "期初资产行不可信（blocked）。",
             what_to_do: "请先在资产页处理阻断行后重试。",
           },

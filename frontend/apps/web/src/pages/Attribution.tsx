@@ -86,9 +86,19 @@ function SummaryCard({ data }: { data: Attribution }): ReactElement {
         </span>
       </div>
       {/* 结论整句只渲染后端 summary（含样本不足/空账户固定句，随 Accept-Language） */}
-      <p className="attr-summary" data-testid="attr-summary-text">
-        {displayValue(data.summary)}
-      </p>
+      {data.summary != null ? (
+        <p className="attr-summary" data-testid="attr-summary-text">
+          {data.summary}
+        </p>
+      ) : (
+        <div className="attr-summary-na" data-testid="attr-summary-na">
+          <p className="attr-summary">本期暂不生成结论</p>
+          <p className="muted">
+            {data.summary_na_reason ??
+              '样本或数据覆盖不足，原因见下方「数据质量」。'}
+          </p>
+        </div>
+      )}
       <ul className="attr-factors">
         {(data.factors ?? []).map((factor) => (
           <FactorRow key={factor.code} factor={factor} />
