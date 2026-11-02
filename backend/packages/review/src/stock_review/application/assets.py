@@ -33,7 +33,7 @@ from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
-from stock_contracts.clock import Clock
+from stock_contracts.clock import SHANGHAI, Clock
 from stock_contracts.enums import JobStatus
 from stock_contracts.errors import ApiError, ErrorCode
 from stock_core.fifo import build_rounds
@@ -173,6 +173,9 @@ class AssetBuildState:
     definition_version: str
     # 本次构建读取的 market_data.as_of（页面顶层 data_as_of 血缘）；未构建为 None。
     data_as_of: date | None = None
+    # 当日交易时段提示（`market_open` 未收盘 / `sync_pending` 已收盘但行情未同步）；
+    # 非工作日或无需提示时为 None。只读展示，不参与 stale 判定。
+    session_notice: str | None = None
 
 
 @dataclass(slots=True)
@@ -590,6 +593,42 @@ def latest_workday(day: date) -> date:
     return day
 
 
+# A 股收盘时刻（Asia/Shanghai）。未做日内实时行情：收盘前当日没有收盘行情，
+# 资产表不含当日行；收盘后当日纳入（行情未同步时该日行以 blocked 体现）。
+MARKET_CLOSE_HOUR = 15
+
+
+def valuation_end(clock: Clock) -> date:
+    """资产表可估值的最近收盘日：未收盘的当日不算。
+
+    构建终点与 stale 判定（本模块与 metrics 门禁）共用本口径：
+    - 周末/节假日沿用「最近工作日」；
+    - 工作日 15:00（Asia/Shanghai）前 → 前一工作日（当日尚无收盘行情）；
+    - 15:00 后 → 当日。
+    """
+    today = clock.today()
+    end = latest_workday(today)
+    if end == today and clock.now().astimezone(SHANGHAI).hour < MARKET_CLOSE_HOUR:
+        end = latest_workday(end - timedelta(days=1))
+    return end
+
+
+def _session_notice(clock: Clock, market_as_of: date | None) -> str | None:
+    """当日交易时段提示（只读展示，不参与判定）：
+
+    - `market_open`：当日为工作日且未收盘——资产表不含当日数据；
+    - `sync_pending`：当日为工作日且已收盘，但行情未同步到当日——提示 `make sync-market`。
+    """
+    today = clock.today()
+    if latest_workday(today) != today:
+        return None
+    if clock.now().astimezone(SHANGHAI).hour < MARKET_CLOSE_HOUR:
+        return "market_open"
+    if market_as_of is None or market_as_of < today:
+        return "sync_pending"
+    return None
+
+
 async def _market_as_of(session: AsyncSession, market_data: MarketDataSource, clock: Clock) -> date:
     """行情覆盖日（构建与状态判定必须同口径，跨进程一致）。
 
@@ -652,9 +691,9 @@ async def build_assets(
         )
 
     start = min(trade.trade_date for trade in live)
-    # 资产表只在工作日写行（周六/周日跳过，设计 §5.3）：末行日期对齐到最近工作日，
-    # 避免水位线停在周末导致下次增量「窗口前一日本无行」而误触发全量。
-    end = latest_workday(clock.today())
+    # 资产表只在已收盘的工作日写行（设计 §5.3 + 收盘口径）：末行日期对齐到最近
+    # 已收盘工作日——周末/未收盘当日不写行，避免水位线停在没有收盘行情的日期。
+    end = valuation_end(clock)
 
     # 可转债发债→上市代码别名（设计 D3）：回合/持仓/行情请求统一用 canonical 代码。
     bond_alias, bond_alias_unresolved = build_bond_alias(
@@ -991,7 +1030,7 @@ def _to_point(row: AssetDaily) -> AssetPoint:
     )
 
 
-def _missing_state(definition_version: str) -> AssetBuildState:
+def _missing_state(definition_version: str, session_notice: str | None = None) -> AssetBuildState:
     """missing 可空性（设计 §7.1）：除 state/rows_count/last_mode/has_new_market_data/
     definition_version 外，last_* / assumption / status_reason / data_as_of 全部 null。
 
@@ -1013,6 +1052,7 @@ def _missing_state(definition_version: str) -> AssetBuildState:
         has_new_market_data=False,
         definition_version=definition_version,
         data_as_of=None,
+        session_notice=session_notice,
     )
 
 
@@ -1026,8 +1066,11 @@ async def _build_state_view(
     state: AssetBuildStateRow | None,
 ) -> AssetBuildState:
     """`build.state` 判定链（设计 §7.1，按序 P1 修正版）。"""
+    # 当日时段提示（未收盘 / 已收盘但行情未同步）：所有分支都透出，与 state 判定正交。
+    market_as_of = await _market_as_of(session, market_data, clock)
+    notice = _session_notice(clock, market_as_of)
     if state is None:
-        return _missing_state(ASSET_DEFINITION_VERSION)
+        return _missing_state(ASSET_DEFINITION_VERSION, notice)
     base = AssetBuildState(
         state=STATE_CURRENT,
         last_status=state.last_status,
@@ -1042,6 +1085,7 @@ async def _build_state_view(
         has_new_market_data=False,
         definition_version=state.definition_version or ASSET_DEFINITION_VERSION,
         data_as_of=state.data_as_of,
+        session_notice=notice,
     )
     # 2) 全局 blocked（last_status=blocked 且无构建终点）。
     if state.last_status == BUILD_STATUS_BLOCKED and state.last_built_through is None:
@@ -1055,7 +1099,7 @@ async def _build_state_view(
         return base
     # 3) 无流水/全部软删：尚未构建（同样按 missing 可空性，不透出 DB 里的 last_*）。
     if state.last_built_through is None:
-        return _missing_state(state.definition_version or ASSET_DEFINITION_VERSION)
+        return _missing_state(state.definition_version or ASSET_DEFINITION_VERSION, notice)
     # 4) 口径版本升级 → 旧行混排，必须重建。
     if state.definition_version != ASSET_DEFINITION_VERSION:
         base.state = STATE_STALE
@@ -1071,13 +1115,12 @@ async def _build_state_view(
         return base
     # 6) 行情前进 → stale（并标记 has_new_market_data）。
     #    行情覆盖日与构建同口径（live+缓存读 market.daily_bar，避免进程内近似值误判）。
-    market_as_of = await _market_as_of(session, market_data, clock)
     if state.data_as_of is None or market_as_of > state.data_as_of:
         base.state = STATE_STALE
         base.has_new_market_data = True
         return base
-    # 7) 有新工作日；周六/周日不判 stale（资产表周末不写行）。
-    if latest_workday(clock.today()) > state.last_built_through:
+    # 7) 有新的已收盘工作日；周末/未收盘当日不判 stale（资产表这些日期不写行）。
+    if valuation_end(clock) > state.last_built_through:
         base.state = STATE_STALE
     return base
 
@@ -1181,6 +1224,7 @@ async def build_assets_job(
 __all__ = [
     "ASSET_DEFINITION_VERSION",
     "FIFO_ERROR_REASON",
+    "MARKET_CLOSE_HOUR",
     "MARKET_UNCOVERED_REASON",
     "MISSING_PRICE_PREFIX",
     "NO_ANCHOR_REASON",
@@ -1193,4 +1237,5 @@ __all__ = [
     "build_assets_job",
     "compute_daily_valuations",
     "list_assets",
+    "valuation_end",
 ]

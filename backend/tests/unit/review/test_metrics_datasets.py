@@ -148,23 +148,37 @@ def _build_state(*, data_as_of: date, last_built_through: date) -> SimpleNamespa
 
 
 def test_asset_build_view_current_on_weekend() -> None:
-    """周六查询：last_built_through/data_as_of 停在周五，与 GET /assets 同口径不判 stale。"""
+    """周六/周日查询：valuation_end 停在周五，已构建到周五的资产表不判 stale。"""
     state = _build_state(data_as_of=date(2026, 10, 30), last_built_through=date(2026, 10, 30))
-    for today in (date(2026, 10, 31), date(2026, 11, 1)):  # 周六 / 周日
-        view = _asset_build_view(state, market_as_of=date(2026, 10, 30), today=today)
-        assert view.state == "current", today
+    view = _asset_build_view(
+        state, market_as_of=date(2026, 10, 30), valuation_end_date=date(2026, 10, 30)
+    )
+    assert view.state == "current"
+
+
+def test_asset_build_view_current_intraday_before_close() -> None:
+    """周一未收盘：valuation_end 停在周五，已构建到周五的资产表不判 stale。"""
+    state = _build_state(data_as_of=date(2026, 10, 30), last_built_through=date(2026, 10, 30))
+    view = _asset_build_view(
+        state, market_as_of=date(2026, 10, 30), valuation_end_date=date(2026, 10, 30)
+    )
+    assert view.state == "current"
 
 
 def test_asset_build_view_stale_when_new_workday_or_market_ahead() -> None:
     state = _build_state(data_as_of=date(2026, 10, 30), last_built_through=date(2026, 10, 30))
-    # 周一（下一个工作日）未重建 → stale。
+    # 周一收盘后（valuation_end=周一）未重建 → stale。
     assert (
-        _asset_build_view(state, market_as_of=date(2026, 10, 30), today=date(2026, 11, 2)).state
+        _asset_build_view(
+            state, market_as_of=date(2026, 10, 30), valuation_end_date=date(2026, 11, 2)
+        ).state
         == "stale"
     )
     # 行情覆盖日前进到下一交易日 → stale。
     assert (
-        _asset_build_view(state, market_as_of=date(2026, 11, 2), today=date(2026, 10, 30)).state
+        _asset_build_view(
+            state, market_as_of=date(2026, 11, 2), valuation_end_date=date(2026, 10, 30)
+        ).state
         == "stale"
     )
 

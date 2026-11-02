@@ -176,6 +176,21 @@
             "title": "Rows Count",
             "type": "integer"
           },
+          "session_notice": {
+            "anyOf": [
+              {
+                "enum": [
+                  "market_open",
+                  "sync_pending"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Notice"
+          },
           "state": {
             "enum": [
               "missing",

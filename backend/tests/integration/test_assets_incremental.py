@@ -46,7 +46,7 @@ from stock_review.repositories.assets import AssetRepository
 pytestmark = [pytest.mark.integration]
 
 # 业务日 2026-06-30（Asia/Shanghai）；replay 行情 as_of=2026-09-30。
-CLOCK = FrozenClock("2026-06-30T12:00:00+08:00")
+CLOCK = FrozenClock("2026-06-30T16:00:00+08:00")
 # 造数用固定 updated_at（保证两条构建路径指纹一致/可复现）。
 BASE_UPDATED_AT = datetime.fromisoformat("2026-06-01T00:00:00+08:00")
 LATER_UPDATED_AT = datetime.fromisoformat("2026-07-01T00:00:00+08:00")
@@ -508,7 +508,7 @@ async def test_incremental_minimal_window_writes(
     assert first.mode == "full"
     rows_before = {row.trade_date: row.rebuilt_at for row in await _rows(app_db, user_id)}
 
-    later = FrozenClock("2026-07-01T12:00:00+08:00")
+    later = FrozenClock("2026-07-01T16:00:00+08:00")
     second = await _build(app_db, user_id, replay_market, clock=later)
     assert second.mode == "incremental"
     assert second.rebuild_from is not None
@@ -755,7 +755,7 @@ async def test_clock_rollback_triggers_full_and_trims_rows(
     await _seed_baseline(owner_engine, user_id)
     await _build(app_db, user_id, replay_market)
 
-    earlier = FrozenClock("2026-06-15T12:00:00+08:00")
+    earlier = FrozenClock("2026-06-15T16:00:00+08:00")
     summary = await _build(app_db, user_id, replay_market, clock=earlier)
     assert summary.mode == "full"
     rows = await _rows(app_db, user_id)
@@ -798,7 +798,7 @@ async def test_backfill_before_first_balance_line_triggers_full(
         cash_balance_units=cents("100000.00"),
         line_no=2,
     )
-    short = FrozenClock("2026-01-10T12:00:00+08:00")
+    short = FrozenClock("2026-01-10T16:00:00+08:00")
     await _build(app_db, user_id, replay_market, clock=short)
 
     # 在首个余额行之前回填一笔（version=1）→ back_solved 锚点变化 → 全量。
@@ -959,7 +959,7 @@ async def test_failure_rolls_back_rows_and_state(
 
     monkeypatch.setattr(AssetRepository, "insert_rows", _boom)
     # 先制造一次真实变更，确保 build 会走 delete+insert 路径。
-    later = FrozenClock("2026-07-01T12:00:00+08:00")
+    later = FrozenClock("2026-07-01T16:00:00+08:00")
     with pytest.raises(RuntimeError):
         await _build(app_db, user_id, replay_market, clock=later)
     monkeypatch.undo()
@@ -1106,10 +1106,10 @@ async def test_state_current_on_weekend_after_build(
     """周末构建后 last_built_through=周五；周六/周日再查不得误判 stale。"""
     user_id = await _insert_user(owner_engine)
     await _seed_baseline(owner_engine, user_id)
-    saturday = FrozenClock("2026-07-04T12:00:00+08:00")
+    saturday = FrozenClock("2026-07-04T16:00:00+08:00")
     await _build(app_db, user_id, replay_market, clock=saturday)
 
-    for clock in (saturday, FrozenClock("2026-07-05T12:00:00+08:00")):
+    for clock in (saturday, FrozenClock("2026-07-05T16:00:00+08:00")):
         async with app_db.tenant_tx(user_id) as session:
             _, _, build = await list_assets(
                 session,

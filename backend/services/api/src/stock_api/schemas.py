@@ -646,6 +646,10 @@ class AssetBuildStateOut(StrictModel):
     status_reason: str | None = None
     has_new_market_data: bool = False
     definition_version: str
+    # 当日交易时段提示：market_open=工作日未收盘（资产表不含当日数据）；
+    # sync_pending=工作日已收盘但行情未同步到当日（提示 make sync-market）；
+    # 非工作日或无需提示时为 null。只读展示，不参与 stale 判定。
+    session_notice: Literal["market_open", "sync_pending"] | None = None
 
 
 class AssetPageOut(StrictModel):

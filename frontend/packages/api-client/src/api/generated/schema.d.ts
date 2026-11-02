@@ -1083,6 +1083,8 @@ export interface components {
              * @default 0
              */
             rows_count: number;
+            /** Session Notice */
+            session_notice?: ("market_open" | "sync_pending") | null;
             /**
              * State
              * @enum {string}

@@ -311,6 +311,7 @@ _DICT_EXAMPLES: dict[str, dict[str, Any]] = {
         "status_reason": None,
         "has_new_market_data": False,
         "definition_version": "1.0",
+        "session_notice": "market_open",
     },
     "checks": {"db": "ok", "schema_version": "0042"},
     "reverted": {"inserted": 118, "updated": 0},

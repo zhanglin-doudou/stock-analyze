@@ -141,6 +141,17 @@ function BuildSummary({ page }: BuildSummaryProps): ReactElement {
           {build.has_new_market_data ? "（检测到新行情数据）" : ""}
         </p>
       ) : null}
+      {build.session_notice === "market_open" ? (
+        <p className="muted" data-testid="assets-session-notice">
+          当日还未收盘（A 股 15:00 收盘），资产表暂不包含当日数据。
+        </p>
+      ) : null}
+      {build.session_notice === "sync_pending" ? (
+        <p className="notice-warn" data-testid="assets-session-notice">
+          当日已收盘但行情尚未同步——请先在终端运行 make sync-market
+          同步行情数据，再点「更新资产表」。
+        </p>
+      ) : null}
       {build.last_status === "degraded" ? (
         <p className="notice-warn" data-testid="assets-degraded">
           部分日期存在阻断/降级，修复数据后点「更新资产表」即可重算。
@@ -171,7 +182,7 @@ export function Assets() {
     setLoading(true);
     setError(null);
     try {
-      const data = await api.assets.list({ limit: PAGE_LIMIT, cursor, sort: 'trade_date' });
+      const data = await api.assets.list({ limit: PAGE_LIMIT, cursor, sort: '-trade_date' });
       if (cursor) {
         setPage((previous) => {
           if (!previous) return data;
