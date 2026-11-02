@@ -1,4 +1,4 @@
-import { type CSSProperties, type ReactElement } from 'react';
+import { Fragment, type CSSProperties, type ReactElement } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import type {
@@ -80,6 +80,30 @@ const QUICK_RANGES: Array<{ label: string; build: () => string }> = [
   { label: '今年', build: yearToDateRange },
   { label: '上月', build: () => latestCompletedMonth() },
 ];
+
+/** 五因子释义（术语统一；U-15）。 */
+const FACTOR_DEFINITIONS: Record<string, { definition: string; source: string }> = {
+  selection: {
+    definition: '个股选择相对基准的超额收益。',
+    source: '回合持仓 + 板块基准权重',
+  },
+  sector: {
+    definition: '行业/板块配置权重相对基准的偏离收益。',
+    source: '板块归属 + 板块指数 + 基准权重',
+  },
+  buy_timing: {
+    definition: '买入时点相对区间均价产生的损益。',
+    source: '买入成交价 + 区间行情',
+  },
+  sell_timing: {
+    definition: '卖出时点相对区间均价产生的损益。',
+    source: '卖出成交价 + 区间行情',
+  },
+  fee: {
+    definition: '佣金、印花税、过户费等交易费用。',
+    source: '流水费用列',
+  },
+};
 
 /** 原始码值一律转人话；未知码保留可追溯但加“未识别”前缀（U-02）。 */
 function labelFor(map: Record<string, string>, code: string | null | undefined): string {
@@ -175,14 +199,30 @@ function StatusBadge({ status }: { status: string }): ReactElement {
 }
 
 /** 因子行（零口径）：宽度直接用后端 `presentation.bar_pct`，不解析不换算。 */
-function FactorRow({ factor }: { factor: AttributionFactor }): ReactElement {
+function FactorRow({
+  factor,
+}: {
+  factor: AttributionFactor;
+}): ReactElement {
   const barPct = (factor.presentation.bar_pct ?? '0%').replace(/^[+−-]/, '');
+  const info = FACTOR_DEFINITIONS[factor.code];
   return (
     <li className="attr-factor" data-testid={`attr-factor-${factor.code}`}>
       <span className="attr-rank" aria-label={`排名 ${factor.rank}`}>
         {factor.rank}
       </span>
-      <strong className="attr-factor-name">{factor.name}</strong>
+      <strong className="attr-factor-name">
+        {factor.name}
+        {info ? (
+          <span
+            className="attr-info"
+            title={`${info.definition}数据来源：${info.source}`}
+            aria-label={`${factor.name}释义`}
+          >
+            ⓘ
+          </span>
+        ) : null}
+      </strong>
       <span className="attr-factor-amount num">
         {formatMoney(factor.amount)}
         <small className="attr-factor-ratio muted" title={RATIO_HINT}>
@@ -383,6 +423,41 @@ function ResidualCard({ data }: { data: Attribution }): ReactElement {
   );
 }
 
+/** 页脚口径说明（definition_version / data_as_of / benchmark / assumptions；U-15）。 */
+function CaliberNotes({ data }: { data: Attribution }): ReactElement {
+  const assumptions = data.assumptions ?? {};
+  return (
+    <section className="attr-caliber" data-testid="attr-caliber">
+      <h2 className="attr-caliber-title">口径说明</h2>
+      <dl className="attr-caliber-list">
+        <dt>定义版本</dt>
+        <dd>{data.definition_version}</dd>
+        <dt>数据截至</dt>
+        <dd>{data.data_as_of ?? '—'}</dd>
+        <dt>基准</dt>
+        <dd>{labelFor(BENCHMARK_LABELS, assumptionText(data, 'benchmark_id'))}</dd>
+        <dt>比率分母</dt>
+        <dd>{labelFor(RATIO_BASIS_LABELS, data.ratio_basis)}</dd>
+        <dt>总损益口径</dt>
+        <dd>{labelFor(TOTAL_PNL_BASIS_LABELS, data.total_pnl_basis)}</dd>
+      </dl>
+      <details className="attr-tech-details">
+        <summary className="muted">
+          技术口径（assumptions {Object.keys(assumptions).length} 项）
+        </summary>
+        <dl className="attr-caliber-list">
+          {Object.entries(assumptions).map(([key, value]) => (
+            <Fragment key={key}>
+              <dt>{key}</dt>
+              <dd>{typeof value === 'string' ? value : JSON.stringify(value)}</dd>
+            </Fragment>
+          ))}
+        </dl>
+      </details>
+    </section>
+  );
+}
+
 function QualityCard({ data }: { data: Attribution }): ReactElement {
   return (
     <section className="dash-panel attr-panel" data-testid="attr-quality">
@@ -520,15 +595,20 @@ export function AttributionPage(): ReactElement {
             <span className="attr-skeleton-line is-short" />
           </div>
         </section>
-      ) : blocked ? (
-        // blocked：不渲染任何金额（§8.1-④），只渲染数据质量卡。
-        <QualityCard data={data} />
       ) : (
         <>
-          <TotalPnlBar data={data} />
-          <SummaryCard data={data} />
-          <ResidualCard data={data} />
-          <QualityCard data={data} />
+          {blocked ? (
+            // blocked：不渲染任何金额（§8.1-④），只渲染数据质量卡。
+            <QualityCard data={data} />
+          ) : (
+            <>
+              <TotalPnlBar data={data} />
+              <SummaryCard data={data} />
+              <ResidualCard data={data} />
+              <QualityCard data={data} />
+            </>
+          )}
+          <CaliberNotes data={data} />
         </>
       )}
     </div>

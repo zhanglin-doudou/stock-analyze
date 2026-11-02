@@ -73,6 +73,45 @@
   font-weight: var(--fw-medium);
 }
 
+.attr-info {
+  margin-left: 4px;
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  font-weight: normal;
+  cursor: help;
+}
+
+.attr-caliber {
+  margin-top: var(--s5);
+  padding-top: var(--s4);
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+}
+
+.attr-caliber-title {
+  margin: 0 0 var(--s2);
+  font-size: var(--fs-sm);
+  font-weight: var(--fw-medium);
+}
+
+.attr-caliber-list {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--s1) var(--s3);
+  margin: 0 0 var(--s2);
+}
+
+.attr-caliber-list dt {
+  color: var(--muted);
+}
+
+.attr-caliber-list dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
 .attr-factor-amount {
   display: flex;
   flex-direction: column;

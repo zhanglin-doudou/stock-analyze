@@ -125,6 +125,7 @@ function attribution(overrides: Partial<Attribution> = {}): Attribution {
     },
     missing: [],
     assumptions: {
+      benchmark_id: "hs300_tr",
       data_sources: { assets: "2026-06-30", market: "2026-06-30", sector: "2026-06-29" },
     },
     data_as_of: "2026-06-30",
@@ -181,6 +182,9 @@ describe("AttributionPage", () => {
     );
     expect(screen.getByTestId("attr-summary").textContent).toContain("占构成");
     expect(screen.getByTestId("attr-summary").textContent).toContain("说明");
+    expect(screen.getByTestId("attr-factor-selection").textContent).toContain("ⓘ");
+    expect(screen.getByTestId("attr-caliber").textContent).toContain("five-factor@1.0");
+    expect(screen.getByTestId("attr-caliber").textContent).toContain("沪深 300 全收益");
 
     const bar = screen.getByTestId("attr-factor-selection").querySelector(".attr-bar > i");
     expect(bar).not.toBeNull();
