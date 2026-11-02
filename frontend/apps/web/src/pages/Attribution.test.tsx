@@ -175,6 +175,11 @@ describe("AttributionPage", () => {
     expect(screen.getByTestId("attr-data-sources").textContent).toContain(
       "资产 2026-06-30 · 行情 2026-06-30 · 板块 2026-06-29",
     );
+    expect(screen.getByTestId("attr-pnl-value").textContent).toContain(
+      "本期亏损 -3,200.00 元",
+    );
+    expect(screen.getByTestId("attr-summary").textContent).toContain("占构成");
+    expect(screen.getByTestId("attr-summary").textContent).toContain("说明");
 
     const bar = screen.getByTestId("attr-factor-selection").querySelector(".attr-bar > i");
     expect(bar).not.toBeNull();
@@ -248,6 +253,7 @@ describe("AttributionPage", () => {
     expect(screen.getByTestId("attr-quality")).toBeTruthy();
     expect(screen.getByTestId("attr-missing").textContent).toContain("期初资产行不可信");
     expect(screen.getByTestId("attr-period-end").textContent).toContain("2026-06-30");
+    expect(screen.queryByTestId("attr-pnl-bar")).toBeNull();
   });
 
   it("insufficient：金额照给，结论区用后端样本不足句（不在前端写死）", async () => {

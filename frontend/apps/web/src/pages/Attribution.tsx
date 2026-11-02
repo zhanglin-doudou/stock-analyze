@@ -9,7 +9,7 @@ import type {
 import { api } from '../client';
 import { latestCompletedMonth } from '../lib/date';
 import { ProblemView } from '../ui/Problem';
-import { displayValue } from '../ui/format';
+import { displayValue, signTone } from '../ui/format';
 import { SAMPLE_STATUS_LABELS, dataStatusLabel } from '../ui/status';
 import './dashboard.css';
 import './attribution.css';
@@ -153,28 +153,24 @@ function FactorRow({ factor }: { factor: AttributionFactor }): ReactElement {
       <span className="attr-rank" aria-label={`排名 ${factor.rank}`}>
         {factor.rank}
       </span>
-      <div className="attr-factor-main">
-        <div className="attr-factor-head">
-          <strong>{factor.name}</strong>
-          <span className="attr-factor-amount num">
-            {formatMoney(factor.amount)}
-          </span>
-          <span className="muted num" title={RATIO_HINT}>
-            贡献率 {formatPct(factor.presentation.ratio_pct)}
-          </span>
-          <span className="muted num">
-            占构成 {formatPct(factor.presentation.share_pct)}
-          </span>
-        </div>
-        <div className="attr-bar" aria-hidden="true">
-          <i
-            data-tone={factor.presentation.tone}
-            style={{ '--w': barPct } as CSSProperties}
-          />
-        </div>
-        <p className="attr-factor-conclusion">
-          {displayValue(factor.conclusion)}
-        </p>
+      <strong className="attr-factor-name">{factor.name}</strong>
+      <span className="attr-factor-amount num">
+        {formatMoney(factor.amount)}
+        <small className="attr-factor-ratio muted" title={RATIO_HINT}>
+          贡献率 {formatPct(factor.presentation.ratio_pct)}
+        </small>
+      </span>
+      <span className="attr-factor-share num">
+        {formatPct(factor.presentation.share_pct)}
+      </span>
+      <span className="attr-factor-conclusion">
+        {displayValue(factor.conclusion)}
+      </span>
+      <div className="attr-bar" aria-hidden="true">
+        <i
+          data-tone={factor.presentation.tone}
+          style={{ '--w': barPct } as CSSProperties}
+        />
       </div>
     </li>
   );
@@ -218,7 +214,21 @@ function MissingList({
   );
 }
 
-/** 摘要卡：summary 与五因子固定顺序（后端 rank 决定展示顺序，前端不重排）。 */
+/** 顶栏 KPI：把“本期盈亏”提到页面主信息位置（U-12）。 */
+function TotalPnlBar({ data }: { data: Attribution }): ReactElement {
+  const tone = signTone(data.total_pnl);
+  const label = tone === 'neg' ? '本期亏损' : tone === 'pos' ? '本期盈利' : '本期持平';
+  return (
+    <section className="attr-pnl-bar" data-testid="attr-pnl-bar">
+      <strong className={`attr-pnl-value num is-${tone}`} data-testid="attr-pnl-value">
+        {label} {formatMoney(data.total_pnl)}
+      </strong>
+      <span className="muted">数据截至 {data.data_as_of ?? '—'}</span>
+    </section>
+  );
+}
+
+/** 摘要卡：summary 与五因子固定列（后端 rank 决定展示顺序，前端不重排）。 */
 function SummaryCard({ data }: { data: Attribution }): ReactElement {
   return (
     <section className="dash-panel attr-panel" data-testid="attr-summary">
@@ -244,6 +254,13 @@ function SummaryCard({ data }: { data: Attribution }): ReactElement {
         </div>
       )}
       <ul className="attr-factors">
+        <li className="attr-factor-head-row" aria-hidden="true">
+          <span>排名</span>
+          <span>因子</span>
+          <span>金额</span>
+          <span>占构成</span>
+          <span>说明</span>
+        </li>
         {/* 用后端 rank 排序，避免固定数组顺序与 rank 徽标出现 2,1,5,3,4（U-04） */}
         {[...(data.factors ?? [])]
           .sort((left, right) => left.rank - right.rank)
@@ -451,6 +468,7 @@ export function AttributionPage(): ReactElement {
         <QualityCard data={data} />
       ) : (
         <>
+          <TotalPnlBar data={data} />
           <SummaryCard data={data} />
           <ResidualCard data={data} />
           <QualityCard data={data} />

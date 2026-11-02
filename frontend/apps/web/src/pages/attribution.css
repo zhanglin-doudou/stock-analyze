@@ -45,10 +45,20 @@
 
 .attr-factor {
   display: grid;
-  grid-template-columns: 28px 1fr;
+  grid-template-columns: 36px minmax(72px, 1fr) minmax(140px, max-content) minmax(72px, max-content) minmax(160px, 2fr);
   gap: var(--s3);
+  align-items: baseline;
   padding: var(--s3) 0;
   border-top: 1px solid var(--line);
+}
+
+.attr-factor-head-row {
+  display: grid;
+  grid-template-columns: 36px minmax(72px, 1fr) minmax(140px, max-content) minmax(72px, max-content) minmax(160px, 2fr);
+  gap: var(--s3);
+  padding: var(--s2) 0;
+  color: var(--muted);
+  font-size: var(--fs-xs);
 }
 
 .attr-rank {
@@ -57,23 +67,39 @@
   text-align: right;
 }
 
-.attr-factor-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  gap: var(--s3);
-}
-
-.attr-factor-head strong {
+.attr-factor-name {
+  min-width: 0;
+  overflow-wrap: anywhere;
   font-weight: var(--fw-medium);
 }
 
 .attr-factor-amount {
-  margin-left: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  text-align: right;
+}
+
+.attr-factor-ratio {
+  color: var(--muted);
+  font-size: var(--fs-xs);
+  font-weight: normal;
+}
+
+.attr-factor-share,
+.attr-factor-conclusion {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.attr-factor-conclusion {
+  color: var(--muted);
 }
 
 /* 宽度直接复用后端绝对百分比串；不做数值解析/换算 */
 .attr-bar {
+  grid-column: 2 / -1;
   margin-top: 6px;
   height: 4px;
   background: var(--line);
@@ -97,9 +123,68 @@
 }
 
 .attr-factor-conclusion {
-  margin: 6px 0 0;
   font-size: var(--fs-sm);
-  color: var(--muted);
+}
+
+.attr-pnl-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--s3);
+  margin-bottom: var(--s5);
+  padding: var(--s3) var(--s4);
+  border: 1px solid var(--line);
+  background: var(--surface-2, var(--surface));
+}
+
+.attr-pnl-value {
+  font-family: var(--font-display);
+  font-size: var(--fs-h1);
+  font-weight: var(--fw-medium);
+}
+
+.attr-pnl-value.is-pos {
+  color: var(--up);
+}
+
+.attr-pnl-value.is-neg {
+  color: var(--down);
+}
+
+/* 窄屏：固定列折叠为两列，金额/占构成/说明各占一行 */
+@media (max-width: 720px) {
+  .attr-factor-head-row {
+    display: none;
+  }
+
+  .attr-factor {
+    grid-template-columns: 28px minmax(0, 1fr);
+    row-gap: var(--s1);
+  }
+
+  .attr-factor-name,
+  .attr-factor-amount,
+  .attr-factor-share,
+  .attr-factor-conclusion,
+  .attr-bar {
+    grid-column: 2;
+  }
+
+  .attr-factor-amount {
+    align-items: flex-start;
+    flex-direction: row;
+    gap: var(--s3);
+  }
+
+  .attr-factor-share,
+  .attr-factor-conclusion {
+    text-align: left;
+  }
+
+  .attr-pnl-value {
+    font-size: var(--fs-h2);
+  }
 }
 
 .attr-kpis {
