@@ -413,7 +413,11 @@ export function AttributionPage(): ReactElement {
     assetsAsOf != null || marketAsOf != null || sectorAsOf != null;
 
   return (
-    <div className="attr-page" data-testid="attribution-page">
+    <div
+      className="attr-page"
+      data-testid="attribution-page"
+      aria-busy={query.isFetching}
+    >
       <header className="dash-head">
         <div className="dash-eyebrow">归因口径 · 五因子</div>
         <h1 className="dash-title">收益归因</h1>
@@ -422,6 +426,11 @@ export function AttributionPage(): ReactElement {
             ? `${data.period_start} ~ ${data.period_end} · 模型 ${data.model}`
             : '选择期间查看五因子收益拆解；所有数值均为后端口径，本页只做呈现。'}
         </p>
+        {query.isFetching && query.isPlaceholderData ? (
+          <p className="attr-updating" data-testid="attr-updating">
+            正在更新…当前展示的是上一区间数据
+          </p>
+        ) : null}
         <div className="dash-head-meta">
           <PeriodInput
             value={period}
@@ -460,8 +469,13 @@ export function AttributionPage(): ReactElement {
       </header>
 
       {data == null ? (
-        <section className="dash-panel attr-panel">
+        <section className="dash-panel attr-panel" data-testid="attr-skeleton">
           <p className="muted">加载中…</p>
+          <div className="attr-skeleton" aria-hidden="true">
+            <span className="attr-skeleton-line" />
+            <span className="attr-skeleton-line" />
+            <span className="attr-skeleton-line is-short" />
+          </div>
         </section>
       ) : blocked ? (
         // blocked：不渲染任何金额（§8.1-④），只渲染数据质量卡。

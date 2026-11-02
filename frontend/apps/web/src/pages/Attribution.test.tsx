@@ -401,6 +401,14 @@ describe("AttributionPage", () => {
     expect(details?.textContent).toContain("BRIDGE_MISMATCH");
   });
 
+  it("加载态：骨架屏 + aria-busy（U-13）", async () => {
+    getAttribution.mockReturnValue(new Promise(() => undefined));
+    renderPage();
+
+    expect(await screen.findByTestId("attr-skeleton")).toBeTruthy();
+    expect(screen.getByTestId("attribution-page").getAttribute("aria-busy")).toBe("true");
+  });
+
   it("错误态：渲染 RFC 7807 人话", async () => {
     getAttribution.mockRejectedValue({
       code: "VALIDATION_ERROR",
