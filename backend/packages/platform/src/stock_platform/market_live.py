@@ -70,6 +70,12 @@ FAILURE_UNAVAILABLE: str = "unavailable"
 FAILURE_NOT_SUPPORTED: str = "not_supported"
 FAILURE_INVALID_DATA: str = "invalid_data"
 
+# 收盘数据发布窗口（东八区）：(16, 30) 前视为盘中，sync 不拉当天（截到昨天）；
+# (18, 0) 后上游日线基本定型，空结果可落负覆盖（final_ready）。CLI 提示共用常量，
+# 避免提示文案与实际阈值漂移。
+CURRENT_DAY_PULL_AFTER: tuple[int, int] = (16, 30)
+FINAL_READY_AFTER: tuple[int, int] = (18, 0)
+
 _MAX_UNITS = 2**63 - 1
 _SYMBOL_RE = re.compile(r"^\d{6}$")
 _ISO_DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -783,11 +789,11 @@ class CachedMarketDataSource:
         today = self._clock.today()
         now = self._clock.now().astimezone(SHANGHAI)
         effective_end = min(end, today)
-        if (now.hour, now.minute) < (16, 30) and effective_end >= today:
+        if (now.hour, now.minute) < CURRENT_DAY_PULL_AFTER and effective_end >= today:
             effective_end = today - timedelta(days=1)
         # 18:00 后上游日线已基本定型：空结果可覆盖当天，避免同一晚重复请求；
         # 16:30~18:00 之间仍留当天缺口，给晚发布留重试机会。
-        final_ready = (now.hour, now.minute) >= (18, 0)
+        final_ready = (now.hour, now.minute) >= FINAL_READY_AFTER
         if effective_end < start:
             return 0, ()
         failed: list[str] = []
@@ -806,7 +812,12 @@ class CachedMarketDataSource:
             fetch_start, fetch_end = gaps[0][0], gaps[-1][1]
             try:
                 fetched = await self._inner.get_daily_bars([symbol], fetch_start, fetch_end)
-            except ApiError as exc:
+            except (ApiError, _TransientMarketError, _InvalidMarketDataError) as exc:
+                # 适配器抛出的所有可预期异常：ApiError（业务错误码）、
+                # _TransientMarketError（瞬时网络故障，可重试）、
+                # _InvalidMarketDataError（上游返回非法数据，不可重试）。
+                # 全部记到 failed 列表，让循环继续处理下一个标的，
+                # 避免一颗坏代码/一次网络抖动让整批同步静默中断。
                 failed.append(symbol)
                 log.warning(
                     "market.sync",
@@ -814,7 +825,7 @@ class CachedMarketDataSource:
                     start=fetch_start.isoformat(),
                     end=fetch_end.isoformat(),
                     result="failed",
-                    error=str(exc),
+                    error=f"{type(exc).__name__}: {exc}",
                 )
                 continue
             rows = [(bar.trade_date, bar.close_units, bar.return_units) for bar in fetched]

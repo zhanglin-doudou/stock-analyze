@@ -2,11 +2,12 @@
 
 面向个人投资者的交易复盘系统：导入券商对账单，自动落库/分类/对账，建立 FIFO 回合、净值/资产序列与三域指标，并在 Dashboard 中聚合展示。
 
-> **当前阶段（2026-10-31）**
+> **当前阶段（2026-11-02）**
 >
 > - **一期**：已完成（认证/多租户/RLS、导入、任务队列、流水维护、契约链路）。
 > - **二期核心**：已完成验收或已落地——FIFO 回合、`GET /nav`、资产表、18 指标引擎与 `/metrics`、**Dashboard 两板块（API-084）**、`POST /jobs/rebuild-period`（API-083）、**板块数据底座（API-087/088 + `/sectors`）**。
-> - **二期剩余**：归因、月报、导出、设置增强、报告/导出前端页按计划**暂停**；前端已预留 `/reports`、`/exports`、`/attribution` 占位入口，验收中按缺失清单 SKIP，不伪造数据。
+> - **Period2-08 归因**：**设计已人工批准（2026-11-02）**——[设计 v1.0](docs/architecture/2026-11-02-five-factor-attribution.md) / [交叉评审](docs/reviews/2026-11-02-DevDesign-Review-five-factor-attribution.md)；实现未开始，前置 08a（板块指数日线 + replay 日线）。
+> - **二期剩余**：月报、导出、设置增强、报告/导出前端页按计划**暂停**；前端已预留 `/reports`、`/exports` 占位入口，验收中按缺失清单 SKIP，不伪造数据。
 > - **三期**：未开始。
 >
 > 设计与验收记录见 [Dashboard 设计](docs/architecture/2026-10-28-dashboard.md)、[月度报告设计](docs/architecture/2026-10-28-monthly-report.md)、[S10 验收记录](docs/reviews/2026-10-27-p207-S10-acceptance.md)。
@@ -270,7 +271,8 @@ STOCK_DB_PORT=5433 make test-p2     # 显式指向 Docker 库（不改 .env 的 
 
 ## 已知未完成（二期暂停项）
 
-- Period2-08 归因、Period2-09 月报、Period2-10 导出、Period2-11 设置增强、Period2-13 报告/导出页、Period2-14 `verify-p2`、Period2-15 零口径 ESLint 门禁。
+- Period2-08 归因：设计已人工批准（2026-11-02），**实现未开始**（08a 前置：THS 行业指数日线 + replay 日线）。
+- Period2-09 月报、Period2-10 导出、Period2-11 设置增强、Period2-13 报告/导出页、Period2-14 `verify-p2`、Period2-15 零口径 ESLint 门禁。
 - G8 金标审批仍有 22 个 COVERAGE 骨架 + `perf.fee_breakeven` 口径待收尾；`make gate-golden` 可能红。
 - 具体缺失/占位/验收 SKIP 见 [Dashboard 设计 §7](docs/architecture/2026-10-28-dashboard.md)。
 

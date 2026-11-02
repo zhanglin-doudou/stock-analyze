@@ -5,7 +5,7 @@
 
 > 依据：[PRD-v2.md](prd/PRD-v2.md)（28 FR + 15 NFR）｜[Architecture-v2.md](Architecture-v2.md)｜[API-Catalog.md](architecture/v2/API-Catalog.md)（88 端点）
 > 编排原则：**本地可验证优先，部署与交付最后做**。
-> 估时口径：1 名资深全栈 + AI 编码辅助；1 人日 = 6 小时有效开发。总计 **≈ 96.0 人日**（单线程约 19 周；并行轨道可压到 ≈ 12–14 周）。
+> 估时口径：1 名资深全栈 + AI 编码辅助；1 人日 = 6 小时有效开发。总计 **≈ 102.0–105.5 人日**（Period2-08 设计批准后由 2 调整为 8.0~11.5；单线程约 20 周；并行轨道可压到 ≈ 13–15 周）。
 
 ---
 
@@ -173,7 +173,7 @@ open http://localhost:5173/dashboard
 | **Period2-05** | 指标注册表与执行引擎 | `MetricDef` 13 字段、注册发现、框架代算 `n/CI/inputs_hash/sample_status/status`、DAG 拓扑与环检测、`definition_version` 失效、`metric_result` 物化、门禁状态机 | Period2-03/Period2-04 | `make test-engine`：N<10 → `insufficient` 且 `conclusion=null`；口径 bump → 新版本行 + 旧行保留 + `is_stale` 单测 | 6.5 |
 | **Period2-06** | 指标端点 + 三段式 | `GET /metrics`（批量/过滤）、`/{id}`、`/explain`、`/drilldown`、`ETag`、`data_as_of` 透出 | Period2-05 | API-033~035、079 验收；`blocked` 时无 `value`；`conclusion` 无裸术语（词表断言） | 3 |
 | **Period2-07** | 三域指标实现 | 绩效（胜率含全样本、盈亏比、持仓天数、集中度 CR1/Gini、费用占比/回本门槛）、择时（追涨分位、卖飞率 z、β/α/IR、回撤族）、行为（PGR/PLR DE + bootstrap、换手、摊平、HHI）、选股（PIT cohort BHAR 20/60） | Period2-05 | 每个指标 1 份 golden（期望值来自手算表/独立实现）+ mutation ≥80% | 3.5 |
-| **Period2-08** | 五因子归因 | `core/attribution/five_factor`：选股/板块/买点/卖点/费用 +残差、`GET /attribution`、排序结论生成 | Period2-07/17 | API-036 验收：Σ因子+残差 = 区间损益（≤0.01）；单因子主导 fixture 排序正确；`factors[]` 含 `code="sector"` | 2 |
+| **Period2-08** | 五因子归因（**设计已人工批准 2026-11-02**） | [设计 v1.0](architecture/2026-11-02-five-factor-attribution.md)：`core/attribution` 选股/板块/买点/卖点/费用+残差、`GET /attribution`、排序结论生成；**08a 数据前置**：THS 行业指数日线落 `market.sector_bar` + `sync-sectors --start` + replay 日线夹具；[交叉评审](reviews/2026-11-02-DevDesign-Review-five-factor-attribution.md) 17 P0/33 P1 已处置、A-01~A-11 已批准 | Period2-07/17 | API-036 **19 条验收**（Σ+残差=区间损益、单因子主导 `rank==1`、`factors[]` 含 sector、blocked/degraded/coverage/词表/负 total_pnl/bridge 对账）；`make test-p2/test-isolation/api-check` 全绿；08a 未完成时 blocked+SKIP 记录 | 8.0~11.5 |
 | **Period2-09** | 月度报告 | `report` 表、`ReportSpec`、区块组装（概览/归因/最赚最亏/行为/重复错误/一条行动/口径脚注）、异步生成、HTML 自包含、`ETag`/下载、`blocked` 降级为说明单 | Period2-06/Period2-08 | API-039~042 验收；离线打开 HTML；报告数字与 `/metrics` 逐一相等（脚本比对）；同 `spec_hash` 复用 | 2.5 |
 | **Period2-10** | 数据导出 | `POST /exports`（异步）、Excel+JSON 打包、签名下载与 410 过期 | Period2-09 | API-059/060 验收；导出→清库→导入后行数/回合/净值一致 | 1 |
 | **Period2-11** | 设置 | `GET /settings`、`PUT /settings/benchmark`、`PUT /settings/privacy`、默认基准沪深300全收益、切换即触发失效重算 | Period2-03 | API-055~057 验收；切基准后历史趋势分段 | 1 |
