@@ -812,7 +812,12 @@ class CachedMarketDataSource:
             fetch_start, fetch_end = gaps[0][0], gaps[-1][1]
             try:
                 fetched = await self._inner.get_daily_bars([symbol], fetch_start, fetch_end)
-            except ApiError as exc:
+            except (ApiError, _TransientMarketError, _InvalidMarketDataError) as exc:
+                # 适配器抛出的所有可预期异常：ApiError（业务错误码）、
+                # _TransientMarketError（瞬时网络故障，可重试）、
+                # _InvalidMarketDataError（上游返回非法数据，不可重试）。
+                # 全部记到 failed 列表，让循环继续处理下一个标的，
+                # 避免一颗坏代码/一次网络抖动让整批同步静默中断。
                 failed.append(symbol)
                 log.warning(
                     "market.sync",
@@ -820,7 +825,7 @@ class CachedMarketDataSource:
                     start=fetch_start.isoformat(),
                     end=fetch_end.isoformat(),
                     result="failed",
-                    error=str(exc),
+                    error=f"{type(exc).__name__}: {exc}",
                 )
                 continue
             rows = [(bar.trade_date, bar.close_units, bar.return_units) for bar in fetched]
