@@ -3,11 +3,13 @@
  */
 
 .attr-page {
+  min-width: 0;
   color: var(--text);
   font-size: var(--fs-body);
 }
 
 .attr-panel {
+  min-width: 0;
   margin-bottom: var(--s5);
 }
 
@@ -123,9 +125,33 @@
   border-top: 1px solid var(--line);
 }
 
-.attr-missing li strong {
+.attr-missing li strong,
+.attr-unattributed li strong {
   flex: 1 1 320px;
+  min-width: 0;
+  overflow-wrap: anywhere;
   font-weight: var(--fw-medium);
+}
+
+.attr-severity {
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--surface-2, var(--surface));
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+
+.attr-severity[data-severity='blocker'] {
+  color: var(--down);
+}
+
+.attr-severity[data-severity='warning'] {
+  color: var(--text-2);
+}
+
+.attr-ratio-hint {
+  margin: var(--s3) 0 0;
+  font-size: var(--fs-xs);
 }
 
 .attr-what-to-do {
