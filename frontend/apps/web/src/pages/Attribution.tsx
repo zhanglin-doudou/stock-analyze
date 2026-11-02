@@ -103,6 +103,23 @@ function pctExceeds100(value: string | null | undefined): boolean {
   return integer.length > 3 || (integer.length === 3 && integer >= '100');
 }
 
+const USER_ACTION_LABELS: Record<string, string> = {
+  ASSET_SERIES_MISSING: '去资产页构建资产日表',
+  ASSET_ROW_BLOCKED: '去资产页处理阻断行',
+  ASSET_SERIES_STALE: '去资产页更新资产日表',
+  SECTOR_DATA_MISSING: '去板块页同步板块数据',
+  SECTOR_BAR_MISSING: '去板块页同步板块行情',
+  SECTOR_HISTORY_NOT_COVERED: '去板块页同步历史成分',
+  SECTOR_MAPPING_MISSING: '去板块页补齐缺失标的的行业归属',
+  SECTOR_BENCHMARK_WEIGHTS_MISSING: '联系管理员同步基准权重',
+  SECTOR_CLASSIFICATION_LOOKAHEAD: '确认 look-ahead 口径例外已批准',
+  BRIDGE_MISMATCH: '去对账页检查断链',
+  RESIDUAL_LARGE: '查看下方「残差去向」',
+  COVERAGE_LOW: '查看下方覆盖率与未归因标的',
+};
+
+const SEVERITY_ORDER: Record<string, number> = { blocker: 0, warning: 1 };
+
 /** 只读展示用：assumptions 中字符串项（U-06/U-11）。 */
 function assumptionText(
   data: Attribution,
@@ -160,9 +177,14 @@ function MissingList({
 }: {
   missing: AttributionMissing[];
 }): ReactElement {
+  // 阻断项优先（U-10）。
+  const ordered = [...missing].sort(
+    (left, right) =>
+      (SEVERITY_ORDER[left.severity] ?? 2) - (SEVERITY_ORDER[right.severity] ?? 2),
+  );
   return (
     <ul className="attr-missing" data-testid="attr-missing">
-      {missing.map((item, index) => (
+      {ordered.map((item, index) => (
         <li
           key={`${item.code}-${item.field}-${index}`}
           data-testid={`attr-missing-${item.code}`}
@@ -172,8 +194,16 @@ function MissingList({
             {item.severity === 'blocker' ? '阻断' : '降级'}
           </span>
           <strong>{item.reason}</strong>
-          <span className="muted">{item.field_label ?? item.field}</span>
-          <span className="attr-what-to-do">{item.what_to_do}</span>
+          <span className="muted">影响：{item.field_label ?? item.field}</span>
+          <span className="attr-what-to-do">
+            建议：{USER_ACTION_LABELS[item.code] ?? '联系管理员'}
+          </span>
+          <details className="attr-tech-details">
+            <summary className="muted">技术详情</summary>
+            <div className="muted">
+              {item.code} · {item.field} · {item.what_to_do}
+            </div>
+          </details>
         </li>
       ))}
     </ul>

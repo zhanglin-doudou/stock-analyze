@@ -181,6 +181,15 @@
   color: var(--muted);
 }
 
+.attr-tech-details {
+  flex: 1 1 100%;
+  font-size: var(--fs-xs);
+}
+
+.attr-tech-details > summary {
+  cursor: pointer;
+}
+
 .attr-links {
   display: flex;
   flex-wrap: wrap;

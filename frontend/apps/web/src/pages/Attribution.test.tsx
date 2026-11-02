@@ -353,6 +353,42 @@ describe("AttributionPage", () => {
     expect(screen.getByTestId("attr-residual").textContent).toContain("残差大于本期总损益");
   });
 
+  it("数据质量：阻断项优先、显示用户动作、开发命令折叠（U-10）", async () => {
+    getAttribution.mockResolvedValue(
+      attribution({
+        status: "degraded",
+        missing: [
+          {
+            code: "SECTOR_BAR_MISSING",
+            field: "factors.sector.amount",
+            field_label: "因子归因",
+            severity: "warning",
+            reason: "5 只标的缺板块指数行情。",
+            what_to_do: "补板块日线",
+          },
+          {
+            code: "BRIDGE_MISMATCH",
+            field: "total_pnl",
+            field_label: "总损益",
+            severity: "blocker",
+            reason: "MTM 损益与桥接式差额超过 1 分。",
+            what_to_do: "对账页检查断链",
+          },
+        ],
+      }),
+    );
+    renderPage();
+
+    await screen.findByTestId("attr-missing");
+    const items = Array.from(screen.getByTestId("attr-missing").querySelectorAll("li"));
+    expect(items[0]?.getAttribute("data-severity")).toBe("blocker");
+    expect(items[0]?.textContent).toContain("去对账页检查断链");
+    expect(items[0]?.textContent).toContain("影响：总损益");
+    const details = items[0]?.querySelector("details.attr-tech-details");
+    expect(details).not.toBeNull();
+    expect(details?.textContent).toContain("BRIDGE_MISMATCH");
+  });
+
   it("错误态：渲染 RFC 7807 人话", async () => {
     getAttribution.mockRejectedValue({
       code: "VALIDATION_ERROR",
