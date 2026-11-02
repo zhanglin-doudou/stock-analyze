@@ -150,9 +150,12 @@ function SummaryCard({ data }: { data: Attribution }): ReactElement {
         </div>
       )}
       <ul className="attr-factors">
-        {(data.factors ?? []).map((factor) => (
-          <FactorRow key={factor.code} factor={factor} />
-        ))}
+        {/* 用后端 rank 排序，避免固定数组顺序与 rank 徽标出现 2,1,5,3,4（U-04） */}
+        {[...(data.factors ?? [])]
+          .sort((left, right) => left.rank - right.rank)
+          .map((factor) => (
+            <FactorRow key={factor.code} factor={factor} />
+          ))}
       </ul>
     </section>
   );

@@ -301,6 +301,7 @@ describe("AttributionPage", () => {
         coverage: {
           capital_total: "0.00",
           capital_attributed: "0.00",
+          capital_excluded: "0.00",
           capital_ratio: null,
           base_basis: "market",
           segments_total: 0,
