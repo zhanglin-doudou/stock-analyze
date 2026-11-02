@@ -45,6 +45,7 @@ from stock_core.attribution.ranking import (
     total_abs_amounts,
 )
 from stock_core.fifo import build_rounds
+from stock_core.values import Money
 from stock_ledger.models import Trade
 from stock_ledger.repositories.trades import TradeRepository
 from stock_platform.ports import MarketDataSource, SectorDataSource
@@ -998,7 +999,8 @@ async def build_attribution(
             MissingEntry(
                 field="residual",
                 code="RESIDUAL_LARGE",
-                reason=f"无法解释的残差 {abs(gap_units)} 分超过阈值 {residual_threshold} 分",
+                reason=f"无法解释的残差 {Money(abs(gap_units))} 元超过阈值 "
+                f"{Money(residual_threshold)} 元",
                 what_to_do="看 residual_breakdown",
             )
         )
