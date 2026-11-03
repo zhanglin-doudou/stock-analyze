@@ -652,6 +652,15 @@ class AkshareSectorSource:
             if not parsed:
                 if page == 1:
                     raise SectorValidationError(f"同花顺板块 {code} 详情页成分表为空")
+                if total_pages is not None and page == total_pages:
+                    # 末页只有「暂无成份股数据」占位行：page_info 把空页也计入总页数
+                    # （如三胎概念 210 只 / 21 页，却声明 22 页）。按实际有数据页收口。
+                    log.info(
+                        "ths last page has no data",
+                        sector_code=code,
+                        declared_pages=total_pages,
+                    )
+                    total_pages = page - 1
                 # 越界页/末页之后会返回只有表头的空表：视为翻页结束。
                 break
             fresh = sum(1 for raw in parsed if raw not in seen)

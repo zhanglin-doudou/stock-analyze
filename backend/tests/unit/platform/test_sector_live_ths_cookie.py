@@ -226,6 +226,26 @@ def test_truncated_page_count_triggers_refetch(
     assert len(calls) == 5  # 第 1 轮 2 页即截断，第 2 轮 3 页补齐
 
 
+def test_declared_last_page_without_data_is_accepted(
+    make_source: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """page_info 把空末页计入总页数（如三胎概念 21 页有数据却声明 22 页）→ 按实际页收口。"""
+    source = make_source()
+    pages = {1: _codes(600000, 20), 2: _codes(600020, 20)}
+    empty_last = '<html><body><table><tr><th>序号</th><th>代码</th></tr><tr><td colspan="2">暂无成份股数据</td></tr></table><span class="page_info">3/3</span></body></html>'
+
+    def handler(url: str, _index: int) -> _Resp:
+        page = _page_number(url)
+        if page == 3:
+            return _Resp(empty_last)
+        return _Resp(_page_markup(pages[page], page, 3))
+
+    calls = _install_get(monkeypatch, handler)
+    members = source._ths_board_members("881117", TAXONOMY_INDUSTRY)
+    assert len(members) == 40
+    assert len(calls) == 3
+
+
 # ── 行业指数日线（sync-sector-bars）也带 cookie ──────────────────
 
 
