@@ -3,8 +3,8 @@
 全部子命令都用 `uv run python -m stock_api.cli <cmd>` 调用；只依赖标准库
 （`argparse` + `asyncio`），不引入 `click`/`typer` 等三方 CLI 依赖。
 
-子命令一览：seed-tenants / seed-demo / sync-market / sync-sectors / api-check /
-api-snapshot / sdk / api-coverage / verify-p1 / demo-p1 / db-truncate。
+子命令一览：seed-tenants / seed-demo / sync-market / sync-sectors / sync-sector-bars /
+api-check / api-snapshot / sdk / api-coverage / verify-p1 / demo-p1 / db-truncate。
 """
 
 from __future__ import annotations
@@ -1071,8 +1071,10 @@ async def _sync_sectors(
     try:
         source = create_live_sector_source(settings, session_factory=db.session, clock=clock)
         if start is not None:
-            emit(f"  提示：--start {start.isoformat()} 仅用于板块日线回填（P1），当前忽略")
-        report = await source.sync_to_cache(today=today, dry_run=dry_run, taxonomies=taxonomies)
+            emit(f"  板块日线回填：自 {start.isoformat()} 起（仅行业板块，概念不回填）")
+        report = await source.sync_to_cache(
+            today=today, dry_run=dry_run, taxonomies=taxonomies, bars_start=start
+        )
     except Exception as exc:
         emit(f"\n❌ sync-sectors 失败：{type(exc).__name__}: {exc}")
         return 1
@@ -1088,6 +1090,44 @@ async def _sync_sectors(
     if report.status == "failed":
         return 1
     emit("✅ 板块同步完成")
+    return 0
+
+
+async def _sync_sector_bars(*, start: date | None = None, dry_run: bool = False) -> int:
+    """只同步行业板块指数日线（08a 行情入口；不跑目录/成分同步）。"""
+    settings = get_settings()
+    clock = SystemClock()
+    today = clock.business_today()
+    if settings.sector_mode != "live":
+        emit(
+            f"SECTOR_MODE={settings.sector_mode}：板块数据来自 replay 夹具，"
+            "无需同步（live 环境才需要 make sync-sector-bars）"
+        )
+        return 0
+    _prepare_sync_network()
+    # 运维命令：owner 连接写 market 公共表（无 user_id / 无 RLS）。
+    db = Database(settings, role="owner")
+    try:
+        source = create_live_sector_source(settings, session_factory=db.session, clock=clock)
+        report = await source.sync_bars_to_cache(today=today, start=start, dry_run=dry_run)
+    except Exception as exc:
+        emit(f"\n❌ sync-sector-bars 失败：{type(exc).__name__}: {exc}")
+        return 1
+    finally:
+        await db.dispose()
+    if dry_run:
+        emit("== sync-sector-bars（--dry-run：仅做配置/DB 检查）==")
+    emit(f"  目标 as_of={report.as_of.isoformat()}；状态={report.status}")
+    if report.message:
+        emit(f"  {report.message}")
+    if report.status == "failed":
+        return 1
+    if dry_run:
+        emit("✅ 检查完成（未联网、未写库）")
+    elif report.status == "skipped":
+        emit("✅ 无需回填（bar_as_of 已是最新）")
+    else:
+        emit("✅ 板块日线同步完成")
     return 0
 
 
@@ -1183,6 +1223,18 @@ def build_parser() -> argparse.ArgumentParser:
     sector_concept.add_argument(
         "--dry-run", action="store_true", help="只做配置/DB 检查，不联网不写库"
     )
+    sector_bars = subparsers.add_parser(
+        "sync-sector-bars", help="只同步行业板块指数日线到 market.sector_bar（不跑目录/成分）"
+    )
+    sector_bars.add_argument(
+        "--start",
+        type=date.fromisoformat,
+        default=None,
+        help="回填起始日 YYYY-MM-DD（缺省从 bar_as_of 次日续传）",
+    )
+    sector_bars.add_argument(
+        "--dry-run", action="store_true", help="只做配置/DB 检查，不联网不写库"
+    )
     subparsers.add_parser("api-check", help="契约完整性检查（路径/operationId/错误码/错误响应）")
     snapshot = subparsers.add_parser("api-snapshot", help="规范化写出 contracts/openapi.json")
     snapshot.add_argument("--check", action="store_true", help="只比对不写，漂移则退出码 1")
@@ -1232,6 +1284,8 @@ async def _dispatch(args: argparse.Namespace) -> int:
         return await _sync_sectors(taxonomies=("industry",), dry_run=args.dry_run)
     if command == "sync-sector-concept":
         return await _sync_sectors(taxonomies=("concept",), dry_run=args.dry_run)
+    if command == "sync-sector-bars":
+        return await _sync_sector_bars(start=args.start, dry_run=args.dry_run)
     if command == "db-truncate":
         return await _db_truncate()
     if command == "api-check":
@@ -1257,6 +1311,7 @@ COMMANDS: dict[str, Callable[[argparse.Namespace], Coroutine[Any, Any, int]]] = 
         "sync-sectors",
         "sync-sector-industry",
         "sync-sector-concept",
+        "sync-sector-bars",
         "db-truncate",
         "api-check",
         "api-snapshot",

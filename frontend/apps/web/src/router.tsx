@@ -29,6 +29,9 @@ const NavPage = lazy(() => import("./pages/Nav").then((m) => ({ default: m.Nav }
 const Assets = lazy(() => import("./pages/Assets").then((m) => ({ default: m.Assets })));
 const Metrics = lazy(() => import("./pages/Metrics").then((m) => ({ default: m.Metrics })));
 const Sectors = lazy(() => import("./pages/Sectors").then((m) => ({ default: m.Sectors })));
+const AttributionPage = lazy(() =>
+  import("./pages/Attribution").then((m) => ({ default: m.AttributionPage })),
+);
 const MetricDetail = lazy(() =>
   import("./pages/MetricDetail").then((m) => ({ default: m.MetricDetail })),
 );
@@ -85,13 +88,7 @@ export const router = createBrowserRouter([
       },
       {
         path: "attribution",
-        element: (
-          <FeaturePlaceholder
-            title="归因"
-            dependency="Period2-08 归因分析"
-            description="收益归因（选股/择时/行业）尚未实现；此处仅预留入口。"
-          />
-        ),
+        element: <AttributionPage />,
       },
       { path: "settings", element: <Settings /> },
     ],

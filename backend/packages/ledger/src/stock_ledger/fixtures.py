@@ -13,7 +13,7 @@ import json
 import random
 import re
 import zipfile
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 
 from openpyxl import Workbook  # type: ignore[import-untyped]  # 第三方 openpyxl 无类型桩
@@ -180,11 +180,19 @@ def generate_broken_bill(seed: int, *, months: int = 1, count: int = 30) -> byte
 
 
 # ── 确定性行情夹具（G4：replay 适配器的唯一数据源）─────────────────
-# 纯确定性：日期固定、收盘由固定「首日收盘 + 月度漂移」推导、排序固定、
+# 纯确定性：日期固定、收盘由固定「首日收盘 + 月度漂移」锚点推导、排序固定、
 # 不写任何运行时刻戳/随机数；同一解释器重复调用 bytes 完全一致。
 # 价格/收益一律定点字符串（价格 10^-6 元、比率 10^-8），生成与读取全链路禁 float。
+# 08a（设计 §4.2-4）：由 9 个月末点扩为日频——完整覆盖账单区间（2026-04-01 起）
+# + 前向缓冲（至 2026-09-30）；起止仍为旧夹具的 2026-01-30~2026-09-30，与板块夹具
+# series 同跨度、同工作日序列，保证买/卖点参考价与行业指数参考日一致。
 
-_MARKET_DATES: tuple[str, ...] = (
+_SERIES_START = "2026-01-30"
+_SERIES_END = "2026-09-30"
+
+# 旧夹具的月末尾盘日期：日频扩频时必须逐位保留这些收盘价（API-032/081/084 的
+# 手算 oracle 依赖，如 600519 2026-06-30 = 1706.20），否则金标断裂。
+_MONTH_END_ANCHORS: tuple[str, ...] = (
     "2026-01-30",
     "2026-02-27",
     "2026-03-31",
@@ -195,11 +203,27 @@ _MARKET_DATES: tuple[str, ...] = (
     "2026-08-31",
     "2026-09-30",
 )
+
+
+def _business_days(start: str, end: str) -> tuple[str, ...]:
+    """工作日序列（周一~周五；夹具不考虑节假日，仅供确定性回放）。"""
+    cursor = date.fromisoformat(start)
+    last = date.fromisoformat(end)
+    days: list[str] = []
+    while cursor <= last:
+        if cursor.weekday() < 5:
+            days.append(cursor.isoformat())
+        cursor += timedelta(days=1)
+    return tuple(days)
+
+
+_MARKET_DATES: tuple[str, ...] = _business_days(_SERIES_START, _SERIES_END)
 MARKET_AS_OF: str = _MARKET_DATES[-1]
 MARKET_BENCHMARK: str = "hs300_tr"
 MARKET_PROVENANCE: str = "deterministic-fixtures/v1"
 
 # (symbol, 首日收盘, 月度漂移)：固定参数表，无随机、无时间依赖。
+# 参数与旧月频夹具完全一致——保证 9 个月末锚点收盘逐位不变。
 _MARKET_SERIES_SPEC: tuple[tuple[str, str, str], ...] = (
     (MARKET_BENCHMARK, "3150.20", "0.0042"),
     ("600519", "1680.00", "0.0031"),
@@ -209,12 +233,27 @@ _MARKET_SERIES_SPEC: tuple[tuple[str, str, str], ...] = (
 
 
 def _market_rows(first_close: str, monthly_drift: str) -> list[dict[str, str]]:
-    """按固定日期序列推导一条日线序列（每周期的收盘价与环比收益）。"""
+    """按固定日期序列推导一条日线序列（每交易日收盘价与环比收益）。
+
+    口径：先按原月频公式（首日收盘 × (1+月漂移)^n）算出 9 个月末锚点收盘，
+    锚点之间用几何插值补齐工作日——月末尾盘与旧夹具逐位一致，日频仅新增中间点。
+    """
     factor = Decimal("1") + Decimal(monthly_drift)
-    closes: list[Price] = [Price.from_str(first_close)]
-    for _ in range(1, len(_MARKET_DATES)):
-        grown = closes[-1].to_decimal() * factor
-        closes.append(Price.from_decimal(grown.quantize(Decimal("0.01"))))
+    anchors: list[Price] = [Price.from_str(first_close)]
+    for _ in range(1, len(_MONTH_END_ANCHORS)):
+        anchors.append(
+            Price.from_decimal((anchors[-1].to_decimal() * factor).quantize(Decimal("0.01")))
+        )
+    positions = [_MARKET_DATES.index(day) for day in _MONTH_END_ANCHORS]
+    closes: list[Price] = [anchors[0]] * len(_MARKET_DATES)
+    for index in range(len(positions) - 1):
+        lo, hi = positions[index], positions[index + 1]
+        start = anchors[index].to_decimal()
+        ratio = anchors[index + 1].to_decimal() / start
+        span = hi - lo
+        for step in range(span + 1):
+            grown = start * (ratio ** (Decimal(step) / Decimal(span)))
+            closes[lo + step] = Price.from_decimal(grown.quantize(Decimal("0.01")))
 
     rows: list[dict[str, str]] = []
     for index, (day, close) in enumerate(zip(_MARKET_DATES, closes, strict=True)):
@@ -232,8 +271,8 @@ def _market_rows(first_close: str, monthly_drift: str) -> list[dict[str, str]]:
 def generate_market_quotes() -> bytes:
     """生成确定性行情回放夹具（JSON bytes，可直接落盘 `fixtures/market/quotes.json`）。"""
     series = {
-        symbol: _market_rows(first_close, monthly_drift)
-        for symbol, first_close, monthly_drift in _MARKET_SERIES_SPEC
+        symbol: _market_rows(first_close, daily_drift)
+        for symbol, first_close, daily_drift in _MARKET_SERIES_SPEC
     }
     payload = {
         "schema_version": 1,

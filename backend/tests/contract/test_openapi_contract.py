@@ -43,10 +43,16 @@ def _find_operation(spec: dict[str, Any], operation_id: str) -> dict[str, Any]:
 
 
 def _walk_example_fields(value: Any, field: str | None = None) -> Any:
-    """递归产出 (字段名, 值) 对（用于示例格式断言）。"""
+    """递归产出 (字段名, 标量值) 对（用于示例格式断言）。
+
+    dict/list 只下钻、不作为叶节点产出：字段表（MONEY/RATIO_FIELDS…）是全局
+    平坦表，同名键在不同端点可以是容器（如 `coverage` 在板块响应是比率串、
+    在归因响应是对象），容器值不应参与标量格式断言。
+    """
     if isinstance(value, dict):
         for key, child in value.items():
-            yield key, child
+            if not isinstance(child, (dict, list)):
+                yield key, child
             yield from _walk_example_fields(child, key)
     elif isinstance(value, list):
         for item in value:
@@ -75,11 +81,11 @@ def test_validate_contract_returns_no_violations(spec: dict[str, Any]) -> None:
 
 
 def test_covers_all_registered_operations(spec: dict[str, Any]) -> None:
-    """55 个 operation（P2-12 API-084 + 2026-10-28 API-085/086 + 2026-10-31 API-087/088）全部登记且与 OPERATION_META 一致。"""
+    """56 个 operation（P2-12 API-084 + 2026-10-28 API-085/086 + 2026-10-31 API-087/088 + 2026-11-02 API-036）全部登记且与 OPERATION_META 一致。"""
     operations = _operations(spec)
     operation_ids = [operation["operationId"] for _, _, operation in operations]
-    assert len(operations) == 55
-    assert len(set(operation_ids)) == 55
+    assert len(operations) == 56
+    assert len(set(operation_ids)) == 56
     assert set(operation_ids) == set(OPERATION_META), "OPERATION_META 与实现端点漂移"
     paths = {path for _, path, _ in operations}
     # 探针/元数据端点（/api/v1/openapi.json 由 FastAPI 自引用，不在 paths 中）。
@@ -119,9 +125,9 @@ def test_every_2xx_has_example(spec: dict[str, Any]) -> None:
                     json_count += 1
                 else:
                     text_count += 1
-    # 55 个 operation 中 2 个文本响应（SSE / Prometheus）、5 个 204 无 body，
-    # 其余 48 个 2xx JSON 响应必须各带确定性示例（新增端点漏示例即失败）。
-    assert json_count == 48
+    # 56 个 operation 中 2 个文本响应（SSE / Prometheus）、5 个 204 无 body，
+    # 其余 49 个 2xx JSON 响应必须各带确定性示例（新增端点漏示例即失败）。
+    assert json_count == 49
     assert text_count == 2  # SSE（API-063）+ Prometheus 文本（API-074）
     stream = _find_operation(spec, "streamJobEvents")["responses"]["200"]["content"]
     assert "text/event-stream" in stream

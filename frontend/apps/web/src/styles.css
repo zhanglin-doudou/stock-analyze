@@ -81,6 +81,13 @@ h3 {
   background: #fff;
   color: var(--accent);
 }
+.btn-text {
+  white-space: nowrap;
+  background: none;
+  color: var(--accent);
+  border: none;
+  text-decoration: underline;
+}
 
 label {
   display: block;

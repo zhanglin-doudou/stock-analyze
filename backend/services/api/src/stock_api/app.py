@@ -33,6 +33,7 @@ from stock_api.middlewares import RequestContextMiddleware
 from stock_api.openapi_meta import apply_contract_metadata
 from stock_api.routers import (
     assets,
+    attribution,
     auth,
     dashboard,
     imports,
@@ -139,6 +140,7 @@ def create_app(settings: Settings | None = None, *, clock: Clock | None = None) 
         metrics,
         dashboard,
         sectors,
+        attribution,
     ):
         app.include_router(module.router, prefix=API_PREFIX)
     # 探针/根路由按容器惯例不带前缀（/healthz、/readyz、/version、/metrics、/）

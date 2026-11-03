@@ -14,6 +14,8 @@ export interface PeriodInputProps {
   value: string;
   onChange: (value: string) => void;
   disabled?: boolean;
+  /** 自定义区间默认结束日（如数据截至日）；缺省用今天（U-14）。 */
+  defaultEnd?: string;
   "aria-label"?: string;
 }
 
@@ -27,6 +29,7 @@ export function PeriodInput({
   value,
   onChange,
   disabled,
+  defaultEnd,
   "aria-label": ariaLabel = "期间",
 }: PeriodInputProps): ReactElement {
   const kind = periodKind(value);
@@ -58,7 +61,7 @@ export function PeriodInput({
       return;
     }
     const from = `${year}-01-01`;
-    const to = currentDate();
+    const to = defaultEnd ?? currentDate();
     setRange({ from, to });
     if (from <= to) onChange(toRangeToken(from, to));
   }
@@ -69,6 +72,9 @@ export function PeriodInput({
       onChange(toRangeToken(next.from, next.to));
     }
   }
+
+  const rangeInvalid =
+    kind === "custom" && range.from !== "" && range.to !== "" && range.from > range.to;
 
   return (
     <span className="period-input" aria-label={ariaLabel}>
@@ -120,6 +126,11 @@ export function PeriodInput({
             disabled={disabled}
             onChange={(event) => updateRange({ ...range, to: event.target.value })}
           />
+          {rangeInvalid ? (
+            <span className="period-range-error" role="alert">
+              开始日期晚于结束日期
+            </span>
+          ) : null}
         </span>
       ) : null}
     </span>

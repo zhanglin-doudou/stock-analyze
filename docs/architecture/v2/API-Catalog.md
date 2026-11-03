@@ -343,10 +343,11 @@
 - 验收断言：① items 非空；② 每项金额匹配 `^-?\d+\.\d{2}$`；③ items 中 trade_id 均可在 GET /trades 查到（本人）；④ params 回填 period 与 metric_id。
 #### API-036 GET /attribution
 - 用途：归因拆解（P0 五因子，P1 行业 Brinson）；FR-R7；认证：read；同步。
-- 请求：query `period`(必填) / `model`(five_factor|brinson_industry,默认 five_factor) / `benchmark`(可选)。
-- 响应 200：`model` / `period` / `total_pnl` / `factors[]{code,name,amount,ratio,rank,conclusion}` / `residual` / `status` / `definition_version` / `data_as_of` / `assumptions`。
-- 错误码：INVALID_PERIOD(422)、MODEL_NOT_AVAILABLE(422)、VALIDATION_ERROR(422)。
-- 验收断言：① Σfactors.amount + residual 与 total_pnl 差 ≤0.01；② rank 从 1 连续无重复；③ Σfactors.ratio + residual_ratio 与 1 差 ≤1bp；④ fx_single_factor → rank[0].code 等于期望因子；⑤ blocked 区间 → status=="blocked" 且 total_pnl 缺省。
+- 请求：query `period`(必填，月/年/自定义 ≤366 天) / `model`(five_factor|brinson_industry,默认 five_factor) / `benchmark`(可选) / `classification_lookahead`(deny|allow,默认 deny；allow 需部署 `SECTOR_LOOKAHEAD_ENABLED=true`)；头 `Accept-Language`（只换文案不换数字，§5.5）。
+- 响应 200：`model` / `ratio_basis` / `period` / `period_start` / `period_end` / `status`(ok|degraded|blocked) / `definition_version` / `total_pnl_basis` / `total_pnl` / `ratio_na_reason` / `base_capital` / `factors[]{code,name,amount,ratio,share,rank,conclusion,presentation{bar_pct,ratio_pct,tone}}`（固定 5 项、固定顺序，含 `sector`）/ `summary`(string|null) / `residual` / `residual_ratio` / `residual_breakdown{corporate_action_pnl,unattributed_price_pnl,dividend_without_position,interest,other_cashflow,valuation_gap}` / `sample{n_segments,n_attributed_segments,n_rounds,n_symbols,min_n,sample_status}` / `coverage{capital_total,capital_attributed,capital_ratio,base_basis,segments_total,segments_attributed,symbols_total,symbols_attributed,unattributed[]}` / `missing[]{field,code,reason,what_to_do}` / `assumptions`（18 键，见设计 §6.2）/ `data_as_of` / `inputs_hash` / `links{dashboard,sectors,rounds,reports}`。金额/占比均为定点字符串（`^-?\d+\.\d{2}$` / `^-?\d+\.\d{8}$`）。
+- blocked 缺省（冻结）：`total_pnl`/`base_capital`/`summary`/`residual`/`residual_ratio`/`residual_breakdown`/`coverage` 与 `factors[].amount/ratio/share` 整个键缺省；`factors[].code/name/rank` 保留、`conclusion=null`、`presentation=(null,null,"flat")`。`missing[]` 是响应字段（不是 `ErrorCode`）。
+- 错误码：INVALID_PERIOD(422)、MODEL_NOT_AVAILABLE(422，含 lookahead 未开)、UNKNOWN_BENCHMARK(422)、VALIDATION_ERROR(422)、UNKNOWN_QUERY_PARAM(400)、ADMIN_CANNOT_READ_TRADES(403)、401 认证族。
+- 验收断言：① Σfactors.amount+residual==total_pnl（≤0.01）；② rank 1..5 连续无重复；③ Σfactors.ratio+residual_ratio==1（≤1bp）；④ `factors[]` 恰 5 项且含 `sector`；⑤ blocked → 200、金额键缺省、`missing[]` 带 reason/what_to_do；⑥ degraded → 200、五因子照给且 coverage/missing 披露；⑦ 空账户/无可归因 A 股 → 后端固定 `summary` 句（金额 0 照给）；⑧ `sample_status=insufficient` → `summary` 只给事实句、不生成结论（金额照给）；⑨ `Accept-Language=en-US` 只换文案不换数值；⑩ 确定性：同输入两跑（含 `inputs_hash`）一致；⑪ 跨账号隔离（A/B 各自 200 且互不泄漏）；⑫ admin → 403、未认证 → 401；⑬ 参数校验 5 组 → 422/422/422/422/400；⑭ `data_as_of=min(资产/行情/板块)`、`assumptions` 18 键齐全；⑮ 边界：周末月末不误判 stale、`V_begin` blocked → blocked；⑯ bridge 对账 `|MTM−桥接式|≤1 分` 或 degraded+`BRIDGE_MISMATCH`。
 #### API-037 GET /trends
 - 用途：季度/月趋势（口径断点必须断开）；FR-D5；认证：read；同步。
 - 请求：query `metric`(必填) / `granularity`(month|quarter) / `from`/`to` / `benchmark`(可选)。
@@ -591,7 +592,7 @@ data: {"job_id":"job_01J9Z6","status":"succeeded","result_ref":"/api/v1/reports/
 | API-033 | metrics_batch_contract | n==12、sample_status=ok、value 小数、版本匹配 | fx_round30 | P0 |
 | API-034 | metrics_explain_trace | 无裸术语；status!=ok 时 conclusion=null+what_to_do | fx_n5 | P0 |
 | API-035 | metrics_drilldown_money | items 非空且金额定点；source_endpoints 可调 | fx_round30 | P0 |
-| API-036 | attribution_identity | Σfactor+residual==total_pnl（≤0.01）；rank 连续 | fx_single_factor | P0 |
+| API-036 | attribution_identity | Σfactor+residual==total_pnl（≤0.01）；rank 1..5 连续；blocked 金额缺省；insufficient 结论降级 | fx_attr_mixed / fx_attr_p0_blocked（内联向量：`tests/unit/core/test_attribution.py`、`tests/unit/review/test_attribution_assembly.py`；API 协议层用 `account_factory`） | P0 |
 | API-037 | trends_version_breaks | breaks 非空且跨断点 segment 不同、不连线 | fx_version_break | P1 |
 | API-038 | selection_as_of | 202→succeeded；含 BHAR n/CI；as_of 无未来财报 | fx_round30 | P0 |
 | API-039 | reports_create_reuse | 202；同 (period,spec_hash) 复用同一 report_id | fx_base | P0 |
@@ -713,7 +714,7 @@ grep -c '2026-09' report.html
 | R4 选股诊断 | API-038、API-033 | 202→succeeded；domain=selection 含 BHAR/t/n/CI；as_of 无未来数据 |
 | R5 择时与绩效 | API-033、API-056、API-079 | timing 全字段含 n/CI/sample_status/data_as_of；默认基准显式标注 |
 | R6 行为偏差 | API-033 | de 含 value/CI；处置效应 fixture de>0 且 CI 不含 0；无效应 fixture CI 含 0 |
-| R7 归因 | API-036 | Σfactor+residual==total_pnl（≤0.01）；单因子主导 rank[0] 正确 |
+| R7 归因 | API-036 | Σfactor+residual==total_pnl（≤0.01）；rank 1..5 连续；blocked 不输出金额；degraded/insufficient 以 `missing[]`/`sample_status` 披露（2026-11-02 08g 更新） |
 | R8 统计可信度 | API-033、API-034、API-052、API-079 | n<10 → insufficient 且无结论；n≥30 有 CI；exploratory 不进行动建议 |
 | D1 Web SPA | API-005、API-029、API-032、API-033、API-036、API-040、API-047、API-055 等全部读端点 | 页面数据端点 100% 登记并过验收；`GET /` 200 |
 | D2 月报 | API-039~042、API-062 | 202→succeeded；下载 200 且 Content-Disposition 正确；数字与 metrics 一致；同 spec 复用 |

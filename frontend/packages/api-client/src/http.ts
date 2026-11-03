@@ -9,6 +9,7 @@ import type {
   AssetChart,
   AssetPage,
   AuthTokens,
+  Attribution,
   BatchList,
   CommitImportBody,
   CreateTokenBody,
@@ -217,6 +218,14 @@ export interface SectorsOverviewQuery {
   parent?: string;
   benchmark?: string;
   limit?: number;
+}
+
+/** API-036 五因子归因查询（period=YYYY-MM；`benchmark` 仅 brinson 模型用）。 */
+export interface GetAttributionQuery {
+  period: string;
+  model?: "five_factor" | "brinson_industry";
+  benchmark?: string;
+  classification_lookahead?: "deny" | "allow";
 }
 
 /** API-088 板块目录查询（公共数据；level/parent/q 过滤 + 游标分页）。 */
@@ -720,6 +729,24 @@ export function createClient(options: ClientOptions) {
     },
   };
 
+  const attribution = {
+    /** API-036：五因子归因（纯读；blocked/degraded 仍 200，文案随 Accept-Language）。 */
+    get(query: GetAttributionQuery) {
+      return send<Attribution>({
+        path: "/attribution",
+        query: {
+          period: query.period,
+          model: query.model,
+          benchmark: query.benchmark,
+          classification_lookahead: query.classification_lookahead,
+        },
+        // 只换文案不换数字（§5.5）；SSR/测试环境无 navigator 时用后端默认 zh。
+        headers:
+          typeof navigator === "undefined" ? undefined : { "Accept-Language": navigator.language },
+      }).then((r) => r.data);
+    },
+  };
+
   const metricsApi = {
     /** API-086：18 个指标的口径说明书（无 period；只读）。 */
     catalog() {
@@ -782,7 +809,7 @@ export function createClient(options: ClientOptions) {
     },
   };
 
-  return { auth, tokens, imports, jobs, trades, rounds, nav, assets, dashboard, sectors, metrics: metricsApi, ops, request: send };
+  return { auth, tokens, imports, jobs, trades, rounds, nav, assets, dashboard, sectors, attribution, metrics: metricsApi, ops, request: send };
 }
 
 export type ApiClient = ReturnType<typeof createClient>;

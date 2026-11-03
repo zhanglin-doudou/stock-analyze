@@ -122,10 +122,12 @@ async def test_replay_reads_tracked_fixture_row_by_row() -> None:
 async def test_range_filter_is_inclusive_and_sorted() -> None:
     source = ReplayMarketDataSource(MARKET_FIXTURE)
     bars = await source.get_daily_bars(["hs300_tr", "600519"], date(2026, 4, 30), date(2026, 6, 30))
-    expected_dates = [date(2026, 4, 30), date(2026, 5, 29), date(2026, 6, 30)]
-    # 日期升序、同日按 symbol 升序（确定性输出）
+    # 08a 日频夹具：区间内每个工作日都有行；日期升序、同日按 symbol 升序（确定性输出）。
+    dates = sorted({bar.trade_date for bar in bars})
+    assert dates[0] == date(2026, 4, 30)
+    assert dates[-1] == date(2026, 6, 30)
     assert [bar.trade_date for bar in bars] == [
-        trade_date for trade_date in expected_dates for _ in ("600519", "hs300_tr")
+        trade_date for trade_date in dates for _ in ("600519", "hs300_tr")
     ]
     assert all(date(2026, 4, 30) <= bar.trade_date <= date(2026, 6, 30) for bar in bars)
 

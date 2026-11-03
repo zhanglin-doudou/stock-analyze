@@ -96,6 +96,9 @@ class Settings(BaseSettings):
     sector_ths_page_interval_seconds: float = Field(0.6, alias="SECTOR_THS_PAGE_INTERVAL_SECONDS")
     sector_sync_retry_attempts: int = Field(3, alias="SECTOR_SYNC_RETRY_ATTEMPTS")
     sector_flat_active_units: int = Field(100_000, alias="SECTOR_FLAT_ACTIVE_UNITS")
+    # 2026-11-02 五因子归因（§4.3）：classification_lookahead=allow 的部署开关
+    # （默认关闭；开启后允许用最早可用分类快照并标 degraded，属人工批准的例外）。
+    sector_lookahead_enabled: bool = Field(False, alias="SECTOR_LOOKAHEAD_ENABLED")
 
     # 指标引擎：无风险利率（C-24，D-14）
     rf_annual: Decimal = Field(RF_ANNUAL_DEFAULT, alias="RF_ANNUAL")

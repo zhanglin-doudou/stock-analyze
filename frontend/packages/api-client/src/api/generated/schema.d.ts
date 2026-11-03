@@ -84,6 +84,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/attribution": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Attribution Endpoint
+         * @description API-036：五因子归因（FR-R7；数据不可用 → 200 blocked/degraded + missing[]）。
+         */
+        get: operations["getAttribution"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/login": {
         parameters: {
             query?: never;
@@ -1197,6 +1217,218 @@ export interface components {
             total_assets?: string | null;
             /** Unrealized Pnl */
             unrealized_pnl?: string | null;
+        };
+        /**
+         * AttributionCoverageOut
+         * @description §4.4 覆盖披露：资本 / 段 / 标的三层归因覆盖 + 未归因明细。
+         */
+        AttributionCoverageOut: {
+            /**
+             * Base Basis
+             * @enum {string}
+             */
+            base_basis: "market" | "mixed";
+            /** Capital Attributed */
+            capital_attributed: string;
+            /** Capital Excluded */
+            capital_excluded: string;
+            /** Capital Ratio */
+            capital_ratio?: string | null;
+            /** Capital Ratio Pct */
+            capital_ratio_pct?: string | null;
+            /** Capital Total */
+            capital_total: string;
+            /** Segments Attributed */
+            segments_attributed: number;
+            /** Segments Total */
+            segments_total: number;
+            /** Symbols Attributed */
+            symbols_attributed: number;
+            /** Symbols Total */
+            symbols_total: number;
+            /** Unattributed */
+            unattributed?: components["schemas"]["AttributionUnattributedOut"][];
+        };
+        /**
+         * AttributionFactorOut
+         * @description `factors[]` 单项：固定 5 项、固定顺序 [selection, sector, buy_timing, sell_timing, fee]。
+         */
+        AttributionFactorOut: {
+            /** Amount */
+            amount?: string | null;
+            /** Code */
+            code: string;
+            /** Conclusion */
+            conclusion?: string | null;
+            /** Name */
+            name: string;
+            presentation: components["schemas"]["AttributionPresentationOut"];
+            /** Rank */
+            rank: number;
+            /** Ratio */
+            ratio?: string | null;
+            /** Share */
+            share?: string | null;
+        };
+        /** AttributionLinksOut */
+        AttributionLinksOut: {
+            /** Dashboard */
+            dashboard: string;
+            /** Reports */
+            reports: string;
+            /** Rounds */
+            rounds: string;
+            /** Sectors */
+            sectors: string;
+        };
+        /**
+         * AttributionMissingOut
+         * @description 200 降级项（字段路径 + 机读码 + 人话 + 可执行指引；码不是 ErrorCode）。
+         */
+        AttributionMissingOut: {
+            /** Code */
+            code: string;
+            /** Field */
+            field: string;
+            /** Field Label */
+            field_label?: string | null;
+            /** Reason */
+            reason: string;
+            /**
+             * Severity
+             * @default warning
+             * @enum {string}
+             */
+            severity: "blocker" | "warning";
+            /** What To Do */
+            what_to_do: string;
+        };
+        /**
+         * AttributionOut
+         * @description 五因子归因响应（§6.2；金额 2 位 / 比率 scale=8 定点字符串）。
+         *
+         *     blocked 缺省语义（§6.3 评审 P0-7 冻结）：`status="blocked"` 时
+         *     `total_pnl/base_capital/residual/residual_ratio/residual_breakdown/coverage`
+         *     整键省略，`factors[].amount/ratio/share` 逐项省略（code/name/rank/conclusion 保留）；
+         *     非 blocked 时 ratio=None 显式输出 null（PNL_NEAR_ZERO，附 `ratio_na_reason`）。
+         */
+        AttributionOut: {
+            /** Assumptions */
+            assumptions?: {
+                [key: string]: unknown;
+            };
+            /** Base Capital */
+            base_capital?: string | null;
+            coverage?: components["schemas"]["AttributionCoverageOut"] | null;
+            /** Data As Of */
+            data_as_of?: string | null;
+            /** Definition Version */
+            definition_version: string;
+            /** Factors */
+            factors?: components["schemas"]["AttributionFactorOut"][];
+            /** Inputs Hash */
+            inputs_hash: string;
+            links: components["schemas"]["AttributionLinksOut"];
+            /** Missing */
+            missing?: components["schemas"]["AttributionMissingOut"][];
+            /** Model */
+            model: string;
+            /** Period */
+            period: string;
+            /**
+             * Period End
+             * Format: date
+             */
+            period_end: string;
+            /**
+             * Period Start
+             * Format: date
+             */
+            period_start: string;
+            /** Ratio Basis */
+            ratio_basis: string;
+            /** Ratio Na Reason */
+            ratio_na_reason?: string | null;
+            /** Residual */
+            residual?: string | null;
+            /** Residual Breakdown */
+            residual_breakdown?: {
+                [key: string]: string;
+            } | null;
+            /** Residual Breakdown Labels */
+            residual_breakdown_labels?: {
+                [key: string]: string;
+            } | null;
+            /** Residual Ratio */
+            residual_ratio?: string | null;
+            /** Residual Ratio Pct */
+            residual_ratio_pct?: string | null;
+            sample: components["schemas"]["AttributionSampleOut"];
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "degraded" | "blocked";
+            /** Summary */
+            summary?: string | null;
+            /** Summary Na Reason */
+            summary_na_reason?: string | null;
+            /** Total Pnl */
+            total_pnl?: string | null;
+            /** Total Pnl Basis */
+            total_pnl_basis: string;
+        };
+        /**
+         * AttributionPresentationOut
+         * @description 因子呈现三元组：`bar_pct` 由 share 取绝对值派生（前端直接作 CSS 宽度）。
+         */
+        AttributionPresentationOut: {
+            /** Bar Pct */
+            bar_pct?: string | null;
+            /** Ratio Pct */
+            ratio_pct?: string | null;
+            /** Share Pct */
+            share_pct?: string | null;
+            /**
+             * Tone
+             * @enum {string}
+             */
+            tone: "positive" | "negative" | "flat";
+        };
+        /**
+         * AttributionSampleOut
+         * @description 样本规模与结论门禁（insufficient 只封 summary/conclusion，金额照给）。
+         */
+        AttributionSampleOut: {
+            /** Min N */
+            min_n: number;
+            /** N Attributed Segments */
+            n_attributed_segments: number;
+            /** N Rounds */
+            n_rounds: number;
+            /** N Segments */
+            n_segments: number;
+            /** N Symbols */
+            n_symbols: number;
+            /**
+             * Sample Status
+             * @enum {string}
+             */
+            sample_status: "ok" | "insufficient";
+        };
+        /**
+         * AttributionUnattributedOut
+         * @description 一条未归因标的披露（amount = 其残差桶金额，可为 0）。
+         */
+        AttributionUnattributedOut: {
+            /** Amount */
+            amount: string;
+            /** Reason Code */
+            reason_code?: string | null;
+            /** Security Code */
+            security_code: string;
+            /** Symbol Class */
+            symbol_class: string;
         };
         /**
          * AuthOut
@@ -3705,6 +3937,72 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AssetChartOut"];
+                };
+            };
+            /** @description 请求参数错误 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getAttribution: {
+        parameters: {
+            query: {
+                period: string;
+                model?: "five_factor" | "brinson_industry";
+                benchmark?: string | null;
+                classification_lookahead?: "deny" | "allow";
+            };
+            header?: {
+                "Accept-Language"?: string | null;
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AttributionOut"];
                 };
             };
             /** @description 请求参数错误 */
