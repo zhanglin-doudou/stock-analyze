@@ -492,7 +492,12 @@ class AkshareSectorSource:
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
     )
-    _THS_MAX_PAGES = 300
+    # 概念页 10 行/页、行业页 20 行/页；同花顺超大概念（如 `300900` 融资融券
+    # ~3887 只 / 389 页）页数远超小板块，上限需留足余量（600 页 ≈ 6000 只）。
+    _THS_MAX_PAGES = 600
+    # 连续多页拿不到任何新代码 → 上游分页重复返回（截断/反爬），立即显式失败，
+    # 不再空转到页数上限。
+    _THS_STALE_PAGES = 5
     # 单页请求失败重试 3 次（总尝试 4 次），退避 1/2/4s；401 同样走此重试。
     _THS_PAGE_RETRIES = 3
     _THS_RETRY_BACKOFF_SECONDS = (1.0, 2.0, 4.0)
@@ -575,7 +580,19 @@ class AkshareSectorSource:
         last_expected = 0
         last_unique = 0
         for pass_index in range(self._THS_MEMBER_PASSES):
-            unique, expected = self._ths_board_members_pass(code, taxonomy, cookie=cookie)
+            try:
+                unique, expected = self._ths_board_members_pass(code, taxonomy, cookie=cookie)
+            except SectorMemberIncompleteError as exc:
+                # 页数截断/分页重复返回：整板重抓比直接判死更有机会拿到完整集合。
+                if pass_index + 1 >= self._THS_MEMBER_PASSES:
+                    raise
+                log.warning(
+                    "ths member truncated, refetch",
+                    sector_code=code,
+                    error=str(exc)[:120],
+                    attempt=pass_index + 1,
+                )
+                continue
             if expected > 0 and len(unique) == expected:
                 # 闸门通过后再过滤非 A 股行（如北交所 92xxxx），避免误判缺行。
                 filtered = (
@@ -603,8 +620,10 @@ class AkshareSectorSource:
         """抓取一遍全部分页，返回（去重后的原始代码, page_info 推导的期望行数）。"""
         members: list[str] = []
         counts: list[int] = []
+        seen: set[str] = set()
         total_pages: int | None = None
         page = 1
+        stale_pages = 0
         page_interval = self._settings.sector_ths_page_interval_seconds
         while page <= self._THS_MAX_PAGES:
             if page > 1 and page_interval > 0:
@@ -635,6 +654,15 @@ class AkshareSectorSource:
                     raise SectorValidationError(f"同花顺板块 {code} 详情页成分表为空")
                 # 越界页/末页之后会返回只有表头的空表：视为翻页结束。
                 break
+            fresh = sum(1 for raw in parsed if raw not in seen)
+            # 超大板块（数千只）下用集合判定，避免逐页 O(n²)。
+            seen.update(parsed)
+            stale_pages = 0 if fresh else stale_pages + 1
+            if stale_pages >= self._THS_STALE_PAGES:
+                raise SectorMemberIncompleteError(
+                    f"同花顺板块 {code} 连续 {stale_pages} 页无新成分股（第 {page} 页），"
+                    "疑似上游分页重复返回/截断，整批放弃不落库"
+                )
             counts.append(len(parsed))
             members.extend(parsed)
             if total_pages is not None and page >= total_pages:

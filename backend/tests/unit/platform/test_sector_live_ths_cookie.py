@@ -186,6 +186,46 @@ def test_gate_rejects_after_all_passes(make_source: Any, monkeypatch: pytest.Mon
     assert len(calls) == 9  # 3 轮 × 3 页
 
 
+def test_stale_pages_abort_fast(make_source: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """上游分页重复返回同一批代码 → 连续多页无新行时快速失败，不空转到页数上限。"""
+    source = make_source()
+    page1 = _codes(600000, 20)
+    calls = _install_get(
+        monkeypatch,
+        lambda url, _index: _Resp(_page_markup(page1, _page_number(url), 50)),
+    )
+    with pytest.raises(SectorMemberIncompleteError, match="无新成分股"):
+        source._ths_board_members("881117", TAXONOMY_INDUSTRY)
+    # 每轮 6 页（第 1 页 + 连续 5 页无新行）即中止，3 轮共 18 次请求。
+    assert len(calls) == 18
+    assert source._THS_STALE_PAGES == 5
+
+
+def test_truncated_page_count_triggers_refetch(
+    make_source: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """某页返回只有表头的空表 → 实际页数 < page_info 声明 → 整板重抓后通过闸门。"""
+    source = make_source()
+    clean = {1: _codes(600000, 20), 2: _codes(600020, 20), 3: _codes(600040, 14)}
+    pass_no = {"value": 0}
+
+    def handler(url: str, _index: int) -> _Resp:
+        page = _page_number(url)
+        if page == 1:
+            pass_no["value"] += 1
+        if pass_no["value"] == 1 and page == 2:
+            return _Resp(
+                "<html><body><table><tr><th>序号</th><th>代码</th></tr></table>"
+                '<span class="page_info">2/3</span></body></html>'
+            )
+        return _Resp(_page_markup(clean[page], page, 3))
+
+    calls = _install_get(monkeypatch, handler)
+    members = source._ths_board_members("881117", TAXONOMY_INDUSTRY)
+    assert len(members) == 54
+    assert len(calls) == 5  # 第 1 轮 2 页即截断，第 2 轮 3 页补齐
+
+
 # ── 行业指数日线（sync-sector-bars）也带 cookie ──────────────────
 
 
