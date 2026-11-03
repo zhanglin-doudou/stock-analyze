@@ -18,12 +18,11 @@ class TestClusterT:
         assert cluster_t([]) is None
 
     def test_two_clusters_with_variance(self) -> None:
-        """设计文档 §5.5 小例：3 事件，t 值 ≈ 0.25。"""
+        """设计文档 §5.5 小例：3 事件，t 值 = 0.375（scale=4）。"""
         # 两个事件在 day=0，一个在 day=1
         bhars = _ratio_to_scale8([0.05, -0.07, 0.05])
         events = [(0, bhars[0]), (0, bhars[1]), (1, bhars[2])]
-        t = cluster_t(events)
-        assert t is not None
+        assert cluster_t(events) == 3750
 
     def test_all_same_value_returns_zero(self) -> None:
         """所有 BHAR 相同 → 均值无偏 → SS=0 → t=0。"""
@@ -31,7 +30,6 @@ class TestClusterT:
         assert cluster_t(events) == 0
 
     def test_singleton_event_per_day(self) -> None:
-        """每个事件独占一天 → 单样本 t 近似。"""
+        """每个事件独占一天 → 单样本 t 近似：0.34641（scale=4）。"""
         events = [(0, 1000), (1, 2000), (2, 3000)]
-        t = cluster_t(events)
-        assert t is not None  # 至少应返回数值
+        assert cluster_t(events) == 34641

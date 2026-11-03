@@ -39,6 +39,10 @@ def test_sqrt_units_both_shifts() -> None:
     # shift < 0：out_scale 更细，需先整除
     assert sqrt_units(100, in_scale=4, out_scale=0) == 0
     assert sqrt_units(100, in_scale=2, out_scale=0) == 1
+    # shift > 0：先放大再开方；sqrt(16)×10 = 40
+    assert sqrt_units(16, in_scale=0, out_scale=1) == 40
+    # sqrt(0) = 0 是合法边界（不能被当作负值拒绝）
+    assert sqrt_units(0, in_scale=0, out_scale=0) == 0
     with pytest.raises(ValueError):
         sqrt_units(-1, in_scale=0, out_scale=0)
 
@@ -56,12 +60,24 @@ def test_percentile_index_bounds_and_validation() -> None:
     assert percentile_index(10, 250) == 2
     assert percentile_index(10, 1000) == 9
     assert percentile_index(1, 500) == 0
+    # ceil(q·n/1000) 的进位边界：7×143‰=1001‰ → 排名 2（索引 1）
+    assert percentile_index(7, 143) == 1
     with pytest.raises(ValueError):
         percentile_index(0, 500)
     with pytest.raises(ValueError):
         percentile_index(10, -1)
     with pytest.raises(ValueError):
         percentile_index(10, 1001)
+
+
+def test_xorshift_first_value_is_stable() -> None:
+    """PRNG 输出是跨版本契约（bootstrap 可复现性依赖它），固定 seed=42 first value。"""
+    assert XorShift64Star(42).next_u64() == 620_241_905_386_665_794
+
+
+def test_below_one_always_returns_zero() -> None:
+    """上界为 1 时唯一合法值就是 0（不能因 upper<=1 抛错）。"""
+    assert XorShift64Star(7).below(1) == 0
 
 
 def test_xorshift_is_deterministic_and_seed_zero_is_remapped() -> None:

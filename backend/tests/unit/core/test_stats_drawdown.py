@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from stock_core.metrics.portfolio_index import compound_index
 from stock_core.stats.drawdown import drawdown_family
 
 
@@ -131,3 +132,81 @@ class TestCompounding:
         returns = _ratio_to_scale8([0.01, -0.02, 0.01])
         df = drawdown_family(returns, natural_days=0)
         assert df.twr_annual_units == 0
+
+
+class TestDrawdownBoundaries:
+    """边界与精确值：样本量下限、恢复判定、年化口径、显式 false 标记。"""
+
+    def test_two_observations_is_enough(self) -> None:
+        """n=2 是可用下限；无回撤时 duration 为 None（不能给出 0）。"""
+        df = drawdown_family([1_000_000, 2_000_000])
+        assert df.mdd_units == 0
+        assert df.mdd_duration_obs is None
+        assert df.recovery_censored is False
+
+    def test_recovery_exactly_at_prior_peak(self) -> None:
+        """指数恰好回到前高（相等）也算恢复：I=[1, 1.25, 1.0, 1.25]。"""
+        returns = [25_000_000, -20_000_000, 25_000_000]
+        df = drawdown_family(returns)
+        assert df.mdd_units == 20_000_000
+        assert df.peak_index == 1
+        assert df.trough_index == 2
+        assert df.recovery_index == 3
+        assert df.mdd_duration_obs == 1
+        assert df.mdd_recovery_obs == 1
+        assert df.recovery_censored is False
+
+    def test_first_return_loss_starts_from_initial_peak(self) -> None:
+        """首个收益为负时，峰值仍取初始指数 1.0（不是 I_1）。"""
+        returns = [-10_000_000, -20_000_000, 35_000_000]
+        df = drawdown_family(returns)
+        assert df.mdd_units == 28_000_000
+        assert df.peak_index == 0
+        assert df.trough_index == 2
+
+    def test_first_observation_underwater_counts(self) -> None:
+        """首期即回撤：水下占比必须计入第 1 期，Ulcer 也必须统计全部 n 期。
+
+        n=2：dd₁=-0.1、dd₂=-0.055 → sqrt((0.01+0.003025)/2)=0.08070006。
+        """
+        returns = [-10_000_000, 5_000_000]
+        df = drawdown_family(returns)
+        assert df.underwater_ratio_units == 100_000_000  # 2/2 期都在水下
+        assert df.ulcer_units == 8_070_006
+
+    def test_recovered_then_loss_is_censored(self) -> None:
+        returns = [50_000_000, -20_000_000]
+        df = drawdown_family(returns)
+        assert df.recovery_censored is True
+        assert df.mdd_recovery_obs is None
+
+    def test_total_wipeout_has_zero_annual_return(self) -> None:
+        """累计收益 -100% → 年化 TWR 归 0（不能对 0 取幂得 -1）。"""
+        df = drawdown_family([-100_000_000, 0])
+        assert df.twr_annual_units == 0
+
+    def test_annualized_twr_matches_compound_for_one_year(self) -> None:
+        """natural_days=365 时年化 TWR 即复利累计收益，应与 compound_index 逐位一致。"""
+        returns = [50_000_000, -20_000_000]
+        df = drawdown_family(returns, natural_days=365)
+        assert df.twr_annual_units == compound_index(returns) == 20_000_000
+
+    def test_one_natural_day_is_still_annualized(self) -> None:
+        """natural_days=1 也必须按 1/365 年折算，不能直接返回 0。"""
+        df = drawdown_family([1_000_000, 2_000_000], natural_days=1)
+        assert df.twr_annual_units > 0
+
+    def test_blocked_and_insufficient_report_false_censored(self) -> None:
+        blocked = drawdown_family([1_000_000, 2_000_000], blocked=True)
+        assert blocked.recovery_censored is False
+        assert blocked.n_obs == 2
+
+        insufficient = drawdown_family([1_000_000])
+        assert insufficient.recovery_censored is False
+        assert insufficient.n_obs == 1
+
+    def test_return_of_exactly_one_is_not_unreliable(self) -> None:
+        """单期 +100% 是合法收益（|r| 判据必须严格大于 1，不能含等号）。"""
+        # natural_days 取大使年化指数远离精度边界，聚焦 unreliable 判定本身
+        df = drawdown_family([0, 100_000_000], natural_days=365_000)
+        assert df.unreliable is False

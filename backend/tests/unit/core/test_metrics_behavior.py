@@ -61,19 +61,57 @@ class TestAveragingDownRate:
 
 class TestPortfolioConcentrationMean:
     def test_design_doc_two_days(self) -> None:
-        # d1: mv=[6000,3000], cash=1000 → HHI_total=0.46
-        # d2: mv=[5000,5000], cash=0 → total=10000, HHI_total = (25_000_000+25_000_000)/100_000_000 = 0.5
-        # mean = (0.46+0.5)/2 = 0.48
+        # d1: mv=[6000,3000], cash=1000 → total=10000 → HHI = (6000²+3000²)/10000² = 0.45
+        # 等等：hhi_indices 含现金？d1 HHI_total=0.46（见 TestHHI 单测），d2=0.5 → mean=0.48
         states = [
             ([6000, 3000], 1000),
             ([5000, 5000], 0),
         ]
-        result = portfolio_concentration_mean(states, scale=8)
-        assert result is not None
-        # HHI_total 用 scale=8 → 但这里数值太小，内部 Decimal 计算
-        # 等等，hhi_indices(6000, 3000, 1000) 的 HHI_total = 0.46 (scale 输出 8 → 46_000_000)
-        # mean(46_000_000, 50_000_000) = 48_000_000 → 0.48
-        assert abs(result - 48_000_000) <= 1_000_000
+        assert portfolio_concentration_mean(states, scale=8) == 48_000_000
 
     def test_empty_returns_none(self) -> None:
         assert portfolio_concentration_mean([]) is None
+
+    def test_single_day_is_a_valid_average(self) -> None:
+        """只有 1 个有效日也应给出均值，不能当作「无数据」。"""
+        assert portfolio_concentration_mean([([100, 0], 0)], scale=8) == 100_000_000
+
+    def test_all_cash_day_contributes_zero(self) -> None:
+        """全现金日 HHI_total=0 是有效观测（不能跳过）。"""
+        assert portfolio_concentration_mean([([], 0), ([], 1)], scale=0) == 1  # mean 0.5
+
+    def test_scale_parameter_is_forwarded_to_hhi(self) -> None:
+        """scale=4 时输出应是 4 位标度，而不是按 8 位算完再乘。"""
+        states = [([6000, 3000], 1000), ([5000, 5000], 0)]
+        assert portfolio_concentration_mean(states, scale=4) == 4800
+
+
+class TestBehaviorBoundaries:
+    def test_decision_efficiency_averages_ratios(self) -> None:
+        """两笔有效率 0 与 0.5 → 均值 0.25（不是比值之和 × 笔数）。"""
+        trades = [
+            (100_000_000, 100_000_000, 100_000_000, 200_000_000),  # 0
+            (150_000_000, 100_000_000, 100_000_000, 200_000_000),  # 0.5
+        ]
+        assert decision_efficiency(trades) == 25_000_000
+
+    def test_zero_spread_trade_does_not_abort_the_scan(self) -> None:
+        """跳过零价差笔后仍要继续统计后续有效笔。"""
+        trades = [
+            (100_000_000, 100_000_000, 100_000_000, 100_000_000),  # 零价差 → 跳过
+            (150_000_000, 100_000_000, 100_000_000, 200_000_000),  # 0.5
+        ]
+        assert decision_efficiency(trades) == 50_000_000
+
+    def test_decision_efficiency_half_up_on_tie(self) -> None:
+        assert (
+            decision_efficiency([(150_000_000, 100_000_000, 100_000_000, 200_000_000)], scale=0)
+            == 1
+        )
+
+    def test_turnover_half_up_on_tie(self) -> None:
+        assert turnover_daily_mean([2, 3], scale=0) == 3
+
+    def test_equal_price_is_not_averaging_down(self) -> None:
+        """新价与首次均价相等不构成「下跌加仓」。"""
+        assert averaging_down_rate([(True, 100_000_000, 100_000_000)]) == 0

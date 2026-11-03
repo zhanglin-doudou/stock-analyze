@@ -36,6 +36,14 @@ class TestRfDailyUnits:
         rf12 = rf_daily_units(Decimal("0.015"), scale=12)
         assert rf10 < rf12  # scale 更大，数值更大
 
+    def test_annual_base_two_uses_square_root(self) -> None:
+        """annual_base=2 → (1+rf)^(1/2)−1；不能直接用 (1+rf)^2 或 2/2 次方。"""
+        assert rf_daily_units(Decimal("0.015"), annual_base=2, scale=12) == 7_472_083_980
+
+    def test_rounding_half_up_on_tie(self) -> None:
+        """(1.00100025)^(1/2)−1 恰为 0.0005，scale=3 下应进位为 1。"""
+        assert rf_daily_units(Decimal("0.00100025"), annual_base=2, scale=3) == 1
+
 
 class TestBetaAlpha:
     def test_perfect_regression_matches_design_doc_beta(self) -> None:
@@ -70,6 +78,7 @@ class TestBetaAlpha:
         ba = beta_alpha(r_p, r_b, rf_daily_units=0)
         assert ba.blocked is True
         assert ba.beta_units is None
+        assert ba.n_obs == 5
 
     def test_mismatched_lengths_raises(self) -> None:
         with pytest.raises(ValueError):
@@ -111,7 +120,7 @@ class TestBetaAlpha:
         ba = beta_alpha(y, x, rf_daily_units=0)
         assert ba.blocked is False
         assert ba.beta_units is not None  # beta=2.0
-        assert ba.se_alpha_units is not None  # 哨兵值 1e-28 scale8
+        assert ba.se_alpha_units == 0  # SSE=0 → se 归零（不是非零哨兵）
         assert ba.t_alpha_units == 0  # se=0 → t=0
 
     def test_zero_variance_excess_is_zero_ir(self) -> None:
@@ -145,3 +154,85 @@ class TestStdevUnits:
         sd = stdev_units([0, 1000_000_000])  # 0 和 1.0
         assert sd is not None
         assert sd > 0
+
+    def test_known_sample_sd(self) -> None:
+        """[0, 0, 0, 4.0] → 均值 1.0，样本方差 4e16 → sd = 2.0（n-ddof=3）。"""
+        assert stdev_units([0, 0, 0, 400_000_000]) == 200_000_000
+
+    def test_ddof_not_less_than_n_returns_none(self) -> None:
+        """n == ddof → 分母为 0，必须返回 None 而不是除零。"""
+        assert stdev_units([1, 2, 3], ddof=3) is None
+
+    def test_tiny_dispersion_is_not_floored_to_zero(self) -> None:
+        """离散度远小于 1 元时仍要输出真实 sd（不能被「小方差」门槛吞掉）。"""
+        # 0 与 0.00001（scale8=1000）→ sd = sqrt(2×(500)²) ≈ 707.1
+        assert stdev_units([0, 1000]) == 707
+
+
+class TestExactOlsValues:
+    """同一输入下 OLS 族各字段的精确闭式值（§5.5 手算向量完整对账）。"""
+
+    def test_design_vector_exact_fields(self) -> None:
+        r_b = _pct_to_scale8([0.40, -0.30, 0.90, 0.20, -0.60, 0.70])
+        r_p = _pct_to_scale8([0.55, -0.20, 1.10, 0.30, -0.85, 0.60])
+        ba = beta_alpha(r_p, r_b, rf_daily_units=0)
+        assert ba.beta_units == 115_984_062
+        assert ba.alpha_daily_units == -1_299
+        assert ba.alpha_annual_units == -316_860
+        assert ba.se_alpha_units == 71_751
+        assert ba.t_alpha_units == -181
+        assert ba.te_units == 2_271_253
+        assert ba.ir_units == -13_950_908
+        assert ba.excess_arith_units == -316_860
+
+    def test_constant_daily_excess_exact(self) -> None:
+        """r_p = r_b + 0.1 每日恒定 → β=1、α_daily=0.1，年化/算术超额 = 0.1×244。"""
+        r_b = [10_000_000, 20_000_000, 30_000_000, 40_000_000]
+        r_p = [v + 10_000_000 for v in r_b]
+        ba = beta_alpha(r_p, r_b, rf_daily_units=0)
+        assert ba.beta_units == 100_000_000
+        assert ba.alpha_daily_units == 10_000_000
+        assert ba.alpha_annual_units == 2_440_000_000
+        assert ba.excess_arith_units == 2_440_000_000  # 0.1 × 244
+
+    def test_rf_shift_moves_alpha_by_daily_rf(self) -> None:
+        """r_p = 2·r_b 时 β=2、α=0；扣减 rf 后 α_daily 应等于 rf 本身（(β−1)·rf）。"""
+        r_b = [10_000_000, 20_000_000, 30_000_000, 40_000_000]
+        r_p = [2 * v for v in r_b]
+        rf_d = rf_daily_units(Decimal("0.015"), scale=12)
+        ba = beta_alpha(r_p, r_b, rf_daily_units=rf_d)
+        assert ba.beta_units == 200_000_000
+        assert ba.alpha_daily_units == (rf_d + 5_000) // 10_000  # 6.1020765e-5 → 6102
+        ba_no_rf = beta_alpha(r_p, r_b, rf_daily_units=0)
+        assert ba_no_rf.alpha_daily_units == 0
+
+    def test_three_observations_is_enough(self) -> None:
+        """n=3 是可用下限（样本量门槛必须严格小于 3 才判不足）。"""
+        ba = beta_alpha(
+            [10_000_000, 20_000_000, 30_000_000],
+            [5_000_000, 10_000_000, 15_000_000],
+            rf_daily_units=0,
+        )
+        assert ba.insufficient is False
+        assert ba.beta_units == 200_000_000
+
+    def test_zero_total_return_b_falls_back_to_zero_excess_geo(self) -> None:
+        """基准累计收益恰好 -100% → excess_geo 归 0，不能除以 0。"""
+        r_b = [-100_000_000] + [0] * 5  # scale8 = -1.0
+        ba = beta_alpha([0] * 6, r_b, rf_daily_units=0)
+        assert ba.excess_geo_units == 0
+
+    def test_positive_but_flat_benchmark_is_annualized(self) -> None:
+        """基准累计收益恰为 +100% 是合法输入（判据必须 >1 而不是 >=1）。"""
+        r_b = [100_000_000] + [0] * 5  # 累计 +100%
+        ba = beta_alpha([0] * 6, r_b, rf_daily_units=0)
+        assert ba.excess_geo_units == -100_000_000  # 组合 0% vs 基准翻倍 → 年化 -100%
+
+    def test_negative_benchmark_total_still_computes_excess_geo(self) -> None:
+        """基准累计收益为负（乘积 < 1）时仍要算几何超额，不能直接归零。"""
+        r_b = [1_000_000, -2_000_000, 1_000_000, -2_000_000, 1_000_000, -50_000_000]
+        r_p = [v + 10_000_000 for v in r_b]
+        ba = beta_alpha(r_p, r_b, rf_daily_units=0)
+        assert ba.excess_arith_units == 2_440_000_000
+        assert ba.excess_geo_units is not None
+        assert ba.excess_geo_units > 0
