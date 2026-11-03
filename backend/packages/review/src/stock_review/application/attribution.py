@@ -55,6 +55,7 @@ from stock_platform.symbols import is_bond
 from stock_review.application.assets import (
     ASSET_DEFINITION_VERSION,
     get_asset_build_state,
+    last_trading_day,
     latest_workday,
     valuation_end,
 )
@@ -714,16 +715,20 @@ async def build_attribution(
     )
 
     # ── 5. PIT（§4.3）：blocked 短路（不读行情/板块）──────────────
+    # 区间终点是自然日（月末常落在周末/节假日），板块成分按交易日发布；先对齐到
+    # 「≤ 区间末日的最后一个交易日」（如 2026-10-31 周六 → 2026-10-30），
+    # 否则以 10-31 查 SCD2 成分会漏掉以 10-30 关闭/新增的行。
     sync_state = await SectorRepository(session).sync_state(dataset_key=_SECTOR_DATASET_KEY)
     membership_as_of = (
         sync_state.membership_as_of
         if sync_state is not None and sync_state.membership_as_of is not None
         else sector_data.as_of
     )
+    classification_period_end = await last_trading_day(session, resolved.end)
     pit = _pit_view(
         sector_data=sector_data,
         membership_as_of=membership_as_of,
-        period_end=resolved.end,
+        period_end=classification_period_end,
         lookahead_requested=classification_lookahead,
     )
     sector_fingerprint: dict[str, Any] = {
