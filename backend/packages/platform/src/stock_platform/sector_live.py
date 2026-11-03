@@ -381,12 +381,15 @@ def _ths_expected_rows(
     """由 `page_info` 总页数与各页行数推导期望成分行数。
 
     缺 `page_info` 或实际页数与声明不一致 → 视为上游截断，抛完整性错误（整批失败）。
-    整页行数必须一致（只有末页可以更少），否则同样视为分页异常。
+    期望值按首屏整页行数 × (总页数−1) + 末页行数；中途某页少行（动态排序缺失/
+    分页异常）会让去重后行数小于期望值，由上层整板重抓而不是直接判死。
+    少数板块（如小行业）页面无 ``page_info``，此时以各页实际行数之和为期望值：
+    仍能通过「去重后 < 合计」发现跨页重复，但无法识别从未出现过的缺失行。
     """
+    if not page_counts:
+        return 0
     if total_pages is None or total_pages <= 0:
-        raise SectorMemberIncompleteError(
-            f"同花顺板块 {sector_code} 缺少 page_info 总页数，拒绝按不完整结果落库"
-        )
+        return sum(page_counts)
     if len(page_counts) != total_pages:
         raise SectorMemberIncompleteError(
             f"同花顺板块 {sector_code} 实际抓取 {len(page_counts)} 页，"
@@ -396,13 +399,7 @@ def _ths_expected_rows(
         return 0
     if len(page_counts) == 1:
         return page_counts[0]
-    per_page = page_counts[0]
-    if any(count != per_page for count in page_counts[:-1]):
-        raise SectorValidationError(
-            f"同花顺板块 {sector_code} 分页行数不一致（整页应为 {per_page}，"
-            f"实际 {list(page_counts)}）"
-        )
-    return per_page * (total_pages - 1) + page_counts[-1]
+    return page_counts[0] * (total_pages - 1) + page_counts[-1]
 
 
 def _parse_quote_bridge(text: str, sector_code: str, year: int) -> dict[str, Any]:
@@ -454,7 +451,9 @@ class AkshareSectorSource:
         return f"live:akshare@{self._version}"
 
     # ── 出站治理（并发上限 + 超时 + 有上限重试）───────
-    async def _call(self, func: Any, *args: Any, interval: float = 0.0) -> Any:
+    async def _call(
+        self, func: Any, *args: Any, interval: float = 0.0, timeout: float | None = None
+    ) -> Any:
         async with self._semaphore:
             if interval > 0:
                 await asyncio.sleep(interval)
@@ -463,7 +462,7 @@ class AkshareSectorSource:
                 try:
                     return await asyncio.wait_for(
                         asyncio.to_thread(func, *args),
-                        timeout=self._settings.sector_live_timeout_seconds,
+                        timeout=timeout or self._settings.sector_live_timeout_seconds,
                     )
                 except SectorCookieError:
                     # 登录态缺失/失效不重试：继续重试只会放大限流且必然失败。
@@ -493,13 +492,15 @@ class AkshareSectorSource:
         "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
     )
-    _THS_MAX_PAGES = 50
+    _THS_MAX_PAGES = 300
     # 单页请求失败重试 3 次（总尝试 4 次），退避 1/2/4s；401 同样走此重试。
     _THS_PAGE_RETRIES = 3
     _THS_RETRY_BACKOFF_SECONDS = (1.0, 2.0, 4.0)
     # 上游按涨跌幅动态排序会让同一集合在两次抓取中出现 1~4 只重复/缺失；
     # 整板重抓最多 3 轮，只有「去重后行数 == page_info 推导值」才接受。
     _THS_MEMBER_PASSES = 3
+    # 单板块全分页抓取的总超时：页数上限 × 请求间隔 + 重试余量。
+    _THS_BOARD_TIMEOUT_SECONDS = 900.0
 
     def _require_cookie(self) -> str:
         """读取登录 cookie；缺失即 fail-fast（不保留匿名半截路径）。"""
@@ -576,7 +577,11 @@ class AkshareSectorSource:
         for pass_index in range(self._THS_MEMBER_PASSES):
             unique, expected = self._ths_board_members_pass(code, taxonomy, cookie=cookie)
             if expected > 0 and len(unique) == expected:
-                return unique
+                # 闸门通过后再过滤非 A 股行（如北交所 92xxxx），避免误判缺行。
+                filtered = (
+                    (code, symbol) for raw in unique if (symbol := _norm_symbol(raw)) is not None
+                )
+                return tuple(dict.fromkeys(filtered))
             last_expected, last_unique = expected, len(unique)
             if pass_index + 1 < self._THS_MEMBER_PASSES:
                 log.warning(
@@ -594,9 +599,9 @@ class AkshareSectorSource:
 
     def _ths_board_members_pass(
         self, code: str, taxonomy: str, *, cookie: str
-    ) -> tuple[tuple[tuple[str, str], ...], int]:
-        """抓取一遍全部分页，返回（去重成分, page_info 推导的期望行数）。"""
-        members: list[tuple[str, str]] = []
+    ) -> tuple[tuple[str, ...], int]:
+        """抓取一遍全部分页，返回（去重后的原始代码, page_info 推导的期望行数）。"""
+        members: list[str] = []
         counts: list[int] = []
         total_pages: int | None = None
         page = 1
@@ -625,8 +630,13 @@ class AkshareSectorSource:
                         f"响应 {len(resp.text)} 字节）"
                     )
                 break
+            if not parsed:
+                if page == 1:
+                    raise SectorValidationError(f"同花顺板块 {code} 详情页成分表为空")
+                # 越界页/末页之后会返回只有表头的空表：视为翻页结束。
+                break
             counts.append(len(parsed))
-            members.extend((code, symbol) for symbol in parsed)
+            members.extend(parsed)
             if total_pages is not None and page >= total_pages:
                 break
             page += 1
@@ -651,8 +661,10 @@ class AkshareSectorSource:
 
     @staticmethod
     def _ths_parse_member_table(tables: Any) -> list[str] | None:
-        """在多张表中找出含「代码」表头的成分表，返回归一后的股票代码。
+        """在多张表中找出含「代码」表头的成分表，返回**原始** 6 位代码（含北交所）。
 
+        完整性闸门按上游原始行计数/去重；股票过滤（``_norm_symbol``）放到闸门之后，
+        避免把合法的非 A 股行（如 92xxxx 北交所）误判为「缺行」。
         没有匹配表时返回 ``None``（由调用方区分「无成分表」与「本页无成分」）。
         """
         for table in tables:
@@ -663,15 +675,15 @@ class AkshareSectorSource:
             if "代码" not in header:
                 continue
             code_idx = header.index("代码")
-            symbols: list[str] = []
+            codes: list[str] = []
             for tr in rows[1:]:
                 cells = [td.get_text(strip=True) for td in tr.find_all("td")]
                 if len(cells) <= code_idx:
                     continue
-                symbol = _norm_symbol(cells[code_idx])
-                if symbol is not None:
-                    symbols.append(symbol)
-            return symbols
+                raw = cells[code_idx].strip()
+                if len(raw) == 6 and raw.isdigit():
+                    codes.append(raw)
+            return codes
         return None
 
     # ── 目录 ────────────────────────────────────────────
@@ -713,6 +725,7 @@ class AkshareSectorSource:
                 row.sector_code,
                 TAXONOMY_INDUSTRY,
                 interval=interval,
+                timeout=self._THS_BOARD_TIMEOUT_SECONDS,
             )
             members.extend(rows)
             if index % 20 == 0 or index == total:
@@ -779,6 +792,7 @@ class AkshareSectorSource:
                     row.sector_code,
                     TAXONOMY_CONCEPT,
                     interval=interval,
+                    timeout=self._THS_BOARD_TIMEOUT_SECONDS,
                 )
             except (SectorCookieError, SectorMemberIncompleteError):
                 # 登录态失效与完整性闸门是整批失败条件，不允许按「单板块跳过」处理。
@@ -934,7 +948,12 @@ class AkshareSectorSource:
         for sector_code, name in boards:
             try:
                 rows = await self._call(
-                    self._ths_board_bars, sector_code, start, end, interval=interval
+                    self._ths_board_bars,
+                    sector_code,
+                    start,
+                    end,
+                    interval=interval,
+                    timeout=self._THS_BOARD_TIMEOUT_SECONDS,
                 )
             except SectorCookieError:
                 raise
