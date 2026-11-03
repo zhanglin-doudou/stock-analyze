@@ -23,6 +23,10 @@ class SectorMemberIncompleteError(SectorValidationError):
     """单个板块的成分行数未达到 `page_info` 推导的期望值（完整性闸门）。"""
 
 
+class SectorWafBlockedError(SectorValidationError):
+    """同花顺 WAF 连续 403/429 熔断：快速中止整批，不空转到 1 小时后才失败。"""
+
+
 def validate_catalog(catalog: Sequence[SectorInfo], *, level: int) -> None:
     """同一层级内：代码唯一、名称唯一、父级必须存在且恰为上一层。"""
     rows = [row for row in catalog if row.level == level]
@@ -96,6 +100,7 @@ __all__ = [
     "SectorCookieError",
     "SectorMemberIncompleteError",
     "SectorValidationError",
+    "SectorWafBlockedError",
     "catalog_row_counts",
     "validate_catalog",
     "validate_member_totals",

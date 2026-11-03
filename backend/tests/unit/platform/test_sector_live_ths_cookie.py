@@ -66,7 +66,8 @@ def make_source(monkeypatch: pytest.MonkeyPatch) -> Any:
     def _make(*, cookie: str | None = _COOKIE) -> AkshareSectorSource:
         settings = Settings(
             sector_ths_cookie=cookie,
-            sector_ths_page_interval_seconds=0.0,
+            # 单测关掉全局限速（间隔断言只关心退避）；生产默认 8 req/s。
+            sector_ths_rate_limit_per_second=0.0,
             sector_live_timeout_seconds=10.0,
         )
         return AkshareSectorSource(
@@ -78,14 +79,25 @@ def make_source(monkeypatch: pytest.MonkeyPatch) -> Any:
     return _make
 
 
+class _FakeSession:
+    """``requests.Session`` 的最小替身：记录每次 GET（url/headers/timeout）。"""
+
+    def __init__(self, handler: Any, calls: list[dict[str, Any]]) -> None:
+        self._handler = handler
+        self._calls = calls
+
+    def get(self, url: str, headers: Any = None, timeout: float | None = None) -> _Resp:
+        self._calls.append({"url": url, "headers": dict(headers or {}), "timeout": timeout})
+        return self._handler(url, len(self._calls))
+
+
 def _install_get(monkeypatch: pytest.MonkeyPatch, handler: Any) -> list[dict[str, Any]]:
     calls: list[dict[str, Any]] = []
 
-    def fake_get(url: str, headers: Any = None, timeout: float | None = None) -> _Resp:
-        calls.append({"url": url, "headers": dict(headers or {}), "timeout": timeout})
-        return handler(url, len(calls))
+    def fake_new_session(_source: AkshareSectorSource) -> _FakeSession:
+        return _FakeSession(handler, calls)
 
-    monkeypatch.setattr(sector_live.requests, "get", fake_get)
+    monkeypatch.setattr(AkshareSectorSource, "_new_http_session", fake_new_session)
     return calls
 
 
@@ -101,10 +113,10 @@ def test_cookie_missing_fails_fast_without_network(
 ) -> None:
     source = make_source(cookie=None)
 
-    def boom(*_args: Any, **_kwargs: Any) -> Any:
+    def boom(_source: AkshareSectorSource) -> Any:
         raise AssertionError("cookie 缺失时不应发起任何网络请求")
 
-    monkeypatch.setattr(sector_live.requests, "get", boom)
+    monkeypatch.setattr(AkshareSectorSource, "_new_http_session", boom)
     with pytest.raises(SectorCookieError, match="SECTOR_THS_COOKIE"):
         source._ths_board_members("881117", TAXONOMY_INDUSTRY)
 

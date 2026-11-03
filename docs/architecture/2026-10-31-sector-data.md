@@ -493,6 +493,15 @@ class SyncableSectorSource(Protocol):
 
 **限速（实测）**：申万总览 3 个函数各自 GET 同一页面，反爬会返回 HTML 变体（`AttributeError`）/403/429；单并发、每次调用间隔 0.3~0.5s、有上限重试（3 次，指数退避），**整批重试而不是逐行重试**。申万成分 0.32~0.34s/次，全量 335 次约 2~4 分钟；东财概念分页 `pz=100` + 页间 0.5~1.5s，首次全量可能 10~30 分钟。
 
+**THS 同步性能（P0，2026-11-03）**：行业+概念实测约 **7376 页**（行业 90 板 / 323 页；概念 375 板 / 7053 页，其中 61 个大板块占 55% 页数）。原实现是「逐板逐页串行 + 每页 sleep 1.0s + 每板 sleep 0.6s」，纯等待就约 1.9h；现已改为：
+
+- **板级并发**（`SECTOR_LIVE_MAX_CONCURRENCY`，默认 6，行业与概念各自并发抓板）+ **全局限速器**（`SECTOR_THS_RATE_LIMIT_PER_SECOND`，默认 8 req/s，所有页面/日线请求与重试共用）；
+- 线程本地 `requests.Session`（keep-alive）复用连接，去掉每页一次 TCP/TLS 握手；
+- `_call` **只对传输层失败重试**（超时/网络），完整性闸门/解析/登录态等语义失败立即抛错，不再整板重试放大；
+- 连续 8 次 403/429 → `_WafBreaker` 熔断，抛 `SectorWafBlockedError` 快速中止并保留旧快照（不再空转 1 小时后整批回滚）。
+
+**2026-11-03 本机实测**（`SECTOR_THS_RATE_LIMIT_PER_SECOND=8`、并发 6）：`sync-sector-industry` 337 次请求 / **42.6s**（90 板、5223 成员，0 次 403）；`sync-sector-concept` 6933 次请求 / **923s（15.4 min）**（375 板、64518 成员，1 板因上游 HTTP 502 按策略跳过，0 次 403）；全量合计约 16–17 分钟，同日重跑命中 `checksum` 为 no-op。剩余瓶颈已是 8 req/s 限速本身（需更快可上调该配置，注意 WAF）；后续 P1 走「变更探测增量 + 周度全量」把日更压到 3 分钟内（另行设计）。原 `SECTOR_THS_PAGE_INTERVAL_SECONDS` / `SECTOR_THS_CALL_INTERVAL_SECONDS` 已被全局限速器取代，字段保留仅为旧 `.env` 兼容。
+
 **幂等性**：同一天重复执行不产生重复区间（diff 后无变化则不写）；`checksum` 相同 → 整个同步可短路（除 bar 增量外）；并发双跑由 `UNIQUE(dataset_key, ...)` + CLI `pg_advisory_lock` 兜底。**目录 + 成分 + 基准权重必须在同一个短事务内提交**；校验失败时连目录也不落库（避免「目录新、成分为空」的半截状态）。
 
 ### 4.5 与 API-083 `rebuild-period` 的边界
@@ -508,9 +517,9 @@ class SyncableSectorSource(Protocol):
 | `SECTOR_MODE` | `replay` | `replay`/`live` |
 | `SECTOR_FIXTURES_FILE` | 空（用 `fixtures/market/sectors.json`） | replay 夹具路径 |
 | `SECTOR_CACHE_READ_ONLY` | `true` | 读路径禁外呼（默认，防盘中/请求期拉数据） |
-| `SECTOR_LIVE_MAX_CONCURRENCY` | `2` | 出站并发上限 |
+| `SECTOR_LIVE_MAX_CONCURRENCY` | `6` | 板级并发上限（板块任务重叠；总请求量由全局限速器约束） |
 | `SECTOR_LIVE_TIMEOUT_SECONDS` | `30` | 单次调用超时 |
-| `SECTOR_LIVE_RETRY_ATTEMPTS` | `2` | 有上限重试 |
+| `SECTOR_LIVE_RETRY_ATTEMPTS` | `2` | 仅传输层失败的有上限重试（语义失败不重试） |
 | `SECTOR_INDUSTRY_LEVEL_DEFAULT` | `1` | 看板默认行业层级（L1 可比性最好） |
 | `SECTOR_COVERAGE_OK_MIN_UNITS` | `950_000_000` | 覆盖率（scale=8）≥ 该值 → ok；**int，不用 float** |
 | `SECTOR_COVERAGE_DEGRADED_MIN_UNITS` | `900_000_000` | ≥ 该值 → degraded；否则 insufficient |
@@ -518,9 +527,10 @@ class SyncableSectorSource(Protocol):
 | `SECTOR_BENCHMARK_MAX_AGE_DAYS` | `45` | 基准权重最大可接受滞后天数 |
 | `SECTOR_INDUSTRY_STALE_DAYS` | `35` | 行业快照超过该天数 → `stale`（season 调整低频） |
 | `SECTOR_CONCEPT_STALE_DAYS` | `7` | 概念快照超过该天数 → `stale`（事件高频） |
-| `SECTOR_THS_CALL_INTERVAL_SECONDS` | `0.6` | 同花顺单板块调用间隔（单并发） |
-| `SECTOR_THS_PAGE_INTERVAL_SECONDS` | `0.6` | 同花顺详情页翻页间隔（分页有反爬限流） |
-| `SECTOR_SYNC_RETRY_ATTEMPTS` | `3` | 整批重试次数（指数退避） |
+| `SECTOR_THS_RATE_LIMIT_PER_SECOND` | `8` | THS 全局限速（所有页面/日线请求与重试共用；撞 403 熔断后下调） |
+| `SECTOR_THS_CALL_INTERVAL_SECONDS` | `0`（弃用） | 旧固定间隔字段，仅为旧 `.env` 兼容，同步路径不读取 |
+| `SECTOR_THS_PAGE_INTERVAL_SECONDS` | `0`（弃用） | 旧翻页间隔字段，仅为旧 `.env` 兼容，同步路径不读取 |
+| `SECTOR_SYNC_RETRY_ATTEMPTS` | `3` | 传输层重试的指数退避基数（秒） |
 | `SECTOR_FLAT_ACTIVE_UNITS` | `100_000` | `|Δ| ≤ 0.001`（scale=8）判平配 |
 
 ---
