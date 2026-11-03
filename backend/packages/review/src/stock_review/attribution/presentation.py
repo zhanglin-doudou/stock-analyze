@@ -206,7 +206,9 @@ def build_summary(
                 )
             else:
                 phrase = "主要来自" if amount1 >= 0 else "主要拖累"
-                head += f"，{phrase}「{name1}」（{money_str(amount1)} 元，占构成 {pct_str(share1)}）"
+                head += (
+                    f"，{phrase}「{name1}」（{money_str(amount1)} 元，占构成 {pct_str(share1)}）"
+                )
         else:
             head += ", contributions are dispersed" if en else "，贡献分散"
         if len(ranked) >= 2 and ranked[1][1] != 0:

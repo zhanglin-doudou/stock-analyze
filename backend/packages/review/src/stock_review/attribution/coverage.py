@@ -22,6 +22,7 @@ from dataclasses import dataclass
 
 from stock_core.attribution import Decomposition
 from stock_core.stats.numeric import div_round
+
 from stock_review.attribution.segments import SymbolPlan
 
 # 结论样本门禁（FR-R8 / D-09）：可归因段 ≥10 才允许给 summary。

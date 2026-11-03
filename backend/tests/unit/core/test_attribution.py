@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
-
 from stock_core.attribution import (
     FACTOR_CODES,
     FactorCode,
@@ -15,9 +14,9 @@ from stock_core.attribution import (
     allocate,
     decompose,
     decompose_segment,
+    rank_factors,
     ratio_na_reason,
     ratio_of,
-    rank_factors,
     sector_amount_units,
     sector_return_units,
     share_of,
@@ -305,7 +304,7 @@ class TestShares:
         assert shares[FactorCode.SELECTION] == 33_333_334
 
     def test_all_zero_returns_none(self) -> None:
-        factors = {code: 0 for code in FACTOR_CODES}
+        factors = dict.fromkeys(FACTOR_CODES, 0)
         assert all(share is None for share in shares_of(factors).values())
 
     def test_single_dominant(self) -> None:

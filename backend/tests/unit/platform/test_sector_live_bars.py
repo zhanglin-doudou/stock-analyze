@@ -397,4 +397,3 @@ async def test_sync_bars_requires_cached_catalog(live_source: Any) -> None:
     report = await live_source.sync_bars_to_cache(today=_TODAY, start=date(2026, 6, 1))
     assert report.status == "failed"
     assert "make sync-sector-industry" in report.message
-

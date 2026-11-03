@@ -105,8 +105,7 @@ def _to_out(result: AttributionResult) -> AttributionOut:
             capital_attributed=str(Money(result.coverage.capital_attributed_units)),
             capital_excluded=str(
                 Money(
-                    result.coverage.capital_total_units
-                    - result.coverage.capital_attributed_units
+                    result.coverage.capital_total_units - result.coverage.capital_attributed_units
                 )
             ),
             capital_ratio=_ratio(result.coverage.capital_ratio_units),

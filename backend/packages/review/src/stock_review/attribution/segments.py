@@ -34,6 +34,7 @@ from stock_core.attribution import SegmentInput, SegmentKind, allocate, sector_a
 from stock_core.fifo import FifoResult, Fill, OpenLot
 from stock_ledger.models import Trade
 from stock_platform.symbols import classify_symbol
+
 from stock_review.application.valuation import (
     QTY_PRICE_SCALE,
     category,

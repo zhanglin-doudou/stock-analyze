@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 from datetime import date
 
 from stock_ledger.models import Trade
+
 from stock_review.application.valuation import category, is_money_fund_row
 from stock_review.attribution.segments import SymbolPlan
 
