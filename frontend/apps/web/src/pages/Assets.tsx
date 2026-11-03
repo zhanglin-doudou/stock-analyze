@@ -281,12 +281,12 @@ export function Assets() {
     [activeJobId, finishJob],
   );
 
-  const startBuild = useCallback(async (): Promise<void> => {
+  const startBuild = useCallback(async (mode: 'auto' | 'full' = 'auto'): Promise<void> => {
     setSubmitting(true);
     setError(null);
     setNotice("");
     try {
-      const accepted: AssetBuildAccepted = await api.assets.build({ mode: "auto" }, newIdempotencyKey());
+      const accepted: AssetBuildAccepted = await api.assets.build({ mode }, newIdempotencyKey());
       handledJobRef.current = null;
       setActiveJobId(accepted.job_id);
     } catch (err) {
@@ -442,9 +442,21 @@ export function Assets() {
       </div>
 
       {notice ? (
-        <p className="notice" data-testid="assets-notice">
-          {notice}
-        </p>
+        <div className="row-actions">
+          <p className="notice" data-testid="assets-notice">
+            {notice}
+          </p>
+          <p>不满意？或者试试:</p>
+          <button
+            className="btn btn-text"
+            type="button"
+            disabled={executing}
+            aria-busy={executing}
+            onClick={() => void startBuild('full')}
+          >
+            强制重新构建
+          </button>
+        </div>
       ) : null}
       <ProblemView error={error} onRetry={() => void load()} />
 
