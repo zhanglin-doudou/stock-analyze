@@ -12,6 +12,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+import re
 import time
 from collections.abc import Sequence
 from dataclasses import dataclass
@@ -53,6 +54,8 @@ from stock_platform.ports import (
 )
 from stock_platform.repositories.sectors import SectorRepository, new_snapshot_id
 from stock_platform.sector_validation import (
+    SectorCookieError,
+    SectorMemberIncompleteError,
     SectorValidationError,
     validate_catalog,
     validate_unique_industry,
@@ -67,6 +70,27 @@ BENCHMARK_INDEX = "000300"
 CLASSIFICATION_VERSION = "THS"
 SOURCE_THS = "ths"
 SOURCE_CSINDEX = "csindex"
+# 同花顺登录态（SECTOR_THS_COOKIE）缺失/失效时统一报此文案；不含 cookie 明文。
+_THS_COOKIE_MESSAGE = (
+    "同花顺 cookie 缺失或已失效：请通过环境变量 SECTOR_THS_COOKIE 注入浏览器登录后的"
+    "完整 cookie 串（可选 SECTOR_THS_UA 覆盖 User-Agent）；本次同步整批放弃，不写库"
+)
+
+
+def mask_cookie(cookie: str | None) -> str:
+    """cookie 脱敏：日志/异常只允许出现长度标记，禁止明文。"""
+    return f"<masked,len={len(cookie)}>" if cookie else "<empty>"
+
+
+def _is_login_wall(status_code: int, text: str, url: str = "") -> bool:
+    """识别同花顺登录墙：401、跳登录页、或 ~192 字节的拦截页。"""
+    if status_code == 401:
+        return True
+    lowered_url = url.lower()
+    if "passport" in lowered_url or "/login" in lowered_url:
+        return True
+    body = (text or "").strip()
+    return bool(len(body) <= 300 and ("登录" in body or "login" in body.lower()))
 
 
 def akshare_available() -> bool:
@@ -351,6 +375,53 @@ def _bars_checksum(bars: Sequence[SectorBar]) -> str:
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
+def _ths_expected_rows(
+    sector_code: str, page_counts: Sequence[int], total_pages: int | None
+) -> int:
+    """由 `page_info` 总页数与各页行数推导期望成分行数。
+
+    缺 `page_info` 或实际页数与声明不一致 → 视为上游截断，抛完整性错误（整批失败）。
+    整页行数必须一致（只有末页可以更少），否则同样视为分页异常。
+    """
+    if total_pages is None or total_pages <= 0:
+        raise SectorMemberIncompleteError(
+            f"同花顺板块 {sector_code} 缺少 page_info 总页数，拒绝按不完整结果落库"
+        )
+    if len(page_counts) != total_pages:
+        raise SectorMemberIncompleteError(
+            f"同花顺板块 {sector_code} 实际抓取 {len(page_counts)} 页，"
+            f"与 page_info 声明 {total_pages} 页不一致（疑似截断）"
+        )
+    if not page_counts:
+        return 0
+    if len(page_counts) == 1:
+        return page_counts[0]
+    per_page = page_counts[0]
+    if any(count != per_page for count in page_counts[:-1]):
+        raise SectorValidationError(
+            f"同花顺板块 {sector_code} 分页行数不一致（整页应为 {per_page}，"
+            f"实际 {list(page_counts)}）"
+        )
+    return per_page * (total_pages - 1) + page_counts[-1]
+
+
+def _parse_quote_bridge(text: str, sector_code: str, year: int) -> dict[str, Any]:
+    """解析行业指数 JSONP（``quotebridge_v4_line_...({...})``）为字典。"""
+    start = (text or "").find("{")
+    end = (text or "").rfind("}")
+    if start < 0 or end <= start:
+        raise SectorValidationError(
+            f"行业指数 {sector_code} {year} 响应非 JSONP（{len(text or '')} 字节）"
+        )
+    try:
+        payload = json.loads(text[start : end + 1])
+    except ValueError as exc:
+        raise SectorValidationError(f"行业指数 {sector_code} {year} JSONP 无法解析: {exc}") from exc
+    if not isinstance(payload, dict) or not isinstance(payload.get("data"), str):
+        raise SectorValidationError(f"行业指数 {sector_code} {year} JSONP 缺少 data 字段")
+    return payload
+
+
 class AkshareSectorSource:
     """akshare 外呼实现（`sync_to_cache` 写缓存；读方法供同步/排障使用）。"""
 
@@ -394,6 +465,9 @@ class AkshareSectorSource:
                         asyncio.to_thread(func, *args),
                         timeout=self._settings.sector_live_timeout_seconds,
                     )
+                except SectorCookieError:
+                    # 登录态缺失/失效不重试：继续重试只会放大限流且必然失败。
+                    raise
                 except Exception as exc:
                     last_error = exc
                     if attempt < self._settings.sector_live_retry_attempts:
@@ -420,51 +494,160 @@ class AkshareSectorSource:
         "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36"
     )
     _THS_MAX_PAGES = 50
+    # 单页请求失败重试 3 次（总尝试 4 次），退避 1/2/4s；401 同样走此重试。
+    _THS_PAGE_RETRIES = 3
+    _THS_RETRY_BACKOFF_SECONDS = (1.0, 2.0, 4.0)
+    # 上游按涨跌幅动态排序会让同一集合在两次抓取中出现 1~4 只重复/缺失；
+    # 整板重抓最多 3 轮，只有「去重后行数 == page_info 推导值」才接受。
+    _THS_MEMBER_PASSES = 3
+
+    def _require_cookie(self) -> str:
+        """读取登录 cookie；缺失即 fail-fast（不保留匿名半截路径）。"""
+        cookie = (self._settings.sector_ths_cookie or "").strip()
+        if not cookie:
+            raise SectorCookieError(_THS_COOKIE_MESSAGE)
+        return cookie
+
+    @property
+    def _ths_user_agent(self) -> str:
+        return (self._settings.sector_ths_ua or "").strip() or self._THS_USER_AGENT
 
     def _ths_board_url(self, code: str, taxonomy: str, page: int) -> str:
         path = "gn" if taxonomy == TAXONOMY_CONCEPT else "thshy"
         return f"http://q.10jqka.com.cn/{path}/detail/code/{code}/page/{page}/"
 
+    def _ths_get(self, url: str, *, cookie: str, referer: str) -> requests.Response:
+        """带登录态的单次 GET：401/网络错误重试 3 次（1/2/4s），登录页立即失败。"""
+        headers = {
+            "User-Agent": self._ths_user_agent,
+            "Referer": referer,
+            "Cookie": cookie,
+        }
+        last_error = ""
+        last_status = 0
+        for attempt in range(self._THS_PAGE_RETRIES + 1):
+            try:
+                resp = requests.get(
+                    url, headers=headers, timeout=self._settings.sector_live_timeout_seconds
+                )
+            except requests.RequestException as exc:
+                last_status = 0
+                last_error = str(exc)
+            else:
+                if resp.status_code == 401:
+                    last_status = 401
+                    last_error = "HTTP 401"
+                elif _is_login_wall(resp.status_code, resp.text, resp.url):
+                    # 192 字节登录拦截/跳转：cookie 已失效，重试无意义。
+                    raise SectorCookieError(
+                        f"{_THS_COOKIE_MESSAGE}（登录页拦截，{mask_cookie(cookie)}）"
+                    )
+                elif resp.status_code >= 400:
+                    last_status = resp.status_code
+                    last_error = f"HTTP {resp.status_code}"
+                else:
+                    return resp
+            if attempt < self._THS_PAGE_RETRIES:
+                time.sleep(self._THS_RETRY_BACKOFF_SECONDS[attempt])
+        if last_status == 401:
+            raise SectorCookieError(
+                f"{_THS_COOKIE_MESSAGE}（401 重试 {self._THS_PAGE_RETRIES} 次仍失败，"
+                f"{mask_cookie(cookie)}）"
+            )
+        raise SectorValidationError(
+            f"同花顺请求失败（{url}）：{last_error}；重试 {self._THS_PAGE_RETRIES} 次仍失败"
+        )
+
     def _ths_board_members(self, code: str, taxonomy: str) -> tuple[tuple[str, str], ...]:
-        """抓取同花顺板块详情页成分股（同步，由 ``_call`` 放入线程池并限流）。
+        """抓取同花顺板块详情页全部分页成分股（同步，由 ``_call`` 放入线程池并限流）。
 
         概念详情页首屏通常有**两张表**：第 1 张是「概念解析」产业链/子行业，
         第 2 张才是成分股表（含 ``代码`` 列）。因此必须遍历所有表找带 ``代码`` 表头的
         那张，不能只取第一张。单元格一律用 BeautifulSoup 取 ``.text``
         （pandas ``read_html`` 会把 ``003032`` 转 int 丢前导零）。
-        分页靠 ``Referer`` 头，翻到无成分行即停。
+
+        完整性：先由 ``page_info``（如 ``1/13``）取总页数，逐页抓完；期望行数 =
+        (总页数−1)×整页行数 + 末页行数。动态排序导致的 1~4 只重复/缺失会让去重后
+        行数少于期望值，此时整板重抓（最多 3 轮），仍不一致则整批失败、不落库。
         """
+        cookie = self._require_cookie()
+        last_expected = 0
+        last_unique = 0
+        for pass_index in range(self._THS_MEMBER_PASSES):
+            unique, expected = self._ths_board_members_pass(code, taxonomy, cookie=cookie)
+            if expected > 0 and len(unique) == expected:
+                return unique
+            last_expected, last_unique = expected, len(unique)
+            if pass_index + 1 < self._THS_MEMBER_PASSES:
+                log.warning(
+                    "ths member incomplete, refetch",
+                    sector_code=code,
+                    expected=expected,
+                    unique=len(unique),
+                    attempt=pass_index + 1,
+                )
+        raise SectorMemberIncompleteError(
+            f"同花顺板块 {code} 成分完整性校验失败：page_info 期望 {last_expected} 行，"
+            f"去重后 {last_unique} 行；整板重抓 {self._THS_MEMBER_PASSES} 轮仍不一致，"
+            "整批放弃不落库"
+        )
+
+    def _ths_board_members_pass(
+        self, code: str, taxonomy: str, *, cookie: str
+    ) -> tuple[tuple[tuple[str, str], ...], int]:
+        """抓取一遍全部分页，返回（去重成分, page_info 推导的期望行数）。"""
         members: list[tuple[str, str]] = []
+        counts: list[int] = []
+        total_pages: int | None = None
+        page = 1
         page_interval = self._settings.sector_ths_page_interval_seconds
-        for page in range(1, self._THS_MAX_PAGES + 1):
+        while page <= self._THS_MAX_PAGES:
             if page > 1 and page_interval > 0:
                 time.sleep(page_interval)
             url = self._ths_board_url(code, taxonomy, page)
-            headers = {"User-Agent": self._THS_USER_AGENT, "Referer": url}
-            resp = requests.get(
-                url, headers=headers, timeout=self._settings.sector_live_timeout_seconds
-            )
-            resp.raise_for_status()
+            resp = self._ths_get(url, cookie=cookie, referer=url)
             soup = BeautifulSoup(resp.text, "html.parser")
+            info = self._ths_page_info(soup)
+            if info is not None:
+                if total_pages is None:
+                    total_pages = info[1]
+                elif total_pages != info[1]:
+                    raise SectorValidationError(
+                        f"同花顺板块 {code} 分页总页数漂移：{total_pages} → {info[1]}"
+                    )
             tables = soup.find_all("table")
             parsed = self._ths_parse_member_table(tables) if tables else None
             if parsed is None:
                 if page == 1:
-                    # 首屏拿不到成分表：多为同花顺限流/反爬（返回无表格的拦截页），
-                    # 或页面结构变更。必须显式失败，不能静默产出空成分。
+                    # 首屏拿不到成分表：多为限流/反爬拦截页或页面结构变更，必须显式失败。
                     raise SectorValidationError(
                         f"同花顺板块 {code} 详情页无成分表（可能被限流或页面结构变更，"
                         f"响应 {len(resp.text)} 字节）"
                     )
                 break
-            page_count = 0
-            for symbol in parsed:
-                members.append((code, symbol))
-                page_count += 1
-            if page_count == 0:
+            counts.append(len(parsed))
+            members.extend((code, symbol) for symbol in parsed)
+            if total_pages is not None and page >= total_pages:
                 break
-        # 单板块分页可能出现重复行（同花顺页面偶发分页重叠），去重保序。
-        return tuple(dict.fromkeys(members))
+            page += 1
+        if page > self._THS_MAX_PAGES:
+            raise SectorMemberIncompleteError(
+                f"同花顺板块 {code} 分页超过上限 {self._THS_MAX_PAGES}，疑似上游截断"
+            )
+        unique = tuple(dict.fromkeys(members))
+        expected = _ths_expected_rows(code, counts, total_pages)
+        return unique, expected
+
+    @staticmethod
+    def _ths_page_info(soup: Any) -> tuple[int, int] | None:
+        """解析 ``<span class="page_info">1/13</span>`` → (当前页, 总页数)。"""
+        node = soup.find("span", class_="page_info")
+        if node is None:
+            return None
+        matched = re.fullmatch(r"\s*(\d+)\s*/\s*(\d+)\s*", node.get_text(strip=True))
+        if matched is None:
+            return None
+        return int(matched.group(1)), int(matched.group(2))
 
     @staticmethod
     def _ths_parse_member_table(tables: Any) -> list[str] | None:
@@ -597,6 +780,9 @@ class AkshareSectorSource:
                     TAXONOMY_CONCEPT,
                     interval=interval,
                 )
+            except (SectorCookieError, SectorMemberIncompleteError):
+                # 登录态失效与完整性闸门是整批失败条件，不允许按「单板块跳过」处理。
+                raise
             except Exception as exc:
                 # 概念板块为多归属、非互斥；单板块上游不可用（限流/下线）时跳过该板块，
                 # 不让整批同步失败。已跳过的板块在响应中以 missing[] 形式透出由读路径降级。
@@ -709,36 +895,59 @@ class AkshareSectorSource:
         bars, _skipped = await self._fetch_board_bars(boards, start=start, end=end)
         return bars
 
+    def _ths_board_bars(self, sector_code: str, start: date, end: date) -> list[SectorBar]:
+        """按年拉取行业指数日线（`d.10jqka.com.cn` JSONP），带登录 cookie 与 UA。"""
+        cookie = self._require_cookie()
+        records: list[dict[str, Any]] = []
+        referer = f"http://q.10jqka.com.cn/thshy/detail/code/{sector_code}/"
+        for year in range(start.year, end.year + 1):
+            url = f"https://d.10jqka.com.cn/v4/line/bk_{sector_code}/01/{year}.js"
+            resp = self._ths_get(url, cookie=cookie, referer=referer)
+            payload = _parse_quote_bridge(resp.text, sector_code, year)
+            for item in str(payload["data"]).split(";"):
+                fields = item.split(",")
+                if len(fields) < 5 or not fields[0].strip() or not fields[4].strip():
+                    continue
+                raw_date = fields[0].strip()
+                try:
+                    trade_date = date(int(raw_date[:4]), int(raw_date[4:6]), int(raw_date[6:8]))
+                except (ValueError, IndexError) as exc:
+                    raise SectorValidationError(
+                        f"行业指数 {sector_code} 日期无法解析: {raw_date!r}"
+                    ) from exc
+                if start <= trade_date <= end:
+                    records.append({"日期": trade_date, "收盘价": fields[4]})
+        records.sort(key=lambda rec: rec["日期"])
+        return _board_bar_records(TAXONOMY_INDUSTRY, sector_code, records)
+
     async def _fetch_board_bars(
         self, boards: Sequence[tuple[str, str]], *, start: date, end: date
     ) -> tuple[tuple[SectorBar, ...], list[str]]:
         """按 (sector_code, name) 拉取行业指数日线；单板块失败跳过（与成分同步同策略）。
 
-        返回 (bars, skipped_codes)；跳过板块由读路径按覆盖缺口自然重试。
+        名称仅用于日志（接口按板块代码取数）；登录态缺失/失效整批失败，不跳过。
         """
+        self._require_cookie()
         interval = self._settings.sector_ths_call_interval_seconds
-        start_text = start.strftime("%Y%m%d")
-        end_text = end.strftime("%Y%m%d")
         bars: list[SectorBar] = []
         skipped: list[str] = []
         for sector_code, name in boards:
             try:
-                frame = await self._call(
-                    self._ak.stock_board_industry_index_ths,
-                    name,
-                    start_text,
-                    end_text,
-                    interval=interval,
+                rows = await self._call(
+                    self._ths_board_bars, sector_code, start, end, interval=interval
                 )
+            except SectorCookieError:
+                raise
             except Exception as exc:
                 skipped.append(sector_code)
                 log.warning(
                     "industry bars fetch skipped",
                     sector_code=sector_code,
+                    name=name,
                     error=str(exc)[:120],
                 )
                 continue
-            bars.extend(_board_bar_records(TAXONOMY_INDUSTRY, sector_code, _records(frame)))
+            bars.extend(rows)
         if skipped:
             log.warning(
                 "industry bars fetch done",
@@ -895,6 +1104,8 @@ class AkshareSectorSource:
 
     async def _build_snapshot(self, wanted: tuple[str, ...]) -> _Snapshot:
         """按 `wanted` 只抓取需要的 taxonomy（行业/概念可分开同步，互不拖累）。"""
+        # 成分抓取一律需要登录态：缺失即 fail-fast，避免先抓目录再半途失败。
+        self._require_cookie()
         industry: tuple[SectorInfo, ...] = ()
         concepts: tuple[SectorInfo, ...] = ()
         if TAXONOMY_INDUSTRY in wanted:

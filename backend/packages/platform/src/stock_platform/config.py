@@ -93,7 +93,11 @@ class Settings(BaseSettings):
     sector_industry_stale_days: int = Field(35, alias="SECTOR_INDUSTRY_STALE_DAYS")
     sector_concept_stale_days: int = Field(7, alias="SECTOR_CONCEPT_STALE_DAYS")
     sector_ths_call_interval_seconds: float = Field(0.6, alias="SECTOR_THS_CALL_INTERVAL_SECONDS")
-    sector_ths_page_interval_seconds: float = Field(0.6, alias="SECTOR_THS_PAGE_INTERVAL_SECONDS")
+    sector_ths_page_interval_seconds: float = Field(1.0, alias="SECTOR_THS_PAGE_INTERVAL_SECONDS")
+    # 同花顺登录态：只从环境注入，禁止写入仓库/日志（`repr=False` 防止误打印）。
+    # 缺失或失效时同步 fail-fast（整批不落库），不保留匿名半截路径。
+    sector_ths_cookie: str | None = Field(None, alias="SECTOR_THS_COOKIE", repr=False)
+    sector_ths_ua: str | None = Field(None, alias="SECTOR_THS_UA")
     sector_sync_retry_attempts: int = Field(3, alias="SECTOR_SYNC_RETRY_ATTEMPTS")
     sector_flat_active_units: int = Field(100_000, alias="SECTOR_FLAT_ACTIVE_UNITS")
     # 2026-11-02 五因子归因（§4.3）：classification_lookahead=allow 的部署开关
