@@ -197,12 +197,16 @@ def build_summary(
     if ranked and sigma_abs > 0:
         name1, amount1, share1 = ranked[0]
         if share1 is not None and share1 >= DOMINANT_SHARE_MIN:
-            head += (
-                f', mainly from "{name1}" ({money_str(amount1)} CNY, '
-                f"{pct_str(share1)} of composition)"
-                if en
-                else f"，主要来自「{name1}」（{money_str(amount1)} 元，占构成 {pct_str(share1)}）"
-            )
+            # 措辞跟随 dominant 因子金额符号（P1-1）：正贡献“来自”，负贡献“拖累”。
+            if en:
+                phrase = "mainly from" if amount1 >= 0 else "mainly dragged by"
+                head += (
+                    f', {phrase} "{name1}" ({money_str(amount1)} CNY, '
+                    f"{pct_str(share1)} of composition)"
+                )
+            else:
+                phrase = "主要来自" if amount1 >= 0 else "主要拖累"
+                head += f"，{phrase}「{name1}」（{money_str(amount1)} 元，占构成 {pct_str(share1)}）"
         else:
             head += ", contributions are dispersed" if en else "，贡献分散"
         if len(ranked) >= 2 and ranked[1][1] != 0:

@@ -480,10 +480,30 @@ def test_summary_dominant_factor_and_residual_zh() -> None:
     """§5.5 排序句：rank=1 且 share≥0.20 点名 + 次因子 + 未归属（负 total 措辞）。"""
     summary = _summary()
     assert summary == (
-        "本期亏损 3,200.00 元，主要来自「买点」（-1,900.00 元，占构成 59.4%）；"
+        "本期亏损 3,200.00 元，主要拖累「买点」（-1,900.00 元，占构成 59.4%）；"
         "其次为「费用」（-410.00 元）。未归属 120.00 元，见残差明细。"
     )
     assert_copy_compliance(summary)
+
+
+def test_summary_wording_follows_dominant_amount_sign() -> None:
+    """P1-1：正总损益下点名负贡献因子时必须用“主要拖累”，不能用“主要来自”。"""
+    summary = _summary(
+        total_pnl_units=841_984,
+        ranked=(("板块配置", -912_280, 52_700_000), ("选股", 605_182, 34_900_000)),
+        residual_units=109_603,
+    )
+    assert summary is not None
+    assert "本期盈利 8,419.84 元" in summary
+    assert "主要拖累「板块配置」（-9,122.80 元，占构成 52.7%）" in summary
+    assert "主要来自「板块配置」" not in summary
+
+    summary_pos = _summary(
+        total_pnl_units=105_400,
+        ranked=(("选股", 60_518, 57_400_000),),
+        residual_units=0,
+    )
+    assert summary_pos is not None and "主要来自「选股」" in summary_pos
 
 
 def test_summary_dispersed_when_share_below_threshold() -> None:
@@ -521,7 +541,7 @@ def test_summary_english_switches_copy_not_numbers() -> None:
     en = _summary(lang="en")
     assert en is not None and zh is not None
     assert en == (
-        'Lost 3,200.00 CNY this period, mainly from "买点" (-1,900.00 CNY, 59.4% of composition); '
+        'Lost 3,200.00 CNY this period, mainly dragged by "买点" (-1,900.00 CNY, 59.4% of composition); '
         'next was "费用" (-410.00 CNY). 120.00 CNY unattributed; see residual breakdown.'
     )
     # 数字串（金额/百分比）完全一致。
