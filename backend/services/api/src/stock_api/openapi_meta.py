@@ -1714,6 +1714,11 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
                     "market": "2026-06-30",
                     "sector": "2026-06-30",
                 },
+                "residual_tolerance": {
+                    "amount": "5000.00",
+                    "pct": "0.01000000",
+                    "base": "500000.00",
+                },
             },
             "data_as_of": "2026-06-30",
             "inputs_hash": "0" * 64,

@@ -48,6 +48,7 @@ _ASSUMPTION_KEYS = {
     "rounding",
     "adjust",
     "data_sources",
+    "residual_tolerance",
 }
 
 
@@ -120,6 +121,10 @@ async def test_api_036_blocked_empty_account(attr_client: Any, account_factory: 
     assert body["assumptions"]["total_pnl_basis"] == "asset_daily_mtm"
     assert body["assumptions"]["classification_lookahead"] is False
     assert body["assumptions"]["corporate_action_policy"] == "exclude_symbol"
+    # blocked 无期末资产 → 容差金额/分母缺省，pct 口径仍恒定。
+    tolerance = body["assumptions"]["residual_tolerance"]
+    assert tolerance["pct"] == "0.01000000"
+    assert tolerance["amount"] is None and tolerance["base"] is None
     assert body["inputs_hash"].startswith("sha256:")
     assert _HEX64_RE.match(body["inputs_hash"].removeprefix("sha256:"))
     assert body["links"] == {

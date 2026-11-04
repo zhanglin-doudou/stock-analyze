@@ -45,7 +45,7 @@ from stock_core.attribution.ranking import (
     total_abs_amounts,
 )
 from stock_core.fifo import build_rounds
-from stock_core.values import Money
+from stock_core.values import Money, Ratio
 from stock_ledger.models import Trade
 from stock_ledger.repositories.trades import TradeRepository
 from stock_platform.ports import MarketDataSource, SectorDataSource
@@ -131,8 +131,9 @@ _DB_TAXONOMY_INDUSTRY: Final[str] = "industry_sw"
 _SECTOR_DATASET_KEY: Final[str] = "sector"
 # 桥接容差（§3.2.1：|MTM − 桥接式| ≤ 1 分）。
 _BRIDGE_TOLERANCE_UNITS: Final[int] = 1
-# RESIDUAL_LARGE 阈值（§3.6/§4.4）：|gap| > max(1 元, 0.1%×V_end)。
-_RESIDUAL_MIN_UNITS: Final[int] = 100
+# 残差容差（§3.6/§4.4）：|未归因金额合计| > 期末总资产 × 1% → degraded。
+# 期末总资产取 `review.asset_daily.total_assets_units`（区间末行，标度整数分）。
+_RESIDUAL_TOLERANCE_DENOMINATOR: Final[int] = 100
 # NOT_PIT 判定（§4.3）：快照日距期末 >90 天 → degraded。
 _NOT_PIT_DAYS: Final[int] = 90
 # 缺行业映射文案（zh/en × warning/info）：warning = 数据质量缺口（参与本期且缺映射）；
@@ -419,6 +420,7 @@ def _assumptions(
     data_sources: Mapping[str, date | None],
     data_starts: Mapping[str, date | None] | None = None,
     sector_bar_fallback: Mapping[str, Any] | None = None,
+    residual_tolerance: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """`assumptions` 键集（§6.2；全部进 `inputs_hash`）。"""
     return {
@@ -443,6 +445,9 @@ def _assumptions(
         "data_starts": dict(data_starts or {}),
         "sector_bar_fallback": dict(
             sector_bar_fallback or {"count": 0, "symbols": [], "first_bar_date": None}
+        ),
+        "residual_tolerance": dict(
+            residual_tolerance or {"amount": None, "pct": str(Ratio(1_000_000)), "base": None}
         ),
     }
 
@@ -623,22 +628,46 @@ def _sector_start_fallback_missing(
 def _aggregate_status(
     missing: Sequence[MissingEntry],
     *,
-    unexplained_bucket: bool,
-    gap_units: int,
-    residual_threshold: int,
+    unattributed_units: int,
+    tolerance_units: int,
 ) -> str:
     """ok/degraded 聚合（§4.4；blocked 由短路路径决定，此处不负责）。
 
-    只有 `severity=info` 的提示（如 look-ahead 披露、板块指数期初回退）不影响归因
-    口径，不降级；任一 warning/blocker、非空未归因桶、或残差超阈值 → degraded。
+    只有 `severity=info` 的提示（如 look-ahead 披露、板块指数期初回退、容差内残差）
+    不影响归因口径，不降级；任一 warning/blocker、或 |未归因金额| 超容差 → degraded。
     """
-    if (
-        any(item.severity != "info" for item in missing)
-        or unexplained_bucket
-        or abs(gap_units) > residual_threshold
+    if any(item.severity != "info" for item in missing) or (
+        abs(unattributed_units) > tolerance_units
     ):
         return "degraded"
     return "ok"
+
+
+def _residual_missing(*, unattributed_units: int, tolerance_units: int) -> MissingEntry | None:
+    """残差披露（§4.4）：超容差 → `RESIDUAL_LARGE`(warning)；容差内非零 → info。
+
+    `unattributed_units` = `decomposition.residual_units`（各桶合计，含估值差），
+    取绝对值与容差比较；为 0 时不产生条目（避免无意义提示）。
+    """
+    magnitude = abs(unattributed_units)
+    amount = Money(magnitude)
+    tolerance = Money(tolerance_units)
+    if magnitude > tolerance_units:
+        return MissingEntry(
+            field="residual",
+            code="RESIDUAL_LARGE",
+            reason=f"未归因金额 {amount} 元（绝对值）超过容差 {tolerance} 元（期末总资产的 1%）",
+            what_to_do="看 residual_breakdown",
+        )
+    if unattributed_units != 0:
+        return MissingEntry(
+            field="residual",
+            code="RESIDUAL_WITHIN_TOLERANCE",
+            severity="info",
+            reason=f"未归因 {amount} 元，低于期末资产 1%（阈值 {tolerance} 元）",
+            what_to_do="无需处理",
+        )
+    return None
 
 
 def _exclusion_missing(
@@ -1048,7 +1077,8 @@ async def build_attribution(
     )
     gap_units = decomposition.residual_units - sum(split.buckets.values())
     assert window.v_end_units is not None
-    residual_threshold = max(_RESIDUAL_MIN_UNITS, window.v_end_units // 1000)
+    # 容差 = 期末总资产（`asset_daily.total_assets_units`）× 1%（标度整数分）。
+    residual_tolerance_units = window.v_end_units // _RESIDUAL_TOLERANCE_DENOMINATOR
 
     # ── 11. 状态机（§4.4）：存在候选但零可归因段（板块数据全缺）→ blocked
     stock_plans = [plan for plan in bundle.plans if plan.symbol_class == "stock"]
@@ -1144,25 +1174,17 @@ async def build_attribution(
                 what_to_do="补板块日线",
             )
         )
-    if abs(gap_units) > residual_threshold:
-        missing.append(
-            MissingEntry(
-                field="residual",
-                code="RESIDUAL_LARGE",
-                reason=f"无法解释的残差 {Money(abs(gap_units))} 元超过阈值 "
-                f"{Money(residual_threshold)} 元",
-                what_to_do="看 residual_breakdown",
-            )
-        )
-
-    unexplained_bucket = any(
-        value != 0 for key, value in split.buckets.items() if key != BUCKET_GAP
+    residual_entry = _residual_missing(
+        unattributed_units=decomposition.residual_units,
+        tolerance_units=residual_tolerance_units,
     )
+    if residual_entry is not None:
+        missing.append(residual_entry)
+
     status = _aggregate_status(
         missing,
-        unexplained_bucket=unexplained_bucket,
-        gap_units=gap_units,
-        residual_threshold=residual_threshold,
+        unattributed_units=decomposition.residual_units,
+        tolerance_units=residual_tolerance_units,
     )
 
     # ── 13. 因子 / 结论 / assumptions / hash ──────────────────────
@@ -1269,6 +1291,11 @@ async def build_attribution(
             "sector": sector_start,
         },
         sector_bar_fallback=sector_fallback_marks,
+        residual_tolerance={
+            "amount": str(Money(residual_tolerance_units)),
+            "pct": str(Ratio(1_000_000)),
+            "base": str(Money(window.v_end_units)),
+        },
     )
     payload = _hash_payload(
         model="five_factor",

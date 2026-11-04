@@ -164,6 +164,7 @@ function attribution(overrides: Partial<Attribution> = {}): Attribution {
         market: "2026-05-06",
         sector: "2026-06-05",
       },
+      residual_tolerance: { amount: "5000.00", pct: "0.01000000", base: "500000.00" },
     },
     data_as_of: "2026-06-30",
     inputs_hash: "sha256:abc",
@@ -234,6 +235,34 @@ describe("AttributionPage", () => {
     expect((bar as HTMLElement).style.getPropertyValue("--w")).toBe("59.40%");
     expect(bar?.getAttribute("data-tone")).toBe("negative");
     expect(screen.getByTestId("attr-unattributed").textContent).toContain("110059");
+    expect(screen.getByTestId("attr-residual-tolerance").textContent).toContain(
+      "容差 5,000.00 元（期末总资产 500,000.00 元 × 1%）",
+    );
+  });
+
+  it("容差内残差：残差卡标「容差内（不降级）」，整页仍为正常", async () => {
+    getAttribution.mockResolvedValue(
+      attribution({
+        status: "ok",
+        missing: [
+          {
+            code: "RESIDUAL_WITHIN_TOLERANCE",
+            field: "residual",
+            severity: "info",
+            reason: "未归因 40.76 元，低于期末资产 1%（阈值 5,000.00 元）",
+            what_to_do: "无需处理",
+          },
+        ],
+      }),
+    );
+    renderPage();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("attr-status-badge").textContent).toBe("正常"),
+    );
+    expect(screen.getByTestId("attr-residual-tolerance-status").textContent).toContain(
+      "容差内（不降级）",
+    );
   });
 
   it("degraded：渲染金额同时列出缺失项与 what_to_do", async () => {

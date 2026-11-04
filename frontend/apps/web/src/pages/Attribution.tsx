@@ -168,6 +168,7 @@ const USER_ACTION_LABELS: Record<string, string> = {
   SECTOR_CLASSIFICATION_LOOKAHEAD: '确认 look-ahead 口径例外已批准',
   BRIDGE_MISMATCH: '去对账页检查断链',
   RESIDUAL_LARGE: '查看下方「残差去向」',
+  RESIDUAL_WITHIN_TOLERANCE: '无需处理',
   COVERAGE_LOW: '查看下方覆盖率与未归因标的',
 };
 
@@ -206,6 +207,17 @@ function dataStartText(data: Attribution, key: string): string | undefined {
 /** 是否使用了最新行业成分回溯（assumptions 里的布尔标记）。 */
 function lookaheadActive(data: Attribution | undefined): boolean {
   return data?.assumptions?.['classification_lookahead'] === true;
+}
+
+/** 只读展示用：容差金额与分母（assumptions.residual_tolerance，金额为后端定点字符串）。 */
+function residualToleranceText(data: Attribution): string | undefined {
+  const value = data.assumptions?.['residual_tolerance'];
+  if (value == null || typeof value !== 'object') return undefined;
+  const tolerance = value as Record<string, unknown>;
+  const amount = typeof tolerance.amount === 'string' ? tolerance.amount : undefined;
+  const base = typeof tolerance.base === 'string' ? tolerance.base : undefined;
+  if (amount == null || base == null) return undefined;
+  return `容差 ${formatMoney(amount)}（期末总资产 ${formatMoney(base)} × 1%）`;
 }
 
 function StatusBadge({ status }: { status: string }): ReactElement {
@@ -391,6 +403,10 @@ function ResidualCard({ data }: { data: Attribution }): ReactElement {
     compareDecimalStrings(right[1], left[1]),
   );
   const unattributed = (data.coverage?.unattributed ?? []).slice(0, 5);
+  const toleranceText = residualToleranceText(data);
+  const withinTolerance = (data.missing ?? []).some(
+    (item) => item.code === 'RESIDUAL_WITHIN_TOLERANCE',
+  );
   return (
     <section className="dash-panel attr-panel" data-testid="attr-residual">
       <div className="attr-panel-head">
@@ -400,6 +416,15 @@ function ResidualCard({ data }: { data: Attribution }): ReactElement {
           {formatPct(data.residual_ratio_pct)}
           {pctExceeds100(data.residual_ratio_pct) ? (
             <span className="attr-ratio-warn">（残差大于本期总损益）</span>
+          ) : null}
+          {toleranceText ? (
+            <span data-testid="attr-residual-tolerance"> · {toleranceText}</span>
+          ) : null}
+          {withinTolerance ? (
+            <span className="muted" data-testid="attr-residual-tolerance-status">
+              {' '}
+              · 容差内（不降级）
+            </span>
           ) : null}
         </span>
       </div>

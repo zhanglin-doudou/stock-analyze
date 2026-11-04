@@ -39,6 +39,7 @@ from stock_review.application.attribution import (
     _aggregate_status,
     _exclusion_missing,
     _mirror_view,
+    _residual_missing,
     _sector_start_fallback_missing,
 )
 from stock_review.application.rebuild import trades_to_events
@@ -700,9 +701,8 @@ def test_status_info_only_missing_is_ok() -> None:
     """只剩 info 提示（如 look-ahead 披露）时不降级：整页 ok（§4.4）。"""
     status = _aggregate_status(
         [_info_entry(), _info_entry("SECTOR_MAPPING_MISSING")],
-        unexplained_bucket=False,
-        gap_units=0,
-        residual_threshold=100,
+        unattributed_units=0,
+        tolerance_units=100,
     )
     assert status == "ok"
 
@@ -715,33 +715,54 @@ def test_status_warning_missing_degrades() -> None:
         reason="缺行业指数日线",
         what_to_do="补板块日线",
     )
+    assert _aggregate_status([warn], unattributed_units=0, tolerance_units=100) == "degraded"
+
+
+def test_status_residual_tolerance_boundary() -> None:
+    """|未归因金额| 超容差 → degraded；等于容差或容差内 → ok。"""
     assert (
-        _aggregate_status([warn], unexplained_bucket=False, gap_units=0, residual_threshold=100)
+        _aggregate_status([_info_entry()], unattributed_units=101, tolerance_units=100)
         == "degraded"
+    )
+    # 负残差按绝对值比较。
+    assert (
+        _aggregate_status([_info_entry()], unattributed_units=-101, tolerance_units=100)
+        == "degraded"
+    )
+    # 等于容差（含）不降级。
+    assert _aggregate_status([_info_entry()], unattributed_units=100, tolerance_units=100) == "ok"
+    assert (
+        _aggregate_status([_info_entry()], unattributed_units=4_076, tolerance_units=10_000) == "ok"
     )
 
 
-def test_status_nonzero_bucket_or_large_gap_still_degrades() -> None:
-    """只有 info 提示，但未归因桶非空 / 残差超阈值 → 仍 degraded（不抹掉）。"""
-    assert (
-        _aggregate_status(
-            [_info_entry()], unexplained_bucket=True, gap_units=0, residual_threshold=100
-        )
-        == "degraded"
-    )
-    assert (
-        _aggregate_status(
-            [_info_entry()], unexplained_bucket=False, gap_units=101, residual_threshold=100
-        )
-        == "degraded"
-    )
-    # 阈值内（含等于）仍 ok。
-    assert (
-        _aggregate_status(
-            [_info_entry()], unexplained_bucket=False, gap_units=100, residual_threshold=100
-        )
-        == "ok"
-    )
+def test_residual_missing_within_tolerance_is_info() -> None:
+    """容差内非零残差 → info 提示（不降级），文案带金额/阈值。"""
+    entry = _residual_missing(unattributed_units=4_076, tolerance_units=10_000)
+    assert entry is not None
+    assert entry.code == "RESIDUAL_WITHIN_TOLERANCE"
+    assert entry.severity == "info"
+    assert entry.reason == "未归因 40.76 元，低于期末资产 1%（阈值 100.00 元）"
+    assert entry.what_to_do == "无需处理"
+
+
+def test_residual_missing_over_tolerance_is_warning() -> None:
+    """超容差（负残差取绝对值）→ RESIDUAL_LARGE warning。"""
+    entry = _residual_missing(unattributed_units=-571_057, tolerance_units=10_000)
+    assert entry is not None
+    assert entry.code == "RESIDUAL_LARGE"
+    assert entry.severity == "warning"
+    assert "5710.57" in entry.reason
+    assert "100.00" in entry.reason
+    assert entry.what_to_do == "看 residual_breakdown"
+
+
+def test_residual_missing_zero_tolerance_edge() -> None:
+    """期末总资产为 0 → 容差 0：零残差不产生条目，非零即超容差。"""
+    assert _residual_missing(unattributed_units=0, tolerance_units=0) is None
+    entry = _residual_missing(unattributed_units=1, tolerance_units=0)
+    assert entry is not None
+    assert entry.code == "RESIDUAL_LARGE"
 
 
 def _retired_trades() -> list[Trade]:
