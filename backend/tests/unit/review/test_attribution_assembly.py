@@ -50,7 +50,12 @@ from stock_review.attribution.context import (
     MissingEntry,
     resolve_asset_window,
 )
-from stock_review.attribution.coverage import MIN_SAMPLE_SEGMENTS, build_coverage
+from stock_review.attribution.coverage import (
+    MIN_SAMPLE_SEGMENTS,
+    UNATTRIBUTED_LIMIT,
+    Coverage,
+    build_coverage,
+)
 from stock_review.attribution.presentation import (
     assert_copy_compliance,
     build_summary,
@@ -547,7 +552,10 @@ def test_residual_reconciliation_identity(
         buckets=buckets, fee_bucketed_units=0, fee_indep_units=0, per_symbol=dict(per_symbol)
     )
     reconciliation = _residual_reconciliation(
-        split=split, gap_units=gap_units, residual_units=residual_units
+        split=split,
+        coverage=_coverage_for(per_symbol),
+        gap_units=gap_units,
+        residual_units=residual_units,
     )
     assert reconciliation.unattributed_symbols_total_units == sum(per_symbol.values())
     assert reconciliation.account_level_total_units == expect_account
@@ -555,6 +563,50 @@ def test_residual_reconciliation_identity(
         reconciliation.unattributed_symbols_total_units + reconciliation.account_level_total_units
         == reconciliation.residual_units
     )
+    # 展示切分是 additive 的：前 5 条 + 其余 = 标的合计（不受截断影响）。
+    assert (
+        reconciliation.listed_units + reconciliation.others_units
+        == reconciliation.unattributed_symbols_total_units
+    )
+    assert reconciliation.display_limit == UNATTRIBUTED_LIMIT
+
+
+def _coverage_for(per_symbol: dict[str, int]) -> Coverage:
+    """仅用计划外（pseudo）标的构造 coverage：金额降序切分与展示上限由此覆盖。"""
+    return build_coverage(
+        plans=[],
+        decomposition=decompose([], 0, extra_fee_units=0),
+        per_symbol=per_symbol,
+        base_basis="market",
+    )
+
+
+@pytest.mark.parametrize("count", [0, 1, 3, 5, 6, 20])
+def test_coverage_unattributed_display_split(count: int) -> None:
+    """明细展示前 `UNATTRIBUTED_LIMIT` 条，其余归入「其余 N 只」；两段之和恒等于合计。
+
+    0 条 / 1–5 条（不足上限）/ 6 条（越界 1 只）/ 20 条（越界 15 只）四类场景。
+    """
+    per_symbol = {f"{index:06d}": (index + 1) * 1_000 for index in range(count)}
+    coverage = _coverage_for(per_symbol)
+
+    assert len(coverage.unattributed) == min(count, UNATTRIBUTED_LIMIT)
+    assert coverage.unattributed_others_count == max(0, count - UNATTRIBUTED_LIMIT)
+    assert coverage.unattributed_display_limit == UNATTRIBUTED_LIMIT
+    assert coverage.unattributed_listed_total_units == sum(
+        entry.amount_units for entry in coverage.unattributed
+    )
+    assert (
+        coverage.unattributed_listed_total_units + coverage.unattributed_others_total_units
+        == sum(per_symbol.values())
+    )
+    # 展示顺序按 |金额| 降序（大额在前），追加行汇总的正是被截断的小额标的。
+    amounts = [entry.amount_units for entry in coverage.unattributed]
+    assert amounts == sorted(amounts, reverse=True)
+    if count > UNATTRIBUTED_LIMIT:
+        assert coverage.unattributed_others_total_units == sum(
+            sorted(per_symbol.values(), reverse=True)[UNATTRIBUTED_LIMIT:]
+        )
 
 
 def test_golden_summary_insufficient_sample() -> None:

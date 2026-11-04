@@ -1080,10 +1080,26 @@
       },
       "AttributionReconciliationOut": {
         "additionalProperties": false,
-        "description": "残差对账（后端派生，前端零口径）：标的合计 + 账户级桶合计 == residual。",
+        "description": "残差对账（后端派生，前端零口径）：标的合计 + 账户级桶合计 == residual。\n\n`listed_total + others_total == unattributed_symbols_total`；`display_limit` 为\n明细展示上限（单一常量来源，前端不硬编码）。",
         "properties": {
           "account_level_total": {
             "title": "Account Level Total",
+            "type": "string"
+          },
+          "display_limit": {
+            "title": "Display Limit",
+            "type": "integer"
+          },
+          "listed_total": {
+            "title": "Listed Total",
+            "type": "string"
+          },
+          "others_count": {
+            "title": "Others Count",
+            "type": "integer"
+          },
+          "others_total": {
+            "title": "Others Total",
             "type": "string"
           },
           "residual": {
@@ -1097,6 +1113,10 @@
         },
         "required": [
           "unattributed_symbols_total",
+          "listed_total",
+          "others_count",
+          "others_total",
+          "display_limit",
           "account_level_total",
           "residual"
         ],

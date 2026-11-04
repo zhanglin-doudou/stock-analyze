@@ -127,6 +127,10 @@ function attribution(overrides: Partial<Attribution> = {}): Attribution {
     },
     residual_reconciliation: {
       unattributed_symbols_total: "120.00",
+      listed_total: "120.00",
+      others_count: 0,
+      others_total: "0.00",
+      display_limit: 5,
       account_level_total: "0.00",
       residual: "120.00",
     },
@@ -253,6 +257,9 @@ describe("AttributionPage", () => {
     // 名称缺失只显示代码。
     expect(rows[1].textContent).toContain("600519");
     expect(rows[1].textContent).not.toContain("未知");
+    // 展示上限来自后端 `display_limit`；不足上限时无「其余 N 只」行。
+    expect(screen.getByText(/最多 5 只/)).toBeTruthy();
+    expect(screen.queryByTestId("attr-unattributed-others")).toBeNull();
     expect(screen.getByTestId("attr-residual-tolerance").textContent).toContain(
       "容差 1,000.00 元（期末总资产 500,000.00 元）",
     );
@@ -399,6 +406,10 @@ describe("AttributionPage", () => {
         },
         residual_reconciliation: {
           unattributed_symbols_total: "0.00",
+          listed_total: "0.00",
+          others_count: 0,
+          others_total: "0.00",
+          display_limit: 5,
           account_level_total: "0.00",
           residual: "0.00",
         },
@@ -449,6 +460,9 @@ describe("AttributionPage", () => {
     expect(screen.getByTestId("attr-reconciliation").textContent).toBe(
       "明细合计 0.00 元 + 账户级 0.00 元 = 0.00 元",
     );
+    // 0 条：不渲染明细区，也无追加行。
+    expect(screen.queryByTestId("attr-unattributed")).toBeNull();
+    expect(screen.queryByTestId("attr-unattributed-others")).toBeNull();
   });
 
   it("残差去向：桶按金额降序、正负含义、残差比 >100% 提示（U-08）", async () => {
@@ -468,8 +482,23 @@ describe("AttributionPage", () => {
         },
         residual_reconciliation: {
           unattributed_symbols_total: "445625.33",
+          listed_total: "445625.33",
+          others_count: 0,
+          others_total: "0.00",
+          display_limit: 5,
           account_level_total: "-336016.03",
           residual: "109609.30",
+        },
+        // 与对账字段同源：5 条明细合计 445,625.33（无追加行）。
+        coverage: {
+          ...attribution().coverage!,
+          unattributed: [
+            { security_code: "600000", security_name: "浦发银行", symbol_class: "stock", reason_code: null, amount: "100000.00" },
+            { security_code: "600036", symbol_class: "stock", reason_code: null, amount: "100000.00" },
+            { security_code: "601318", symbol_class: "stock", reason_code: null, amount: "100000.00" },
+            { security_code: "000001", symbol_class: "stock", reason_code: null, amount: "100000.00" },
+            { security_code: "600519", symbol_class: "stock", reason_code: null, amount: "45625.33" },
+          ],
         },
       }),
     );
@@ -489,6 +518,55 @@ describe("AttributionPage", () => {
       "445,625.33 元 + 账户级 -336,016.03 元 = 109,609.30 元",
     );
   });
+
+  it.each([
+    { count: 6, othersCount: 1, othersTotal: "2.00" },
+    { count: 20, othersCount: 15, othersTotal: "30.00" },
+  ])(
+    "明细超过展示上限（$count 条）：前 5 条 + 「其余 N 只」汇总行",
+    async ({ count, othersCount, othersTotal }) => {
+      // 构造用例（非真实数据）：后端只下发前 5 条（各 10.00），其余各 2.00 汇总在追加行。
+      const listedTotal = "50.00";
+      const total = (50 + 2 * othersCount).toFixed(2);
+      const entries = Array.from({ length: Math.min(count, 5) }, (_, index) => ({
+        security_code: `${600000 + index}`,
+        symbol_class: "stock",
+        reason_code: null,
+        amount: "10.00",
+      }));
+      getAttribution.mockResolvedValue(
+        attribution({
+          residual: total,
+          residual_reconciliation: {
+            unattributed_symbols_total: total,
+            listed_total: listedTotal,
+            others_count: othersCount,
+            others_total: othersTotal,
+            display_limit: 5,
+            account_level_total: "0.00",
+            residual: total,
+          },
+          coverage: { ...attribution().coverage!, unattributed: entries },
+        }),
+      );
+      renderPage();
+
+      const list = await screen.findByTestId("attr-unattributed");
+      expect(list.querySelectorAll("li:not(.attr-unattributed-others)")).toHaveLength(5);
+      expect(screen.getByText(/最多 5 只/)).toBeTruthy();
+
+      const others = screen.getByTestId("attr-unattributed-others");
+      expect(others.textContent).toContain(`其余 ${othersCount} 只`);
+      expect(others.textContent).toContain(`${othersTotal} 元`);
+      // 追加行是非标的、不可点击，也不出现伪代码。
+      expect(others.querySelector("a")).toBeNull();
+      expect(others.textContent).not.toContain("pseudo");
+      // 对账行仍展示「全部标的」合计（含被截断部分）。
+      expect(screen.getByTestId("attr-reconciliation").textContent).toContain(
+        `明细合计 ${total} 元`,
+      );
+    },
+  );
 
   it("数据质量：阻断项优先、显示用户动作、开发命令折叠（U-10）", async () => {
     getAttribution.mockResolvedValue(

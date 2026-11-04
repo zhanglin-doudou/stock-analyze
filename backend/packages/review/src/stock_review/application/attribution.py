@@ -201,12 +201,19 @@ class ResidualReconciliation:
       unattributed_price_pnl 中落到标的的部分，含被 5 条展示上限截断的标的）；
     - `account_level_total`：不按标的分摊的桶（interest / other_cashflow /
       dividend_without_position）+ valuation_gap；
+    - `listed_total` / `others_count` / `others_total`：明细展示前 `display_limit`
+      条的金额合计、其后标的数与其金额合计；`listed_total + others_total ==
+      unattributed_symbols_total`；
     - 等式由构造保证：residual = Σ五桶 + valuation_gap。
     """
 
     unattributed_symbols_total_units: int
     account_level_total_units: int
     residual_units: int
+    listed_units: int
+    others_count: int
+    others_units: int
+    display_limit: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -676,12 +683,17 @@ def _display_name(raw: str | None) -> str | None:
 
 
 def _residual_reconciliation(
-    *, split: ResidualSplit, gap_units: int, residual_units: int
+    *,
+    split: ResidualSplit,
+    coverage: Coverage,
+    gap_units: int,
+    residual_units: int,
 ) -> ResidualReconciliation:
     """残差对账（§4.4，标度整数）：Σper_symbol + (dividend+interest+other+gap) == residual。
 
-    `per_symbol` 是 corporate/unattributed 两桶中**落到标的**的部分（含被 5 条
-    展示上限截断的标的），因此恒等于两桶之和；等式由 `residual = Σ五桶 + gap` 保证。
+    `per_symbol` 是 corporate/unattributed 两桶中**落到标的**的部分（含被展示上限
+    截断的标的），因此恒等于两桶之和；等式由 `residual = Σ五桶 + gap` 保证。
+    `listed + others` 由 `coverage` 的已展示/未展示分组给出，同样恒等于 Σper_symbol。
     """
     return ResidualReconciliation(
         unattributed_symbols_total_units=sum(split.per_symbol.values()),
@@ -692,6 +704,10 @@ def _residual_reconciliation(
             + gap_units
         ),
         residual_units=residual_units,
+        listed_units=coverage.unattributed_listed_total_units,
+        others_count=coverage.unattributed_others_count,
+        others_units=coverage.unattributed_others_total_units,
+        display_limit=coverage.unattributed_display_limit,
     )
 
 
@@ -1386,6 +1402,7 @@ async def build_attribution(
     # 对账行（§4.4）：标的合计 + 账户级桶合计 = residual（后端派生，前端零口径）。
     reconciliation = _residual_reconciliation(
         split=split,
+        coverage=coverage,
         gap_units=gap_units,
         residual_units=decomposition.residual_units,
     )

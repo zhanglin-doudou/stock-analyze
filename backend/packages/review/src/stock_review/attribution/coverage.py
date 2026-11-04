@@ -59,7 +59,11 @@ class Coverage:
     symbols_total: int
     symbols_attributed: int
     symbols_participating: int  # 本期参与候选数（participating=True 的 plan 数）
-    unattributed: tuple[UnattributedEntry, ...]
+    unattributed: tuple[UnattributedEntry, ...]  # 前 UNATTRIBUTED_LIMIT 条
+    unattributed_listed_total_units: int  # 已展示条目的金额合计
+    unattributed_others_count: int  # 第 UNATTRIBUTED_LIMIT 条之后的标的数
+    unattributed_others_total_units: int  # 未展示条目的金额合计
+    unattributed_display_limit: int = UNATTRIBUTED_LIMIT
 
 
 def build_coverage(
@@ -116,6 +120,8 @@ def build_coverage(
             )
         )
     entries.sort(key=lambda e: (-abs(e.amount_units), e.security_code))
+    listed = entries[:UNATTRIBUTED_LIMIT]
+    others = entries[UNATTRIBUTED_LIMIT:]
     return Coverage(
         capital_total_units=capital_total,
         capital_attributed_units=capital_attributed,
@@ -126,7 +132,10 @@ def build_coverage(
         symbols_total=len(plans),
         symbols_participating=sum(1 for plan in plans if plan.participating),
         symbols_attributed=sum(1 for plan in plans if plan.attributed),
-        unattributed=tuple(entries[:UNATTRIBUTED_LIMIT]),
+        unattributed=tuple(listed),
+        unattributed_listed_total_units=sum(e.amount_units for e in listed),
+        unattributed_others_count=len(others),
+        unattributed_others_total_units=sum(e.amount_units for e in others),
     )
 
 

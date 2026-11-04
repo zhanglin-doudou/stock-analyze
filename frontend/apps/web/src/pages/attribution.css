@@ -393,6 +393,19 @@
   font-size: var(--fs-sm);
 }
 
+/* 「其余 N 只」汇总行：非标的、不可点击，弱化展示以区别于上方逐只明细。 */
+.attr-unattributed li.attr-unattributed-others {
+  padding-inline: var(--s2);
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+.attr-unattributed li.attr-unattributed-others strong {
+  flex: 1 1 auto;
+  font-weight: var(--fw-regular);
+  color: var(--muted);
+}
+
 .attr-what-to-do {
   flex: 1 1 100%;
   font-size: var(--fs-sm);

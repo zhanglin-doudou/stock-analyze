@@ -403,7 +403,8 @@ function ResidualCard({ data }: { data: Attribution }): ReactElement {
   const buckets = Object.entries(data.residual_breakdown ?? {}).sort((left, right) =>
     compareDecimalStrings(right[1], left[1]),
   );
-  const unattributed = (data.coverage?.unattributed ?? []).slice(0, 5);
+  // 展示条数与「其余 N 只」均由后端切分（`display_limit` 单一来源），前端不截断。
+  const unattributed = data.coverage?.unattributed ?? [];
   const toleranceText = residualToleranceText(data);
   const withinTolerance = (data.missing ?? []).some(
     (item) => item.code === 'RESIDUAL_WITHIN_TOLERANCE',
@@ -479,7 +480,13 @@ function ResidualCard({ data }: { data: Attribution }): ReactElement {
       ) : null}
       {unattributed.length > 0 ? (
         <details className="attr-unattributed-details">
-          <summary className="muted">未归因标的明细（按金额降序，最多 5 只）</summary>
+          <summary className="muted">
+            未归因标的明细（按金额降序
+            {data.residual_reconciliation
+              ? `，最多 ${data.residual_reconciliation.display_limit} 只`
+              : ''}
+            ）
+          </summary>
           <ul className="attr-unattributed" data-testid="attr-unattributed">
             {unattributed.map((item) => (
               <li key={item.security_code}>
@@ -497,6 +504,18 @@ function ResidualCard({ data }: { data: Attribution }): ReactElement {
                 <span className="num">{formatMoney(item.amount)}</span>
               </li>
             ))}
+            {/* 第 display_limit 条之后的标的汇总行（非标的、不可点击）；数字全部来自后端。 */}
+            {data.residual_reconciliation && data.residual_reconciliation.others_count > 0 ? (
+              <li
+                className="attr-unattributed-others"
+                data-testid="attr-unattributed-others"
+              >
+                <strong>其余 {data.residual_reconciliation.others_count} 只</strong>
+                <span className="num">
+                  {formatMoney(data.residual_reconciliation.others_total)}
+                </span>
+              </li>
+            ) : null}
           </ul>
         </details>
       ) : null}

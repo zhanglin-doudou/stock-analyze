@@ -156,6 +156,10 @@ def _to_out(result: AttributionResult) -> AttributionOut:
                 unattributed_symbols_total=str(
                     Money(result.residual_reconciliation.unattributed_symbols_total_units)
                 ),
+                listed_total=str(Money(result.residual_reconciliation.listed_units)),
+                others_count=result.residual_reconciliation.others_count,
+                others_total=str(Money(result.residual_reconciliation.others_units)),
+                display_limit=result.residual_reconciliation.display_limit,
                 account_level_total=str(
                     Money(result.residual_reconciliation.account_level_total_units)
                 ),

@@ -1415,9 +1415,17 @@ class AttributionLinksOut(StrictModel):
 
 
 class AttributionReconciliationOut(StrictModel):
-    """残差对账（后端派生，前端零口径）：标的合计 + 账户级桶合计 == residual。"""
+    """残差对账（后端派生，前端零口径）：标的合计 + 账户级桶合计 == residual。
+
+    `listed_total + others_total == unattributed_symbols_total`；`display_limit` 为
+    明细展示上限（单一常量来源，前端不硬编码）。
+    """
 
     unattributed_symbols_total: str
+    listed_total: str
+    others_count: int
+    others_total: str
+    display_limit: int
     account_level_total: str
     residual: str
 

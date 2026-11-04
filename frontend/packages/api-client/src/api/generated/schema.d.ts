@@ -1407,10 +1407,21 @@ export interface components {
         /**
          * AttributionReconciliationOut
          * @description 残差对账（后端派生，前端零口径）：标的合计 + 账户级桶合计 == residual。
+         *
+         *     `listed_total + others_total == unattributed_symbols_total`；`display_limit` 为
+         *     明细展示上限（单一常量来源，前端不硬编码）。
          */
         AttributionReconciliationOut: {
             /** Account Level Total */
             account_level_total: string;
+            /** Display Limit */
+            display_limit: number;
+            /** Listed Total */
+            listed_total: string;
+            /** Others Count */
+            others_count: number;
+            /** Others Total */
+            others_total: string;
             /** Residual */
             residual: string;
             /** Unattributed Symbols Total */

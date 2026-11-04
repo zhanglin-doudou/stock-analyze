@@ -95,6 +95,8 @@ MONEY_FIELDS = frozenset(
         # 2026-11-04（API-036）：残差对账派生金额（与 residual 同 2 位）
         "unattributed_symbols_total",
         "account_level_total",
+        "listed_total",
+        "others_total",
     }
 )
 PRICE_FIELDS = frozenset({"price", "unit_nav"})
