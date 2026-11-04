@@ -83,8 +83,8 @@ function IndustryView({
           testId="sector-kpi-effective-n"
           hint={`${concentration.n_sectors} 个持仓板块`}
         />
-        <Kpi label="Top1" value={concentration.top1_weight} testId="sector-kpi-top1" />
-        <Kpi label="Top3" value={concentration.top3_weight} testId="sector-kpi-top3" />
+        <Kpi label="Top1集中度" value={concentration.top1_weight} testId="sector-kpi-top1" />
+        <Kpi label="Top3集中度" value={concentration.top3_weight} testId="sector-kpi-top3" />
         <Kpi
           label="覆盖率"
           value={overview.portfolio.coverage_pct}
@@ -266,7 +266,7 @@ export function Sectors(): ReactElement {
           className={`sector-tab${taxonomy === "industry" ? " is-active" : ""}`}
           onClick={() => update({ taxonomy: "industry", level: "1", parent: undefined })}
         >
-          行业板块
+          行业板块（同花顺）
         </button>
         <button
           type="button"
@@ -275,7 +275,7 @@ export function Sectors(): ReactElement {
           className={`sector-tab${taxonomy === "concept" ? " is-active" : ""}`}
           onClick={() => update({ taxonomy: "concept", level: undefined, parent: undefined })}
         >
-          概念板块
+          概念板块（同花顺）
         </button>
       </div>
 

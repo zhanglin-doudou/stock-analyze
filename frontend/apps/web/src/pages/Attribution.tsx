@@ -604,8 +604,8 @@ function QualityCard({ data }: { data: Attribution }): ReactElement {
 
 export function AttributionPage(): ReactElement {
   const [params, setParams] = useSearchParams();
-  const period = params.get('period') ?? latestCompletedMonth();
-  const allowLookahead = params.get('lookahead') === 'allow';
+  const period = params.get('period') ?? yearToDateRange();
+  const allowLookahead = params.get('lookahead') === 'allow' || 'allow';
 
   const query = useQuery({
     queryKey: ['attribution', period, allowLookahead],
