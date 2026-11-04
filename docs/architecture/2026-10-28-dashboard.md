@@ -6,7 +6,7 @@
 > 事实基线（2026-10-28）：
 > - 前端**没有** `Dashboard` 页面；`/` 目前重定向 `/trades`（`frontend/apps/web/src/router.tsx`）。
 > - 后端已有 `GET /nav`、`GET /metrics`、`GET /rounds`、`GET /reconciliation/bridge`、`GET /assets`、`POST /jobs/rebuild-period`（API-083）；**没有** Dashboard 聚合端点。
-> - Period2-08（归因，08a~08f 已于 2026-11-02 落地）、Period2-09（月报）、Period2-10（导出）、Period2-11（设置）、Period2-13（报告/导出页）、Period2-14/15（验收/零口径门禁）未完成；`make rebuild`、`make demo-broken`、`make verify-p2` 不存在。
+> - Period2-08（归因）**已交付并验收**（08a~08g，2026-11-02；2026-11-04 口径收口）、Period2-09（月报）、Period2-10（导出）、Period2-11（设置）、Period2-13（报告/导出页）、Period2-14/15（验收/零口径门禁）未完成；`make rebuild`、`make demo-broken`、`make verify-p2` 不存在。
 > - 因此本设计同时交付：**Dashboard 页面 + 验收剧本修订 + 未完成功能的前端入口预留 + 缺失内容清单**；剩余二期任务不实现。
 
 ---
@@ -27,11 +27,11 @@
 | **D-04** | **"已平仓股票数量"** | **distinct security_code（已平仓且非 data_error）** 为 headline；同时返回 `closed_round_count`（平仓笔数）供副标题，避免"股票数/笔数"混淆 | 只按平仓笔数计（更接近 win_rate 的 n） | 影响文案与验收断言；两个口径同时展示最稳 |
 | **D-05** | **最大回撤的数据范围与异常行** | 用全历史 `asset_daily` **有效日收益**（`status=ok/degraded`）复利链；仅 blocked/NULL 行断链，degraded（新股按成本、债券缺行情）日收益有效不断链、不进 missing；有效观测 `<60` 个工作日（资产表自 2026-10-31 起周末不写行，故观测数按工作日计）→ `insufficient`（不冒充"历史回撤"）；完全无有效段 → `blocked`。全历史无回撤 → `mdd=0` + 起止 null | ① 任一 blocked 整块不出值（会让有单日断链的用户永久看不到历史）；② 跳过 blocked 继续算（失真）；③ 仅用当前月 `timing.drawdown`（不是"历史"） | 影响历史概览可用性；演示数据若历史有断链会降级而非整块消失；需人工确认 60 日门槛 |
 | **D-06** | **旧"五卡"验收如何合并到两板块** | **保留旧内容为两板块内的子块**：净值 summary + 费用 + **对账横幅**并入"资产概览"；四数字（胜率/盈亏比/持仓天数/集中度，带 n/CI/可信度）+ 行为 + 最赚最亏 + **下钻入口**并入"历史概览"；页面仍只有 2 个大板块 | ① 直接删旧五卡（PRD/验收缺项）；② 保留旧五卡再加两板块（页面过载，违背2板块） | 下钻用 `/metrics/{id}/explain` 详情页替代"抽屉"，需同步修订验收；对账/可信度标签保留 |
-| **D-07** | 未完成功能的**入口预留**方式 | 新增 `/reports`、`/exports`、`/attribution` **路由页占位**（`ComingSoon`）；Dashboard 顶部/历史区放按钮进入占位页；**不渲染任何假数字/假按钮成功**；占位页标注依赖任务 | ① 仅 disabled 按钮（不可发现）；② 隐藏入口（验收无法证明预留）；③ 先做假页面（误导） | 用户明确要求"先进行前端入口预留"；必须可测试 |
+| **D-07** | 未完成功能的**入口预留**方式 | 新增 `/reports`、`/exports` **路由页占位**（`ComingSoon`；`/attribution` 已于 08f 交付为实页）；Dashboard 顶部/历史区放按钮进入对应页；**不渲染任何假数字/假按钮成功**；占位页标注依赖任务 | ① 仅 disabled 按钮（不可发现）；② 隐藏入口（验收无法证明预留）；③ 先做假页面（误导） | 用户明确要求"先进行前端入口预留"；必须可测试 |
 | **D-08** | Dashboard 数据获取方式 | **新增 `GET /api/v1/dashboard`（API-084）聚合请求字段 + 当前持仓 + 最赚最亏**；旧子块补充指标仍由现有 `/metrics` 获取（前端只展示） | ① 前端拼 `/nav`+`/assets`+`/rounds`+`/metrics`（计算/一致性在前端，违反零口径）；② 扩展 `/assets`（语义混杂） | 新端点让 §1.3 的 15 项字段有唯一来源；旧指标保持现有 API |
 | **D-09** | 当前快照取哪天/是否自动构建 | **只读最新 `asset_daily` 行**（`trade_date ≤ today`），不自动触发构建；**API-084 自身不写任何表**；旧子块按需懒加载，`/nav`/`/metrics` 的既有 GET 物化写不隐瞒；`asset_build.state` 为 `stale/missing/blocked` 时显示状态与"去构建"链接（跳 `/assets`，不自动 job） | ① Dashboard 自动触发 rebuild（有副作用/慢）；② 用实时期末估值（与资产表可能分叉）；③ 首屏同时调 `/nav`+`/metrics`（触发写） | 首屏只调 API-084；数据可能滞后但显式披露；既有 GET 写副作用另行标注 |
 | **D-10** | 图表/可视化依赖 | v1 **不新增图表库**；用 CSS 进度条/文字/简单内联 SVG；ECharts 留到后续（PRD 有要求但当前未依赖） | ① 引入 ECharts（体积/测试成本）；② 不做任何可视化 | 影响"净值曲线"旧卡；可先放占位/后续补 |
-| **D-11** | 旧五卡用哪个 period | **2026-10-30 修订：指标子块改为年度口径**——API-084 返回 `metrics_period`（`as_of` 所在自然年，如 `2026`）、`metrics_period_start`（1/1）、`metrics_period_end`（=as_of），前端按此自动请求 `/metrics?period={metrics_period}`（低频操作者月度样本不足）；`legacy_period`（最近有流水/回合的月份）保留给归因占位链接；全历史 headline 标注"全历史" | ① 默认当月（demo 全空）；② 用户自选；③ 不显示旧五卡 | 解决同页三套时间口径；history headline 与指标子块（年度）明确分开 |
+| **D-11** | 旧五卡用哪个 period | **2026-10-30 修订：指标子块改为年度口径**——API-084 返回 `metrics_period`（`as_of` 所在自然年，如 `2026`）、`metrics_period_start`（1/1）、`metrics_period_end`（=as_of），前端按此自动请求 `/metrics?period={metrics_period}`（低频操作者月度样本不足）；`legacy_period`（最近有流水/回合的月份）保留给归因入口链接；全历史 headline 标注"全历史" | ① 默认当月（demo 全空）；② 用户自选；③ 不显示旧五卡 | 解决同页三套时间口径；history headline 与指标子块（年度）明确分开 |
 | **D-12** | 状态分类法 | **拆两轴**：`build_state`（missing/current/stale/blocked，来自 `asset_build_state`）与 `data_status`（ok/degraded/blocked/insufficient/missing，来自行/指标）；页面状态优先级 `blocked > missing > insufficient > stale > degraded > ok` | 单轴混用（现状评审发现矛盾） | 前后端/测试按两轴映射；避免 stale 与 blocked 冲突 |
 | **D-13** | 缺失清单口径 | 每项给"是否阻塞本任务验收 / 本次是否修 / SKIP 依据 / 占位入口"；G8 红灯、D-19、前端工具链/夹具缺口全部列入 | 只列 API/页面 | 验收可逐项核对，不把"暂停"误判为完成 |
 
@@ -117,7 +117,7 @@
 
 ## 2. 与既有验收的合并矩阵
 
-> **窗口约定（评审 P0-1，2026-10-30 修订）**：指标子块是**年度**口径（`metrics_period`：`as_of` 所在年 1/1 → `as_of`），由 API-084 显式返回并自动加载；资产概览 headline 是**最新快照**；历史概览是**全历史**。三种窗口在页面标题/子块上分别标注，禁止混用。`legacy_period` 仅保留给归因占位链接。
+> **窗口约定（评审 P0-1，2026-10-30 修订）**：指标子块是**年度**口径（`metrics_period`：`as_of` 所在年 1/1 → `as_of`），由 API-084 显式返回并自动加载；资产概览 headline 是**最新快照**；历史概览是**全历史**。三种窗口在页面标题/子块上分别标注，禁止混用。`legacy_period` 仅保留给归因入口链接。
 
 | 旧验收项（DEV-PLAN §3.1 / PRD FR-D1 / Period2-12） | 新位置 | 处理 |
 |---|---|---|
@@ -130,7 +130,7 @@
 | **下钻抽屉**（Period2-12） | 历史概览 · 指标卡/数字链接 | **合并为详情页**：点胜率等 → `/metrics/{id}?period=legacy_period`（现有 `MetricDetail` 已渲染 explain/drilldown）；此为验收变更 |
 | **对账横幅**（Period2-12） | 资产概览顶部 | **保留**：读 `GET /reconciliation?period=legacy_period`；有断链/补差时显示横幅 + 链接 `/assets`；无数据则隐藏 |
 | **可信度标签**（FR-R8/Period2-12） | 历史概览指标子块 | **保留**：复用 metric `sample_status/n/ci_low/ci_high`，显示"样本不足/窗口未满/可信/阻断"；全历史 headline 也标 `n/样本状态` |
-| 顶部一句本期结论 | 两板块页头 | **保留为可空文案**：无报告/归因时不生成结论；占位"本期结论待月报/归因上线" |
+| 顶部一句本期结论 | 两板块页头 | **保留为可空文案**：无报告时不生成结论；占位"本期结论待月报上线"（归因已交付） |
 
 > 结论：**页面视觉只有 2 个板块**；旧五卡全部有归宿，不另起第三板块。验收从"五卡有数"改为"两板块 + 子块断言 + legacy_period"；下钻抽屉改为详情页、基准卡部分缺失，均为明确的验收变更，不是静默丢失。
 
@@ -379,7 +379,7 @@ def max_drawdown_window(...) -> DrawdownWindow:
 - 新增 `frontend/apps/web/src/pages/Dashboard.tsx`（按仓库现有 `pages/` 目录，不用 `features/`）。
 - `router.tsx`：
   - 根 `index` 重定向 `/dashboard`（当前 `/trades` 改掉）；
-  - `/dashboard` 受 `RequireAuth` 保护；占位页 `/reports`、`/exports`、`/attribution` 也必须挂在同一 `Layout + RequireAuth` children 下；
+  - `/dashboard` 受 `RequireAuth` 保护；占位页 `/reports`、`/exports` 也必须挂在同一 `Layout + RequireAuth` children 下；
   - 导航第一位加"看板"；同时更新 `Login.tsx:22`、`Register.tsx:38` 的 `navigate("/trades")` → `/dashboard`；
   - 更新 `router.test.tsx` 对导航前四项顺序的断言（新增"看板"会改变顺序）。
 - 保留 `/nav`、`/assets`、`/metrics`、`/rounds` 链接，作为下钻入口。
@@ -389,7 +389,7 @@ def max_drawdown_window(...) -> DrawdownWindow:
 
 ```
 <DashboardPage>
-  <PageHeader> 数据截至 / 状态徽标 / 刷新 / 入口按钮（月报、导出、归因占位）
+  <PageHeader> 数据截至 / 状态徽标 / 刷新 / 入口按钮（月报、导出、归因）
   <div data-board="asset-overview"> 资产概览（板块级容器）
     <BuildBanner> build_state/data_status / 数据截止 / 去构建 CTA（跳 /assets，不自动 job）
     <ReconciliationBanner> 对账断链/补差（/reconciliation?period=legacy_period）
@@ -500,7 +500,7 @@ curl -fsS "$BASE/dashboard" -H "$AUTH" | tee /tmp/dashboard.json | jq -e '
 # 5) 明确 SKIP（缺失项不伪装通过）
 SKIPS+=("make verify-p2 不存在（Period2-14 暂停）")
 SKIPS+=("make rebuild / make demo-broken / D-19 demo 数据未完成")
-SKIPS+=("Period2-08/09/10/11/13/15 功能未实现，仅占位")
+SKIPS+=("Period2-09/10/11/13/15 功能未实现，仅占位；Period2-08 归因已交付")
 printf 'SKIP: %s\n' "${SKIPS[@]}"
 ```
 
@@ -509,14 +509,14 @@ printf 'SKIP: %s\n' "${SKIPS[@]}"
 1. 打开 `http://localhost:5173/dashboard`：
    - 存在 `data-testid="asset-overview"` / `history-overview`，无第三 section；
    - A1~A7、H1~H8（§1.3）逐项与 `/api/v1/dashboard` 字段相等；`data-value` 逐字符；
-   - 指标子块显示 `metrics_period=2026`（年度：2026-01-01 → as_of）标签并自动加载；`legacy_period` 只用于归因占位链接。
+   - 指标子块显示 `metrics_period=2026`（年度：2026-01-01 → as_of）标签并自动加载；`legacy_period` 只用于归因入口链接。
 2. 状态：
    - 正常/`stale`：数字可读 + 黄提示；
    - `blocked`/`missing`：该 section DOM 无金额/百分比，显示原因 + `what_to_do`；
    - 用 pytest 的 blocked fixture（见 §8）验证，不依赖不存在的 `make demo-broken`。
 3. 指标子块：年度指标卡按 `metrics_period` 自动加载（年度区间 1/1→as_of 标签），资产子块有净值 summary/费用/对账横幅（`legacy_period`）；历史子块有四数字（带 n/CI/可信度）/行为/最赚最亏。
 4. 下钻：点胜率 → `/metrics/perf.win_rate?period=2026-06`（不再用不支持 query 的 `/rounds?status`）；点最赚/最亏行 → `/rounds/{round_id}`。
-5. 占位入口：Dashboard 按钮 → `/reports`、`/exports`、`/attribution` 占位页（`coming-soon`，`data-dependency` 标明 Period2-09/10/08）；无 `<a download>`、无 job、无假数字；从占位页可返回看板。
+5. 占位入口：Dashboard 按钮 → `/reports`、`/exports` 占位页（`coming-soon`，`data-dependency` 标明 Period2-09/10）；`/attribution` 已是实页（08f），无 `<a download>`、无 job、无假数字；从占位页可返回看板。
 6. 缺失项：按 §7 清单核对；`SKIP` 输出必须列出。
 
 ### 6.2 验收断言（脚本级）
@@ -532,7 +532,7 @@ printf 'SKIP: %s\n' "${SKIPS[@]}"
 | DASH-07 | 无 `Number(`/`parseFloat`/`parseInt`/`toFixed` 用于指标值/比率；无裸术语（`TWR/MWR/DE/HHI/CR1` 用中文标签） |
 | DASH-08 | 无 token 401；admin 403 `ADMIN_CANNOT_READ_TRADES`；B 的 200 响应不含 A 的 `security_code/金额/UUID`；B 无数据 200+missing（不是 404） |
 | DASH-09 | API p95 ≤300ms 目标（5 万行夹具为后续性能任务；未建夹具时标 SKIP，不伪通过）；首屏只调 `/dashboard`，旧子块懒加载 |
-| DASH-10 | `/reports`、`/exports`、`/attribution` 占位页用 **RTL 路由渲染**断言 `coming-soon`、`data-dependency`、无下载/job；`curl` 200 不作为证据 |
+| DASH-10 | `/reports`、`/exports` 占位页用 **RTL 路由渲染**断言 `coming-soon`、`data-dependency`、无下载/job；`/attribution` 为实页（08f）；`curl` 200 不作为证据 |
 | DASH-11 | 指标子块数值与 `/metrics?period={metrics_period}&ids=...` 逐项一致（`metrics_period` 年 1/1→as_of，仅 `status=ok` 字段）；`/nav`、对账横幅仍用 `legacy_period` |
 | DASH-12 | 两轴状态映射/未知枚举兜底；`badge-stale/missing/insufficient` 有样式 |
 | DASH-13 | API-084 在 Catalog/OpenAPI/OPERATION_META/gate 计数/隔离矩阵/手写客户端全部登记；无契约漂移 |
@@ -607,7 +607,7 @@ printf 'SKIP: %s\n' "${SKIPS[@]}"
 |---|---|---|
 | Dashboard 页面 | `frontend/apps/web/src/pages/Dashboard.test.tsx` | 两 section、字段文本=API display、状态、空态、持仓表；`top-holding-duration`/`top-trade-count` 两列布局与「持有 N 天」「N 笔」文本 |
 | blocked | 同上 | DOM 无数字/无收益词；显示原因+操作 |
-| 入口占位 | `ComingSoon.test.tsx`/router test | `/reports`、`/exports`、`/attribution` 可访问；`coming-soon`；无假下载 |
+| 入口占位 | `ComingSoon.test.tsx`/router test | `/reports`、`/exports` 可访问（`coming-soon`）；`/attribution` 为实页；无假下载 |
 | 零口径 | `Dashboard.test.tsx` 源码 `?raw` 正则（仓库无 ESLint 自定义规则工具） | 无 `Number(`/`parseFloat`/`parseInt`/`toFixed` 用于指标；无前端比率拼接；无裸术语 |
 | 路由 | `router.test.tsx` | `/` → `/dashboard`；未登录 → `/login`；导航含"看板" |
 
@@ -671,7 +671,7 @@ printf 'SKIP: %s\n' "${SKIPS[@]}"
 - [ ] 历史概览「持仓时长 Top3」「交易次数 Top3」两列布局，来自 `top_holding_rounds`/`top_trade_counts`，交易次数按流水 buy/sell 分别计数并展示个股累计收益/总费用，前端零计算。
 - [ ] 旧五卡子块按 §2 合并，验收剧本更新；legacy_period=最近数据月。
 - [ ] **blocked/missing 不显示数字；stale 可显示并提示**；无 token 401、admin 403、B 列表 200 无 A 数据。
-- [ ] `/reports`、`/exports`、`/attribution` 占位入口存在；无假下载/假数字。
+- [ ] `/reports`、`/exports` 占位入口存在；`/attribution` 为实页；无假下载/假数字。
 - [ ] 缺失清单 §7 与实际状态一致；验收脚本输出 SKIP 项。
 - [ ] 前端零口径源码正则断言；后端 p95 目标准入（无 5 万行夹具时 SKIP，不伪通过）。
 - [ ] 板块子块与 `/sectors` 页：`[data-board]` 恰 2 个、`links.sectors` 深链、基准缺失降级、概念 `caveat`；API-087/088 契约与测试齐全。

@@ -57,7 +57,7 @@
 - 已有**公共行情缓存**范式：`market.daily_bar` / `market.pull_range`（[market_models.py](../../backend/packages/platform/src/stock_platform/market_models.py)），无 RLS、无 `user_id`、可再生；`MarketDataSource` 端口 + replay/live 两个 adapter + `CachedMarketDataSource`（[ports.py](../../backend/packages/platform/src/stock_platform/ports.py)、[market_live.py](../../backend/packages/platform/src/stock_platform/market_live.py)）可直接照搬。
 - 已有**看板聚合**：`GET /dashboard`（API-084）两板块，返回当前持仓行（含 `weight_ratio_units`）与全历史概览；聚合逻辑在 [dashboard.py](../../backend/packages/review/src/stock_review/application/dashboard.py)，权威口径见 [Dashboard 设计](2026-10-28-dashboard.md)。
 - 已有**集中度纯函数**：`stock_core.stats.concentration`（`top_k_share/cr1_units/gini_units/hhi_indices`）与 `behavior.hhi`（个股 HHI，含现金口径）——**但都是「按个股」的，不是「按板块」的**。
-- 归因**未实现**：API-036 仅在 [API-Catalog](v2/API-Catalog.md) 有契约（`model=five_factor|brinson_industry`），指标引擎 `DOMAINS` 已含 `attribution`（[registry.py](../../backend/packages/review/src/stock_review/metrics/registry.py)），但没有任何 `attribution.*` def；PRD FR-R7/§A25 已定义 Brinson 公式。
+- 归因**已交付**（Period2-08，API-036 + `/attribution`）：本设计只记录板块底座与 additive 预留，不重复归因算法。
 - 缺口：**没有证券主数据**（只有 6 位代码 + 名称），板块成分只能按代码映射；成分/分类会随时间和上游数据源漂移。
 
 ### 1.2 目标
@@ -983,7 +983,7 @@ def concept_exposure(mv_by_symbol: Mapping[str, int], memberships: Mapping[str, 
 - 同步更新：
   - `backend/tests/api/test_dashboard.py:466-473` 的 `links` 等值断言；
   - `frontend/apps/web/src/pages/Dashboard.test.tsx:181`（mock links）与 `:403-404`（`link-attribution` 附近）；
-  - Dashboard 页头加「板块」入口按钮（与「归因（占位）」并列，但**不是占位**，指向真实页）。
+  - Dashboard 页头加「板块」入口按钮（与「归因」并列，均指向真实页）。
 - Dashboard 响应仍只有 `asset_overview`/`history_overview` 两个板块级字段；页面板块级容器仍恰好 2 个（`data-board`）。
 
 ### 7.4 API-036 归因的 additive 预留（本期不实现）
@@ -1082,7 +1082,7 @@ A_linked = Σ_t (k_t/K) · A_t；S、I 同理
 - 基准权重同理：只有首次同步后的区间；更早区间 → `blocked` + `what_to_do`（缩短区间/升级数据源历史权重）。
 - 未分类占比 `>5%` → `degraded`；`>20%` → blocker（三效应不出结论），但 `total_pnl`/`residual` 仍可给。**本段阈值仅用于归因口径**；描述性看板仍用 §6.5 的 95%/90% 两条线（两者服务对象不同，不要混用）。
 
-> **2026-11-02 裁决补充**：M1 五因子归因**默认仍按本节 fail-closed**（首次同步日之前一律 blocked）；经人工批准的唯一例外见 [归因设计 §4.3](2026-11-02-five-factor-attribution.md)（部署开关 `SECTOR_LOOKAHEAD_ENABLED=true` + 请求 `classification_lookahead=allow` + `status=degraded`/`missing[]` 披露），且**仅用于 M1 五因子**；描述性看板与 Brinson（M2）仍严格按本节执行。
+> **2026-11-02 裁决补充**：M1 五因子归因**默认仍按本节 fail-closed**（首次同步日之前一律 blocked）；经人工批准的唯一例外见 [归因设计 §4.3](2026-11-02-five-factor-attribution.md)（部署开关 `SECTOR_LOOKAHEAD_ENABLED=true` + 请求 `classification_lookahead=allow` + `missing[]` 披露，`severity=info` 不改变 `status`），且**仅用于 M1 五因子**；描述性看板与 Brinson（M2）仍严格按本节执行。
 
 ---
 
@@ -1152,7 +1152,7 @@ SectorsPage
 2. 状态：`missing/blocked` 时子块 DOM 无金额/百分比（正则 `\d+\.\d{2}%` 不命中）；`stale` 显示「数据截至」；`degraded` 有徽标 + 提示；基准缺失时偏好条替换为「组合权重 Top3」。
 3. 概念：`concept-caveat` 可见；概念表无「基准权重/主动权重」列；`overlap` 行有徽标。
 4. 零口径：源码静态断言（现有零口径 ESLint + 测试）——页面不出现 `Number/parseFloat/toFixed`、不求和、不归一、不算 `1/hhi`；所有数字来自 props。
-5. 路由/深链：Tab、层级、`parent`、`as_of` 可回填；`/attribution` 仍占位。
+5. 路由/深链：Tab、层级、`parent`、`as_of` 可回填；`/attribution` 已交付（08f），非占位。
 
 ### 9.4 API-Client 变更
 

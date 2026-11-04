@@ -1,7 +1,7 @@
 # 五因子归因（Period2-08）开发设计
 
 > 版本：**v1.0（人工批准，2026-11-02）** ｜ 日期：2026-11-02 ｜ 任务：`docs/DEV-PLAN-v2.md` **Period2-08**
-> 状态：**已人工审批通过**（A-01~A-11 全部按本设计「推荐」方向执行）；**实现未开始**（前置 08a）。
+> 状态：**已交付并验收（08a~08g，2026-11-02；2026-11-04 口径收口）**；设计 v1.0 已人工批准（A-01~A-11 全部按本设计「推荐」方向执行）。
 > 需求基线：`docs/prd/PRD-v2.md` FR-R7（API-036）、FR-R8（样本门槛）、FR-D3（人话层）；`docs/prd/PRD-v1.md` FR-R7.1/§5.2（五因子定义原文、桥接恒等式）
 > 契约基线：`docs/architecture/v2/API-Catalog.md` §1/§2.3（API-036）/§6（验收矩阵）
 > 关联设计：[板块数据](2026-10-31-sector-data.md)（§7.4/§8 归因联动）、[Dashboard](2026-10-28-dashboard.md)（§7 未完成项/占位入口）、[月报](2026-10-28-monthly-report.md)（§8.2 归因区块）、[资产表](2026-10-25-asset-daily-table.md)、[指标三域](2026-10-26-metrics-three-domain.md)
@@ -10,7 +10,7 @@
 >
 > **审批记录（2026-11-02，人工审核通过）**：A-01~A-11 全部按本设计「推荐」方向拍板（明细见 §11 与 [评审记录 §10](../reviews/2026-11-02-DevDesign-Review-five-factor-attribution.md)）。据此生效：D-01 MTM 区间损益；D-02 M1 板块=行业指数贡献、M2 才 Brinson；D-03 买/卖点执行口径；D-05 股息现金制；D-07 默认 fail-closed + 显式 look-ahead 例外（部署开关默认关，需人工批准）；D-12 公司行动整标的剔除；D-13 独立端点实现（EP-6 修订）；D-14/08a 为 P0 前置；D-18 前端归因页本期交付；估时 8.0~11.5 人日（A-01）。
 >
-> **本文定位**：把「五因子归因」从 PRD 的一句话口径，冻结成**可复算、可降级、可扩展**的工程口径。A 类决策已于 2026-11-02 人工批准，实现按 §9 任务表推进（先 08a）。
+> **本文定位**：把「五因子归因」从 PRD 的一句话口径，冻结成**可复算、可降级、可扩展**的工程口径。A 类决策已于 2026-11-02 人工批准，08a~08g 已按 §9 交付并验收；2026-11-04 的口径调整直接更新在 §3.6/§4.4/§7.3。
 
 ---
 
@@ -26,7 +26,7 @@
 | **D-04** | 区间边界参考价 `P0/P1` | `P0 = 严格早于 T0 的最后一个交易日收盘`（不早于 45 天窗口，`PRICE_LOOKBACK`）；`P1 = ≤T1 的最后一个交易日收盘`（停牌用最近可得收盘，与 `valuation.close_on_or_before` 同源；**行业指数必须取与 P1 同一日期**）。**不做 `same_day` 静默兜底**：P0/P1/建仓日/卖出日参考价缺失 → 该标的剔除（§4.4），不做近似 | 用 T0 当日收盘当 P0（把 T0 涨跌算进区间，且与股息现金制冲突）；用期初成本 | 首日损益/区间前 lot 的板块起点；**A-05**（与 D-07 联动） |
 | **D-05** | 股息归到哪个因子、按什么时点 | **现金制**：区间内 `category=dividend` 的**到账日**净额（税后）按标的整额**加进 `selection`**（不要求该标的有段）；**不按除息日**、不逐 lot 裁剪历史累计股息。与 `asset_daily` 现金口径一致，天然避免"除息前/后 P0 配对"的双计问题（§3.4.1） | 权责发生制（按除息日）：需新增除息日字段（账单无），且要与 P0 时点严格配对，否则重复计息 | 股息归属与可对账性 |
 | **D-06** | 哪些持仓进因子 | **仅"可归因标的"**：A 股股票（非伪代码/非货基/非债/非基金/非新股待上市）**且参与本期**（期末有未平仓 lot、`close_date ∈ [T0,T1]` 的平仓、或区间内有持仓类流水）**且**行业映射可得**且**所需参考价/行业指数可得。债券/ETF/LOF/货基/未映射股票 → **残差**并进入 `coverage`/`residual_breakdown` | 全部标的强制摊入（给债券/货基编造"选股/板块"）；新增第六因子（破坏契约） | 残差规模；P2 资产类别扩展（§10.7） |
-| **D-07** | **行业成分时点（PIT）** | **默认严格 fail-closed**：`period_end < first_sync_on` 或 `memberships_at(period_end)` 为空 → **blocked** + `SECTOR_HISTORY_NOT_COVERED`。**可选显式例外**：query `classification_lookahead=allow`（默认 `deny`）时，用最早可用快照并标 `assumptions.classification_lookahead=true`、`status=degraded`、`missing[]=SECTOR_CLASSIFICATION_LOOKAHEAD`；启用需人工批准并修订 `AGENTS.md` 板块铁律 5 | ① 默认就用未来成分（look-ahead，违规）；② 永远 blocked（老账单/历史区间不可用，产品不可用） | 历史可用性；**A-05**；**需修订 AGENTS.md** |
+| **D-07** | **行业成分时点（PIT）** | **默认严格 fail-closed**：`period_end < first_sync_on` 或 `memberships_at(period_end)` 为空 → **blocked** + `SECTOR_HISTORY_NOT_COVERED`。**可选显式例外**：部署 `SECTOR_LOOKAHEAD_ENABLED=true` 且 query `classification_lookahead=allow`（默认 `deny`）时，用最早可用快照并标 `assumptions.classification_lookahead=true`、`missing[]=SECTOR_CLASSIFICATION_LOOKAHEAD`（`severity=info`，不改变 `status`）；启用需人工批准并修订 `AGENTS.md` 板块铁律 5 | ① 默认就用未来成分（look-ahead，违规）；② 永远 blocked（老账单/历史区间不可用，产品不可用） | 历史可用性；**A-05**；**需修订 AGENTS.md** |
 | **D-08** | 因子排序与占比语义 | `rank` 按 **`\|amount\|` 降序**（tie-break 固定因子序）；双分母：`ratio = amount / total_pnl`（贡献率，可超 ±100%，可负）与 `share = \|amount\| / Σ\|amount\|`（构成比，0..1，用于条形宽度）；`residual_ratio = 1e8 − Σratio_i`（plug）；`\|total_pnl\| < max(100 分, 0.5%×Σ\|amount\|)` → `ratio=null` + `ratio_na_reason="PNL_NEAR_ZERO"`（`share` 仍给） | 按 `\|ratio\|` 排序（负 total_pnl 语义翻转、除法放大噪声）；只给单一 ratio（负 total_pnl 时构成比不可读） | 验收②③；**A-07** |
 | **D-09** | 结论/文案门禁 | `summary` 允许条件：`total_pnl` 可得 **且** `n_attributed_segments ≥ 10` **且** `valuation_gap_ratio ≤ 5%` **且** `coverage.capital_ratio ≥ 0.90`；与 `status` 解耦（`degraded` 不自动封口，`blocked` 必封）。全量词表断言（禁裸术语）+ 禁买卖建议 | 把 `status=ok` 设为硬前提：任一缺映射即永不出结论（过严）；不看 valuation_gap（结论建立在估值差上） | FR-R8/FR-D3 合规；**A-07** |
 | **D-10** | 模型与版本 | `model=five_factor`（默认，`definition_version="1.0"`）；`model=brinson_industry` → **422 `MODEL_NOT_AVAILABLE`**（P3-08 再开放）；`level`/`classification_version` **本期不开放**（THS 行业实际扁平 L1）；响应 additive `ratio_basis` 顶层字段 | 先合成保守 Brinson（数据不具备）；开放 `level` 但只支持 1（假参数） | 契约/错误码；§6 |
@@ -64,16 +64,16 @@
 
 ## 1. 背景、目标与非目标
 
-### 1.1 现状（2026-11-02 事实基线）
+### 1.1 现状（2026-11-02 设计时基线；交付状态见 §12.3）
 
-- `GET /attribution`（API-036）**未实现**：`contracts/openapi.json` 无 `/attribution`（49 path / 55 operation），`stock_api/routers/` 无 attribution router，前端 `/attribution` 是 `FeaturePlaceholder`（`frontend/apps/web/src/router.tsx:86-94`，导航 `placeholder:true`）。
+- **设计时**：`GET /attribution`（API-036）未实现：`contracts/openapi.json` 无 `/attribution`（49 path / 55 operation），`stock_api/routers/` 无 attribution router，前端 `/attribution` 是 `FeaturePlaceholder`（`frontend/apps/web/src/router.tsx:86-94`，导航 `placeholder:true`）。**现已交付**（见 §12.3）。
 - 已具备地基（人工验收通过）：FIFO 回合（core `build_rounds` + `review.round/round_fill`）、净值/TWR（`/nav`）、资产表（`review.asset_daily`，含 `daily_pnl/unrealized_pnl/holding_cost/cashflow`）、18 指标（`/metrics`）、Dashboard、板块数据底座（`market.sector*` + API-087/088）。
 - 关键缺口（事实核查）：① **板块指数日线无生产者**（live `get_board_bars` 空实现、`SectorRepository.upsert_bars` 无调用方、replay `series={}`）；② 行业成分只有首次同步日之后（replay=2026-06-30，live=部署日）；③ 基准设置（Period2-11）未实现，`KNOWN_BENCHMARKS` 仅 3 个；④ **区间损益无生产者**（只有 Dashboard 全历史 `total_profit`）；⑤ 行情 replay 夹具只有 9 个月末点（个股日线不足）；⑥ EP-6（`MetricGroup`/`AttributionModel`）在代码中不存在，且 Extensibility 排 M2 与 DEV-PLAN 二期冲突。
 - 产品侧已明确（`2026-10-30-metrics-product-optimization.md` §7.4）：归因模型需**另起设计文档（口径/样本/披露/验收）**——本文即该文档。
 
 ### 1.2 目标（可验收）
 
-1. `GET /api/v1/attribution?period=YYYY-MM&model=five_factor` 返回 5 因子 + 残差，`Σfactors.amount + residual = total_pnl`（≤0.01 元）；**真门禁不是恒等式本身（plug 恒真），而是**：受控 fixture 下 `residual==0`、`coverage`/`missing[]` 完整、`residual_breakdown` 各桶独立可复算（§7.2）。
+1. `GET /api/v1/attribution?period=YYYY-MM&model=five_factor` 返回 5 因子 + 残差，`Σfactors.amount + residual = total_pnl`（≤0.01 元）；**真门禁不是恒等式本身（plug 恒真），而是**：受控 fixture 下 `residual==0`、`coverage`/`missing[]` 完整、`residual_breakdown` 各桶之和 = `residual` 且 `valuation_gap` 为 plug（§7.2）。
 2. 每个因子带**人话结论**（无裸术语、无买卖建议）与排序；单因子主导 fixture 排序正确。
 3. 明确**残差去哪了**：残差必须拆到固定桶（未归因价格损益/未归属股息/利息/打新收益/其他现金流/公司行动/估值差），桶之和=residual。
 4. 明确**降级**：缺板块指数、缺成分映射、缺行情、资产表 blocked/stale、区间含公司行动时返回 200 + `status/missing[]`，**绝不用 0/等权/未来成分冒充**；无法给 `total_pnl` 时 `status="blocked"` 且金额字段缺省。
@@ -284,7 +284,7 @@ V_begin=5700.00（仅持仓市值，现金 0）；期末现金 4628.40、期末�
 - 断言：`1274.00 + 306.00 + 40.00 + 120.00 − 11.60 = 1728.40 = total_pnl`，`residual=0.00`；`ratio` 各 = 金额/1728.40。
 - 要点：区间前 lot 的买费 3.00 **不进本期费用因子**（只计卖费 6.60）；B 的买费 2.40 按 200/400 分摊为 1.20（买）+1.20（持有），卖费 2.60（B_sell）；A 段股息 120 归 `selection`（现金制）。
 - 独立验证（`var/review-attribution-numeric/`）：32000 组随机属性测试 / 198315 段，**段级恒等 max 误差 0 分**；与 core `build_rounds` 交叉 4000/4000 fill 一致；与 `asset_daily` MTM 对账：**A 股整分 tick 4173/4173 组残差 0**，采用"标的→段两级 `_allocate`"后 32000/32000 组残差 0（未采用前 max 7 分）；19 条对抗用例（T+0/区间前部分卖出/股息/停牌/缺指数/送转/配股/可转债/超卖/费用尾差/极端值）全部通过。
-- **断言分层（重要）**：① 段级恒等 = 实现一致性自检（恒真，不单独作为模型正确性证据）；② 受控 fixture 下 `residual==0` 且五因子逐项等于手算值（**真正的 golden**）；③ `residual_breakdown` 各桶独立复算（不靠 plug）+ `coverage`/`missing[]`；④ 与 asset_daily 逐分对账。
+- **断言分层（重要）**：① 段级恒等 = 实现一致性自检（恒真，不单独作为模型正确性证据）；② 受控 fixture 下 `residual==0` 且五因子逐项等于手算值（**真正的 golden**）；③ `residual_breakdown` 各桶之和 = residual（`valuation_gap` 为 plug）+ `coverage`/`missing[]`；④ 与 asset_daily 逐分对账。
 
 ### 3.9 与既有口径/文档的差异（为什么不能直接照抄 PRD/sector 设计）
 
@@ -340,7 +340,7 @@ membership_as_of = sector_sync_state.membership_as_of（或 sector_data.as_of）
 if period_end < first_sync_on 或 membership_as_of is None:
     if classification_lookahead == "allow":                 # 需人工批准
         classification_as_of = membership_as_of（最早可用快照）
-        classification_lookahead = true；status 至少 degraded
+        classification_lookahead = true；missing[]=SECTOR_CLASSIFICATION_LOOKAHEAD（severity=info，不改变 status）
     else:
         status = "blocked" + SECTOR_HISTORY_NOT_COVERED
 else:
@@ -640,7 +640,7 @@ Authorization: Bearer <jwt|pat>
 | `fx_attr_single_buy` | 价格路径 0（同日收盘买/卖）、买价显著低于建仓日收盘 | `rank==1` 的 code=`buy_timing` |
 | `fx_attr_single_sell` | 同上、卖价显著高于卖出日收盘 | `rank==1` 的 code=`sell_timing` |
 | `fx_attr_single_fee` | 价格几乎不动、佣金/印花税显著 | `rank==1` 的 code=`fee`（负） |
-| `fx_attr_mixed` | §3.8 手算向量 + 区间前 lot + 部分卖出 + T+0 + 股息 + 不可归因债券/货基 + 停牌缺价 | `residual==0`；五因子逐项等于手算；`residual_breakdown` 各桶独立复算；`coverage`/`missing[]` |
+| `fx_attr_mixed` | §3.8 手算向量 + 区间前 lot + 部分卖出 + T+0 + 股息 + 不可归因债券/货基 + 停牌缺价 | `residual==0`；五因子逐项等于手算；`residual_breakdown` 各桶之和 = residual（`valuation_gap` 为 plug）；`coverage`/`missing[]` |
 | `fx_attr_corporate_action` | 区间内 10 送 3 + 10 配 3 | 标的剔除；`corporate_action_pnl` 桶=手算；`missing[]=CORPORATE_ACTION_ADJUSTMENT_MISSING`；不产生幻影因子 |
 | `fx_attr_blocked` | 资产区间行 blocked / 缺失 / `V_begin` 行 blocked | 200 `status="blocked"`、金额键缺省、`missing[]` |
 | `fx_attr_no_sector` | 行业指数全缺 / 未映射 | 零可归因段 → `blocked`；部分缺 → `degraded` + 标的剔除 |
@@ -669,7 +669,7 @@ Authorization: Bearer <jwt|pat>
 | ④ | 单因子主导：**`rank==1` 的因子** code 正确（不是 `factors[0]`，因固定顺序） | `fx_attr_single_*` ×5 | 各自期望 code |
 | ⑤ | blocked：`status="blocked"`、`total_pnl` 缺省、`factors[].amount` 缺省 | `fx_attr_blocked` | 200 + 键缺省 |
 | ⑥ | `factors[]` 恰 5 项、固定顺序、含 `code="sector"`、`name` 中文 | 全部 | 通过 |
-| ⑦ | `residual_breakdown` 各桶之和 = residual，且 `valuation_gap` 独立可复算（不靠 plug 反推） | `fx_attr_mixed`/`fx_attr_corporate_action` | 通过 |
+| ⑦ | `residual_breakdown` 各桶之和 = residual；`valuation_gap` 为 plug（`residual − 其余桶`） | `fx_attr_mixed`/`fx_attr_corporate_action` | 通过 |
 | ⑧ | 结论无裸术语、无买卖建议 | 词表 + 正则 | 0 命中 |
 | ⑨ | 跨用户隔离（A/B 各自 200、数据互不泄漏） | 双用户 | 通过 |
 | ⑩ | admin 越界 → 403 `ADMIN_CANNOT_READ_TRADES` | admin | 通过 |
@@ -682,6 +682,9 @@ Authorization: Bearer <jwt|pat>
 | ⑰ | 边界：周末月末不误判 stale；`V_begin` blocked → blocked | `fx_attr_boundary_weekend`/`fx_attr_p0_blocked` | 通过 |
 | ⑱ | 公司行动剔除：不产生幻影因子、残差桶正确、`missing[]` 存在 | `fx_attr_corporate_action` | 通过 |
 | ⑲ | bridge 对账：`\|MTM − 桥接式\| ≤1 分` 或 degraded+`BRIDGE_MISMATCH` | `fx_attr_mixed` | 通过 |
+| ⑳ | 当前口径：`new_stock` 按本期窗口判定，损益只进 `ipo_pnl`，`unattributed[]` 不含 `new_stock`；`unattributed_symbols_total + account_level_total == residual` | 构造用例/实测 | 通过 |
+| ㉑ | 降级只由「未归因标的损益」超容差触发；账户级桶（利息/分红/其他/打新/估值差）超容差不改变 status | 构造用例 | 通过 |
+| ㉒ | `VALUATION_GAP_ABOVE_TOLERANCE`/`SECTOR_BAR_FALLBACK`/`SECTOR_CLASSIFICATION_LOOKAHEAD` 均 `severity=info`、status 不变；lookahead 需部署开关 + 请求 `allow` | 构造用例/实测 | 通过 |
 
 ### 7.4 门禁命令（提交前；AGENTS 门禁 + 本任务追加）
 
@@ -768,6 +771,8 @@ PageHeader：期间选择 + 状态徽标（ok/degraded/blocked）+ 数据截至 
 | **合计** | | | **8.0~11.5d** | |
 
 **裁剪选项（需 A-01 签字）**：① 08f 前端拆到 Period2-12/13（API 先行，PRD FR-R7 UI 验收暂 SKIP 并记录）；② 08a 概念板块指数不做（M1 不需要，已不含）；③ 残差桶合并（不建议，降低可解释性）。**不建议**砍 08a/08b/08c（会牺牲可验收性）。
+
+> **交付状态（2026-11-04）**：08a~08g 已全部交付并验收；`/attribution` 页随 08f 交付；月报 09b 同源接入未开始。
 
 ---
 
@@ -888,8 +893,10 @@ MODELS: dict[str, Callable[[], AttributionModel]] = {
 
 ### 12.3 本轮声明（诚实边界）
 
-- 本文是**设计**，未改任何代码/数据；`fx_attr_*` fixture、golden 数值（仅 §3.8 手算向量）、08a 数据均未落地。
-- 未实现：`GET /attribution`、`core/attribution/`、08a 板块指数同步与 replay 日线、前端归因页、月报 09b 接入。
+- **08a~08g 已按本设计交付并验收（2026-11-02）**：`fx_attr_*` fixture、`core/attribution/`、`GET /attribution`（API-036）、08a 板块指数同步与 replay 日线、`/attribution` 页均已落地。
+- **已交付口径（2026-11-04）**：`new_stock` 按本期窗口判定；其损益进账户级 `ipo_pnl`（不落 `per_symbol`/`unattributed[]`）；降级只由「未归因标的损益」超容差（期末总资产 0.2%）触发；`VALUATION_GAP_ABOVE_TOLERANCE`/`SECTOR_BAR_FALLBACK`/`SECTOR_CLASSIFICATION_LOOKAHEAD` 为 `info`；lookahead 需 `SECTOR_LOOKAHEAD_ENABLED=true` + 请求 `allow`。
+- **已知边界**：不做历史回填（SCD2 仅自首次同步）；2025 年及更早区间受行情/板块覆盖限制不可用；`coverage.symbols_total` 为全历史候选、`symbols_participating` 为本期参与数；`unattributed[]` 明细展示前 `display_limit`（5）条 + 「其余 N 只」（`others_count`/`others_total` 由后端派生）。
+- **未交付**：月报 09b 同源接入（Period2-09）。
 - **A-01~A-11 已于 2026-11-02 人工批准（按推荐方向；§11/评审记录 §10）**；公司行动 M1 整标的剔除（D-12）是**已批准的范围裁决**而非技术终态（P2 复权调整）；历史 PIT 默认 blocked（老账单归因不可用），经批准可用 look-ahead 例外（degraded + 披露）。
 - 验收中不可执行项：`make verify-p2` 不存在（Period2-14 暂停）；`make mutation` 是否在 CI 启用需确认；50 并发性能测试不属于本任务。以上在评审记录中标注 SKIP。
 - 数值验证产物在 gitignored `var/review-attribution-numeric/`，不随仓库交付；需要复现可按 `report.md` 命令重跑。
