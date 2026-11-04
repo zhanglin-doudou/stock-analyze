@@ -24,6 +24,7 @@ import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 from functools import partial
 from typing import Any, Final
 
@@ -131,9 +132,10 @@ _DB_TAXONOMY_INDUSTRY: Final[str] = "industry_sw"
 _SECTOR_DATASET_KEY: Final[str] = "sector"
 # 桥接容差（§3.2.1：|MTM − 桥接式| ≤ 1 分）。
 _BRIDGE_TOLERANCE_UNITS: Final[int] = 1
-# 残差容差（§3.6/§4.4）：|未归因金额合计| > 期末总资产 × 1% → degraded。
-# 期末总资产取 `review.asset_daily.total_assets_units`（区间末行，标度整数分）。
-_RESIDUAL_TOLERANCE_DENOMINATOR: Final[int] = 100
+# 残差容差比例（单一口径来源，§3.6/§4.4）：期末总资产 × 0.2%。
+# 单位：比例（非百分点）；`Decimal` 避免 float；期末总资产取
+# `review.asset_daily.total_assets_units`（区间末行，标度整数分）。
+RESIDUAL_TOLERANCE_PCT: Final[Decimal] = Decimal("0.002")
 # NOT_PIT 判定（§4.3）：快照日距期末 >90 天 → degraded。
 _NOT_PIT_DAYS: Final[int] = 90
 # 缺行业映射文案（zh/en × warning/info）：warning = 数据质量缺口（参与本期且缺映射）；
@@ -447,7 +449,7 @@ def _assumptions(
             sector_bar_fallback or {"count": 0, "symbols": [], "first_bar_date": None}
         ),
         "residual_tolerance": dict(
-            residual_tolerance or {"amount": None, "pct": str(Ratio(1_000_000)), "base": None}
+            residual_tolerance or {"amount": None, "pct": str(_tolerance_pct_ratio()), "base": None}
         ),
     }
 
@@ -623,6 +625,11 @@ def _sector_start_fallback_missing(
         what_to_do=action,
         severity="info",
     )
+
+
+def _tolerance_pct_ratio() -> Ratio:
+    """容差比例的 API 定点表示（唯一来源仍是 `RESIDUAL_TOLERANCE_PCT`）。"""
+    return Ratio(int(RESIDUAL_TOLERANCE_PCT * RATIO_SCALE))
 
 
 def _aggregate_status(
@@ -1077,8 +1084,9 @@ async def build_attribution(
     )
     gap_units = decomposition.residual_units - sum(split.buckets.values())
     assert window.v_end_units is not None
-    # 容差 = 期末总资产（`asset_daily.total_assets_units`）× 1%（标度整数分）。
-    residual_tolerance_units = window.v_end_units // _RESIDUAL_TOLERANCE_DENOMINATOR
+    # 容差 = 期末总资产（`asset_daily.total_assets_units`）× `RESIDUAL_TOLERANCE_PCT`
+    # （标度整数分，向下取整）。
+    residual_tolerance_units = int(Decimal(window.v_end_units) * RESIDUAL_TOLERANCE_PCT)
 
     # ── 11. 状态机（§4.4）：存在候选但零可归因段（板块数据全缺）→ blocked
     stock_plans = [plan for plan in bundle.plans if plan.symbol_class == "stock"]
@@ -1293,7 +1301,7 @@ async def build_attribution(
         sector_bar_fallback=sector_fallback_marks,
         residual_tolerance={
             "amount": str(Money(residual_tolerance_units)),
-            "pct": str(Ratio(1_000_000)),
+            "pct": str(_tolerance_pct_ratio()),
             "base": str(Money(window.v_end_units)),
         },
     )

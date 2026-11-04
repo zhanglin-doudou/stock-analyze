@@ -1715,8 +1715,8 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
                     "sector": "2026-06-30",
                 },
                 "residual_tolerance": {
-                    "amount": "5000.00",
-                    "pct": "0.01000000",
+                    "amount": "1000.00",
+                    "pct": "0.00200000",
                     "base": "500000.00",
                 },
             },

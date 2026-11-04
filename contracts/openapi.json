@@ -8616,9 +8616,9 @@
                     "fee_basis": "commission+stamp_tax+other_fee",
                     "ratio_basis": "amount/total_pnl",
                     "residual_tolerance": {
-                      "amount": "5000.00",
+                      "amount": "1000.00",
                       "base": "500000.00",
-                      "pct": "0.01000000"
+                      "pct": "0.00200000"
                     },
                     "rounding": "scaled_int_half_up_1e-8; residual_plug",
                     "sector_basis": "ths_industry_index",

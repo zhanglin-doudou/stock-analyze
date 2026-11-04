@@ -164,7 +164,7 @@ function attribution(overrides: Partial<Attribution> = {}): Attribution {
         market: "2026-05-06",
         sector: "2026-06-05",
       },
-      residual_tolerance: { amount: "5000.00", pct: "0.01000000", base: "500000.00" },
+      residual_tolerance: { amount: "1000.00", pct: "0.00200000", base: "500000.00" },
     },
     data_as_of: "2026-06-30",
     inputs_hash: "sha256:abc",
@@ -236,7 +236,7 @@ describe("AttributionPage", () => {
     expect(bar?.getAttribute("data-tone")).toBe("negative");
     expect(screen.getByTestId("attr-unattributed").textContent).toContain("110059");
     expect(screen.getByTestId("attr-residual-tolerance").textContent).toContain(
-      "容差 5,000.00 元（期末总资产 500,000.00 元 × 1%）",
+      "容差 1,000.00 元（期末总资产 500,000.00 元）",
     );
   });
 

@@ -242,7 +242,7 @@ selection + sector + buy_timing + sell_timing − F
 | `valuation_gap` | 资产表口径差 + 取整 + 无法逐项解释的剩余 | `residual − Σ前五桶`（**plug，可为负**） |
 
 - **CASH 行不进入标的级桶**（避免与 `interest`/`other_cashflow` 双计）；标的级桶只按 `security_code` 归集。
-- **容差（2026-11-04 修订）** = 期末账户总资产（`review.asset_daily.total_assets_units` 区间末行）× **1%**（标度整数分，向下取整）。
+- **容差（2026-11-04 修订）** = 期末账户总资产（`review.asset_daily.total_assets_units` 区间末行）× **0.2%**（标度整数分，向下取整；常量 `RESIDUAL_TOLERANCE_PCT = Decimal("0.002")`）。
 - 判定用**未归因金额合计** = `|residual|`（即 `|Σ桶|`，含 `valuation_gap`）：
   - `|residual| > 容差` → `status=degraded` + `RESIDUAL_LARGE`；
   - `0 < |residual| ≤ 容差` → `RESIDUAL_WITHIN_TOLERANCE`（`severity=info`），**不降级**；
@@ -403,8 +403,8 @@ unattributed[]     = 最多 5 条 {security_code, symbol_class, reason_code, amo
 | `CORPORATE_ACTION_ADJUSTMENT_MISSING` | 区间内含送转/配股 | 该标的剔除（残差桶） | P2 复权能力（§10.6） |
 | `FEE_BASIS_UNKNOWN` | 费用三列全 0 但净额无法反解 | 该标的剔除 | 人工核对流水 |
 | `SEGMENT_DATA_ERROR` | FIFO 超卖/负持仓/未匹配配股 | 该标的剔除 | 对账/修正流水 |
-| `RESIDUAL_LARGE` | `\|residual\| > 期末总资产 × 1%` | 披露/降级 | 看 `residual_breakdown` |
-| `RESIDUAL_WITHIN_TOLERANCE` | `0 < \|residual\| ≤ 期末总资产 × 1%` | 仅 info（不降级） | 无需处理 |
+| `RESIDUAL_LARGE` | `\|residual\| > 期末总资产 × 0.2%` | 披露/降级 | 看 `residual_breakdown` |
+| `RESIDUAL_WITHIN_TOLERANCE` | `0 < \|residual\| ≤ 期末总资产 × 0.2%` | 仅 info（不降级） | 无需处理 |
 
 ### 4.5 性能与预算
 
@@ -843,7 +843,7 @@ MODELS: dict[str, Callable[[], AttributionModel]] = {
 | R-09 | 性能：全量 trades + 双次 FIFO + 行情 | 端点超时 | 预算 1.5s；只取 `[P0,P1]` 行情；缓存优先；不落库 | ✅ A-09 已批准（按推荐） |
 | R-10 | 历史区间资产表 blocked/stale 比例 | 归因对老数据不可用 | blocked + what_to_do；资产表构建覆盖优先 | ✅ A-10 已批准（按推荐） |
 | R-11 | 结论文案合规（禁买卖建议/裸术语） | 合规风险 | 模板 + 词表/正则断言；人工抽检 | — |
-| R-12 | 残差容差（期末总资产 1%）与 ratio 阈值（100 分/0.5%）需校准 | 结论时有时无/口径扯皮 | 上线前用真实用户/夹具分布校准；配置化常量 | ✅ A-07 已批准（2026-11-04 改为 1%×V_end） |
+| R-12 | 残差容差（期末总资产 0.2%）与 ratio 阈值（100 分/0.5%）需校准 | 结论时有时无/口径扯皮 | 上线前用真实用户/夹具分布校准；配置化常量 | ✅ A-07 已批准（2026-11-04 改为 0.2%×V_end） |
 | R-13 | `definition_version` 未来变更导致历史不可比 | 趋势断点 | 版本号 + 趋势 breaks（P3-02）；旧值保留 | — |
 
 **HITL 升级清单（2026-11-02 已全部批准，按推荐方向执行；实现期如遇新歧义仍按 HITL 协议升级）**：A-01（排期/范围）、A-02（D-01 总损益口径）、A-03（D-02 板块语义 + sector 文档修订）、A-04（D-03 买点卖点口径 + PRD 勘误）、A-05（D-07 PIT + AGENTS.md 例外）、A-06（08a 数据源 spike）、A-07（残差/覆盖/ratio 阈值）、A-08（前端范围）、A-09（性能实测）、A-10（历史资产表可用性）、A-11（公司行动剔除范围）。

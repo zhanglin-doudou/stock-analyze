@@ -217,7 +217,8 @@ function residualToleranceText(data: Attribution): string | undefined {
   const amount = typeof tolerance.amount === 'string' ? tolerance.amount : undefined;
   const base = typeof tolerance.base === 'string' ? tolerance.base : undefined;
   if (amount == null || base == null) return undefined;
-  return `容差 ${formatMoney(amount)}（期末总资产 ${formatMoney(base)} × 1%）`;
+  // 比例口径只在后端（`assumptions.residual_tolerance.pct`），前端零口径不解析/换算。
+  return `容差 ${formatMoney(amount)}（期末总资产 ${formatMoney(base)}）`;
 }
 
 function StatusBadge({ status }: { status: string }): ReactElement {
