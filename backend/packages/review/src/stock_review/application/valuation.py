@@ -103,8 +103,26 @@ def new_stock_pending_codes(trades: Iterable[Trade]) -> set[str]:
     }
 
 
+def new_stock_codes_in_window(trades: Iterable[Trade], *, start: date, end: date) -> set[str]:
+    """窗口 `[start, end]`（闭区间，与持仓/残差的行窗口一致）内新股认购缴款的标的。
+
+    归因专用：只有本期窗口内出现过 `new_stock` 认购/中签缴款行的标的才按
+    `new_stock` 排除出五因子；历史认购但本期无新股行的标的本期按普通 `stock` 归因。
+    估值兜底（assets/nav/portfolio/归因镜像）仍用全历史的 `new_stock_pending_codes`。
+    """
+    return {
+        trade.security_code
+        for trade in trades
+        if trade.security_code
+        and not is_money_fund_row(trade)
+        and (trade.category or "").strip().lower() == "new_stock"
+        and trade.amount_units != 0
+        and start <= trade.trade_date <= end
+    }
+
+
 def category(trade: Trade) -> str:
-    """ledger trade 的业务分类（规范化：trim + lower；空/NULL 返回空串）。"""
+    """`ledger trade` 的业务分类（规范化：trim + lower；空/NULL 返回空串）。"""
     return (trade.category or "").strip().lower()
 
 
@@ -378,6 +396,7 @@ __all__ = [
     "load_prices",
     "market_failure_cause",
     "money_fund_share_delta",
+    "new_stock_codes_in_window",
     "new_stock_fallback_reason",
     "new_stock_pending_codes",
     "total_market_value",

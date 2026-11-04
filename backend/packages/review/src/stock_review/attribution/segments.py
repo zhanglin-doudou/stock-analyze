@@ -39,7 +39,7 @@ from stock_review.application.valuation import (
     QTY_PRICE_SCALE,
     category,
     is_money_fund_row,
-    new_stock_pending_codes,
+    new_stock_codes_in_window,
 )
 
 # 剔除码（`missing[]` 响应字段；资产类别排除不进 missing[]，仅 coverage 列出）。
@@ -211,7 +211,10 @@ def build_symbol_plans(
     由调用方算好传入，本模块零时钟）。
     """
     trade_by_id = {t.id: t for t in trades}
-    new_stocks = {canonical(c) for c in new_stock_pending_codes(trades)}
+    # 新股排除按**本期窗口**判定（§4.4）：只在窗口 [t0, t1] 内出现新股缴款行的标的
+    # 才按 `new_stock` 排除；历史中签、本期无新股行的标的本期按普通 `stock` 参与归因。
+    # 估值兜底（缺价按认购成本）仍用全历史的 `new_stock_pending_codes`（D11）。
+    new_stocks = {canonical(c) for c in new_stock_codes_in_window(trades, start=t0, end=t1)}
     data_error_codes = {canonical(de.security_code) for de in res_all.data_errors}
     data_error_codes.discard("")
 

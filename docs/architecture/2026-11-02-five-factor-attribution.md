@@ -385,6 +385,7 @@ unattributed[]     = 最多 5 条 {security_code, security_name, symbol_class, r
 - **明细截断（2026-11-04）**：展示上限为单一常量 `UNATTRIBUTED_LIMIT = 5`（`stock_review.attribution.coverage`，API 以 `display_limit` 透出，前端不再硬编码/截断）。`residual_reconciliation` 另给 additive 字段 `listed_total`（前 5 条金额合计）、`others_count`（第 6 条及以后的标的数）、`others_total`（其余金额合计）；恒等式 `listed_total + others_total == unattributed_symbols_total` 由同一 `per_symbol` 切分保证。前端仅当 `others_count > 0` 时追加「其余 N 只」汇总行（非标的、不可点击，金额列显示 `others_total`；行内无伪代码）。
 - **结论门禁**（D-09）：`summary` 允许 iff `total_pnl` 可得 && `n_attributed_segments ≥ 10` && `capital_ratio ≥ 0.90` && `valuation_gap_ratio ≤ 5%`；**例外**：`capital_total==0`（空账户/无可归因候选）时允许固定句 summary（"本期无交易/无持仓变化"或"本期无可归因 A 股"）；`blocked` 必封；`insufficient` 只给事实句不给行动建议。
 - `symbol_class`：`stock`/`fund`/`bond`/`money_fund`/`new_stock`/`pseudo`（复用 `stock_platform.symbols.classify_symbol` 与 `valuation.is_money_fund_row`）。
+- **`new_stock` 判定窗口化（2026-11-04）**：归因按**本期窗口 `[T0, T1]`（闭区间）**判定 `new_stock`（`valuation.new_stock_codes_in_window`）——只有窗口内出现非零 `new_stock` 缴款/中签行的标的才排除出五因子；历史中签、本期无新股行的（如 001237 于 2026-06）按普通 `stock` 参与归因。锚日（严格早于 `T0`）的行属上一期，本期按历史持仓处理。估值兜底（缺价按认购成本）仍用全历史 `new_stock_pending_codes`（assets/nav/portfolio/归因镜像共用，口径不变）。
 
 **`missing[]` 码表**（响应字段，不是 `ErrorCode`）：
 

@@ -1060,3 +1060,73 @@ def test_non_participating_symbol_skips_all_reason_codes() -> None:
     assert _exclusion_missing(REASON_CORPORATE, ["600636"]) is not None  # 有缺口本会披露
     assert _exclusion_missing(REASON_BAR, ["600636"]) is not None
     assert _exclusion_missing(REASON_PRICE, ["600636"]) is not None
+
+
+def _new_stock_symbol_trades(row_date: date) -> list[Trade]:
+    """001237 型：`row_date` 新股认购缴款 + 本期普通卖出（无其他交易）。"""
+    return [
+        _trade(
+            trade_date=row_date,
+            security_code="001237",
+            side="buy",
+            category="new_stock",
+            quantity_units=5_000_000,  # 500 股
+            price_units=53_260_000,  # 53.26
+            amount_units=-2_663_000,  # −26,630.00
+            summary="新股申购确认缴款",
+        ),
+        _trade(
+            trade_date=date(2025, 3, 20),
+            security_code="001237",
+            side="sell",
+            category="sell",
+            quantity_units=5_000_000,
+            price_units=60_000_000,  # 60.00
+            amount_units=3_000_000,  # +30,000.00
+            summary="证券卖出",
+        ),
+    ]
+
+
+@pytest.mark.parametrize("row_date", [date(2025, 1, 20), P0_DATE])
+def test_new_stock_exclusion_is_window_scoped(row_date: date) -> None:
+    """窗口外（历史中签/锚日当天）的新股行不排除：本期按普通 stock 参与归因。
+
+    001237 型：历史中签、本期只有普通买卖 → `stock` 且 attributed；
+    锚日（T0−1）行属于上一期窗口（[T0, T1] 闭区间），本期同样按 stock 参与。
+    """
+    ladder = {
+        "001237": [
+            (row_date if row_date <= P0_DATE else P0_DATE, 70_000_000),  # 70.00
+            (P0_DATE, 70_000_000),
+            (date(2025, 3, 20), 60_000_000),
+            (T1, 62_000_000),
+        ]
+    }
+    bundle = _build_bundle(
+        _new_stock_symbol_trades(row_date),
+        memberships={"001237": "S1"},
+        ladder=ladder,
+    )
+    plan = bundle.plans[0]
+    assert plan.symbol_class == "stock"
+    assert plan.attributed is True
+    assert plan.reason_code is None
+
+
+def test_new_stock_row_inside_window_excludes_symbol() -> None:
+    """本期窗口 [T0, T1] 内有新股缴款行 → 按 `new_stock` 排除（不参与五因子）。"""
+    bundle = _build_bundle(
+        _new_stock_symbol_trades(T0),
+        memberships={"001237": "S1"},
+        ladder={
+            "001237": [(P0_DATE, 70_000_000), (date(2025, 3, 20), 60_000_000), (T1, 62_000_000)]
+        },
+    )
+    plan = bundle.plans[0]
+    assert plan.symbol_class == "new_stock"
+    assert plan.attributed is False
+    assert plan.reason_code is None  # 资产类别排除不产生 reason（仅 coverage 列出）
+    assert plan.in_universe is False
+    assert plan.participating is True
+    assert bundle.excluded_by_reason[REASON_ASSET_CLASS] == ["001237"]
