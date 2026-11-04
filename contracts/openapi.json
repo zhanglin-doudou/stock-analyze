@@ -600,6 +600,10 @@
             "title": "Symbols Attributed",
             "type": "integer"
           },
+          "symbols_participating": {
+            "title": "Symbols Participating",
+            "type": "integer"
+          },
           "symbols_total": {
             "title": "Symbols Total",
             "type": "integer"
@@ -620,7 +624,8 @@
           "segments_total",
           "segments_attributed",
           "symbols_total",
-          "symbols_attributed"
+          "symbols_attributed",
+          "symbols_participating"
         ],
         "title": "AttributionCoverageOut",
         "type": "object"
@@ -758,7 +763,8 @@
             "default": "warning",
             "enum": [
               "blocker",
-              "warning"
+              "warning",
+              "info"
             ],
             "title": "Severity",
             "type": "string"
@@ -779,7 +785,7 @@
       },
       "AttributionOut": {
         "additionalProperties": false,
-        "description": "五因子归因响应（§6.2；金额 2 位 / 比率 scale=8 定点字符串）。\n\nblocked 缺省语义（§6.3 评审 P0-7 冻结）：`status=\"blocked\"` 时\n`total_pnl/base_capital/residual/residual_ratio/residual_breakdown/coverage`\n整键省略，`factors[].amount/ratio/share` 逐项省略（code/name/rank/conclusion 保留）；\n非 blocked 时 ratio=None 显式输出 null（PNL_NEAR_ZERO，附 `ratio_na_reason`）。",
+        "description": "五因子归因响应（§6.2；金额 2 位 / 比率 scale=8 定点字符串）。\n\nblocked 缺省语义（§6.3 评审 P0-7 冻结）：`status=\"blocked\"` 时\n`total_pnl/base_capital/residual/residual_ratio/residual_breakdown/coverage`\n`residual_reconciliation` 整键省略，`factors[].amount/ratio/share` 逐项省略\n（code/name/rank/conclusion 保留）；非 blocked 时 ratio=None 显式输出 null\n（PNL_NEAR_ZERO，附 `ratio_na_reason`）。",
         "properties": {
           "assumptions": {
             "additionalProperties": true,
@@ -938,6 +944,16 @@
             ],
             "title": "Residual Ratio Pct"
           },
+          "residual_reconciliation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AttributionReconciliationOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "sample": {
             "$ref": "#/components/schemas/AttributionSampleOut"
           },
@@ -1030,6 +1046,11 @@
             ],
             "title": "Ratio Pct"
           },
+          "sector_bar_fallback": {
+            "default": false,
+            "title": "Sector Bar Fallback",
+            "type": "boolean"
+          },
           "share_pct": {
             "anyOf": [
               {
@@ -1055,6 +1076,51 @@
           "tone"
         ],
         "title": "AttributionPresentationOut",
+        "type": "object"
+      },
+      "AttributionReconciliationOut": {
+        "additionalProperties": false,
+        "description": "残差对账（后端派生，前端零口径）：标的合计 + 账户级桶合计 == residual。\n\n`listed_total + others_total == unattributed_symbols_total`；`display_limit` 为\n明细展示上限（单一常量来源，前端不硬编码）。",
+        "properties": {
+          "account_level_total": {
+            "title": "Account Level Total",
+            "type": "string"
+          },
+          "display_limit": {
+            "title": "Display Limit",
+            "type": "integer"
+          },
+          "listed_total": {
+            "title": "Listed Total",
+            "type": "string"
+          },
+          "others_count": {
+            "title": "Others Count",
+            "type": "integer"
+          },
+          "others_total": {
+            "title": "Others Total",
+            "type": "string"
+          },
+          "residual": {
+            "title": "Residual",
+            "type": "string"
+          },
+          "unattributed_symbols_total": {
+            "title": "Unattributed Symbols Total",
+            "type": "string"
+          }
+        },
+        "required": [
+          "unattributed_symbols_total",
+          "listed_total",
+          "others_count",
+          "others_total",
+          "display_limit",
+          "account_level_total",
+          "residual"
+        ],
+        "title": "AttributionReconciliationOut",
         "type": "object"
       },
       "AttributionSampleOut": {
@@ -1103,7 +1169,7 @@
       },
       "AttributionUnattributedOut": {
         "additionalProperties": false,
-        "description": "一条未归因标的披露（amount = 其残差桶金额，可为 0）。",
+        "description": "一条未归因标的披露（amount = 其残差桶金额，可为 0）。\n\n仅披露本期参与标的；`security_name` 缺失时为 null（前端只展示代码）。",
         "properties": {
           "amount": {
             "title": "Amount",
@@ -1123,6 +1189,17 @@
           "security_code": {
             "title": "Security Code",
             "type": "string"
+          },
+          "security_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Security Name"
           },
           "symbol_class": {
             "title": "Symbol Class",
@@ -8604,6 +8681,11 @@
                     "dividend_basis": "cash_ledger_rows_net_after_tax",
                     "fee_basis": "commission+stamp_tax+other_fee",
                     "ratio_basis": "amount/total_pnl",
+                    "residual_tolerance": {
+                      "amount": "1000.00",
+                      "base": "500000.00",
+                      "pct": "0.00200000"
+                    },
                     "rounding": "scaled_int_half_up_1e-8; residual_plug",
                     "sector_basis": "ths_industry_index",
                     "total_pnl_basis": "asset_daily_mtm"
@@ -8617,6 +8699,7 @@
                     "segments_attributed": 7,
                     "segments_total": 7,
                     "symbols_attributed": 1,
+                    "symbols_participating": 1,
                     "symbols_total": 1,
                     "unattributed": []
                   },

@@ -18,6 +18,10 @@ class TestBharMean:
     def test_empty_returns_none(self) -> None:
         assert bhar_mean([]) is None
 
+    def test_half_up_on_tie(self) -> None:
+        """[1, 2] 均值 1.5，scale=0 下按 HALF_UP 进位为 2。"""
+        assert bhar_mean([1, 2], scale=0) == 2
+
 
 class TestBharHitRate:
     def test_known_rate(self) -> None:
@@ -40,6 +44,10 @@ class TestBharHitRate:
         # threshold = 4_500_000 → 只有 5_000_000 算 hit → 1/3
         result = bhar_hit_rate(vals, threshold_units=4_500_000, scale=8)
         assert result == 33_333_333
+
+    def test_hit_threshold_is_strict(self) -> None:
+        """恰好等于阈值不算命中（严格大于）。"""
+        assert bhar_hit_rate([4_500_000], threshold_units=4_500_000, scale=8) == 0
 
 
 class TestBharClusterT:

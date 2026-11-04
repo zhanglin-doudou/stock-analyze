@@ -48,6 +48,8 @@ class TestBuildDailyPortfolio:
         )
         assert len(dp.lots) == 1
         assert dp.lots[0].quantity_units == 10_000
+        # 卖出 1 股 @120 元，费 20 元 → 现金 = qty×price×100/1e6 − fee
+        assert dp.cash_units == 11_998_000
 
     def test_full_sell_removes_lot(self) -> None:
         prior_cash = 0
@@ -118,6 +120,84 @@ class TestBuildDailyPortfolio:
         assert dp.lots[0].closing_price_units == 100_000_000
 
 
+class TestCashAndValuationExact:
+    """现金守恒与市值口径：每个字段都必须与手算一致。"""
+
+    def test_buy_cash_and_market_value_exact(self) -> None:
+        dp = build_daily_portfolio(
+            prior_cash_units=1_000_000,
+            prior_lots={},
+            day_fills=[("AAPL", 10_000, 15_000_000, 3_000)],
+            day_closes={"AAPL": 16_000_000},
+        )
+        # 现金 = 期初 − 成交额 − 费用，成交额 = qty_u×price_u×100/1e6
+        assert dp.cash_units == 1_000_000 - 15_000_000 - 3_000
+        assert dp.lots[0].closing_price_units == 16_000_000
+        assert dp.lots[0].market_value_units == 16_000_000  # 收盘价而非成本价
+        assert dp.lots[0].avg_cost_units == 15_000_000
+        assert dp.date_index == 0
+
+    def test_only_positive_quantity_creates_a_lot(self) -> None:
+        """最小正数量（1 个标度单位）也是有效持仓，不能被 >1 的判据吞掉。"""
+        dp = build_daily_portfolio(
+            prior_cash_units=0,
+            prior_lots={},
+            day_fills=[("AAPL", 1, 100_000_000, 0)],
+            day_closes={"AAPL": 100_000_000},
+        )
+        assert len(dp.lots) == 1
+        assert dp.lots[0].quantity_units == 1
+
+    def test_non_positive_fill_does_not_abort_remaining_symbols(self) -> None:
+        """遇到无效成交（qty<=0）只能跳过该笔，不能中断当日其余成交。"""
+        dp = build_daily_portfolio(
+            prior_cash_units=0,
+            prior_lots={},
+            day_fills=[("ZZZ", 0, 100_000_000, 0), ("AAPL", 10_000, 15_000_000, 0)],
+            day_closes={"AAPL": 16_000_000},
+        )
+        assert [lot.symbol for lot in dp.lots] == ["AAPL"]
+        assert dp.lots[0].quantity_units == 10_000
+
+    def test_mixed_prior_lots_keep_valid_symbols(self) -> None:
+        """prior_lots 中 qty<=0 只跳过自身，其余有效持仓仍要输出。"""
+        dp = build_daily_portfolio(
+            prior_cash_units=0,
+            prior_lots={"EMPTY": (0, 0), "OK": (10_000, 100)},
+            day_fills=[],
+            day_closes={"OK": 110_000_000},
+        )
+        assert len(dp.lots) == 1
+        assert dp.lots[0].symbol == "OK"
+        assert dp.lots[0].closing_price_units == 110_000_000
+        assert dp.lots[0].market_value_units == 110_000_000
+
+    def test_empty_lot_then_one_unit_buy_sets_avg_cost(self) -> None:
+        """已有空仓（qty=0）后买入最小 1 单位：FIFO 均价必须是成交价，不能清零。"""
+        dp = build_daily_portfolio(
+            prior_cash_units=0,
+            prior_lots={"AAPL": (0, 0)},
+            day_fills=[("AAPL", 1, 200_000_000, 0)],
+            day_closes={"AAPL": 200_000_000},
+        )
+        assert len(dp.lots) == 1
+        assert dp.lots[0].quantity_units == 1
+        assert dp.lots[0].avg_cost_units == 200_000_000
+
+    def test_single_unit_prior_lot_is_kept(self) -> None:
+        """数量为 1 个标度单位的历史持仓不能被当作空仓丢弃。"""
+        dp = build_daily_portfolio(
+            prior_cash_units=0,
+            prior_lots={"AAPL": (1, 100)},
+            day_fills=[],
+            day_closes={},
+        )
+        assert len(dp.lots) == 1
+        assert dp.lots[0].quantity_units == 1
+        assert dp.lots[0].closing_price_units == 100_000_000
+        assert dp.lots[0].market_value_units == 10_000  # 1e-4 股 × 100 元 × 100
+
+
 class TestEquityMvUnitsProperty:
     def test_sums_all_lots_market_value(self) -> None:
         """L51: DailyPortfolio.equity_mv_units property 覆盖。"""
@@ -160,6 +240,12 @@ class TestDailyPortfolioReturns:
         # dp0→dp1 被跳过，只剩 dp1→dp2: r = (105-50)/50 = 1.1 → 但 scale=8 → 110_000_000
         assert rets == [1_100_000_00]
 
+    def test_half_up_tie_at_scale_two(self) -> None:
+        """+0.005 在 scale=2 上按 HALF_UP 进位为 0.01（不是银行家舍入的 0.00）。"""
+        dp0 = DailyPortfolio(date_index=0, cash_units=200)
+        dp1 = DailyPortfolio(date_index=1, cash_units=201)
+        assert daily_portfolio_returns([dp0, dp1], scale=2) == [1]
+
 
 class TestCompoundIndex:
     def test_no_return_is_zero(self) -> None:
@@ -177,3 +263,7 @@ class TestCompoundIndex:
         # [0.01, -0.01] → 1.01 × 0.99 - 1 = 0.9999 - 1 = -0.0001 → -100_00 scale8
         rets = [1_000_000, -1_000_000]
         assert compound_index(rets) == -100_00
+
+    def test_half_up_tie_at_scale_two(self) -> None:
+        """(-0.15)(+0.10) → twr=-0.065，scale=2 下 HALF_UP 应远离零取 -0.07。"""
+        assert compound_index([-15, 10], scale=2) == -7

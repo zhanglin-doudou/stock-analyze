@@ -48,6 +48,7 @@ _ASSUMPTION_KEYS = {
     "rounding",
     "adjust",
     "data_sources",
+    "residual_tolerance",
 }
 
 
@@ -120,6 +121,10 @@ async def test_api_036_blocked_empty_account(attr_client: Any, account_factory: 
     assert body["assumptions"]["total_pnl_basis"] == "asset_daily_mtm"
     assert body["assumptions"]["classification_lookahead"] is False
     assert body["assumptions"]["corporate_action_policy"] == "exclude_symbol"
+    # blocked 无期末资产 → 容差金额/分母缺省，pct 口径仍恒定。
+    tolerance = body["assumptions"]["residual_tolerance"]
+    assert tolerance["pct"] == "0.00200000"
+    assert tolerance["amount"] is None and tolerance["base"] is None
     assert body["inputs_hash"].startswith("sha256:")
     assert _HEX64_RE.match(body["inputs_hash"].removeprefix("sha256:"))
     assert body["links"] == {
@@ -206,9 +211,11 @@ async def test_api_036_model_not_available(attr_client: Any, account_factory: An
 
 
 async def test_api_036_lookahead_requires_deploy_flag(
-    attr_client: Any, account_factory: Any
+    attr_client: Any, account_factory: Any, settings: Any, monkeypatch: Any
 ) -> None:
     """`classification_lookahead=allow` 但部署未开 SECTOR_LOOKAHEAD_ENABLED → 422（D-07）。"""
+    # 本地 .env 可能已置 true：本用例显式关掉开关，保证与部署环境无关。
+    monkeypatch.setattr(settings, "sector_lookahead_enabled", False)
     acc = await account_factory()
     resp = await attr_client.get(
         "/api/v1/attribution",

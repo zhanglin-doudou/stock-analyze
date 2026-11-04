@@ -104,16 +104,23 @@ class FactorPresentation:
     ratio_pct: str | None
     share_pct: str | None
     tone: str
+    # 板块金额是否使用了期初回退价（节假日缺口）；仅 sector 因子可能为 True。
+    sector_bar_fallback: bool = False
 
 
 def factor_presentation(
-    *, amount_units: int, ratio_units: int | None, share_units: int | None
+    *,
+    amount_units: int,
+    ratio_units: int | None,
+    share_units: int | None,
+    sector_bar_fallback: bool = False,
 ) -> FactorPresentation:
     return FactorPresentation(
         bar_pct=bar_pct(share_units),
         ratio_pct=pct_str(ratio_units),
         share_pct=pct_str(share_units),
         tone=tone(amount_units),
+        sector_bar_fallback=sector_bar_fallback,
     )
 
 

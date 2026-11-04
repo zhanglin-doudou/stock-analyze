@@ -77,7 +77,7 @@ def _money(value: int | None) -> str | None:
 
 
 def _ratio(value: int | None) -> str | None:
-    return None if value is None else str(Ratio(value))
+    return None if value is None else Ratio(value).as_decimal_str()
 
 
 def _pct(value: int | None) -> str | None:

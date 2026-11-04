@@ -352,7 +352,9 @@ class TestProperties:
 
     @settings(
         max_examples=300,
-        suppress_health_check=[HealthCheck.too_slow],
+        # mutmut 的 stats/clean-tests/变异体三阶段各自独立进程执行同一用例，
+        # hypothesis 的 differing_executors 会误判为「跨执行器复用」而中止整个变异跑。
+        suppress_health_check=[HealthCheck.too_slow, HealthCheck.differing_executors],
         deadline=None,
     )
     @given(_segment_batches())

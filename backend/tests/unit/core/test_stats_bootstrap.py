@@ -41,3 +41,25 @@ def test_bootstrap_rejects_empty_and_bad_b() -> None:
         bootstrap_percentile([], _mean)
     with pytest.raises(ValueError):
         bootstrap_percentile([(1,)], _mean, b=0)
+
+
+def test_bootstrap_single_iteration_is_valid() -> None:
+    """b=1 是合法下限：一次重采样取 5 个观测，seed=0 固定为 (20,20,30,30,40) 均值 30。"""
+    observations = [(10,), (20,), (30,), (40,), (50,)]
+    assert bootstrap_percentile(observations, _mean, b=1, seed=0) == (30, 30)
+
+
+def test_seed_zero_is_not_remapped_to_one() -> None:
+    """seed=0 与 seed=1 必须产生不同重采样（0 不能被替换成 1）。"""
+    observations = [(10,), (20,), (30,), (40,), (50,)]
+    assert bootstrap_percentile(observations, _mean, b=20, seed=0) != bootstrap_percentile(
+        observations, _mean, b=20, seed=1
+    )
+
+
+def test_default_seed_is_zero() -> None:
+    """省略 seed 时必须等价于 seed=0（默认值不能被改成 1）。"""
+    observations = [(10,), (20,), (30,), (40,), (50,)]
+    assert bootstrap_percentile(observations, _mean, b=20) == bootstrap_percentile(
+        observations, _mean, b=20, seed=0
+    )

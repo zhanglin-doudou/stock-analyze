@@ -20,6 +20,7 @@ from stock_review.application.assets import (
     MISSING_PRICE_PREFIX,
     _ratio_units,
     _session_notice,
+    align_to_trading_day,
     compute_daily_valuations,
     valuation_end,
 )
@@ -78,6 +79,38 @@ class TestValuationEnd:
         assert valuation_end(FrozenClock("2026-11-02T07:00:00+00:00")) == date(2026, 11, 2)
         # UTC 06:59 = 上海 14:59（未收盘）。
         assert valuation_end(FrozenClock("2026-11-02T06:59:00+00:00")) == date(2026, 10, 30)
+
+
+# ── 交易日对齐：align_to_trading_day（归因 PIT 板块时点）─────────────────
+
+
+class TestTradingDayAlignment:
+    """区间末日 → ≤ 末日的最后一个交易日（行情表最大交易日为判定源）。
+
+    `latest_bar_date` 为 `market.daily_bar` 中 ≤ day 的最大交易日；节假日只能
+    通过行情数据识别（周末另有工作日回退兜底）。
+    """
+
+    def test_month_end_on_weekend_rolls_back(self) -> None:
+        # 2026-10-31 周六为非工作日 → 10-30（用户报告的核心场景）。
+        assert align_to_trading_day(date(2026, 10, 31), date(2026, 10, 30)) == date(2026, 10, 30)
+
+    def test_sunday_rolls_back_to_friday(self) -> None:
+        # 2026-11-01 周日 → 10-30 周五。
+        assert align_to_trading_day(date(2026, 11, 1), date(2026, 10, 30)) == date(2026, 10, 30)
+
+    def test_holiday_rolls_back_to_last_bar(self) -> None:
+        # 2026-10-01 国庆（周四，非交易日）→ 行情表最大交易日 09-30。
+        assert align_to_trading_day(date(2026, 10, 1), date(2026, 9, 30)) == date(2026, 9, 30)
+
+    def test_period_end_is_trading_day_unchanged(self) -> None:
+        # 末日恰为交易日（10-30 周五）→ 原样返回。
+        assert align_to_trading_day(date(2026, 10, 30), date(2026, 10, 30)) == date(2026, 10, 30)
+
+    def test_empty_market_falls_back_to_workday(self) -> None:
+        # 空库/replay 无行情：只剔除周末（不含节假日）。
+        assert align_to_trading_day(date(2026, 10, 31), None) == date(2026, 10, 30)
+        assert align_to_trading_day(date(2026, 10, 30), None) == date(2026, 10, 30)
 
 
 class TestSessionNotice:

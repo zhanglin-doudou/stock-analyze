@@ -147,6 +147,34 @@ def test_ratio_as_pct() -> None:
     assert Ratio.from_decimal(Decimal("0.1234")).as_pct() == "12.34%"
 
 
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("0.12345", "0.123"),  # HALF_UP 3 位
+        ("0.12", "0.12"),
+        ("0.1200001", "0.12"),  # 去尾零
+        ("1.000", "1"),
+        ("-0.005", "-0.005"),
+        ("0", "0"),
+        ("-0.0004", "0"),  # 舍入后 -0 → "0"
+        ("0.0004", "0"),  # 超小值 → "0"
+        ("123456.789123", "123456.789"),  # 超大值
+        ("100", "100"),  # 整数部分尾零不被误删
+    ],
+)
+def test_ratio_as_decimal_str(raw: str, expected: str) -> None:
+    assert Ratio.from_str(raw).as_decimal_str() == expected
+
+
+@pytest.mark.parametrize(
+    ("bad", "error"),
+    [(Decimal("NaN"), ValueError), (Decimal("Infinity"), OverflowError)],
+)
+def test_ratio_from_decimal_rejects_non_finite(bad: Decimal, error: type[Exception]) -> None:
+    with pytest.raises(error):
+        Ratio.from_decimal(bad)
+
+
 # ── 工厂函数 ────────────────────────────────────────────────
 
 

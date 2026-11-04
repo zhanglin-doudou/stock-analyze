@@ -629,6 +629,28 @@ def _session_notice(clock: Clock, market_as_of: date | None) -> str | None:
     return None
 
 
+def align_to_trading_day(day: date, latest_bar_date: date | None) -> date:
+    """把自然日对齐到 ≤ day 的最后一个交易日（纯函数，便于确定性单测）。
+
+    `latest_bar_date` 为行情缓存（`market.daily_bar`）中 ≤ day 的最大交易日；
+    空库/replay 无行情时回退 `latest_workday`（只剔除周末，不含法定节假日）。
+    """
+    return latest_bar_date if latest_bar_date is not None else latest_workday(day)
+
+
+async def last_trading_day(session: AsyncSession, day: date) -> date:
+    """≤ day 的最后一个交易日；判定源复用行情缓存的最大交易日，不新建日历。
+
+    取 `market.daily_bar` 中 `trade_date <= day` 的最大值：该表只含真实交易日的
+    收盘行，故最大值即交易日。数据尚未同步到 `day` 时返回更早的可用交易日
+    （归因的板块时点取「可用」口径，偏保守）；表内无任何行时回退工作日判定。
+    """
+    latest = await session.scalar(
+        select(func.max(DailyBar.trade_date)).where(DailyBar.trade_date <= day)
+    )
+    return align_to_trading_day(day, latest)
+
+
 async def _market_as_of(session: AsyncSession, market_data: MarketDataSource, clock: Clock) -> date:
     """行情覆盖日（构建与状态判定必须同口径，跨进程一致）。
 
@@ -1233,9 +1255,11 @@ __all__ = [
     "AssetBuildState",
     "AssetBuildSummary",
     "AssetPoint",
+    "align_to_trading_day",
     "build_assets",
     "build_assets_job",
     "compute_daily_valuations",
+    "last_trading_day",
     "list_assets",
     "valuation_end",
 ]

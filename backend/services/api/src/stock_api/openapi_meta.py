@@ -92,6 +92,11 @@ MONEY_FIELDS = frozenset(
         "unattributed_price_pnl",
         "dividend_without_position",
         "other_cashflow",
+        # 2026-11-04（API-036）：残差对账派生金额（与 residual 同 2 位）
+        "unattributed_symbols_total",
+        "account_level_total",
+        "listed_total",
+        "others_total",
     }
 )
 PRICE_FIELDS = frozenset({"price", "unit_nav"})
@@ -1687,6 +1692,7 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
                 "segments_attributed": 7,
                 "symbols_total": 1,
                 "symbols_attributed": 1,
+                "symbols_participating": 1,
                 "unattributed": [],
             },
             "missing": [],
@@ -1712,6 +1718,11 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
                     "assets": "2026-06-30",
                     "market": "2026-06-30",
                     "sector": "2026-06-30",
+                },
+                "residual_tolerance": {
+                    "amount": "1000.00",
+                    "pct": "0.00200000",
+                    "base": "500000.00",
                 },
             },
             "data_as_of": "2026-06-30",

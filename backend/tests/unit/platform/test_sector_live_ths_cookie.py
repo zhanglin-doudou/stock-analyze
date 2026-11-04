@@ -1,0 +1,286 @@
+"""THS 登录态（SECTOR_THS_COOKIE）与成分完整性闸门单测（全程桩，不联网）。
+
+覆盖：cookie 缺失 fail-fast、登录页/401 失效、全分页齐全、动态排序重复触发的
+整板重抓、完整性闸门拒绝、单页重试退避、日线抓取带 cookie、cookie 脱敏。
+"""
+
+from __future__ import annotations
+
+import json
+from datetime import date
+from typing import Any
+
+import pytest
+from stock_contracts.clock import FrozenClock
+from stock_platform import sector_live
+from stock_platform.config import Settings
+from stock_platform.market_models import TAXONOMY_INDUSTRY
+from stock_platform.sector_live import AkshareSectorSource, mask_cookie
+from stock_platform.sector_validation import (
+    SectorCookieError,
+    SectorMemberIncompleteError,
+)
+
+_COOKIE = "user=abc; sess_tk=def"
+
+
+class _Resp:
+    """requests.Response 的最小替身。"""
+
+    def __init__(self, text: str, *, status_code: int = 200, url: str = "") -> None:
+        self.text = text
+        self.status_code = status_code
+        self.url = url
+        self.history: list[Any] = []
+
+
+def _page_markup(rows: list[str], current: int, total: int) -> str:
+    cells = "".join(
+        f"<tr><td>{index + 1}</td><td>{code}</td><td>n</td></tr>" for index, code in enumerate(rows)
+    )
+    return (
+        "<html><body><table>"
+        "<tr><th>序号</th><th>代码</th><th>名称</th></tr>"
+        f"{cells}</table>"
+        f'<span class="page_info">{current}/{total}</span>'
+        "</body></html>"
+    )
+
+
+def _codes(start: int, count: int) -> list[str]:
+    return [f"{start + offset:06d}" for offset in range(count)]
+
+
+@pytest.fixture(autouse=True)
+def _no_sleep(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    """记录退避序列，避免单测真的睡 1/2/4 秒。"""
+    sleeps: list[float] = []
+    monkeypatch.setattr(sector_live.time, "sleep", lambda seconds: sleeps.append(seconds))
+    return sleeps
+
+
+@pytest.fixture
+def make_source(monkeypatch: pytest.MonkeyPatch) -> Any:
+    monkeypatch.setattr(sector_live, "_import_akshare", lambda: object())
+
+    def _make(*, cookie: str | None = _COOKIE) -> AkshareSectorSource:
+        settings = Settings(
+            sector_ths_cookie=cookie,
+            # 单测关掉全局限速（间隔断言只关心退避）；生产默认 8 req/s。
+            sector_ths_rate_limit_per_second=0.0,
+            sector_live_timeout_seconds=10.0,
+        )
+        return AkshareSectorSource(
+            settings,
+            clock=FrozenClock("2026-11-03T09:00:00+08:00"),
+            session_factory=lambda **_kwargs: None,
+        )
+
+    return _make
+
+
+class _FakeSession:
+    """``requests.Session`` 的最小替身：记录每次 GET（url/headers/timeout）。"""
+
+    def __init__(self, handler: Any, calls: list[dict[str, Any]]) -> None:
+        self._handler = handler
+        self._calls = calls
+
+    def get(self, url: str, headers: Any = None, timeout: float | None = None) -> _Resp:
+        self._calls.append({"url": url, "headers": dict(headers or {}), "timeout": timeout})
+        return self._handler(url, len(self._calls))
+
+
+def _install_get(monkeypatch: pytest.MonkeyPatch, handler: Any) -> list[dict[str, Any]]:
+    calls: list[dict[str, Any]] = []
+
+    def fake_new_session(_source: AkshareSectorSource) -> _FakeSession:
+        return _FakeSession(handler, calls)
+
+    monkeypatch.setattr(AkshareSectorSource, "_new_http_session", fake_new_session)
+    return calls
+
+
+def _page_number(url: str) -> int:
+    return int(url.rstrip("/").rsplit("/", 1)[-1])
+
+
+# ── cookie 缺失 / 失效 ────────────────────────────────────────────
+
+
+def test_cookie_missing_fails_fast_without_network(
+    make_source: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = make_source(cookie=None)
+
+    def boom(_source: AkshareSectorSource) -> Any:
+        raise AssertionError("cookie 缺失时不应发起任何网络请求")
+
+    monkeypatch.setattr(AkshareSectorSource, "_new_http_session", boom)
+    with pytest.raises(SectorCookieError, match="SECTOR_THS_COOKIE"):
+        source._ths_board_members("881117", TAXONOMY_INDUSTRY)
+
+
+def test_login_wall_page_fails_fast(make_source: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    source = make_source()
+    calls = _install_get(
+        monkeypatch,
+        lambda _url, _index: _Resp("请登录后访问", url="https://passport.10jqka.com.cn/login"),
+    )
+    with pytest.raises(SectorCookieError, match="登录页"):
+        source._ths_board_members("881117", TAXONOMY_INDUSTRY)
+    assert len(calls) == 1  # 登录墙不重试
+
+
+def test_401_retries_with_backoff_then_cookie_error(
+    make_source: Any, monkeypatch: pytest.MonkeyPatch, _no_sleep: list[float]
+) -> None:
+    source = make_source()
+    calls = _install_get(monkeypatch, lambda _url, _index: _Resp("", status_code=401))
+    with pytest.raises(SectorCookieError, match="401"):
+        source._ths_board_members("881117", TAXONOMY_INDUSTRY)
+    assert len(calls) == source._THS_PAGE_RETRIES + 1
+    assert _no_sleep == [1.0, 2.0, 4.0]
+
+
+# ── 全分页与完整性闸门 ──────────────────────────────────────────
+
+
+def test_full_pagination_returns_all_deduped_rows(
+    make_source: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = make_source()
+    pages = {1: _codes(600000, 20), 2: _codes(600020, 20), 3: _codes(600040, 14)}
+    _install_get(
+        monkeypatch,
+        lambda url, _index: _Resp(_page_markup(pages[_page_number(url)], _page_number(url), 3)),
+    )
+    members = source._ths_board_members("881117", TAXONOMY_INDUSTRY)
+    assert len(members) == 54
+    assert len({symbol for _, symbol in members}) == 54
+
+
+def test_duplicates_trigger_whole_board_refetch(
+    make_source: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """首轮动态排序造成 2 只重复/缺失 → 去重后 52 < 期望 54 → 整板重抓一轮。"""
+    source = make_source()
+    clean = {1: _codes(600000, 20), 2: _codes(600020, 20), 3: _codes(600040, 14)}
+    dirty = {1: clean[1], 2: clean[1][:2] + clean[2][2:], 3: clean[3]}
+    pass_no = {"value": 0}
+
+    def handler(url: str, _index: int) -> _Resp:
+        page = _page_number(url)
+        if page == 1:
+            pass_no["value"] += 1
+        rows = (dirty if pass_no["value"] == 1 else clean)[page]
+        return _Resp(_page_markup(rows, page, 3))
+
+    calls = _install_get(monkeypatch, handler)
+    members = source._ths_board_members("881117", TAXONOMY_INDUSTRY)
+    assert len(members) == 54
+    assert len(calls) == 6  # 3 页 × 2 轮
+
+
+def test_gate_rejects_after_all_passes(make_source: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    source = make_source()
+    page1 = _codes(600000, 20)
+    page2 = page1[:2] + _codes(600018, 18)  # 2 重复 + 2 缺失 → 去重后 52 < 期望 54
+    pages = {1: page1, 2: page2, 3: _codes(600040, 14)}
+
+    def handler(url: str, _index: int) -> _Resp:
+        page = _page_number(url)
+        return _Resp(_page_markup(pages[page], page, 3))
+
+    calls = _install_get(monkeypatch, handler)
+    with pytest.raises(SectorMemberIncompleteError, match="期望 54 行"):
+        source._ths_board_members("881117", TAXONOMY_INDUSTRY)
+    assert len(calls) == 9  # 3 轮 × 3 页
+
+
+def test_stale_pages_abort_fast(make_source: Any, monkeypatch: pytest.MonkeyPatch) -> None:
+    """上游分页重复返回同一批代码 → 连续多页无新行时快速失败，不空转到页数上限。"""
+    source = make_source()
+    page1 = _codes(600000, 20)
+    calls = _install_get(
+        monkeypatch,
+        lambda url, _index: _Resp(_page_markup(page1, _page_number(url), 50)),
+    )
+    with pytest.raises(SectorMemberIncompleteError, match="无新成分股"):
+        source._ths_board_members("881117", TAXONOMY_INDUSTRY)
+    # 每轮 6 页（第 1 页 + 连续 5 页无新行）即中止，3 轮共 18 次请求。
+    assert len(calls) == 18
+    assert source._THS_STALE_PAGES == 5
+
+
+def test_truncated_page_count_triggers_refetch(
+    make_source: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """某页返回只有表头的空表 → 实际页数 < page_info 声明 → 整板重抓后通过闸门。"""
+    source = make_source()
+    clean = {1: _codes(600000, 20), 2: _codes(600020, 20), 3: _codes(600040, 14)}
+    pass_no = {"value": 0}
+
+    def handler(url: str, _index: int) -> _Resp:
+        page = _page_number(url)
+        if page == 1:
+            pass_no["value"] += 1
+        if pass_no["value"] == 1 and page == 2:
+            return _Resp(
+                "<html><body><table><tr><th>序号</th><th>代码</th></tr></table>"
+                '<span class="page_info">2/3</span></body></html>'
+            )
+        return _Resp(_page_markup(clean[page], page, 3))
+
+    calls = _install_get(monkeypatch, handler)
+    members = source._ths_board_members("881117", TAXONOMY_INDUSTRY)
+    assert len(members) == 54
+    assert len(calls) == 5  # 第 1 轮 2 页即截断，第 2 轮 3 页补齐
+
+
+def test_declared_last_page_without_data_is_accepted(
+    make_source: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """page_info 把空末页计入总页数（如三胎概念 21 页有数据却声明 22 页）→ 按实际页收口。"""
+    source = make_source()
+    pages = {1: _codes(600000, 20), 2: _codes(600020, 20)}
+    empty_last = '<html><body><table><tr><th>序号</th><th>代码</th></tr><tr><td colspan="2">暂无成份股数据</td></tr></table><span class="page_info">3/3</span></body></html>'
+
+    def handler(url: str, _index: int) -> _Resp:
+        page = _page_number(url)
+        if page == 3:
+            return _Resp(empty_last)
+        return _Resp(_page_markup(pages[page], page, 3))
+
+    calls = _install_get(monkeypatch, handler)
+    members = source._ths_board_members("881117", TAXONOMY_INDUSTRY)
+    assert len(members) == 40
+    assert len(calls) == 3
+
+
+# ── 行业指数日线（sync-sector-bars）也带 cookie ──────────────────
+
+
+def test_bars_fetch_sends_cookie_and_parses_jsonp(
+    make_source: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = make_source()
+    payload = {"data": ("20261029,1,2,3,4000.000,10,20;20261030,1,2,3,4010.000,10,21;")}
+    body = f"quotebridge_v4_line_bk_881117_01_2026({json.dumps(payload)})"
+    calls = _install_get(monkeypatch, lambda _url, _index: _Resp(body))
+    bars = source._ths_board_bars("881117", date(2026, 10, 29), date(2026, 10, 30))
+    assert [bar.trade_date for bar in bars] == [date(2026, 10, 29), date(2026, 10, 30)]
+    assert calls[0]["headers"]["Cookie"] == _COOKIE
+    assert "User-Agent" in calls[0]["headers"]
+
+
+def test_bars_cookie_missing_fails_fast(make_source: Any) -> None:
+    source = make_source(cookie=None)
+    with pytest.raises(SectorCookieError, match="SECTOR_THS_COOKIE"):
+        source._ths_board_bars("881117", date(2026, 10, 29), date(2026, 10, 30))
+
+
+def test_mask_cookie_never_leaks_plaintext() -> None:
+    masked = mask_cookie(_COOKIE)
+    assert _COOKIE not in masked
+    assert str(len(_COOKIE)) in masked

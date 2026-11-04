@@ -21,7 +21,8 @@ CODES = ["600000", "000001"]
 SETTINGS = settings(
     max_examples=60,
     deadline=None,
-    suppress_health_check=[HealthCheck.too_slow],
+    # 同上：mutmut 多阶段在独立进程重跑同一用例，differing_executors 需放行。
+    suppress_health_check=[HealthCheck.too_slow, HealthCheck.differing_executors],
 )
 
 

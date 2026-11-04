@@ -33,6 +33,7 @@ from stock_api.schemas import (
     AttributionMissingOut,
     AttributionOut,
     AttributionPresentationOut,
+    AttributionReconciliationOut,
     AttributionSampleOut,
     AttributionUnattributedOut,
     attribution_payload,
@@ -88,6 +89,7 @@ def _factor_out(factor: AttributionFactor) -> AttributionFactorOut:
             ratio_pct=factor.presentation.ratio_pct,
             share_pct=factor.presentation.share_pct,
             tone=factor.presentation.tone,
+            sector_bar_fallback=factor.presentation.sector_bar_fallback,
         ),
     )
 
@@ -115,9 +117,11 @@ def _to_out(result: AttributionResult) -> AttributionOut:
             segments_attributed=result.coverage.segments_attributed,
             symbols_total=result.coverage.symbols_total,
             symbols_attributed=result.coverage.symbols_attributed,
+            symbols_participating=result.coverage.symbols_participating,
             unattributed=[
                 AttributionUnattributedOut(
                     security_code=entry.security_code,
+                    security_name=entry.security_name,
                     symbol_class=entry.symbol_class,
                     reason_code=entry.reason_code,
                     amount=str(Money(entry.amount_units)),
@@ -145,6 +149,23 @@ def _to_out(result: AttributionResult) -> AttributionOut:
         residual_ratio_pct=pct_str(result.residual_ratio_units),
         residual_breakdown=breakdown,
         residual_breakdown_labels=breakdown_labels,
+        residual_reconciliation=(
+            None
+            if result.residual_reconciliation is None
+            else AttributionReconciliationOut(
+                unattributed_symbols_total=str(
+                    Money(result.residual_reconciliation.unattributed_symbols_total_units)
+                ),
+                listed_total=str(Money(result.residual_reconciliation.listed_units)),
+                others_count=result.residual_reconciliation.others_count,
+                others_total=str(Money(result.residual_reconciliation.others_units)),
+                display_limit=result.residual_reconciliation.display_limit,
+                account_level_total=str(
+                    Money(result.residual_reconciliation.account_level_total_units)
+                ),
+                residual=str(Money(result.residual_reconciliation.residual_units)),
+            )
+        ),
         sample=AttributionSampleOut(
             n_segments=result.sample.n_segments,
             n_attributed_segments=result.sample.n_attributed_segments,
@@ -159,7 +180,7 @@ def _to_out(result: AttributionResult) -> AttributionOut:
                 field=item.field,
                 field_label=_FIELD_LABELS.get(item.field, item.field),
                 code=item.code,
-                severity="blocker" if item.code in _BLOCKER_CODES else "warning",
+                severity="blocker" if item.code in _BLOCKER_CODES else item.severity,
                 reason=item.reason,
                 what_to_do=item.what_to_do,
             )

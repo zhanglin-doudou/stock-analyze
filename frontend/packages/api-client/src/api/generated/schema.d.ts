@@ -1244,6 +1244,8 @@ export interface components {
             segments_total: number;
             /** Symbols Attributed */
             symbols_attributed: number;
+            /** Symbols Participating */
+            symbols_participating: number;
             /** Symbols Total */
             symbols_total: number;
             /** Unattributed */
@@ -1299,7 +1301,7 @@ export interface components {
              * @default warning
              * @enum {string}
              */
-            severity: "blocker" | "warning";
+            severity: "blocker" | "warning" | "info";
             /** What To Do */
             what_to_do: string;
         };
@@ -1309,8 +1311,9 @@ export interface components {
          *
          *     blocked 缺省语义（§6.3 评审 P0-7 冻结）：`status="blocked"` 时
          *     `total_pnl/base_capital/residual/residual_ratio/residual_breakdown/coverage`
-         *     整键省略，`factors[].amount/ratio/share` 逐项省略（code/name/rank/conclusion 保留）；
-         *     非 blocked 时 ratio=None 显式输出 null（PNL_NEAR_ZERO，附 `ratio_na_reason`）。
+         *     `residual_reconciliation` 整键省略，`factors[].amount/ratio/share` 逐项省略
+         *     （code/name/rank/conclusion 保留）；非 blocked 时 ratio=None 显式输出 null
+         *     （PNL_NEAR_ZERO，附 `ratio_na_reason`）。
          */
         AttributionOut: {
             /** Assumptions */
@@ -1363,6 +1366,7 @@ export interface components {
             residual_ratio?: string | null;
             /** Residual Ratio Pct */
             residual_ratio_pct?: string | null;
+            residual_reconciliation?: components["schemas"]["AttributionReconciliationOut"] | null;
             sample: components["schemas"]["AttributionSampleOut"];
             /**
              * Status
@@ -1387,6 +1391,11 @@ export interface components {
             bar_pct?: string | null;
             /** Ratio Pct */
             ratio_pct?: string | null;
+            /**
+             * Sector Bar Fallback
+             * @default false
+             */
+            sector_bar_fallback: boolean;
             /** Share Pct */
             share_pct?: string | null;
             /**
@@ -1394,6 +1403,29 @@ export interface components {
              * @enum {string}
              */
             tone: "positive" | "negative" | "flat";
+        };
+        /**
+         * AttributionReconciliationOut
+         * @description 残差对账（后端派生，前端零口径）：标的合计 + 账户级桶合计 == residual。
+         *
+         *     `listed_total + others_total == unattributed_symbols_total`；`display_limit` 为
+         *     明细展示上限（单一常量来源，前端不硬编码）。
+         */
+        AttributionReconciliationOut: {
+            /** Account Level Total */
+            account_level_total: string;
+            /** Display Limit */
+            display_limit: number;
+            /** Listed Total */
+            listed_total: string;
+            /** Others Count */
+            others_count: number;
+            /** Others Total */
+            others_total: string;
+            /** Residual */
+            residual: string;
+            /** Unattributed Symbols Total */
+            unattributed_symbols_total: string;
         };
         /**
          * AttributionSampleOut
@@ -1419,6 +1451,8 @@ export interface components {
         /**
          * AttributionUnattributedOut
          * @description 一条未归因标的披露（amount = 其残差桶金额，可为 0）。
+         *
+         *     仅披露本期参与标的；`security_name` 缺失时为 null（前端只展示代码）。
          */
         AttributionUnattributedOut: {
             /** Amount */
@@ -1427,6 +1461,8 @@ export interface components {
             reason_code?: string | null;
             /** Security Code */
             security_code: string;
+            /** Security Name */
+            security_name?: string | null;
             /** Symbol Class */
             symbol_class: string;
         };

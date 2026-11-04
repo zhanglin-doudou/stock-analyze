@@ -1338,6 +1338,8 @@ class AttributionPresentationOut(StrictModel):
     ratio_pct: str | None = None
     share_pct: str | None = None
     tone: Literal["positive", "negative", "flat"]
+    # 板块因子是否使用了期初回退价（节假日缺口；仅 sector 可能为 True）。
+    sector_bar_fallback: bool = False
 
 
 class AttributionFactorOut(StrictModel):
@@ -1365,9 +1367,13 @@ class AttributionSampleOut(StrictModel):
 
 
 class AttributionUnattributedOut(StrictModel):
-    """一条未归因标的披露（amount = 其残差桶金额，可为 0）。"""
+    """一条未归因标的披露（amount = 其残差桶金额，可为 0）。
+
+    仅披露本期参与标的；`security_name` 缺失时为 null（前端只展示代码）。
+    """
 
     security_code: str
+    security_name: str | None = None
     symbol_class: str
     reason_code: str | None = None
     amount: str
@@ -1386,6 +1392,7 @@ class AttributionCoverageOut(StrictModel):
     segments_attributed: int
     symbols_total: int
     symbols_attributed: int
+    symbols_participating: int
     unattributed: list[AttributionUnattributedOut] = Field(default_factory=list)
 
 
@@ -1395,7 +1402,7 @@ class AttributionMissingOut(StrictModel):
     field: str
     field_label: str | None = None
     code: str
-    severity: Literal["blocker", "warning"] = "warning"
+    severity: Literal["blocker", "warning", "info"] = "warning"
     reason: str
     what_to_do: str
 
@@ -1407,13 +1414,30 @@ class AttributionLinksOut(StrictModel):
     reports: str
 
 
+class AttributionReconciliationOut(StrictModel):
+    """残差对账（后端派生，前端零口径）：标的合计 + 账户级桶合计 == residual。
+
+    `listed_total + others_total == unattributed_symbols_total`；`display_limit` 为
+    明细展示上限（单一常量来源，前端不硬编码）。
+    """
+
+    unattributed_symbols_total: str
+    listed_total: str
+    others_count: int
+    others_total: str
+    display_limit: int
+    account_level_total: str
+    residual: str
+
+
 class AttributionOut(StrictModel):
     """五因子归因响应（§6.2；金额 2 位 / 比率 scale=8 定点字符串）。
 
     blocked 缺省语义（§6.3 评审 P0-7 冻结）：`status="blocked"` 时
     `total_pnl/base_capital/residual/residual_ratio/residual_breakdown/coverage`
-    整键省略，`factors[].amount/ratio/share` 逐项省略（code/name/rank/conclusion 保留）；
-    非 blocked 时 ratio=None 显式输出 null（PNL_NEAR_ZERO，附 `ratio_na_reason`）。
+    `residual_reconciliation` 整键省略，`factors[].amount/ratio/share` 逐项省略
+    （code/name/rank/conclusion 保留）；非 blocked 时 ratio=None 显式输出 null
+    （PNL_NEAR_ZERO，附 `ratio_na_reason`）。
     """
 
     model: str
@@ -1435,6 +1459,7 @@ class AttributionOut(StrictModel):
     residual_ratio_pct: str | None = None
     residual_breakdown: dict[str, str] | None = None
     residual_breakdown_labels: dict[str, str] | None = None
+    residual_reconciliation: AttributionReconciliationOut | None = None
     sample: AttributionSampleOut
     coverage: AttributionCoverageOut | None = None
     missing: list[AttributionMissingOut] = Field(default_factory=list)
@@ -1452,6 +1477,7 @@ _BLOCKED_OMIT_KEYS: tuple[str, ...] = (
     "residual",
     "residual_ratio",
     "residual_breakdown",
+    "residual_reconciliation",
     "coverage",
 )
 

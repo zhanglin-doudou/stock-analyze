@@ -23,7 +23,13 @@ const FACTORS: Attribution["factors"] = [
     share: "0.5940",
     rank: 1,
     conclusion: "拖累 1,900.00 元",
-    presentation: { bar_pct: "59.40%", ratio_pct: "-59.37%", share_pct: "59.40%", tone: "negative" },
+    presentation: {
+      bar_pct: "59.40%",
+      ratio_pct: "-59.37%",
+      share_pct: "59.40%",
+      tone: "negative",
+      sector_bar_fallback: false,
+    },
   },
   {
     code: "sector",
@@ -33,7 +39,13 @@ const FACTORS: Attribution["factors"] = [
     share: "0.2560",
     rank: 2,
     conclusion: "贡献 820.00 元",
-    presentation: { bar_pct: "25.60%", ratio_pct: "25.62%", share_pct: "25.60%", tone: "positive" },
+    presentation: {
+      bar_pct: "25.60%",
+      ratio_pct: "25.62%",
+      share_pct: "25.60%",
+      tone: "positive",
+      sector_bar_fallback: false,
+    },
   },
   {
     code: "buy_timing",
@@ -43,7 +55,13 @@ const FACTORS: Attribution["factors"] = [
     share: "0.0375",
     rank: 3,
     conclusion: "拖累 120.00 元",
-    presentation: { bar_pct: "3.75%", ratio_pct: "-3.75%", share_pct: "3.75%", tone: "negative" },
+    presentation: {
+      bar_pct: "3.75%",
+      ratio_pct: "-3.75%",
+      share_pct: "3.75%",
+      tone: "negative",
+      sector_bar_fallback: false,
+    },
   },
   {
     code: "sell_timing",
@@ -53,7 +71,13 @@ const FACTORS: Attribution["factors"] = [
     share: "0.0000",
     rank: 4,
     conclusion: "影响较小",
-    presentation: { bar_pct: "0.00%", ratio_pct: "0.00%", share_pct: "0.00%", tone: "flat" },
+    presentation: {
+      bar_pct: "0.00%",
+      ratio_pct: "0.00%",
+      share_pct: "0.00%",
+      tone: "flat",
+      sector_bar_fallback: false,
+    },
   },
   {
     code: "fee",
@@ -63,7 +87,13 @@ const FACTORS: Attribution["factors"] = [
     share: "0.1281",
     rank: 5,
     conclusion: "拖累 410.00 元",
-    presentation: { bar_pct: "12.81%", ratio_pct: "-12.81%", share_pct: "12.81%", tone: "negative" },
+    presentation: {
+      bar_pct: "12.81%",
+      ratio_pct: "-12.81%",
+      share_pct: "12.81%",
+      tone: "negative",
+      sector_bar_fallback: false,
+    },
   },
 ];
 
@@ -95,6 +125,15 @@ function attribution(overrides: Partial<Attribution> = {}): Attribution {
       other: "0.00",
       valuation_gap: "0.00",
     },
+    residual_reconciliation: {
+      unattributed_symbols_total: "120.00",
+      listed_total: "120.00",
+      others_count: 0,
+      others_total: "0.00",
+      display_limit: 5,
+      account_level_total: "0.00",
+      residual: "120.00",
+    },
     sample: {
       n_segments: 14,
       n_attributed_segments: 12,
@@ -114,12 +153,21 @@ function attribution(overrides: Partial<Attribution> = {}): Attribution {
       segments_attributed: 12,
       symbols_total: 6,
       symbols_attributed: 5,
+      symbols_participating: 5,
       unattributed: [
         {
           security_code: "110059",
+          security_name: "建工转债",
           symbol_class: "convertible_bond",
           reason_code: "CB_EXCLUDED",
           amount: "120.00",
+        },
+        {
+          // 名称缺失：只展示代码，不做占位错配。
+          security_code: "600519",
+          symbol_class: "stock",
+          reason_code: null,
+          amount: "0.00",
         },
       ],
     },
@@ -127,6 +175,13 @@ function attribution(overrides: Partial<Attribution> = {}): Attribution {
     assumptions: {
       benchmark_id: "hs300_tr",
       data_sources: { asset_daily: "2026-06-30", market: "2026-06-30", sector: "2026-06-29" },
+      data_starts: {
+        period: "2026-06-01",
+        asset_daily: "2025-01-02",
+        market: "2026-05-06",
+        sector: "2026-06-05",
+      },
+      residual_tolerance: { amount: "1000.00", pct: "0.00200000", base: "500000.00" },
     },
     data_as_of: "2026-06-30",
     inputs_hash: "sha256:abc",
@@ -172,7 +227,7 @@ describe("AttributionPage", () => {
     expect(screen.getByTestId("attr-factor-selection").textContent).toContain("拖累 1,900.00 元");
     expect(screen.getByTestId("attr-factor-fee").textContent).toContain("费用");
     expect(screen.getByTestId("attr-capital-ratio").textContent).toContain("98.9%");
-    expect(screen.getByTestId("attr-coverage-bases").textContent).toContain("按标的 5/6");
+    expect(screen.getByTestId("attr-coverage-bases").textContent).toContain("按标的 5/5");
     expect(screen.getByTestId("attr-coverage-bases").textContent).toContain("市值与现金混合");
     expect(screen.getByTestId("attr-data-sources").textContent).toContain(
       "资产 2026-06-30 · 行情 2026-06-30 · 板块 2026-06-29",
@@ -196,7 +251,43 @@ describe("AttributionPage", () => {
     expect(bar).not.toBeNull();
     expect((bar as HTMLElement).style.getPropertyValue("--w")).toBe("59.40%");
     expect(bar?.getAttribute("data-tone")).toBe("negative");
-    expect(screen.getByTestId("attr-unattributed").textContent).toContain("110059");
+    const rows = screen.getByTestId("attr-unattributed").querySelectorAll("li");
+    expect(rows).toHaveLength(2);
+    expect(rows[0].textContent).toContain("110059 建工转债");
+    // 名称缺失只显示代码。
+    expect(rows[1].textContent).toContain("600519");
+    expect(rows[1].textContent).not.toContain("未知");
+    // 展示上限来自后端 `display_limit`；不足上限时无「其余 N 只」行。
+    expect(screen.getByText(/最多 5 只/)).toBeTruthy();
+    expect(screen.queryByTestId("attr-unattributed-others")).toBeNull();
+    expect(screen.getByTestId("attr-residual-tolerance").textContent).toContain(
+      "容差 1,000.00 元（期末总资产 500,000.00 元）",
+    );
+  });
+
+  it("容差内残差：残差卡标「容差内（不降级）」，整页仍为正常", async () => {
+    getAttribution.mockResolvedValue(
+      attribution({
+        status: "ok",
+        missing: [
+          {
+            code: "RESIDUAL_WITHIN_TOLERANCE",
+            field: "residual",
+            severity: "info",
+            reason: "未归因 40.76 元，低于期末资产 1%（阈值 5,000.00 元）",
+            what_to_do: "无需处理",
+          },
+        ],
+      }),
+    );
+    renderPage();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("attr-status-badge").textContent).toBe("正常"),
+    );
+    expect(screen.getByTestId("attr-residual-tolerance-status").textContent).toContain(
+      "容差内（不降级）",
+    );
   });
 
   it("degraded：渲染金额同时列出缺失项与 what_to_do", async () => {
@@ -235,6 +326,7 @@ describe("AttributionPage", () => {
         residual: null,
         residual_ratio: null,
         residual_breakdown: null,
+        residual_reconciliation: null,
         coverage: null,
         factors: FACTORS.map((factor) => ({
           ...factor,
@@ -242,7 +334,12 @@ describe("AttributionPage", () => {
           ratio: null,
           share: null,
           conclusion: null,
-          presentation: { bar_pct: null, ratio_pct: null, tone: "flat" },
+          presentation: {
+            bar_pct: null,
+            ratio_pct: null,
+            tone: "flat",
+            sector_bar_fallback: false,
+          },
         })),
         missing: [
           {
@@ -307,13 +404,27 @@ describe("AttributionPage", () => {
           other: "0.00",
           valuation_gap: "0.00",
         },
+        residual_reconciliation: {
+          unattributed_symbols_total: "0.00",
+          listed_total: "0.00",
+          others_count: 0,
+          others_total: "0.00",
+          display_limit: 5,
+          account_level_total: "0.00",
+          residual: "0.00",
+        },
         factors: FACTORS.map((factor) => ({
           ...factor,
           amount: "0.00",
           ratio: null,
           share: null,
           conclusion: null,
-          presentation: { bar_pct: "0.00%", ratio_pct: null, tone: "flat" },
+          presentation: {
+            bar_pct: "0.00%",
+            ratio_pct: null,
+            tone: "flat",
+            sector_bar_fallback: false,
+          },
         })),
         sample: {
           n_segments: 0,
@@ -333,6 +444,7 @@ describe("AttributionPage", () => {
           segments_attributed: 0,
           symbols_total: 0,
           symbols_attributed: 0,
+          symbols_participating: 0,
           unattributed: [],
         },
       }),
@@ -344,6 +456,13 @@ describe("AttributionPage", () => {
     );
     expect(screen.getByTestId("attr-factor-selection").textContent).toContain("0.00");
     expect(screen.queryByTestId("attr-missing")).toBeNull();
+    // 明细为空时对账行仍为 0 + 0 = 0（全部来自后端派生字段）。
+    expect(screen.getByTestId("attr-reconciliation").textContent).toBe(
+      "明细合计 0.00 元 + 账户级 0.00 元 = 0.00 元",
+    );
+    // 0 条：不渲染明细区，也无追加行。
+    expect(screen.queryByTestId("attr-unattributed")).toBeNull();
+    expect(screen.queryByTestId("attr-unattributed-others")).toBeNull();
   });
 
   it("残差去向：桶按金额降序、正负含义、残差比 >100% 提示（U-08）", async () => {
@@ -361,6 +480,26 @@ describe("AttributionPage", () => {
           unattributed_price_pnl: "未归因标的损益",
           valuation_gap: "估值差（未能解释）",
         },
+        residual_reconciliation: {
+          unattributed_symbols_total: "445625.33",
+          listed_total: "445625.33",
+          others_count: 0,
+          others_total: "0.00",
+          display_limit: 5,
+          account_level_total: "-336016.03",
+          residual: "109609.30",
+        },
+        // 与对账字段同源：5 条明细合计 445,625.33（无追加行）。
+        coverage: {
+          ...attribution().coverage!,
+          unattributed: [
+            { security_code: "600000", security_name: "浦发银行", symbol_class: "stock", reason_code: null, amount: "100000.00" },
+            { security_code: "600036", symbol_class: "stock", reason_code: null, amount: "100000.00" },
+            { security_code: "601318", symbol_class: "stock", reason_code: null, amount: "100000.00" },
+            { security_code: "000001", symbol_class: "stock", reason_code: null, amount: "100000.00" },
+            { security_code: "600519", symbol_class: "stock", reason_code: null, amount: "45625.33" },
+          ],
+        },
       }),
     );
     renderPage();
@@ -374,7 +513,60 @@ describe("AttributionPage", () => {
     expect(amounts[2]).toContain("-336,022.00");
     expect(screen.getByTestId("attr-residual").textContent).toContain("正数=未归因收益");
     expect(screen.getByTestId("attr-residual").textContent).toContain("残差大于本期总损益");
+    // 对账行：标的 445,625.33 + 账户级（利息 5.97 − 估值差 336,022.00）= 残差 109,609.30。
+    expect(screen.getByTestId("attr-reconciliation").textContent).toContain(
+      "445,625.33 元 + 账户级 -336,016.03 元 = 109,609.30 元",
+    );
   });
+
+  it.each([
+    { count: 6, othersCount: 1, othersTotal: "2.00" },
+    { count: 20, othersCount: 15, othersTotal: "30.00" },
+  ])(
+    "明细超过展示上限（$count 条）：前 5 条 + 「其余 N 只」汇总行",
+    async ({ count, othersCount, othersTotal }) => {
+      // 构造用例（非真实数据）：后端只下发前 5 条（各 10.00），其余各 2.00 汇总在追加行。
+      const listedTotal = "50.00";
+      const total = (50 + 2 * othersCount).toFixed(2);
+      const entries = Array.from({ length: Math.min(count, 5) }, (_, index) => ({
+        security_code: `${600000 + index}`,
+        symbol_class: "stock",
+        reason_code: null,
+        amount: "10.00",
+      }));
+      getAttribution.mockResolvedValue(
+        attribution({
+          residual: total,
+          residual_reconciliation: {
+            unattributed_symbols_total: total,
+            listed_total: listedTotal,
+            others_count: othersCount,
+            others_total: othersTotal,
+            display_limit: 5,
+            account_level_total: "0.00",
+            residual: total,
+          },
+          coverage: { ...attribution().coverage!, unattributed: entries },
+        }),
+      );
+      renderPage();
+
+      const list = await screen.findByTestId("attr-unattributed");
+      expect(list.querySelectorAll("li:not(.attr-unattributed-others)")).toHaveLength(5);
+      expect(screen.getByText(/最多 5 只/)).toBeTruthy();
+
+      const others = screen.getByTestId("attr-unattributed-others");
+      expect(others.textContent).toContain(`其余 ${othersCount} 只`);
+      expect(others.textContent).toContain(`${othersTotal} 元`);
+      // 追加行是非标的、不可点击，也不出现伪代码。
+      expect(others.querySelector("a")).toBeNull();
+      expect(others.textContent).not.toContain("pseudo");
+      // 对账行仍展示「全部标的」合计（含被截断部分）。
+      expect(screen.getByTestId("attr-reconciliation").textContent).toContain(
+        `明细合计 ${total} 元`,
+      );
+    },
+  );
 
   it("数据质量：阻断项优先、显示用户动作、开发命令折叠（U-10）", async () => {
     getAttribution.mockResolvedValue(
@@ -412,6 +604,36 @@ describe("AttributionPage", () => {
     expect(details?.textContent).toContain("BRIDGE_MISMATCH");
   });
 
+  it("数据质量：info 提示不计入缺口数，单独展示中性色提示标签", async () => {
+    getAttribution.mockResolvedValue(
+      attribution({
+        // 后端 status 仍按 missing 存在性判为 degraded；info 只是展示分层，
+        // 不参与数据质量缺口计数（也不把整页状态翻回 ok）。
+        status: "degraded",
+        missing: [
+          {
+            code: "SECTOR_MAPPING_MISSING",
+            field: "factors",
+            field_label: "因子归因",
+            severity: "info",
+            reason: "2 个标的无行业归属（已退市或不在可归因范围内，不影响归因口径）：600077,600636",
+            what_to_do: "无需处理",
+          },
+        ],
+      }),
+    );
+    renderPage();
+
+    await screen.findByTestId("attr-quality");
+    expect(screen.getByTestId("attr-quality-summary").textContent).toContain(
+      "无数据质量缺口（1 条提示）",
+    );
+    const item = screen.getByTestId("attr-missing-SECTOR_MAPPING_MISSING");
+    expect(item.getAttribute("data-severity")).toBe("info");
+    expect(item.querySelector(".attr-severity")?.textContent).toContain("提示");
+    expect(item.textContent).toContain("不影响归因口径");
+  });
+
   it("加载态：骨架屏 + aria-busy（U-13）", async () => {
     getAttribution.mockReturnValue(new Promise(() => undefined));
     renderPage();
@@ -427,7 +649,10 @@ describe("AttributionPage", () => {
     await screen.findByTestId("attr-pnl-value");
     fireEvent.click(screen.getByRole("button", { name: "上月" }));
     await waitFor(() =>
-      expect(getAttribution).toHaveBeenLastCalledWith({ period: latestCompletedMonth() }),
+      expect(getAttribution).toHaveBeenLastCalledWith({
+        period: latestCompletedMonth(),
+        classification_lookahead: "deny",
+      }),
     );
 
     fireEvent.change(screen.getByLabelText("期间类型"), { target: { value: "custom" } });
@@ -459,5 +684,124 @@ describe("AttributionPage", () => {
     for (const forbidden of ["parseFloat", "parseInt", "Number(", "toFixed"]) {
       expect(pageSource).not.toContain(forbidden);
     }
+  });
+
+  it("数据起点：三源起点与请求区间起点分别渲染", async () => {
+    getAttribution.mockResolvedValue(
+      attribution({
+        assumptions: {
+          benchmark_id: "hs300_tr",
+          data_sources: { asset_daily: "2026-06-30", market: "2026-06-30", sector: "2026-06-29" },
+          data_starts: {
+            period: "2026-06-01",
+            asset_daily: "2025-01-02",
+            market: "2026-05-06",
+            sector: "2026-06-05",
+          },
+        },
+      }),
+    );
+    renderPage();
+
+    const starts = await screen.findByTestId("attr-data-starts");
+    expect(starts.textContent).toContain("资产 2025-01-02");
+    expect(starts.textContent).toContain("行情 2026-05-06");
+    expect(starts.textContent).toContain("板块 2026-06-05");
+    expect(starts.textContent).toContain("区间 2026-06-01");
+    expect(screen.getByTestId("attr-caliber").textContent).toContain("板块 2026-06-05");
+    expect(screen.getByTestId("attr-caliber").textContent).toContain("区间 2026-06-01");
+  });
+
+  it("板块因子：期初回退价标注", async () => {
+    const factors = FACTORS.map((factor) =>
+      factor.code === "sector"
+        ? {
+            ...factor,
+            presentation: { ...factor.presentation, sector_bar_fallback: true },
+          }
+        : factor,
+    );
+    getAttribution.mockResolvedValue(attribution({ factors }));
+    renderPage();
+
+    const marker = await screen.findByTestId("attr-sector-fallback");
+    expect(marker.textContent).toContain("期初回退价");
+    expect(screen.getByTestId("attr-factor-sector").textContent).toContain("期初回退价");
+  });
+
+  it("lookahead：默认 deny，且无警告条", async () => {
+    getAttribution.mockResolvedValue(attribution());
+    renderPage();
+
+    await screen.findByTestId("attr-summary-text");
+    expect(getAttribution).toHaveBeenCalledWith({
+      period: "2026-06",
+      classification_lookahead: "deny",
+    });
+    expect(screen.queryByTestId("attr-lookahead-banner")).toBeNull();
+    expect((screen.getByRole("checkbox") as HTMLInputElement).checked).toBe(false);
+  });
+
+  it("lookahead：URL 带 allow 时请求 allow、勾选并显示警告条", async () => {
+    getAttribution.mockResolvedValue(
+      attribution({
+        // 回溯披露已降为 info：无 warning 级因素时整页仍为 ok（区别于 warning 聚合）。
+        status: "ok",
+        missing: [
+          {
+            code: "SECTOR_CLASSIFICATION_LOOKAHEAD",
+            field: "classification_as_of",
+            severity: "info",
+            reason:
+              "行业归属使用最新快照（2026-11-03）回溯历史区间，可能与当时实际归属不符；仅用于历史回看",
+            what_to_do: "仅用于回看历史；考核用途请以当时时点成分复核",
+          },
+        ],
+        assumptions: {
+          benchmark_id: "hs300_tr",
+          data_sources: { asset_daily: "2026-06-30", market: "2026-06-30", sector: "2026-06-29" },
+          data_starts: {
+            period: "2026-06-01",
+            asset_daily: "2025-01-02",
+            market: "2026-05-06",
+            sector: "2026-06-05",
+          },
+          classification_lookahead: true,
+        },
+      }),
+    );
+    renderPage("/attribution?period=2026-06&lookahead=allow");
+
+    const banner = await screen.findByTestId("attr-lookahead-banner");
+    expect(banner.textContent).toContain("最新行业成分回溯历史");
+    // 只有 info 提示不降级：徽标为「正常」。
+    expect(screen.getByTestId("attr-status-badge").textContent).toBe("正常");
+    expect(getAttribution).toHaveBeenCalledWith({
+      period: "2026-06",
+      classification_lookahead: "allow",
+    });
+    expect((screen.getByRole("checkbox") as HTMLInputElement).checked).toBe(true);
+    const item = screen.getByTestId("attr-missing-SECTOR_CLASSIFICATION_LOOKAHEAD");
+    expect(item.getAttribute("data-severity")).toBe("info");
+    expect(item.textContent).toContain("ⓘ");
+    expect(item.textContent).toContain("可能与当时实际归属不符");
+    // info 不计入数据质量缺口。
+    expect(screen.getByTestId("attr-quality-summary").textContent).toContain(
+      "无数据质量缺口（1 条提示）",
+    );
+  });
+
+  it("lookahead：勾选后切换为 allow 请求", async () => {
+    getAttribution.mockResolvedValue(attribution());
+    renderPage();
+
+    await screen.findByTestId("attr-summary-text");
+    fireEvent.click(screen.getByRole("checkbox"));
+    await waitFor(() =>
+      expect(getAttribution).toHaveBeenCalledWith({
+        period: "2026-06",
+        classification_lookahead: "allow",
+      }),
+    );
   });
 });

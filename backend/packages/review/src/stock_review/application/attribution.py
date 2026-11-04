@@ -24,6 +24,7 @@ import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 from functools import partial
 from typing import Any, Final
 
@@ -45,7 +46,7 @@ from stock_core.attribution.ranking import (
     total_abs_amounts,
 )
 from stock_core.fifo import build_rounds
-from stock_core.values import Money
+from stock_core.values import Money, Ratio
 from stock_ledger.models import Trade
 from stock_ledger.repositories.trades import TradeRepository
 from stock_platform.ports import MarketDataSource, SectorDataSource
@@ -55,6 +56,7 @@ from stock_platform.symbols import is_bond
 from stock_review.application.assets import (
     ASSET_DEFINITION_VERSION,
     get_asset_build_state,
+    last_trading_day,
     latest_workday,
     valuation_end,
 )
@@ -97,6 +99,7 @@ from stock_review.attribution.residual import (
     BUCKET_INTEREST,
     BUCKET_OTHER,
     BUCKET_UNATTRIBUTED,
+    ResidualSplit,
     split_residual,
 )
 from stock_review.attribution.segments import (
@@ -130,10 +133,31 @@ _DB_TAXONOMY_INDUSTRY: Final[str] = "industry_sw"
 _SECTOR_DATASET_KEY: Final[str] = "sector"
 # 桥接容差（§3.2.1：|MTM − 桥接式| ≤ 1 分）。
 _BRIDGE_TOLERANCE_UNITS: Final[int] = 1
-# RESIDUAL_LARGE 阈值（§3.6/§4.4）：|gap| > max(1 元, 0.1%×V_end)。
-_RESIDUAL_MIN_UNITS: Final[int] = 100
+# 残差容差比例（单一口径来源，§3.6/§4.4）：期末总资产 × 0.2%。
+# 单位：比例（非百分点）；`Decimal` 避免 float；期末总资产取
+# `review.asset_daily.total_assets_units`（区间末行，标度整数分）。
+RESIDUAL_TOLERANCE_PCT: Final[Decimal] = Decimal("0.002")
 # NOT_PIT 判定（§4.3）：快照日距期末 >90 天 → degraded。
 _NOT_PIT_DAYS: Final[int] = 90
+# 缺行业映射文案（zh/en × warning/info）：warning = 数据质量缺口（参与本期且缺映射）；
+# info 分支为防御保留（装配层已让「本期不参与」标的提前跳过、不产生 missing[]）。
+# `lang` 只换文案不换数字。
+_MAPPING_COPY: Final[dict[tuple[str, str], tuple[str, str]]] = {
+    ("zh", "warning"): ("缺行业归属（数据质量缺口）", "同步成分/确认 A 股"),
+    ("zh", "info"): ("无行业归属（已退市或不在可归因范围内，不影响归因口径）", "无需处理"),
+    (
+        "en",
+        "warning",
+    ): ("missing industry mapping (data-quality gap)", "sync sector members / confirm A-share"),
+    (
+        "en",
+        "info",
+    ): (
+        "missing industry mapping (delisted or outside attributable universe; "
+        "does not affect attribution)",
+        "no action needed",
+    ),
+}
 
 # factors[].code 的固定产品名（FACTOR_NAMES 键为 str，FactorCode 是 StrEnum）。
 
@@ -167,6 +191,29 @@ class AttributionSample:
     n_symbols: int
     min_n: int
     sample_status: str  # "ok" | "insufficient"
+
+
+@dataclass(frozen=True, slots=True)
+class ResidualReconciliation:
+    """残差对账（§4.4）：标的合计 + 账户级桶合计 == residual（全部为标度整数分）。
+
+    - `unattributed_symbols_total`：`split.per_symbol` 合计（= corporate_action_pnl +
+      unattributed_price_pnl 中落到标的的部分，含被 5 条展示上限截断的标的）；
+    - `account_level_total`：不按标的分摊的桶（interest / other_cashflow /
+      dividend_without_position）+ valuation_gap；
+    - `listed_total` / `others_count` / `others_total`：明细展示前 `display_limit`
+      条的金额合计、其后标的数与其金额合计；`listed_total + others_total ==
+      unattributed_symbols_total`；
+    - 等式由构造保证：residual = Σ五桶 + valuation_gap。
+    """
+
+    unattributed_symbols_total_units: int
+    account_level_total_units: int
+    residual_units: int
+    listed_units: int
+    others_count: int
+    others_units: int
+    display_limit: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -204,6 +251,7 @@ class AttributionResult:
     data_as_of: date | None
     inputs_hash: str
     links: Mapping[str, str]
+    residual_reconciliation: ResidualReconciliation | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -397,8 +445,11 @@ def _assumptions(
     board_bar_as_of: date | None,
     benchmark_id: str,
     data_sources: Mapping[str, date | None],
+    data_starts: Mapping[str, date | None] | None = None,
+    sector_bar_fallback: Mapping[str, Any] | None = None,
+    residual_tolerance: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """`assumptions` 18 键（§6.2；全部进 `inputs_hash`）。"""
+    """`assumptions` 键集（§6.2；全部进 `inputs_hash`）。"""
     return {
         "total_pnl_basis": "asset_daily_mtm",
         "beginning_value_source": beginning_value_source,
@@ -418,6 +469,13 @@ def _assumptions(
         "rounding": "scaled_int_half_up_1e-8; residual_plug",
         "adjust": "none",
         "data_sources": dict(data_sources),
+        "data_starts": dict(data_starts or {}),
+        "sector_bar_fallback": dict(
+            sector_bar_fallback or {"count": 0, "symbols": [], "first_bar_date": None}
+        ),
+        "residual_tolerance": dict(
+            residual_tolerance or {"amount": None, "pct": str(_tolerance_pct_ratio()), "base": None}
+        ),
     }
 
 
@@ -565,10 +623,152 @@ def _blocked_result(
     )
 
 
-def _exclusion_missing(reason: str, codes: Sequence[str]) -> MissingEntry | None:
-    """标的剔除 → `missing[]` 披露条目（资产类别排除不进 missing[]）。"""
+def _sector_start_fallback_missing(
+    fallbacks: Mapping[str, tuple[date, date]], *, lang: str = "zh"
+) -> MissingEntry:
+    """期初行业指数回退披露（info；节假日缺口，不影响归因口径）。"""
+    codes = sorted(fallbacks)
+    sample_code, (missing_date, actual_date) = sorted(fallbacks.items())[0]
+    if lang == "en":
+        reason = (
+            f"{len(codes)} symbol(s) missing sector index bar at period start (holiday); "
+            f"fell back to the next available close (e.g. {sample_code}: "
+            f"{missing_date} → {actual_date}): {','.join(codes[:8])}"
+        )
+        action = "no action needed (holiday gap; fallback close used)"
+    else:
+        reason = (
+            f"{len(codes)} 个标的的行业指数期初缺 bar（节假日），"
+            f"回退取参考日之后首个可得收盘（如 {sample_code}：{missing_date} → "
+            f"{actual_date}）：{','.join(codes[:8])}"
+        )
+        action = "无需处理（节假日缺口，已回退取最近可得收盘）"
+    return MissingEntry(
+        field="factors",
+        code="SECTOR_BAR_FALLBACK",
+        reason=reason,
+        what_to_do=action,
+        severity="info",
+    )
+
+
+def _tolerance_pct_ratio() -> Ratio:
+    """容差比例的 API 定点表示（唯一来源仍是 `RESIDUAL_TOLERANCE_PCT`）。"""
+    return Ratio(int(RESIDUAL_TOLERANCE_PCT * RATIO_SCALE))
+
+
+def _aggregate_status(
+    missing: Sequence[MissingEntry],
+    *,
+    unattributed_units: int,
+    tolerance_units: int,
+) -> str:
+    """ok/degraded 聚合（§4.4；blocked 由短路路径决定，此处不负责）。
+
+    只有 `severity=info` 的提示（如 look-ahead 披露、板块指数期初回退、容差内残差）
+    不影响归因口径，不降级；任一 warning/blocker、或 |未归因金额| 超容差 → degraded。
+    """
+    if any(item.severity != "info" for item in missing) or (
+        abs(unattributed_units) > tolerance_units
+    ):
+        return "degraded"
+    return "ok"
+
+
+def _display_name(raw: str | None) -> str | None:
+    """账单名称的展示形态：压缩空白（账单里可能含换行），空白视为缺失 → None。"""
+    if not raw:
+        return None
+    return " ".join(raw.split()) or None
+
+
+def _residual_reconciliation(
+    *,
+    split: ResidualSplit,
+    coverage: Coverage,
+    gap_units: int,
+    residual_units: int,
+) -> ResidualReconciliation:
+    """残差对账（§4.4，标度整数）：Σper_symbol + (dividend+interest+other+gap) == residual。
+
+    `per_symbol` 是 corporate/unattributed 两桶中**落到标的**的部分（含被展示上限
+    截断的标的），因此恒等于两桶之和；等式由 `residual = Σ五桶 + gap` 保证。
+    `listed + others` 由 `coverage` 的已展示/未展示分组给出，同样恒等于 Σper_symbol。
+    """
+    return ResidualReconciliation(
+        unattributed_symbols_total_units=sum(split.per_symbol.values()),
+        account_level_total_units=(
+            split.buckets[BUCKET_DIVIDEND]
+            + split.buckets[BUCKET_INTEREST]
+            + split.buckets[BUCKET_OTHER]
+            + gap_units
+        ),
+        residual_units=residual_units,
+        listed_units=coverage.unattributed_listed_total_units,
+        others_count=coverage.unattributed_others_count,
+        others_units=coverage.unattributed_others_total_units,
+        display_limit=coverage.unattributed_display_limit,
+    )
+
+
+def _residual_missing(*, unattributed_units: int, tolerance_units: int) -> MissingEntry | None:
+    """残差披露（§4.4）：超容差 → `RESIDUAL_LARGE`(warning)；容差内非零 → info。
+
+    `unattributed_units` = `decomposition.residual_units`（各桶合计，含估值差），
+    取绝对值与容差比较；为 0 时不产生条目（避免无意义提示）。
+    """
+    magnitude = abs(unattributed_units)
+    amount = Money(magnitude)
+    tolerance = Money(tolerance_units)
+    if magnitude > tolerance_units:
+        return MissingEntry(
+            field="residual",
+            code="RESIDUAL_LARGE",
+            reason=f"未归因金额 {amount} 元（绝对值）超过容差 {tolerance} 元（期末总资产的 {_tolerance_pct_ratio().as_pct()}）",
+            what_to_do="看 residual_breakdown",
+        )
+    if unattributed_units != 0:
+        return MissingEntry(
+            field="residual",
+            code="RESIDUAL_WITHIN_TOLERANCE",
+            severity="info",
+            reason=f"未归因 {amount} 元，低于期末资产 {_tolerance_pct_ratio().as_pct()}（阈值 {tolerance} 元）",
+            what_to_do="无需处理",
+        )
+    return None
+
+
+def _exclusion_missing(
+    reason: str,
+    codes: Sequence[str],
+    *,
+    lang: str = "zh",
+    severity: str = "warning",
+) -> MissingEntry | None:
+    """标的剔除 → `missing[]` 披露条目（资产类别排除不进 missing[]）。
+
+    `severity`：缺行业映射按「是否参与本期」分级——参与本期（有持仓/区间内交易）
+    为 `warning`（数据质量缺口）；`info` 分支为防御保留（正常路径已提前跳过）。
+    `lang` 只切换该码的中英文案，不改变数字（§5.5）；其他码暂保持中文。
+    """
+    shown = sorted(codes)[:8]
+    if reason == REASON_MAPPING:
+        copy_key = ("en" if lang == "en" else "zh", "warning" if severity == "warning" else "info")
+        note, action = _MAPPING_COPY[copy_key]
+        if lang == "en":
+            suffix = f" (+{len(codes) - len(shown)} more)" if len(codes) > len(shown) else ""
+            reason_text = f"{len(codes)} symbol(s) {note}: {','.join(shown)}{suffix}"
+        else:
+            suffix = f" 等 {len(codes)} 只" if len(codes) > len(shown) else ""
+            reason_text = f"{len(codes)} 个标的{note}：{','.join(shown)}{suffix}"
+        return MissingEntry(
+            field="factors",
+            code=reason,
+            reason=reason_text,
+            what_to_do=action,
+            severity=severity,
+        )
     label = {
-        REASON_MAPPING: ("缺行业归属", "同步成分/确认 A 股"),
         REASON_BAR: ("行业指数日线缺失", "运行 make sync-sectors ARGS='--start …'"),
         REASON_PRICE: ("参考价缺失", "补行情"),
         REASON_CORPORATE: ("区间内送转/配股", "等待复权能力（P2）"),
@@ -577,25 +777,24 @@ def _exclusion_missing(reason: str, codes: Sequence[str]) -> MissingEntry | None
     }.get(reason)
     if label is None:
         return None
-    shown = sorted(codes)[:8]
     suffix = f" 等 {len(codes)} 只" if len(codes) > len(shown) else ""
     return MissingEntry(
         field="factors",
         code=reason,
         reason=f"{len(codes)} 个标的（{label[0]}）：{','.join(shown)}{suffix}",
         what_to_do=label[1],
+        severity=severity,
     )
 
 
 def _pit_view(
     *,
-    sector_data: SectorDataSource,
     membership_as_of: date | None,
     period_end: date,
     lookahead_requested: bool,
+    first_sync_on: date | None,
 ) -> _Pit:
     """PIT 算法（§4.3，冻结）：first_sync_on / membership_as_of → classification_as_of。"""
-    first_sync_on = sector_data.capabilities.history_start_for(_DB_TAXONOMY_INDUSTRY)
     not_covered = membership_as_of is None or (
         first_sync_on is not None and period_end < first_sync_on
     )
@@ -714,17 +913,28 @@ async def build_attribution(
     )
 
     # ── 5. PIT（§4.3）：blocked 短路（不读行情/板块）──────────────
+    # 区间终点是自然日（月末常落在周末/节假日），板块成分按交易日发布；先对齐到
+    # 「≤ 区间末日的最后一个交易日」（如 2026-10-31 周六 → 2026-10-30），
+    # 否则以 10-31 查 SCD2 成分会漏掉以 10-30 关闭/新增的行。
     sync_state = await SectorRepository(session).sync_state(dataset_key=_SECTOR_DATASET_KEY)
     membership_as_of = (
         sync_state.membership_as_of
         if sync_state is not None and sync_state.membership_as_of is not None
         else sector_data.as_of
     )
+    classification_period_end = await last_trading_day(session, resolved.end)
+    # live 数据源的 capabilities 依赖一次异步刷新才知历史下界；未刷新时用 DB
+    # `MIN(effective_from)` 兜底，避免历史区间被误判为「已覆盖」而取不到成分。
+    first_sync_on = sector_data.capabilities.history_start_for(_DB_TAXONOMY_INDUSTRY)
+    if first_sync_on is None:
+        first_sync_on = await SectorRepository(session).first_member_effective_from(
+            taxonomy=_DB_TAXONOMY_INDUSTRY
+        )
     pit = _pit_view(
-        sector_data=sector_data,
         membership_as_of=membership_as_of,
-        period_end=resolved.end,
+        period_end=classification_period_end,
         lookahead_requested=classification_lookahead,
+        first_sync_on=first_sync_on,
     )
     sector_fingerprint: dict[str, Any] = {
         "checksum": sync_state.checksum if sync_state is not None else None,
@@ -756,12 +966,26 @@ async def build_attribution(
             sector_fingerprint=sector_fingerprint,
         )
     if pit.lookahead_used:
+        if lang == "en":
+            reason = (
+                "industry membership uses the latest snapshot "
+                f"({pit.classification_as_of}) for a period earlier than its first sync; "
+                "may differ from the membership in effect at the time; review-only"
+            )
+            action = "review-only; verify with point-in-time membership for evaluation"
+        else:
+            reason = (
+                f"行业归属使用最新快照（{pit.classification_as_of}）回溯历史区间，"
+                "区间早于成分首次同步日，可能与当时实际归属不符；仅用于历史回看"
+            )
+            action = "仅用于回看历史；考核用途请以当时时点成分复核"
         missing.append(
             MissingEntry(
                 field="classification_as_of",
                 code="SECTOR_CLASSIFICATION_LOOKAHEAD",
-                reason="区间早于成分首次同步日，已按人工批准使用最早可用快照",
-                what_to_do="确认口径例外已批准",
+                reason=reason,
+                what_to_do=action,
+                severity="info",
             )
         )
     elif pit.stale:
@@ -779,6 +1003,13 @@ async def build_attribution(
         (trade.security_code, trade.security_name) for trade in trades
     )
     canonical = partial(canonical_code, bond_alias)
+    # 名称来源：仓库无独立证券主数据表，`security_name` 随账单落在 `ledger.trade`；
+    # 按 canonical 代码记最新非空名称（与 nav/dashboard 同口径），缺失即 None。
+    code_names: dict[str, str] = {}
+    for trade in trades:
+        name = _display_name(trade.security_name)
+        if name:
+            code_names[canonical(trade.security_code)] = name
     res_all = build_rounds(
         trades_to_events([t for t in trades if t.trade_date <= resolved.end], bond_alias=bond_alias)
     )
@@ -921,7 +1152,9 @@ async def build_attribution(
     )
     gap_units = decomposition.residual_units - sum(split.buckets.values())
     assert window.v_end_units is not None
-    residual_threshold = max(_RESIDUAL_MIN_UNITS, window.v_end_units // 1000)
+    # 容差 = 期末总资产（`asset_daily.total_assets_units`）× `RESIDUAL_TOLERANCE_PCT`
+    # （标度整数分，向下取整）。
+    residual_tolerance_units = int(Decimal(window.v_end_units) * RESIDUAL_TOLERANCE_PCT)
 
     # ── 11. 状态机（§4.4）：存在候选但零可归因段（板块数据全缺）→ blocked
     stock_plans = [plan for plan in bundle.plans if plan.symbol_class == "stock"]
@@ -974,11 +1207,25 @@ async def build_attribution(
         decomposition=decomposition,
         per_symbol=split.per_symbol,
         base_basis=base_basis,
+        names=code_names,
     )
+    plan_by_code = {plan.security_code: plan for plan in bundle.plans}
     for reason, codes in bundle.excluded_by_reason.items():
-        entry = _exclusion_missing(reason, codes)
-        if entry is not None:
-            missing.append(entry)
+        if reason == REASON_MAPPING:
+            # 按「是否属于可归因 universe」分级：退市/非在交易 → info；
+            # 仍在交易的 A 股缺行业映射 → warning（数据质量缺口）。
+            info_codes = [code for code in codes if not plan_by_code[code].in_universe]
+            warn_codes = [code for code in codes if plan_by_code[code].in_universe]
+        else:
+            info_codes, warn_codes = [], list(codes)
+        if info_codes:
+            entry = _exclusion_missing(reason, info_codes, lang=lang, severity="info")
+            if entry is not None:
+                missing.append(entry)
+        if warn_codes:
+            entry = _exclusion_missing(reason, warn_codes, lang=lang)
+            if entry is not None:
+                missing.append(entry)
     if bundle.price_fallback_symbols:
         missing.append(
             MissingEntry(
@@ -989,34 +1236,32 @@ async def build_attribution(
                 what_to_do="补行情",
             )
         )
-    if bundle.sector_fallback_symbols:
+    if bundle.sector_start_fallbacks:
+        missing.append(_sector_start_fallback_missing(bundle.sector_start_fallbacks, lang=lang))
+    other_sector_fallback = [
+        code for code in bundle.sector_fallback_symbols if code not in bundle.sector_start_fallbacks
+    ]
+    if other_sector_fallback:
         missing.append(
             MissingEntry(
                 field="factors",
                 code="SECTOR_BAR_FALLBACK",
-                reason=f"{len(bundle.sector_fallback_symbols)} 个标的的行业指数参考日与个股参考日不一致："
-                f"{','.join(sorted(bundle.sector_fallback_symbols)[:8])}",
+                reason=f"{len(other_sector_fallback)} 个标的的行业指数参考日与个股参考日不一致："
+                f"{','.join(sorted(other_sector_fallback)[:8])}",
                 what_to_do="补板块日线",
             )
         )
-    if abs(gap_units) > residual_threshold:
-        missing.append(
-            MissingEntry(
-                field="residual",
-                code="RESIDUAL_LARGE",
-                reason=f"无法解释的残差 {Money(abs(gap_units))} 元超过阈值 "
-                f"{Money(residual_threshold)} 元",
-                what_to_do="看 residual_breakdown",
-            )
-        )
-
-    unexplained_bucket = any(
-        value != 0 for key, value in split.buckets.items() if key != BUCKET_GAP
+    residual_entry = _residual_missing(
+        unattributed_units=decomposition.residual_units,
+        tolerance_units=residual_tolerance_units,
     )
-    status = (
-        "degraded"
-        if (missing or unexplained_bucket or abs(gap_units) > residual_threshold)
-        else "ok"
+    if residual_entry is not None:
+        missing.append(residual_entry)
+
+    status = _aggregate_status(
+        missing,
+        unattributed_units=decomposition.residual_units,
+        tolerance_units=residual_tolerance_units,
     )
 
     # ── 13. 因子 / 结论 / assumptions / hash ──────────────────────
@@ -1044,7 +1289,12 @@ async def build_attribution(
                 rank=rank,
                 conclusion=factor_conclusion(amount, lang=lang),
                 presentation=factor_presentation(
-                    amount_units=amount, ratio_units=ratio, share_units=share
+                    amount_units=amount,
+                    ratio_units=ratio,
+                    share_units=share,
+                    sector_bar_fallback=(
+                        str(code) == "sector" and bool(bundle.sector_start_fallbacks)
+                    ),
                 ),
             )
         )
@@ -1088,6 +1338,17 @@ async def build_attribution(
     )
 
     sector_as_of = board_bar_as_of or pit.membership_as_of or sector_data.as_of
+    market_start = min((entries[0][0] for entries in ladder.values() if entries), default=None)
+    sector_start = min(
+        (entries[0][0] for entries in sector_ladder.values() if entries), default=None
+    )
+    sector_fallback_marks = {
+        "count": len(bundle.sector_start_fallbacks),
+        "symbols": sorted(bundle.sector_start_fallbacks),
+        "first_bar_date": min(
+            (actual for _, actual in bundle.sector_start_fallbacks.values()), default=None
+        ),
+    }
     assumptions = _assumptions(
         beginning_value_source=window.beginning_value_source,
         classification_version=classification_version,
@@ -1099,6 +1360,18 @@ async def build_attribution(
             "asset_daily": asset_data_as_of,
             "market": market_data.as_of,
             "sector": sector_as_of,
+        },
+        data_starts={
+            "period": resolved.start,
+            "asset_daily": asset_first,
+            "market": market_start,
+            "sector": sector_start,
+        },
+        sector_bar_fallback=sector_fallback_marks,
+        residual_tolerance={
+            "amount": str(Money(residual_tolerance_units)),
+            "pct": str(_tolerance_pct_ratio()),
+            "base": str(Money(window.v_end_units)),
         },
     )
     payload = _hash_payload(
@@ -1126,6 +1399,13 @@ async def build_attribution(
         BUCKET_OTHER: split.buckets[BUCKET_OTHER],
         BUCKET_GAP: gap_units,
     }
+    # 对账行（§4.4）：标的合计 + 账户级桶合计 = residual（后端派生，前端零口径）。
+    reconciliation = _residual_reconciliation(
+        split=split,
+        coverage=coverage,
+        gap_units=gap_units,
+        residual_units=decomposition.residual_units,
+    )
     return AttributionResult(
         model="five_factor",
         ratio_basis="amount/total_pnl",
@@ -1156,4 +1436,5 @@ async def build_attribution(
             "rounds": "/rounds",
             "reports": "/reports",
         },
+        residual_reconciliation=reconciliation,
     )

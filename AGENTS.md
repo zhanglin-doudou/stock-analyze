@@ -104,7 +104,7 @@ raise ApiError(ErrorCode.NOT_FOUND, detail=f"trade {trade_id} 不存在")
 5. **分类版本与时点**：`classification_version`（默认 `THS`）随响应透出；成分按 SCD2 时点区间读取，缺失即 fail-closed（`not_covered`），禁止 assumed 近似。**唯一例外（2026-11-02 人工批准）**：五因子归因（M1）默认同样 fail-closed；仅当部署 `SECTOR_LOOKAHEAD_ENABLED=true` 且请求 `classification_lookahead=allow`、经人工批准时，允许用最早可用快照并标 `classification_lookahead=true`/`status=degraded`/`missing[]=SECTOR_CLASSIFICATION_LOOKAHEAD`（详见 [归因设计 §4.3](docs/architecture/2026-11-02-five-factor-attribution.md)）；描述性板块看板与 Brinson（M2）**不得**使用该例外。
 6. **前端零口径**：板块页面只渲染后端 `*_pct`/`*_display`；偏好条宽度用后端绝对百分比串（去符号）作 CSS 宽度，不做 `Number()/parseFloat`。
 
-**live 同步数据源链（`sector_live.py`）**：行业与概念板块统一走同花顺（THS）——目录用 akshare `stock_board_industry_name_ths` / `stock_board_concept_name_ths`；成分股因 akshare 无 THS 成分接口，改为抓取同花顺板块详情页分页表格（`http://q.10jqka.com.cn/{thshy,gn}/detail/code/{code}/page/{n}/`，需 `User-Agent` + `Referer` 头，BeautifulSoup 取 `代码` 列保留前导零）。基准权重仍走 `csindex`。单板成分拉取独立超时+重试，概念板块单板块失败跳过不阻断整批（行业成员互斥校验失败则整批回滚）。
+**live 同步数据源链（`sector_live.py`）**：行业与概念板块统一走同花顺（THS）——目录用 akshare `stock_board_industry_name_ths` / `stock_board_concept_name_ths`；成分股因 akshare 无 THS 成分接口，改为抓取同花顺板块详情页分页表格（`http://q.10jqka.com.cn/{thshy,gn}/detail/code/{code}/page/{n}/`，需 `User-Agent` + `Referer` 头，BeautifulSoup 取 `代码` 列保留前导零）。基准权重仍走 `csindex`。单板成分拉取独立超时+重试，概念板块单板块失败跳过不阻断整批（行业成员互斥校验失败则整批回滚）。**出站治理（P0，2026-11-03）**：板级并发（`SECTOR_LIVE_MAX_CONCURRENCY`，默认 6）+ 全局限速（`SECTOR_THS_RATE_LIMIT_PER_SECOND`，默认 8 req/s，所有页面/日线请求与重试共用）+ WAF 熔断（连续 403/429 抛 `SectorWafBlockedError` 整批快速失败）；不再按页/按板固定 sleep，`_call` 只重试传输层失败。
 
 ---
 

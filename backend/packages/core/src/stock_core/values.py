@@ -162,6 +162,22 @@ class Ratio(Scaled):
         )
         return f"{pct:f}%"
 
+    def as_decimal_str(self) -> str:
+        """展示用数值字符串（不参与计算）：3 位小数、ROUND_HALF_UP、去尾零、不带 `%`。
+
+        `Ratio` 语义是比例（`0.5` 表示 50%），本方法只输出数值部分，百分比语义由调用方决定。
+        舍入后为 -0 的（如 `-0.0004`）统一输出 `"0"`。
+
+        示例：`0.12345 → "0.123"`、`0.12 → "0.12"`、`0.1200001 → "0.12"`、
+        `1.000 → "1"`、`-0.005 → "-0.005"`、`0 → "0"`。
+
+        非有限值（Inf/NaN）无法进入本对象：`Ratio` 只持有 int 标度单位，
+        `from_decimal` 对它们分别抛 `OverflowError` / `ValueError`。
+        """
+        value = self.to_decimal().quantize(Decimal("0.001"), rounding=ROUND_HALF_UP)
+        text = f"{value:f}".rstrip("0").rstrip(".")
+        return "0" if text in {"", "-0"} else text
+
 
 def money_of(value: str | Decimal | int) -> Money:
     if isinstance(value, int) and not isinstance(value, bool):

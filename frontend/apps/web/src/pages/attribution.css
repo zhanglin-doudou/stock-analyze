@@ -353,6 +353,12 @@
   color: var(--text-2);
 }
 
+/* info（提示）：中性色，不升级为数据质量警告 */
+.attr-severity[data-severity='info'] {
+  color: var(--muted);
+  font-weight: var(--fw-regular);
+}
+
 .attr-ratio-hint {
   margin: var(--s3) 0 0;
   font-size: var(--fs-xs);
@@ -363,6 +369,14 @@
   font-size: var(--fs-sm);
   color: var(--muted);
   line-height: var(--lh-normal);
+}
+
+.attr-reconciliation {
+  margin: 0 0 var(--s3);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-normal);
+  /* 负号 + 千分位长金额在窄屏可断行，不横向溢出。 */
+  overflow-wrap: anywhere;
 }
 
 .attr-ratio-warn {
@@ -377,6 +391,19 @@
 .attr-unattributed-details > summary {
   cursor: pointer;
   font-size: var(--fs-sm);
+}
+
+/* 「其余 N 只」汇总行：非标的、不可点击，弱化展示以区别于上方逐只明细。 */
+.attr-unattributed li.attr-unattributed-others {
+  padding-inline: var(--s2);
+  background: var(--surface-2);
+  color: var(--muted);
+}
+
+.attr-unattributed li.attr-unattributed-others strong {
+  flex: 1 1 auto;
+  font-weight: var(--fw-regular);
+  color: var(--muted);
 }
 
 .attr-what-to-do {
@@ -400,4 +427,33 @@
   gap: var(--s4);
   margin-top: var(--s4);
   font-size: var(--fs-sm);
+}
+
+/* 回溯开关：默认关闭，显眼风险提示（未来信息） */
+.attr-lookahead-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  font-size: var(--fs-sm);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.attr-lookahead-toggle input {
+  accent-color: var(--warning, #b45309);
+}
+
+.attr-lookahead-banner {
+  margin: var(--s3) 0 0;
+  padding: var(--s2) var(--s3);
+  border-left: 3px solid var(--warning, #b45309);
+  background: var(--warning-soft, #fef3c7);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
+/* 板块因子「期初回退价」标注 */
+.attr-factor-fallback {
+  margin-left: var(--s2);
+  font-size: var(--fs-xs);
 }

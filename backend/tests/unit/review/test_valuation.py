@@ -32,6 +32,7 @@ from stock_review.application.valuation import (
     load_prices,
     market_failure_cause,
     money_fund_share_delta,
+    new_stock_codes_in_window,
     new_stock_pending_codes,
     total_market_value,
 )
@@ -484,6 +485,48 @@ def test_new_stock_pending_codes_only_paid_rows() -> None:
     other = _trade(trade_date=date(2026, 5, 20), category_="new_stock", security_code="001237")
     assert new_stock_pending_codes([paid, notice, other]) == {"001237"}
     assert new_stock_pending_codes([notice, other]) == set()
+
+
+def test_new_stock_codes_in_window_is_period_scoped() -> None:
+    """窗口化判定（归因专用）：只有 `[start, end]` 内的缴款行计入。
+
+    历史缴款（窗口前）、零金额通知行均不计；边界日（左/右端）按闭区间计入。
+    """
+    paid_may = _trade(
+        trade_date=date(2026, 5, 18),
+        category_="new_stock",
+        security_code="001237",
+        quantity_units=shares("500"),
+        amount_units=-cents("26630"),
+    )
+    paid_jun = _trade(
+        trade_date=date(2026, 6, 2),
+        category_="new_stock",
+        security_code="002001",
+        quantity_units=shares("500"),
+        amount_units=-cents("10000"),
+    )
+    notice_jun = _trade(
+        trade_date=date(2026, 6, 2),
+        category_="new_stock",
+        security_code="003001",
+        quantity_units=shares("500"),
+        amount_units=0,
+    )
+    boundary_jun = _trade(
+        trade_date=date(2026, 6, 30),  # 右端闭区间
+        category_="new_stock",
+        security_code="004001",
+        quantity_units=shares("500"),
+        amount_units=-cents("8000"),
+    )
+    trades = [paid_may, paid_jun, notice_jun, boundary_jun]
+
+    june = new_stock_codes_in_window(trades, start=date(2026, 6, 1), end=date(2026, 6, 30))
+    assert june == {"002001", "004001"}  # 001237 是历史缴款；003001 是零金额通知
+    may = new_stock_codes_in_window(trades, start=date(2026, 5, 1), end=date(2026, 5, 31))
+    assert may == {"001237"}
+    assert new_stock_codes_in_window(trades, start=date(2026, 7, 1), end=date(2026, 7, 31)) == set()
 
 
 def test_new_stock_pending_quote_falls_back_to_subscription_cost() -> None:

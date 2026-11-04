@@ -80,7 +80,7 @@ class Settings(BaseSettings):
     sector_mode: Literal["replay", "live"] = Field("replay", alias="SECTOR_MODE")
     sector_fixtures_file: Path | None = Field(None, alias="SECTOR_FIXTURES_FILE")
     sector_cache_read_only: bool = Field(True, alias="SECTOR_CACHE_READ_ONLY")
-    sector_live_max_concurrency: int = Field(2, alias="SECTOR_LIVE_MAX_CONCURRENCY")
+    sector_live_max_concurrency: int = Field(6, alias="SECTOR_LIVE_MAX_CONCURRENCY")
     sector_live_timeout_seconds: float = Field(30.0, alias="SECTOR_LIVE_TIMEOUT_SECONDS")
     sector_live_retry_attempts: int = Field(2, alias="SECTOR_LIVE_RETRY_ATTEMPTS")
     sector_industry_level_default: int = Field(1, alias="SECTOR_INDUSTRY_LEVEL_DEFAULT")
@@ -92,8 +92,17 @@ class Settings(BaseSettings):
     sector_benchmark_max_age_days: int = Field(45, alias="SECTOR_BENCHMARK_MAX_AGE_DAYS")
     sector_industry_stale_days: int = Field(35, alias="SECTOR_INDUSTRY_STALE_DAYS")
     sector_concept_stale_days: int = Field(7, alias="SECTOR_CONCEPT_STALE_DAYS")
-    sector_ths_call_interval_seconds: float = Field(0.6, alias="SECTOR_THS_CALL_INTERVAL_SECONDS")
-    sector_ths_page_interval_seconds: float = Field(0.6, alias="SECTOR_THS_PAGE_INTERVAL_SECONDS")
+    # P0 性能（2026-11-03）：同花顺出站统一走全局限速器；下面两个固定间隔字段
+    # 仅保留以兼容旧 .env，同步路径已不再读取（改为 SECTOR_THS_RATE_LIMIT_PER_SECOND）。
+    sector_ths_call_interval_seconds: float = Field(0.0, alias="SECTOR_THS_CALL_INTERVAL_SECONDS")
+    sector_ths_page_interval_seconds: float = Field(0.0, alias="SECTOR_THS_PAGE_INTERVAL_SECONDS")
+    # 全局限速（所有 THS 页面/日线请求与重试共用）：8 req/s 是实测安全区；
+    # 撞 403 熔断后按需下调；0 表示不限速（仅单测/离线排障用）。
+    sector_ths_rate_limit_per_second: float = Field(8.0, alias="SECTOR_THS_RATE_LIMIT_PER_SECOND")
+    # 同花顺登录态：只从环境注入，禁止写入仓库/日志（`repr=False` 防止误打印）。
+    # 缺失或失效时同步 fail-fast（整批不落库），不保留匿名半截路径。
+    sector_ths_cookie: str | None = Field(None, alias="SECTOR_THS_COOKIE", repr=False)
+    sector_ths_ua: str | None = Field(None, alias="SECTOR_THS_UA")
     sector_sync_retry_attempts: int = Field(3, alias="SECTOR_SYNC_RETRY_ATTEMPTS")
     sector_flat_active_units: int = Field(100_000, alias="SECTOR_FLAT_ACTIVE_UNITS")
     # 2026-11-02 五因子归因（§4.3）：classification_lookahead=allow 的部署开关

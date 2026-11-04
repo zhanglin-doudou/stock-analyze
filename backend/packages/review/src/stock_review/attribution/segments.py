@@ -24,7 +24,7 @@
 
 from __future__ import annotations
 
-from bisect import bisect_right
+from bisect import bisect_left, bisect_right
 from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -39,7 +39,7 @@ from stock_review.application.valuation import (
     QTY_PRICE_SCALE,
     category,
     is_money_fund_row,
-    new_stock_pending_codes,
+    new_stock_codes_in_window,
 )
 
 # 剔除码（`missing[]` 响应字段；资产类别排除不进 missing[]，仅 coverage 列出）。
@@ -55,6 +55,11 @@ REASON_ASSET_CLASS = ""
 # 有建仓语义的分类（与资产表 COST_ADD_CATEGORIES 同口径；金额≠0 才建仓）。
 _COST_ADD = frozenset({"buy", "rights", "new_stock"})
 _BUY_SELL = frozenset({"buy", "sell"})
+
+
+# 期初板块指数缺 bar 的回退窗口（自然日）：覆盖元旦/春节等长假。
+# 期末方向不启用回退（避免引入未来信息）。
+SECTOR_START_FALLBACK_DAYS = 5
 
 
 class _BarMissingError(Exception):
@@ -78,6 +83,14 @@ class SymbolPlan:
     price_fallback: bool = False  # 参考价用了前收（≤45 天窗口）
     sector_fallback: bool = False  # 指数参考日与个股参考日不一致
     bucket_kind: str = "none"  # corporate_action_pnl | unattributed_price_pnl | none
+    # 是否属于可归因 universe：A 股 stock 类且**参与本期**（期末有未平仓 lot、
+    # 区间内有平仓、或区间内有持仓类流水）。不参与本期的历史清仓/退市标的不产生
+    # missing[]；参与但缺映射/缺价的仍按 warning 披露（§4.4）。
+    in_universe: bool = True
+    # 是否参与本期（不限标的类别；coverage.symbols_participating 口径）。
+    participating: bool = False
+    # 期初回退明细（缺失参考日, 实际取到的日期）；None 表示期末严格匹配。
+    sector_start_fallback: tuple[date, date] | None = None
 
 
 @dataclass(slots=True)
@@ -89,6 +102,8 @@ class PlanBundle:
     excluded_by_reason: dict[str, list[str]] = field(default_factory=dict)
     price_fallback_symbols: list[str] = field(default_factory=list)
     sector_fallback_symbols: list[str] = field(default_factory=list)
+    # code -> (期初缺失参考日, 实际回退取到的日期)；仅期初回退（期末严格）。
+    sector_start_fallbacks: dict[str, tuple[date, date]] = field(default_factory=dict)
     # 理论可归因候选（A 股 stock 类，或因数据缺口被剔除的 stock 类）：
     # 「存在候选但零可归因段」→ blocked + SECTOR_DATA_MISSING（§4.4 优先级 1）。
     has_candidate: bool = False
@@ -123,6 +138,23 @@ def _close_entry(
     if index == 0:
         return None
     return entries[index - 1]
+
+
+def _first_entry_within(
+    ladder: Mapping[str, list[tuple[date, int]]],
+    symbol: str,
+    start_ref: date,
+    max_days: int,
+) -> tuple[date, int] | None:
+    """`start_ref` 之后 `max_days` 个自然日内的首个收盘（期初回退用）；无则 None。"""
+    entries = ladder.get(symbol)
+    if not entries:
+        return None
+    index = bisect_left([d for d, _ in entries], start_ref)
+    if index >= len(entries):
+        return None
+    entry = entries[index]
+    return entry if (entry[0] - start_ref) <= timedelta(days=max_days) else None
 
 
 def _fee_basis_unknown(trade: Trade) -> bool:
@@ -179,7 +211,10 @@ def build_symbol_plans(
     由调用方算好传入，本模块零时钟）。
     """
     trade_by_id = {t.id: t for t in trades}
-    new_stocks = {canonical(c) for c in new_stock_pending_codes(trades)}
+    # 新股排除按**本期窗口**判定（§4.4）：只在窗口 [t0, t1] 内出现新股缴款行的标的
+    # 才按 `new_stock` 排除；历史中签、本期无新股行的标的本期按普通 `stock` 参与归因。
+    # 估值兜底（缺价按认购成本）仍用全历史的 `new_stock_pending_codes`（D11）。
+    new_stocks = {canonical(c) for c in new_stock_codes_in_window(trades, start=t0, end=t1)}
     data_error_codes = {canonical(de.security_code) for de in res_all.data_errors}
     data_error_codes.discard("")
 
@@ -244,6 +279,8 @@ def build_symbol_plans(
             bundle.price_fallback_symbols.append(code)
         if plan.sector_fallback:
             bundle.sector_fallback_symbols.append(code)
+        if plan.sector_start_fallback is not None:
+            bundle.sector_start_fallbacks[code] = plan.sector_start_fallback
         if not plan.attributed:
             reason = plan.reason_code or REASON_ASSET_CLASS
             bundle.excluded_by_reason.setdefault(reason, []).append(code)
@@ -272,8 +309,15 @@ def _plan_for_symbol(
     dividends: Mapping[str, int],
     fallback_anchors: Mapping[str, int],
 ) -> SymbolPlan:
-    """单标的计划：先按优先级判剔除，再两级分摊构段（§3.3）。"""
+    """单标的计划：先判「本期是否参与」与剔除优先级，再两级分摊构段（§3.3）。"""
     trades_amount = sum(t.amount_units for t in trades_sym)
+    closed_fills = [f for f in fills_sym if t0 <= f.close_date <= t1]
+    open_lots = list(open_sym)
+    holding_rows = [t for t in trades_sym if category(t) in _COST_ADD | {"sell", "bonus"}]
+    # 候选集来自**全历史** FIFO（长期持有/已清仓标的都会生成 plan），但只有在本期仍有
+    # 未平仓 lot、区间内平仓、或区间内有持仓类流水时才算「参与本期」。
+    participating = bool(closed_fills or open_lots or holding_rows)
+    in_universe = klass == "stock" and participating
 
     def _excluded(reason: str | None, bucket: str) -> SymbolPlan:
         return SymbolPlan(
@@ -287,7 +331,14 @@ def _plan_for_symbol(
             trades_amount_units=trades_amount,
             dividend_units=0,
             bucket_kind=bucket,
+            in_universe=in_universe,
+            participating=participating,
         )
+
+    # 本期不参与（无持仓、无区间内平仓/开仓、无窗口持仓行）→ 不产生 missing[] 条目
+    # （§4.4：历史清仓/退市标的与其数据缺口不影响本期归因口径）。
+    if not participating:
+        return _excluded(None, "unattributed_price_pnl")
 
     bucket = "corporate_action_pnl" if code in corporate else "unattributed_price_pnl"
     if code in corporate:
@@ -299,8 +350,6 @@ def _plan_for_symbol(
     if code not in memberships:
         return _excluded(REASON_MAPPING, bucket)
 
-    closed_fills = [f for f in fills_sym if t0 <= f.close_date <= t1]
-    open_lots = list(open_sym)
     if not closed_fills and not open_lots:
         # 窗口内无段（零金额中签/送转通知行标的等）：不产生段，行金额由残差桶吸收。
         return _excluded(None, "unattributed_price_pnl")
@@ -339,13 +388,28 @@ def _plan_for_symbol(
 
     sector_code = memberships[code]
     sector_fallback = False
+    start_fallback: tuple[date, date] | None = None
 
     def _sector_amount(base_units: int, start_ref: date, end_ref: date) -> int | None:
-        """段板块金额（单步取整）；指数缺口 → `_BarMissingError`（整标的剔除）。"""
-        nonlocal sector_fallback
+        """段板块金额（单步取整）；指数缺口 → `_BarMissingError`（整标的剔除）。
+
+        期初：优先 `≤ start_ref` 最近收盘；取不到时允许 `start_ref` 之后
+        `SECTOR_START_FALLBACK_DAYS` 个自然日内首个收盘（节假日回退，记 info 披露）。
+        期末：严格 `≤ end_ref`，不回退（避免引入未来信息）。
+        """
+        nonlocal sector_fallback, start_fallback
         start_entry = _close_entry(sector_ladder, sector_code, start_ref)
+        if start_entry is None:
+            start_entry = _first_entry_within(
+                sector_ladder, sector_code, start_ref, SECTOR_START_FALLBACK_DAYS
+            )
+            if start_entry is None:
+                raise _BarMissingError
+            if start_fallback is None:
+                start_fallback = (start_ref, start_entry[0])
+            sector_fallback = True
         end_entry = _close_entry(sector_ladder, sector_code, end_ref)
-        if start_entry is None or end_entry is None:
+        if end_entry is None:
             raise _BarMissingError
         if start_entry[0] != start_ref or end_entry[0] != end_ref:
             sector_fallback = True
@@ -521,6 +585,9 @@ def _plan_for_symbol(
         price_fallback=price_fallback,
         sector_fallback=sector_fallback,
         bucket_kind="none",
+        in_universe=in_universe,
+        participating=True,
+        sector_start_fallback=start_fallback,
     )
 
 
