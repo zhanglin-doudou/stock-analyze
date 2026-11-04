@@ -59,11 +59,10 @@ function isoDate(date: Date): string {
   return `${date.getFullYear()}-${month}-${day}`;
 }
 
-/** 近 N 个完整自然月的闭区间（U-14）。 */
 function lastNMonthsRange(count: number): string {
   const now = new Date();
-  const end = new Date(now.getFullYear(), now.getMonth(), 0);
-  const start = new Date(end.getFullYear(), end.getMonth() - (count - 1), 1);
+  const end = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const start = new Date(end.getFullYear(), end.getMonth() - (count - 1), now.getDate());
   return `${isoDate(start)}..${isoDate(end)}`;
 }
 
@@ -82,7 +81,10 @@ const QUICK_RANGES: Array<{ label: string; build: () => string }> = [
 ];
 
 /** 五因子释义（术语统一；U-15）。 */
-const FACTOR_DEFINITIONS: Record<string, { definition: string; source: string }> = {
+const FACTOR_DEFINITIONS: Record<
+  string,
+  { definition: string; source: string }
+> = {
   selection: {
     definition: '个股选择相对基准的超额收益。',
     source: '回合持仓 + 板块基准权重',
@@ -106,7 +108,10 @@ const FACTOR_DEFINITIONS: Record<string, { definition: string; source: string }>
 };
 
 /** 原始码值一律转人话；未知码保留可追溯但加“未识别”前缀（U-02）。 */
-function labelFor(map: Record<string, string>, code: string | null | undefined): string {
+function labelFor(
+  map: Record<string, string>,
+  code: string | null | undefined,
+): string {
   if (code == null || code === '') return '—';
   return map[code] ?? `未识别项（${code}）`;
 }
@@ -132,7 +137,8 @@ function formatPct(value: string | null | undefined): string {
  */
 function compareDecimalStrings(left: string, right: string): number {
   const signOf = (value: string): number => (value.startsWith('-') ? -1 : 1);
-  const absOf = (value: string): string => (value.startsWith('-') ? value.slice(1) : value);
+  const absOf = (value: string): string =>
+    value.startsWith('-') ? value.slice(1) : value;
   const compareAbs = (a: string, b: string): number => {
     const [aInt = '', aDec = ''] = a.split('.');
     const [bInt = '', bDec = ''] = b.split('.');
@@ -172,7 +178,11 @@ const USER_ACTION_LABELS: Record<string, string> = {
   COVERAGE_LOW: '查看下方覆盖率与未归因标的',
 };
 
-const SEVERITY_ORDER: Record<string, number> = { blocker: 0, warning: 1, info: 2 };
+const SEVERITY_ORDER: Record<string, number> = {
+  blocker: 0,
+  warning: 1,
+  info: 2,
+};
 const SEVERITY_LABELS: Record<string, string> = {
   blocker: '阻断',
   warning: '降级',
@@ -180,10 +190,7 @@ const SEVERITY_LABELS: Record<string, string> = {
 };
 
 /** 只读展示用：assumptions 中字符串项（U-06/U-11）。 */
-function assumptionText(
-  data: Attribution,
-  key: string,
-): string | undefined {
+function assumptionText(data: Attribution, key: string): string | undefined {
   const value = data.assumptions?.[key];
   return typeof value === 'string' && value !== '' ? value : undefined;
 }
@@ -214,7 +221,8 @@ function residualToleranceText(data: Attribution): string | undefined {
   const value = data.assumptions?.['residual_tolerance'];
   if (value == null || typeof value !== 'object') return undefined;
   const tolerance = value as Record<string, unknown>;
-  const amount = typeof tolerance.amount === 'string' ? tolerance.amount : undefined;
+  const amount =
+    typeof tolerance.amount === 'string' ? tolerance.amount : undefined;
   const base = typeof tolerance.base === 'string' ? tolerance.base : undefined;
   if (amount == null || base == null) return undefined;
   // 比例口径只在后端（`assumptions.residual_tolerance.pct`），前端零口径不解析/换算。
@@ -301,7 +309,8 @@ function MissingList({
   // 阻断项优先（U-10）。
   const ordered = [...missing].sort(
     (left, right) =>
-      (SEVERITY_ORDER[left.severity] ?? 2) - (SEVERITY_ORDER[right.severity] ?? 2),
+      (SEVERITY_ORDER[left.severity] ?? 2) -
+      (SEVERITY_ORDER[right.severity] ?? 2),
   );
   return (
     <ul className="attr-missing" data-testid="attr-missing">
@@ -342,10 +351,14 @@ function MissingList({
 /** 顶栏 KPI：把“本期盈亏”提到页面主信息位置（U-12）。 */
 function TotalPnlBar({ data }: { data: Attribution }): ReactElement {
   const tone = signTone(data.total_pnl);
-  const label = tone === 'neg' ? '本期亏损' : tone === 'pos' ? '本期盈利' : '本期持平';
+  const label =
+    tone === 'neg' ? '本期亏损' : tone === 'pos' ? '本期盈利' : '本期持平';
   return (
     <section className="attr-pnl-bar" data-testid="attr-pnl-bar">
-      <strong className={`attr-pnl-value num is-${tone}`} data-testid="attr-pnl-value">
+      <strong
+        className={`attr-pnl-value num is-${tone}`}
+        data-testid="attr-pnl-value"
+      >
         {label} {formatMoney(data.total_pnl)}
       </strong>
       <span className="muted">数据截至 {data.data_as_of ?? '—'}</span>
@@ -400,8 +413,8 @@ function SummaryCard({ data }: { data: Attribution }): ReactElement {
 
 function ResidualCard({ data }: { data: Attribution }): ReactElement {
   // 桶按金额从大到小排序（只做展示排序，不解析数值；U-08）。
-  const buckets = Object.entries(data.residual_breakdown ?? {}).sort((left, right) =>
-    compareDecimalStrings(right[1], left[1]),
+  const buckets = Object.entries(data.residual_breakdown ?? {}).sort(
+    (left, right) => compareDecimalStrings(right[1], left[1]),
   );
   // 展示条数与「其余 N 只」均由后端切分（`display_limit` 单一来源），前端不截断。
   const unattributed = data.coverage?.unattributed ?? [];
@@ -420,10 +433,16 @@ function ResidualCard({ data }: { data: Attribution }): ReactElement {
             <span className="attr-ratio-warn">（残差大于本期总损益）</span>
           ) : null}
           {toleranceText ? (
-            <span data-testid="attr-residual-tolerance"> · {toleranceText}</span>
+            <span data-testid="attr-residual-tolerance">
+              {' '}
+              · {toleranceText}
+            </span>
           ) : null}
           {withinTolerance ? (
-            <span className="muted" data-testid="attr-residual-tolerance-status">
+            <span
+              className="muted"
+              data-testid="attr-residual-tolerance-status"
+            >
               {' '}
               · 容差内（不降级）
             </span>
@@ -471,7 +490,9 @@ function ResidualCard({ data }: { data: Attribution }): ReactElement {
       {/* 对账行：全部数字来自后端派生字段（零口径，不在前端加总/取整）。 */}
       {data.residual_reconciliation ? (
         <p className="attr-reconciliation" data-testid="attr-reconciliation">
-          明细合计 {formatMoney(data.residual_reconciliation.unattributed_symbols_total)} + 账户级{' '}
+          明细合计{' '}
+          {formatMoney(data.residual_reconciliation.unattributed_symbols_total)}{' '}
+          + 账户级{' '}
           {formatMoney(data.residual_reconciliation.account_level_total)} ={' '}
           <strong className="num">
             {formatMoney(data.residual_reconciliation.residual)}
@@ -505,12 +526,15 @@ function ResidualCard({ data }: { data: Attribution }): ReactElement {
               </li>
             ))}
             {/* 第 display_limit 条之后的标的汇总行（非标的、不可点击）；数字全部来自后端。 */}
-            {data.residual_reconciliation && data.residual_reconciliation.others_count > 0 ? (
+            {data.residual_reconciliation &&
+            data.residual_reconciliation.others_count > 0 ? (
               <li
                 className="attr-unattributed-others"
                 data-testid="attr-unattributed-others"
               >
-                <strong>其余 {data.residual_reconciliation.others_count} 只</strong>
+                <strong>
+                  其余 {data.residual_reconciliation.others_count} 只
+                </strong>
                 <span className="num">
                   {formatMoney(data.residual_reconciliation.others_total)}
                 </span>
@@ -537,19 +561,22 @@ function CaliberNotes({ data }: { data: Attribution }): ReactElement {
         <dt>数据起点</dt>
         <dd>
           资产 {dataStartText(data, 'asset_daily') ?? '—'} · 行情{' '}
-          {dataStartText(data, 'market') ?? '—'} · 板块 {dataStartText(data, 'sector') ?? '—'} ·
-          区间 {data.period_start}
+          {dataStartText(data, 'market') ?? '—'} · 板块{' '}
+          {dataStartText(data, 'sector') ?? '—'} · 区间 {data.period_start}
         </dd>
         <dt>基准</dt>
-        <dd>{labelFor(BENCHMARK_LABELS, assumptionText(data, 'benchmark_id'))}</dd>
+        <dd>
+          {labelFor(BENCHMARK_LABELS, assumptionText(data, 'benchmark_id'))}
+        </dd>
         <dt>比率分母</dt>
         <dd>{labelFor(RATIO_BASIS_LABELS, data.ratio_basis)}</dd>
         <dt>总损益口径</dt>
         <dd>{labelFor(TOTAL_PNL_BASIS_LABELS, data.total_pnl_basis)}</dd>
       </dl>
       <p className="attr-caliber-term">
-        术语：残差 = 未归属（与结论中的“未归属”同义）；板块配置 = 用户常说的“板块”；
-        本期参与标的 = 期末有持仓或区间内有买卖的标的（历史候选另计，仅统计口径）。
+        术语：残差 = 未归属（与结论中的“未归属”同义）；板块配置 =
+        用户常说的“板块”； 本期参与标的 =
+        期末有持仓或区间内有买卖的标的（历史候选另计，仅统计口径）。
       </p>
       <details className="attr-tech-details">
         <summary className="muted">
@@ -559,7 +586,9 @@ function CaliberNotes({ data }: { data: Attribution }): ReactElement {
           {Object.entries(assumptions).map(([key, value]) => (
             <Fragment key={key}>
               <dt>{key}</dt>
-              <dd>{typeof value === 'string' ? value : JSON.stringify(value)}</dd>
+              <dd>
+                {typeof value === 'string' ? value : JSON.stringify(value)}
+              </dd>
             </Fragment>
           ))}
         </dl>
@@ -584,7 +613,8 @@ function QualityCard({ data }: { data: Attribution }): ReactElement {
       <div className="attr-panel-head">
         <h2>数据质量</h2>
         <span className="muted" data-testid="attr-quality-summary">
-          {summary} · 数据截至 {data.data_as_of ?? '—'} · 口径 {data.definition_version}
+          {summary} · 数据截至 {data.data_as_of ?? '—'} · 口径{' '}
+          {data.definition_version}
         </span>
       </div>
       {missing.length > 0 ? (
@@ -605,7 +635,7 @@ function QualityCard({ data }: { data: Attribution }): ReactElement {
 export function AttributionPage(): ReactElement {
   const [params, setParams] = useSearchParams();
   const period = params.get('period') ?? yearToDateRange();
-  const allowLookahead = params.get('lookahead') === 'allow' || 'allow';
+  const allowLookahead = (params.get('lookahead') ?? 'allow') === 'allow';
 
   const query = useQuery({
     queryKey: ['attribution', period, allowLookahead],
@@ -627,7 +657,7 @@ export function AttributionPage(): ReactElement {
   const updateLookahead = (next: boolean): void => {
     const draft = new URLSearchParams(params);
     if (next) draft.set('lookahead', 'allow');
-    else draft.delete('lookahead');
+    else draft.set('lookahead', 'deny');
     setParams(draft, { replace: true });
   };
 
@@ -708,8 +738,8 @@ export function AttributionPage(): ReactElement {
           <span>数据截至 {data?.data_as_of ?? '—'}</span>
           {data ? (
             <span data-testid="attr-data-starts">
-              数据起点 资产 {assetsStart ?? '—'} · 行情 {marketStart ?? '—'} · 板块{' '}
-              {sectorStart ?? '—'} · 区间 {data.period_start}
+              数据起点 资产 {assetsStart ?? '—'} · 行情 {marketStart ?? '—'} ·
+              板块 {sectorStart ?? '—'} · 区间 {data.period_start}
             </span>
           ) : null}
           {data ? (
@@ -721,7 +751,9 @@ export function AttributionPage(): ReactElement {
                 </span>
               ) : null}
               {blocked ? (
-                <span data-testid="attr-period-end">区间末端 {data.period_end}</span>
+                <span data-testid="attr-period-end">
+                  区间末端 {data.period_end}
+                </span>
               ) : null}
               <span>
                 总损益口径{' '}
@@ -738,7 +770,11 @@ export function AttributionPage(): ReactElement {
           ) : null}
         </div>
         {lookaheadActive(data) ? (
-          <p className="attr-lookahead-banner" data-testid="attr-lookahead-banner" role="alert">
+          <p
+            className="attr-lookahead-banner"
+            data-testid="attr-lookahead-banner"
+            role="alert"
+          >
             已使用最新行业成分回溯历史：行业归属取自最新快照，可能与当时实际归属不符。
           </p>
         ) : null}
