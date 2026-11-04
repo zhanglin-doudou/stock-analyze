@@ -1338,6 +1338,8 @@ class AttributionPresentationOut(StrictModel):
     ratio_pct: str | None = None
     share_pct: str | None = None
     tone: Literal["positive", "negative", "flat"]
+    # 板块因子是否使用了期初回退价（节假日缺口；仅 sector 可能为 True）。
+    sector_bar_fallback: bool = False
 
 
 class AttributionFactorOut(StrictModel):

@@ -1387,6 +1387,11 @@ export interface components {
             bar_pct?: string | null;
             /** Ratio Pct */
             ratio_pct?: string | null;
+            /**
+             * Sector Bar Fallback
+             * @default false
+             */
+            sector_bar_fallback: boolean;
             /** Share Pct */
             share_pct?: string | null;
             /**

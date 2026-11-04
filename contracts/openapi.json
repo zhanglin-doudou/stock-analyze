@@ -1031,6 +1031,11 @@
             ],
             "title": "Ratio Pct"
           },
+          "sector_bar_fallback": {
+            "default": false,
+            "title": "Sector Bar Fallback",
+            "type": "boolean"
+          },
           "share_pct": {
             "anyOf": [
               {

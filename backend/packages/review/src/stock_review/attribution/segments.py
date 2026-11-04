@@ -24,7 +24,7 @@
 
 from __future__ import annotations
 
-from bisect import bisect_right
+from bisect import bisect_left, bisect_right
 from collections import defaultdict
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -58,6 +58,11 @@ _COST_ADD = frozenset({"buy", "rights", "new_stock"})
 _BUY_SELL = frozenset({"buy", "sell"})
 
 
+# 期初板块指数缺 bar 的回退窗口（自然日）：覆盖元旦/春节等长假。
+# 期末方向不启用回退（避免引入未来信息）。
+SECTOR_START_FALLBACK_DAYS = 5
+
+
 class _BarMissingError(Exception):
     """板块指数覆盖缺口（内部控制流；整标的剔除）。"""
 
@@ -83,6 +88,8 @@ class SymbolPlan:
     # 退市/长期停牌（期末 45 天内无任何 bar）为 False——缺行业映射时降级为 info，
     # 因为这类标的本就不参与归因（§4.4）。
     in_universe: bool = True
+    # 期初回退明细（缺失参考日, 实际取到的日期）；None 表示期末严格匹配。
+    sector_start_fallback: tuple[date, date] | None = None
 
 
 @dataclass(slots=True)
@@ -94,6 +101,8 @@ class PlanBundle:
     excluded_by_reason: dict[str, list[str]] = field(default_factory=dict)
     price_fallback_symbols: list[str] = field(default_factory=list)
     sector_fallback_symbols: list[str] = field(default_factory=list)
+    # code -> (期初缺失参考日, 实际回退取到的日期)；仅期初回退（期末严格）。
+    sector_start_fallbacks: dict[str, tuple[date, date]] = field(default_factory=dict)
     # 理论可归因候选（A 股 stock 类，或因数据缺口被剔除的 stock 类）：
     # 「存在候选但零可归因段」→ blocked + SECTOR_DATA_MISSING（§4.4 优先级 1）。
     has_candidate: bool = False
@@ -140,6 +149,23 @@ def _in_universe(
     """
     entry = _close_entry(ladder, symbol, expected_p1_date)
     return entry is not None and (expected_p1_date - entry[0]) <= PRICE_LOOKBACK
+
+
+def _first_entry_within(
+    ladder: Mapping[str, list[tuple[date, int]]],
+    symbol: str,
+    start_ref: date,
+    max_days: int,
+) -> tuple[date, int] | None:
+    """`start_ref` 之后 `max_days` 个自然日内的首个收盘（期初回退用）；无则 None。"""
+    entries = ladder.get(symbol)
+    if not entries:
+        return None
+    index = bisect_left([d for d, _ in entries], start_ref)
+    if index >= len(entries):
+        return None
+    entry = entries[index]
+    return entry if (entry[0] - start_ref) <= timedelta(days=max_days) else None
 
 
 def _fee_basis_unknown(trade: Trade) -> bool:
@@ -261,6 +287,8 @@ def build_symbol_plans(
             bundle.price_fallback_symbols.append(code)
         if plan.sector_fallback:
             bundle.sector_fallback_symbols.append(code)
+        if plan.sector_start_fallback is not None:
+            bundle.sector_start_fallbacks[code] = plan.sector_start_fallback
         if not plan.attributed:
             reason = plan.reason_code or REASON_ASSET_CLASS
             bundle.excluded_by_reason.setdefault(reason, []).append(code)
@@ -358,13 +386,28 @@ def _plan_for_symbol(
 
     sector_code = memberships[code]
     sector_fallback = False
+    start_fallback: tuple[date, date] | None = None
 
     def _sector_amount(base_units: int, start_ref: date, end_ref: date) -> int | None:
-        """段板块金额（单步取整）；指数缺口 → `_BarMissingError`（整标的剔除）。"""
-        nonlocal sector_fallback
+        """段板块金额（单步取整）；指数缺口 → `_BarMissingError`（整标的剔除）。
+
+        期初：优先 `≤ start_ref` 最近收盘；取不到时允许 `start_ref` 之后
+        `SECTOR_START_FALLBACK_DAYS` 个自然日内首个收盘（节假日回退，记 info 披露）。
+        期末：严格 `≤ end_ref`，不回退（避免引入未来信息）。
+        """
+        nonlocal sector_fallback, start_fallback
         start_entry = _close_entry(sector_ladder, sector_code, start_ref)
+        if start_entry is None:
+            start_entry = _first_entry_within(
+                sector_ladder, sector_code, start_ref, SECTOR_START_FALLBACK_DAYS
+            )
+            if start_entry is None:
+                raise _BarMissingError
+            if start_fallback is None:
+                start_fallback = (start_ref, start_entry[0])
+            sector_fallback = True
         end_entry = _close_entry(sector_ladder, sector_code, end_ref)
-        if start_entry is None or end_entry is None:
+        if end_entry is None:
             raise _BarMissingError
         if start_entry[0] != start_ref or end_entry[0] != end_ref:
             sector_fallback = True
@@ -541,6 +584,7 @@ def _plan_for_symbol(
         sector_fallback=sector_fallback,
         bucket_kind="none",
         in_universe=in_universe,
+        sector_start_fallback=start_fallback,
     )
 
 

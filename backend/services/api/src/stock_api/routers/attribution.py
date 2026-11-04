@@ -88,6 +88,7 @@ def _factor_out(factor: AttributionFactor) -> AttributionFactorOut:
             ratio_pct=factor.presentation.ratio_pct,
             share_pct=factor.presentation.share_pct,
             tone=factor.presentation.tone,
+            sector_bar_fallback=factor.presentation.sector_bar_fallback,
         ),
     )
 

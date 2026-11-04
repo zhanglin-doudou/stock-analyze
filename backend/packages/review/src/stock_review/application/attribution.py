@@ -416,8 +416,10 @@ def _assumptions(
     board_bar_as_of: date | None,
     benchmark_id: str,
     data_sources: Mapping[str, date | None],
+    data_starts: Mapping[str, date | None] | None = None,
+    sector_bar_fallback: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """`assumptions` 18 键（§6.2；全部进 `inputs_hash`）。"""
+    """`assumptions` 键集（§6.2；全部进 `inputs_hash`）。"""
     return {
         "total_pnl_basis": "asset_daily_mtm",
         "beginning_value_source": beginning_value_source,
@@ -437,6 +439,10 @@ def _assumptions(
         "rounding": "scaled_int_half_up_1e-8; residual_plug",
         "adjust": "none",
         "data_sources": dict(data_sources),
+        "data_starts": dict(data_starts or {}),
+        "sector_bar_fallback": dict(
+            sector_bar_fallback or {"count": 0, "symbols": [], "first_bar_date": None}
+        ),
     }
 
 
@@ -581,6 +587,35 @@ def _blocked_result(
             "rounds": "/rounds",
             "reports": "/reports",
         },
+    )
+
+
+def _sector_start_fallback_missing(
+    fallbacks: Mapping[str, tuple[date, date]], *, lang: str = "zh"
+) -> MissingEntry:
+    """期初行业指数回退披露（info；节假日缺口，不影响归因口径）。"""
+    codes = sorted(fallbacks)
+    sample_code, (missing_date, actual_date) = sorted(fallbacks.items())[0]
+    if lang == "en":
+        reason = (
+            f"{len(codes)} symbol(s) missing sector index bar at period start (holiday); "
+            f"fell back to the next available close (e.g. {sample_code}: "
+            f"{missing_date} → {actual_date}): {','.join(codes[:8])}"
+        )
+        action = "no action needed (holiday gap; fallback close used)"
+    else:
+        reason = (
+            f"{len(codes)} 个标的的行业指数期初缺 bar（节假日），"
+            f"回退取参考日之后首个可得收盘（如 {sample_code}：{missing_date} → "
+            f"{actual_date}）：{','.join(codes[:8])}"
+        )
+        action = "无需处理（节假日缺口，已回退取最近可得收盘）"
+    return MissingEntry(
+        field="factors",
+        code="SECTOR_BAR_FALLBACK",
+        reason=reason,
+        what_to_do=action,
+        severity="info",
     )
 
 
@@ -1052,13 +1087,18 @@ async def build_attribution(
                 what_to_do="补行情",
             )
         )
-    if bundle.sector_fallback_symbols:
+    if bundle.sector_start_fallbacks:
+        missing.append(_sector_start_fallback_missing(bundle.sector_start_fallbacks, lang=lang))
+    other_sector_fallback = [
+        code for code in bundle.sector_fallback_symbols if code not in bundle.sector_start_fallbacks
+    ]
+    if other_sector_fallback:
         missing.append(
             MissingEntry(
                 field="factors",
                 code="SECTOR_BAR_FALLBACK",
-                reason=f"{len(bundle.sector_fallback_symbols)} 个标的的行业指数参考日与个股参考日不一致："
-                f"{','.join(sorted(bundle.sector_fallback_symbols)[:8])}",
+                reason=f"{len(other_sector_fallback)} 个标的的行业指数参考日与个股参考日不一致："
+                f"{','.join(sorted(other_sector_fallback)[:8])}",
                 what_to_do="补板块日线",
             )
         )
@@ -1107,7 +1147,12 @@ async def build_attribution(
                 rank=rank,
                 conclusion=factor_conclusion(amount, lang=lang),
                 presentation=factor_presentation(
-                    amount_units=amount, ratio_units=ratio, share_units=share
+                    amount_units=amount,
+                    ratio_units=ratio,
+                    share_units=share,
+                    sector_bar_fallback=(
+                        str(code) == "sector" and bool(bundle.sector_start_fallbacks)
+                    ),
                 ),
             )
         )
@@ -1151,6 +1196,17 @@ async def build_attribution(
     )
 
     sector_as_of = board_bar_as_of or pit.membership_as_of or sector_data.as_of
+    market_start = min((entries[0][0] for entries in ladder.values() if entries), default=None)
+    sector_start = min(
+        (entries[0][0] for entries in sector_ladder.values() if entries), default=None
+    )
+    sector_fallback_marks = {
+        "count": len(bundle.sector_start_fallbacks),
+        "symbols": sorted(bundle.sector_start_fallbacks),
+        "first_bar_date": min(
+            (actual for _, actual in bundle.sector_start_fallbacks.values()), default=None
+        ),
+    }
     assumptions = _assumptions(
         beginning_value_source=window.beginning_value_source,
         classification_version=classification_version,
@@ -1163,6 +1219,13 @@ async def build_attribution(
             "market": market_data.as_of,
             "sector": sector_as_of,
         },
+        data_starts={
+            "period": resolved.start,
+            "asset_daily": asset_first,
+            "market": market_start,
+            "sector": sector_start,
+        },
+        sector_bar_fallback=sector_fallback_marks,
     )
     payload = _hash_payload(
         model="five_factor",

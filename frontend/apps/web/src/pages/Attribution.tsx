@@ -195,6 +195,14 @@ function dataSourceText(data: Attribution, key: string): string | undefined {
   return typeof value === 'string' && value !== '' ? value : undefined;
 }
 
+/** 只读展示用：assumptions.data_starts 三源实际起点 + 请求区间起点。 */
+function dataStartText(data: Attribution, key: string): string | undefined {
+  const starts = data.assumptions?.['data_starts'];
+  if (starts == null || typeof starts !== 'object') return undefined;
+  const value = (starts as Record<string, unknown>)[key];
+  return typeof value === 'string' && value !== '' ? value : undefined;
+}
+
 function StatusBadge({ status }: { status: string }): ReactElement {
   return (
     <span className={`dash-badge is-${status}`} data-testid="attr-status-badge">
@@ -241,6 +249,15 @@ function FactorRow({
       </span>
       <span className="attr-factor-conclusion">
         {displayValue(factor.conclusion)}
+        {factor.presentation.sector_bar_fallback ? (
+          <span
+            className="attr-factor-fallback muted"
+            data-testid="attr-sector-fallback"
+            title="期初缺板块指数 bar（节假日），已回退取参考日之后首个可得收盘"
+          >
+            期初回退价
+          </span>
+        ) : null}
         <Link
           className="attr-factor-link"
           to={factor.code === 'sector' ? links.sectors : links.rounds}
@@ -279,11 +296,19 @@ function MissingList({
           <span className="attr-severity" data-severity={item.severity}>
             {SEVERITY_LABELS[item.severity] ?? '降级'}
           </span>
-          <strong>{item.reason}</strong>
-          <span className="muted">影响：{item.field_label ?? item.field}</span>
-          <span className="attr-what-to-do">
-            建议：{USER_ACTION_LABELS[item.code] ?? '联系管理员'}
-          </span>
+          {item.severity === 'info' ? (
+            <p>{item.reason}</p>
+          ) : (
+            <>
+              <strong>{item.reason}</strong>
+              <span className="muted">
+                影响：{item.field_label ?? item.field}
+              </span>
+              <span className="attr-what-to-do">
+                建议：{USER_ACTION_LABELS[item.code] ?? '联系管理员'}
+              </span>
+            </>
+          )}
           <details className="attr-tech-details">
             <summary className="muted">技术详情</summary>
             <div className="muted">
@@ -447,6 +472,12 @@ function CaliberNotes({ data }: { data: Attribution }): ReactElement {
         <dd>{data.definition_version}</dd>
         <dt>数据截至</dt>
         <dd>{data.data_as_of ?? '—'}</dd>
+        <dt>数据起点</dt>
+        <dd>
+          资产 {dataStartText(data, 'asset_daily') ?? '—'} · 行情{' '}
+          {dataStartText(data, 'market') ?? '—'} · 板块 {dataStartText(data, 'sector') ?? '—'} ·
+          区间 {data.period_start}
+        </dd>
         <dt>基准</dt>
         <dd>{labelFor(BENCHMARK_LABELS, assumptionText(data, 'benchmark_id'))}</dd>
         <dt>比率分母</dt>
@@ -539,6 +570,9 @@ export function AttributionPage(): ReactElement {
   const assetsAsOf = data ? dataSourceText(data, 'asset_daily') : undefined;
   const marketAsOf = data ? dataSourceText(data, 'market') : undefined;
   const sectorAsOf = data ? dataSourceText(data, 'sector') : undefined;
+  const assetsStart = data ? dataStartText(data, 'asset_daily') : undefined;
+  const marketStart = data ? dataStartText(data, 'market') : undefined;
+  const sectorStart = data ? dataStartText(data, 'sector') : undefined;
   const hasDataSources =
     assetsAsOf != null || marketAsOf != null || sectorAsOf != null;
 
@@ -585,6 +619,12 @@ export function AttributionPage(): ReactElement {
             页面状态 <StatusBadge status={data?.status ?? 'missing'} />
           </span>
           <span>数据截至 {data?.data_as_of ?? '—'}</span>
+          {data ? (
+            <span data-testid="attr-data-starts">
+              数据起点 资产 {assetsStart ?? '—'} · 行情 {marketStart ?? '—'} · 板块{' '}
+              {sectorStart ?? '—'} · 区间 {data.period_start}
+            </span>
+          ) : null}
           {data ? (
             <>
               {hasDataSources ? (

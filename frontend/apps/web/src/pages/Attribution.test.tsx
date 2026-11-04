@@ -23,7 +23,13 @@ const FACTORS: Attribution["factors"] = [
     share: "0.5940",
     rank: 1,
     conclusion: "拖累 1,900.00 元",
-    presentation: { bar_pct: "59.40%", ratio_pct: "-59.37%", share_pct: "59.40%", tone: "negative" },
+    presentation: {
+      bar_pct: "59.40%",
+      ratio_pct: "-59.37%",
+      share_pct: "59.40%",
+      tone: "negative",
+      sector_bar_fallback: false,
+    },
   },
   {
     code: "sector",
@@ -33,7 +39,13 @@ const FACTORS: Attribution["factors"] = [
     share: "0.2560",
     rank: 2,
     conclusion: "贡献 820.00 元",
-    presentation: { bar_pct: "25.60%", ratio_pct: "25.62%", share_pct: "25.60%", tone: "positive" },
+    presentation: {
+      bar_pct: "25.60%",
+      ratio_pct: "25.62%",
+      share_pct: "25.60%",
+      tone: "positive",
+      sector_bar_fallback: false,
+    },
   },
   {
     code: "buy_timing",
@@ -43,7 +55,13 @@ const FACTORS: Attribution["factors"] = [
     share: "0.0375",
     rank: 3,
     conclusion: "拖累 120.00 元",
-    presentation: { bar_pct: "3.75%", ratio_pct: "-3.75%", share_pct: "3.75%", tone: "negative" },
+    presentation: {
+      bar_pct: "3.75%",
+      ratio_pct: "-3.75%",
+      share_pct: "3.75%",
+      tone: "negative",
+      sector_bar_fallback: false,
+    },
   },
   {
     code: "sell_timing",
@@ -53,7 +71,13 @@ const FACTORS: Attribution["factors"] = [
     share: "0.0000",
     rank: 4,
     conclusion: "影响较小",
-    presentation: { bar_pct: "0.00%", ratio_pct: "0.00%", share_pct: "0.00%", tone: "flat" },
+    presentation: {
+      bar_pct: "0.00%",
+      ratio_pct: "0.00%",
+      share_pct: "0.00%",
+      tone: "flat",
+      sector_bar_fallback: false,
+    },
   },
   {
     code: "fee",
@@ -63,7 +87,13 @@ const FACTORS: Attribution["factors"] = [
     share: "0.1281",
     rank: 5,
     conclusion: "拖累 410.00 元",
-    presentation: { bar_pct: "12.81%", ratio_pct: "-12.81%", share_pct: "12.81%", tone: "negative" },
+    presentation: {
+      bar_pct: "12.81%",
+      ratio_pct: "-12.81%",
+      share_pct: "12.81%",
+      tone: "negative",
+      sector_bar_fallback: false,
+    },
   },
 ];
 
@@ -127,6 +157,12 @@ function attribution(overrides: Partial<Attribution> = {}): Attribution {
     assumptions: {
       benchmark_id: "hs300_tr",
       data_sources: { asset_daily: "2026-06-30", market: "2026-06-30", sector: "2026-06-29" },
+      data_starts: {
+        period: "2026-06-01",
+        asset_daily: "2025-01-02",
+        market: "2026-05-06",
+        sector: "2026-06-05",
+      },
     },
     data_as_of: "2026-06-30",
     inputs_hash: "sha256:abc",
@@ -242,7 +278,12 @@ describe("AttributionPage", () => {
           ratio: null,
           share: null,
           conclusion: null,
-          presentation: { bar_pct: null, ratio_pct: null, tone: "flat" },
+          presentation: {
+            bar_pct: null,
+            ratio_pct: null,
+            tone: "flat",
+            sector_bar_fallback: false,
+          },
         })),
         missing: [
           {
@@ -313,7 +354,12 @@ describe("AttributionPage", () => {
           ratio: null,
           share: null,
           conclusion: null,
-          presentation: { bar_pct: "0.00%", ratio_pct: null, tone: "flat" },
+          presentation: {
+            bar_pct: "0.00%",
+            ratio_pct: null,
+            tone: "flat",
+            sector_bar_fallback: false,
+          },
         })),
         sample: {
           n_segments: 0,
@@ -489,5 +535,48 @@ describe("AttributionPage", () => {
     for (const forbidden of ["parseFloat", "parseInt", "Number(", "toFixed"]) {
       expect(pageSource).not.toContain(forbidden);
     }
+  });
+
+  it("数据起点：三源起点与请求区间起点分别渲染", async () => {
+    getAttribution.mockResolvedValue(
+      attribution({
+        assumptions: {
+          benchmark_id: "hs300_tr",
+          data_sources: { asset_daily: "2026-06-30", market: "2026-06-30", sector: "2026-06-29" },
+          data_starts: {
+            period: "2026-06-01",
+            asset_daily: "2025-01-02",
+            market: "2026-05-06",
+            sector: "2026-06-05",
+          },
+        },
+      }),
+    );
+    renderPage();
+
+    const starts = await screen.findByTestId("attr-data-starts");
+    expect(starts.textContent).toContain("资产 2025-01-02");
+    expect(starts.textContent).toContain("行情 2026-05-06");
+    expect(starts.textContent).toContain("板块 2026-06-05");
+    expect(starts.textContent).toContain("区间 2026-06-01");
+    expect(screen.getByTestId("attr-caliber").textContent).toContain("板块 2026-06-05");
+    expect(screen.getByTestId("attr-caliber").textContent).toContain("区间 2026-06-01");
+  });
+
+  it("板块因子：期初回退价标注", async () => {
+    const factors = FACTORS.map((factor) =>
+      factor.code === "sector"
+        ? {
+            ...factor,
+            presentation: { ...factor.presentation, sector_bar_fallback: true },
+          }
+        : factor,
+    );
+    getAttribution.mockResolvedValue(attribution({ factors }));
+    renderPage();
+
+    const marker = await screen.findByTestId("attr-sector-fallback");
+    expect(marker.textContent).toContain("期初回退价");
+    expect(screen.getByTestId("attr-factor-sector").textContent).toContain("期初回退价");
   });
 });

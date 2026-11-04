@@ -35,7 +35,11 @@ from stock_core.attribution.ranking import (
 )
 from stock_core.fifo import build_rounds
 from stock_ledger.models import Trade
-from stock_review.application.attribution import _exclusion_missing, _mirror_view
+from stock_review.application.attribution import (
+    _exclusion_missing,
+    _mirror_view,
+    _sector_start_fallback_missing,
+)
 from stock_review.application.rebuild import trades_to_events
 from stock_review.attribution.context import (
     BEGIN_SOURCE_STATEMENT,
@@ -56,7 +60,9 @@ from stock_review.attribution.residual import (
     split_residual,
 )
 from stock_review.attribution.segments import (
+    REASON_BAR,
     REASON_MAPPING,
+    _first_entry_within,
     build_symbol_plans,
 )
 from stock_review.models import AssetDaily
@@ -200,6 +206,7 @@ def _build_bundle(
     *,
     memberships: dict[str, str],
     ladder: dict[str, list[tuple[date, int]]] | None = None,
+    sector_ladder: dict[str, list[tuple[date, int]]] | None = None,
 ):  # type: ignore[no-untyped-def]
     """两次 FIFO 重放 + build_symbol_plans（与应用层编排同参）。"""
     res_all = build_rounds(trades_to_events([t for t in trades if t.trade_date <= T1]))
@@ -212,7 +219,7 @@ def _build_bundle(
         res_pre=res_pre,
         ladder=LADDER if ladder is None else ladder,
         memberships=memberships,
-        sector_ladder=SECTOR_LADDER,
+        sector_ladder=SECTOR_LADDER if sector_ladder is None else sector_ladder,
         corporate={},
         canonical=lambda c: c,
         expected_p0_date=P0_DATE,
@@ -603,3 +610,71 @@ def test_copy_compliance_rejects_jargon_and_advice() -> None:
         assert_copy_compliance("本期 BHAR 贡献 1 元")
     with pytest.raises(ValueError, match="买卖建议"):
         assert_copy_compliance("建议买入 600519")
+
+
+def test_sector_start_fallback_uses_next_close_within_holiday_window() -> None:
+    """期初缺 bar 时允许取参考日后首个收盘（节日缺口，记 info 披露）。"""
+    sector_ladder = {
+        "S1": [
+            (date(2025, 3, 5), 1_020_000_000),  # P0(02-28) 后第 5 个自然日
+            (date(2025, 3, 20), 990_000_000),
+            (date(2025, 3, 25), 1_071_000_000),
+            (date(2025, 3, 31), 1_122_000_000),
+        ]
+    }
+    bundle = _build_bundle(_golden_trades(), memberships=MEMBERSHIPS, sector_ladder=sector_ladder)
+    plan = bundle.plans[0]
+    assert plan.attributed is True
+    assert plan.sector_start_fallback == (P0_DATE, date(2025, 3, 5))
+    assert bundle.sector_start_fallbacks == {"600000": (P0_DATE, date(2025, 3, 5))}
+
+
+def test_sector_start_fallback_outside_window_still_excludes() -> None:
+    """首个可得收盘超出 5 个自然日窗口 → 仍按 SECTOR_BAR_MISSING 剔除。"""
+    sector_ladder = {
+        "S1": [
+            (date(2025, 3, 10), 1_020_000_000),  # P0(02-28) 后第 10 个自然日
+            (date(2025, 3, 20), 990_000_000),
+            (date(2025, 3, 25), 1_071_000_000),
+            (date(2025, 3, 31), 1_122_000_000),
+        ]
+    }
+    bundle = _build_bundle(_golden_trades(), memberships=MEMBERSHIPS, sector_ladder=sector_ladder)
+    plan = bundle.plans[0]
+    assert plan.attributed is False
+    assert plan.reason_code == REASON_BAR
+
+
+def test_sector_end_bar_never_fallbacks_forward() -> None:
+    """期末方向严格取 ≤ 参考日最近收盘：即使次日有 bar 也不回退（避免未来信息）。"""
+    sector_ladder = {
+        "S1": [
+            (P0_DATE, 1_000_000_000),
+            (date(2025, 4, 1), 1_130_000_000),  # 04-01：落在期初窗口内也不得用于期末
+        ]
+    }
+    bundle = _build_bundle(_golden_trades(), memberships=MEMBERSHIPS, sector_ladder=sector_ladder)
+    plan = bundle.plans[0]
+    assert plan.attributed is True
+    assert plan.sector_start_fallback is None
+    # 辅助函数本身能取到 04-01，但期末路径不调用它（只走 _close_entry 的 ≤ 语义）。
+    assert _first_entry_within(sector_ladder, "S1", date(2025, 3, 31), 5) == (
+        date(2025, 4, 1),
+        1_130_000_000,
+    )
+
+
+def test_sector_start_fallback_missing_copy_bilingual() -> None:
+    """期初回退披露：info + 中英文案含缺失日/回退日，且不影响归因口径。"""
+    fallbacks = {"600000": (P0_DATE, date(2025, 3, 5))}
+    zh = _sector_start_fallback_missing(fallbacks)
+    assert zh.code == "SECTOR_BAR_FALLBACK"
+    assert zh.severity == "info"
+    assert "2025-02-28 → 2025-03-05" in zh.reason
+    assert zh.what_to_do.startswith("无需处理")
+
+    en = _sector_start_fallback_missing(fallbacks, lang="en")
+    assert en.severity == "info"
+    assert "2025-02-28 → 2025-03-05" in en.reason
+    assert "holiday" in en.reason
+    assert en.what_to_do == "no action needed (holiday gap; fallback close used)"
