@@ -851,13 +851,13 @@ async def build_attribution(
             reason = (
                 "industry membership uses the latest snapshot "
                 f"({pit.classification_as_of}) for a period earlier than its first sync; "
-                "may differ from the membership in effect at the time"
+                "may differ from the membership in effect at the time; review-only"
             )
             action = "review-only; verify with point-in-time membership for evaluation"
         else:
             reason = (
                 f"行业归属使用最新快照（{pit.classification_as_of}）回溯历史区间，"
-                "区间早于成分首次同步日，可能与当时实际归属不符"
+                "区间早于成分首次同步日，可能与当时实际归属不符；仅用于历史回看"
             )
             action = "仅用于回看历史；考核用途请以当时时点成分复核"
         missing.append(
@@ -866,6 +866,7 @@ async def build_attribution(
                 code="SECTOR_CLASSIFICATION_LOOKAHEAD",
                 reason=reason,
                 what_to_do=action,
+                severity="info",
             )
         )
     elif pit.stale:

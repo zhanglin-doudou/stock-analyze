@@ -604,9 +604,9 @@ describe("AttributionPage", () => {
           {
             code: "SECTOR_CLASSIFICATION_LOOKAHEAD",
             field: "classification_as_of",
-            severity: "warning",
+            severity: "info",
             reason:
-              "行业归属使用最新快照（2026-11-03）回溯历史区间，可能与当时实际归属不符",
+              "行业归属使用最新快照（2026-11-03）回溯历史区间，可能与当时实际归属不符；仅用于历史回看",
             what_to_do: "仅用于回看历史；考核用途请以当时时点成分复核",
           },
         ],
@@ -632,8 +632,13 @@ describe("AttributionPage", () => {
       classification_lookahead: "allow",
     });
     expect((screen.getByRole("checkbox") as HTMLInputElement).checked).toBe(true);
-    expect(screen.getByTestId("attr-missing").textContent).toContain(
-      "可能与当时实际归属不符",
+    const item = screen.getByTestId("attr-missing-SECTOR_CLASSIFICATION_LOOKAHEAD");
+    expect(item.getAttribute("data-severity")).toBe("info");
+    expect(item.textContent).toContain("ⓘ");
+    expect(item.textContent).toContain("可能与当时实际归属不符");
+    // info 不计入数据质量缺口。
+    expect(screen.getByTestId("attr-quality-summary").textContent).toContain(
+      "无数据质量缺口（1 条提示）",
     );
   });
 
