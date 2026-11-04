@@ -203,6 +203,11 @@ function dataStartText(data: Attribution, key: string): string | undefined {
   return typeof value === 'string' && value !== '' ? value : undefined;
 }
 
+/** 是否使用了最新行业成分回溯（assumptions 里的布尔标记）。 */
+function lookaheadActive(data: Attribution | undefined): boolean {
+  return data?.assumptions?.['classification_lookahead'] === true;
+}
+
 function StatusBadge({ status }: { status: string }): ReactElement {
   return (
     <span className={`dash-badge is-${status}`} data-testid="attr-status-badge">
@@ -542,10 +547,15 @@ function QualityCard({ data }: { data: Attribution }): ReactElement {
 export function AttributionPage(): ReactElement {
   const [params, setParams] = useSearchParams();
   const period = params.get('period') ?? latestCompletedMonth();
+  const allowLookahead = params.get('lookahead') === 'allow';
 
   const query = useQuery({
-    queryKey: ['attribution', period],
-    queryFn: () => api.attribution.get({ period }),
+    queryKey: ['attribution', period, allowLookahead],
+    queryFn: () =>
+      api.attribution.get({
+        period,
+        classification_lookahead: allowLookahead ? 'allow' : 'deny',
+      }),
     placeholderData: keepPreviousData,
   });
 
@@ -553,6 +563,13 @@ export function AttributionPage(): ReactElement {
     const draft = new URLSearchParams(params);
     if (next) draft.set('period', next);
     else draft.delete('period');
+    setParams(draft, { replace: true });
+  };
+
+  const updateLookahead = (next: boolean): void => {
+    const draft = new URLSearchParams(params);
+    if (next) draft.set('lookahead', 'allow');
+    else draft.delete('lookahead');
     setParams(draft, { replace: true });
   };
 
@@ -615,6 +632,18 @@ export function AttributionPage(): ReactElement {
               </button>
             ))}
           </nav>
+          <label
+            className="attr-lookahead-toggle"
+            title="行业归属取最新快照回溯历史区间，可能与当时实际归属不符（未来信息风险）"
+          >
+            <input
+              type="checkbox"
+              checked={allowLookahead}
+              disabled={query.isLoading}
+              onChange={(event) => updateLookahead(event.target.checked)}
+            />
+            使用最新行业成分回溯历史
+          </label>
           <span>
             页面状态 <StatusBadge status={data?.status ?? 'missing'} />
           </span>
@@ -650,6 +679,11 @@ export function AttributionPage(): ReactElement {
             </>
           ) : null}
         </div>
+        {lookaheadActive(data) ? (
+          <p className="attr-lookahead-banner" data-testid="attr-lookahead-banner" role="alert">
+            已使用最新行业成分回溯历史：行业归属取自最新快照，可能与当时实际归属不符。
+          </p>
+        ) : null}
       </header>
 
       {data == null ? (

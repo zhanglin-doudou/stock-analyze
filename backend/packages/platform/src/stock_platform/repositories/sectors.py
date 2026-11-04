@@ -10,7 +10,7 @@ import uuid
 from collections.abc import Sequence
 from datetime import date, datetime
 
-from sqlalchemy import and_, select
+from sqlalchemy import and_, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from stock_platform.market_models import (
@@ -59,6 +59,18 @@ class SectorRepository:
         ]
 
     # ── 成分（时点区间命中的「当前有效」行）────────────────
+    async def first_member_effective_from(self, *, taxonomy: str) -> date | None:
+        """首个成分观测日（即 SCD2 历史下界）。
+
+        live 数据源的 ``capabilities.history_start`` 依赖一次异步刷新；归因 PIT 判定
+        在刷新前调用时拿不到下界，故提供 DB 兜底。`market.*` 公共缓存，不收
+        `user_id`（与 `list_catalog` 同一显式例外）。
+        """
+        stmt = select(func.min(SectorMember.effective_from)).where(
+            SectorMember.taxonomy == taxonomy
+        )
+        return (await self._session.execute(stmt)).scalar_one()
+
     async def memberships_at(
         self,
         *,

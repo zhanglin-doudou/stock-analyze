@@ -670,13 +670,12 @@ def _exclusion_missing(
 
 def _pit_view(
     *,
-    sector_data: SectorDataSource,
     membership_as_of: date | None,
     period_end: date,
     lookahead_requested: bool,
+    first_sync_on: date | None,
 ) -> _Pit:
     """PIT 算法（§4.3，冻结）：first_sync_on / membership_as_of → classification_as_of。"""
-    first_sync_on = sector_data.capabilities.history_start_for(_DB_TAXONOMY_INDUSTRY)
     not_covered = membership_as_of is None or (
         first_sync_on is not None and period_end < first_sync_on
     )
@@ -805,11 +804,18 @@ async def build_attribution(
         else sector_data.as_of
     )
     classification_period_end = await last_trading_day(session, resolved.end)
+    # live 数据源的 capabilities 依赖一次异步刷新才知历史下界；未刷新时用 DB
+    # `MIN(effective_from)` 兜底，避免历史区间被误判为「已覆盖」而取不到成分。
+    first_sync_on = sector_data.capabilities.history_start_for(_DB_TAXONOMY_INDUSTRY)
+    if first_sync_on is None:
+        first_sync_on = await SectorRepository(session).first_member_effective_from(
+            taxonomy=_DB_TAXONOMY_INDUSTRY
+        )
     pit = _pit_view(
-        sector_data=sector_data,
         membership_as_of=membership_as_of,
         period_end=classification_period_end,
         lookahead_requested=classification_lookahead,
+        first_sync_on=first_sync_on,
     )
     sector_fingerprint: dict[str, Any] = {
         "checksum": sync_state.checksum if sync_state is not None else None,
@@ -841,12 +847,25 @@ async def build_attribution(
             sector_fingerprint=sector_fingerprint,
         )
     if pit.lookahead_used:
+        if lang == "en":
+            reason = (
+                "industry membership uses the latest snapshot "
+                f"({pit.classification_as_of}) for a period earlier than its first sync; "
+                "may differ from the membership in effect at the time"
+            )
+            action = "review-only; verify with point-in-time membership for evaluation"
+        else:
+            reason = (
+                f"行业归属使用最新快照（{pit.classification_as_of}）回溯历史区间，"
+                "区间早于成分首次同步日，可能与当时实际归属不符"
+            )
+            action = "仅用于回看历史；考核用途请以当时时点成分复核"
         missing.append(
             MissingEntry(
                 field="classification_as_of",
                 code="SECTOR_CLASSIFICATION_LOOKAHEAD",
-                reason="区间早于成分首次同步日，已按人工批准使用最早可用快照",
-                what_to_do="确认口径例外已批准",
+                reason=reason,
+                what_to_do=action,
             )
         )
     elif pit.stale:

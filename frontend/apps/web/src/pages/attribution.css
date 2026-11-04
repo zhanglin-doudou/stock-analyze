@@ -408,6 +408,29 @@
   font-size: var(--fs-sm);
 }
 
+/* 回溯开关：默认关闭，显眼风险提示（未来信息） */
+.attr-lookahead-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  font-size: var(--fs-sm);
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.attr-lookahead-toggle input {
+  accent-color: var(--warning, #b45309);
+}
+
+.attr-lookahead-banner {
+  margin: var(--s3) 0 0;
+  padding: var(--s2) var(--s3);
+  border-left: 3px solid var(--warning, #b45309);
+  background: var(--warning-soft, #fef3c7);
+  color: var(--text-2);
+  font-size: var(--fs-sm);
+}
+
 /* 板块因子「期初回退价」标注 */
 .attr-factor-fallback {
   margin-left: var(--s2);

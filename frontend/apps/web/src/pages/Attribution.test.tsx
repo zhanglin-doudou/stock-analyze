@@ -503,7 +503,10 @@ describe("AttributionPage", () => {
     await screen.findByTestId("attr-pnl-value");
     fireEvent.click(screen.getByRole("button", { name: "上月" }));
     await waitFor(() =>
-      expect(getAttribution).toHaveBeenLastCalledWith({ period: latestCompletedMonth() }),
+      expect(getAttribution).toHaveBeenLastCalledWith({
+        period: latestCompletedMonth(),
+        classification_lookahead: "deny",
+      }),
     );
 
     fireEvent.change(screen.getByLabelText("期间类型"), { target: { value: "custom" } });
@@ -578,5 +581,73 @@ describe("AttributionPage", () => {
     const marker = await screen.findByTestId("attr-sector-fallback");
     expect(marker.textContent).toContain("期初回退价");
     expect(screen.getByTestId("attr-factor-sector").textContent).toContain("期初回退价");
+  });
+
+  it("lookahead：默认 deny，且无警告条", async () => {
+    getAttribution.mockResolvedValue(attribution());
+    renderPage();
+
+    await screen.findByTestId("attr-summary-text");
+    expect(getAttribution).toHaveBeenCalledWith({
+      period: "2026-06",
+      classification_lookahead: "deny",
+    });
+    expect(screen.queryByTestId("attr-lookahead-banner")).toBeNull();
+    expect((screen.getByRole("checkbox") as HTMLInputElement).checked).toBe(false);
+  });
+
+  it("lookahead：URL 带 allow 时请求 allow、勾选并显示警告条", async () => {
+    getAttribution.mockResolvedValue(
+      attribution({
+        status: "degraded",
+        missing: [
+          {
+            code: "SECTOR_CLASSIFICATION_LOOKAHEAD",
+            field: "classification_as_of",
+            severity: "warning",
+            reason:
+              "行业归属使用最新快照（2026-11-03）回溯历史区间，可能与当时实际归属不符",
+            what_to_do: "仅用于回看历史；考核用途请以当时时点成分复核",
+          },
+        ],
+        assumptions: {
+          benchmark_id: "hs300_tr",
+          data_sources: { asset_daily: "2026-06-30", market: "2026-06-30", sector: "2026-06-29" },
+          data_starts: {
+            period: "2026-06-01",
+            asset_daily: "2025-01-02",
+            market: "2026-05-06",
+            sector: "2026-06-05",
+          },
+          classification_lookahead: true,
+        },
+      }),
+    );
+    renderPage("/attribution?period=2026-06&lookahead=allow");
+
+    const banner = await screen.findByTestId("attr-lookahead-banner");
+    expect(banner.textContent).toContain("最新行业成分回溯历史");
+    expect(getAttribution).toHaveBeenCalledWith({
+      period: "2026-06",
+      classification_lookahead: "allow",
+    });
+    expect((screen.getByRole("checkbox") as HTMLInputElement).checked).toBe(true);
+    expect(screen.getByTestId("attr-missing").textContent).toContain(
+      "可能与当时实际归属不符",
+    );
+  });
+
+  it("lookahead：勾选后切换为 allow 请求", async () => {
+    getAttribution.mockResolvedValue(attribution());
+    renderPage();
+
+    await screen.findByTestId("attr-summary-text");
+    fireEvent.click(screen.getByRole("checkbox"));
+    await waitFor(() =>
+      expect(getAttribution).toHaveBeenCalledWith({
+        period: "2026-06",
+        classification_lookahead: "allow",
+      }),
+    );
   });
 });

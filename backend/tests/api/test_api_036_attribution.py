@@ -206,9 +206,11 @@ async def test_api_036_model_not_available(attr_client: Any, account_factory: An
 
 
 async def test_api_036_lookahead_requires_deploy_flag(
-    attr_client: Any, account_factory: Any
+    attr_client: Any, account_factory: Any, settings: Any, monkeypatch: Any
 ) -> None:
     """`classification_lookahead=allow` 但部署未开 SECTOR_LOOKAHEAD_ENABLED → 422（D-07）。"""
+    # 本地 .env 可能已置 true：本用例显式关掉开关，保证与部署环境无关。
+    monkeypatch.setattr(settings, "sector_lookahead_enabled", False)
     acc = await account_factory()
     resp = await attr_client.get(
         "/api/v1/attribution",
