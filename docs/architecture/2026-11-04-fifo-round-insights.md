@@ -1,6 +1,6 @@
 # FIFO 回合分析增强：操作理由 / 前瞻收益 / 波段与抄底卖飞识别 / 买卖后表现排序
 
-> 版本：**v1.0（评审修订版，2026-11-04 定稿）** ｜ 状态：**设计定稿，可进入实现**（实现前仍需 PM 确认 API-ID 期次）
+> 版本：**v1.0（评审修订版，2026-11-04 定稿）** ｜ 状态：**已实现并验收（2026-11-05，API-090~094）**
 > 需求来源：产品侧 5 项增强 + 2 项补充建议（2026-11-04）：
 > ① 人工补充买入/卖出理由；② 买入/卖出后 5/10/20 行情日涨跌幅（单独入口、每日手动更新、不足 20 行情日留空、后续自动化）；③ 统计波段操作的 FIFO；④ 识别加仓抄底/越跌越买后继续下跌、止盈卖飞/越涨越卖后继续大涨；⑤ 可量化的“买得好/卖得好”评估排序；⑥ 其他建议。
 > 关联设计：[FIFO 回合与落库](2026-10-26-metrics-three-domain.md)（round/round_fill 口径）、[月度报告](2026-10-28-monthly-report.md)、[五因子归因](2026-11-02-five-factor-attribution.md)、行为评分卡（另稿未入库）、[PRD FR-D4 交易日志](../prd/PRD-v2.md)（Period3-01 未实现）
@@ -9,6 +9,9 @@
 > **编号修订（2026-11-05）**：API-089 预留、暂不实现；本任务端点改为 **API-090~094**，已登记 [API-Catalog §1/§2.6](v2/API-Catalog.md)；设计内容不变。
 > 数据基线：本地 `1234@dev.com`，2026 年（截至 2026-11-04）；现有 FIFO 回合 99 笔已平仓、18 指标、资产表、行情缓存可用。
 > **本文是设计，不是实现**；所有阈值/公式为 v1.0 定稿，变更须 bump `definition_version`。
+>
+> **交付状态（2026-11-05）**：P0/P1 已落地并通过门禁。提交链：`5de8380`（契约/迁移/模型）→ `c2610a4`（core/review）→ `8a958d8`（API + OpenAPI 快照）→ `8317b4b` / `a9729e5` / `fdb01dd`（前端与归因容差/默认 lookahead）。
+> **实现口径**：API-092 `items[]` 以本文件 §6.3 **当前正文**为准（`buy_trade` / `sell_trade` 内含 `reason` + `forward`），与 v1.0 初稿示意结构的差异见 **附录 C**；`quality` 在列表为 `list[str]`，详情逐笔见 §6.4。
 
 ---
 
@@ -643,27 +646,35 @@ quadrant = sign(buy_excess_20), sign(sell_avoid_20)  # 双正/买正卖负/买�
   "status": "closed", "open_date": "2026-03-02", "close_date": "2026-03-18",
   "holding_days_legacy": 12, "holding_trading_days": 10, "bucket": "swing",
   "pnl": "1234.56", "return_rate_pct": "4.56%",
-  "buy_reason": {"code":"add_on","label":"主动加仓","text":"...","side":"buy","annotated_at":"...","late_annotated":false},
-  "sell_reason": {"code":"take_profit","label":"止盈","text":"...","side":"sell"},
-  "forward": {
-    "buy": {"h5": {"exec_gross_pct":"1.20%","drift_pct":"3.12%","trade_return_pct":"4.10%","excess_pct":"1.23%","status":"ok"},
-            "h10": {...}, "h20": {...}},
-    "sell": {"h5": {...}, "h10": {...}, "h20": {...}}
+  "buy_trade": {
+    "trade_id": "trd_...", "date": "2026-03-02",
+    "price_display": "10.00", "quantity_display": "100", "amount_display": "1000.00",
+    "reason": {"code":"add_on","label":"主动加仓","text":"...","side":"buy",
+               "annotated_at":"2026-03-03T09:30:00+08:00","late_annotated":false},
+    "reason_label": "主动加仓",
+    "forward": {
+      "5":  {"horizon":5,"status":"ok","base_shifted":false,"b0_pct":"0.00%","b0_net_pct":"0.00%",
+             "b1_pct":"5.00%","b2_pct":"4.95%","b3_pct":"3.00%",
+             "max_close_display":"10.60","min_close_display":"9.80","price_jump_review":false},
+      "10": {...}, "20": {...}
+    }
   },
-  "flags": {"is_swing": true, "is_addon": true, "addon_below_avg": true,
-            "addon_decline_20": true, "is_profit_taking": true,
-            "sold_too_early": false, "profit_take_fly": false, "stop_loss_rebound": false,
-            "is_full_exit": true, "is_same_day": false, "is_new_stock": false},
-  "missed_profit_worst_display": "0.00", "missed_profit_end_display": "0.00",
-  "ranking": {"buy_excess_20_pct":"2.10%", "sell_avoid_20_pct":"1.20%",
-              "combined_20_pct":"1.65%", "quadrant":"双正",
-              "sample_status":"ok", "ci_low_pct":"-0.50%", "ci_high_pct":"3.80%",
-              "relative_position_pct":"72.0%（辅助，不是能力分）"},
-  "quality": {"forward_complete": true, "corporate_action": false,
-              "calendar_basis":"benchmark", "n_events": 4, "data_as_of":"2026-11-04"}
+  "sell_trade": {
+    "trade_id": "trd_...", "date": "2026-03-18",
+    "price_display": "12.00", "quantity_display": "100", "amount_display": "1200.00",
+    "reason": {"code":"take_profit","label":"止盈","text":"...","side":"sell","annotated_at":"..."},
+    "reason_label": "止盈",
+    "forward": {"5": {...}, "10": {...}, "20": {...}}
+  },
+  "buy_excess_pct": "2.10%", "sell_avoid_pct": "1.20%", "combined_pct": "1.65%",
+  "rank": 3, "quadrant": "双正",
+  "flags": ["profit_taking", "full_exit"],
+  "quality": ["forward_complete"],
+  "missed_profit_worst_display": "0.00", "missed_profit_end_display": "0.00"
 }
 ```
 
+- `flags` 为**内部旗标码**（`addon / dip_sequence / below_avg / continued_decline / profit_taking / profit_take_fly / stop_loss_rebound / rising_sell_sequence / full_exit / partial_exit / same_day`）；查询参数 `flag=` 使用 §6.3 词表，由服务端做映射，前端只做文案映射、不做判断。
 - `summary`：`swing{...}`、`addon{...}`、`sell_fly{...}`、`reason_coverage{...}`、`ranking{n_rounds,n_events,min_rank_n,basis,quadrant_counts}`、`pending{forward_recompute,reason_missing}`。
 - **零口径展示契约**：所有数值字段带 `_pct`/`_display`/`label`；**前端不得自己算/拼百分号**；缺失为 null，不返回 0 分。`disclaimer` 固定文案（见 §7.4）。
 - `summary` 每次请求计算一次，**不随 cursor 变化**；P1 加短 TTL 缓存/ETag（以 `data_as_of`+filter hash 为键）；`items` 分页。<br>- 无数据/blocked：`items=[]` + `missing[]`；`sample_status` 显式；**不伪造 0%**。
@@ -1003,3 +1014,16 @@ PageHeader：期间（年/月/自定义，默认年）+ 数据截至 + “手动
 - 参考：`docs/architecture/2026-10-26-metrics-three-domain.md`（18 指标）、`docs/architecture/2026-11-02-five-factor-attribution.md`（买/卖点 D-03）、`docs/architecture/2026-11-04-investor-behavior-scorecard.md`（行为评分卡）、`docs/prd/PRD-v2.md` FR-D4（journal）、`docs/architecture/v2/Testing.md`。
 
 > **v1.0 定稿（2026-11-04）**：H-01~H-10 已确认，T-01~T-11 已按评审建议写入；仅 T-10（API-ID 期次）待 PM。所有阈值/公式改变须 bump `definition_version` 并更新评审记录。
+
+## 附录 C：实现与 §6.3 示意结构的差异（2026-11-05）
+
+§6.3 正文已按**实现**回写；下表保留 v1.0 初稿示意与实现差异，供评审追溯：
+
+| 项 | v1.0 初稿示意 | 实现 | 原因/影响 |
+|---|---|---|---|
+| 买卖侧结构 | 并列 `buy_reason`/`sell_reason` + `forward.buy/sell.h5..h20` | `buy_trade`/`sell_trade` 各含 `trade_id/date/价量额/reason/reason_label/forward["5"\|"10"\|"20"]` | 与详情逐笔、理由编辑（trade_id）统一；前端不拼路径 |
+| 前瞻字段 | `exec_gross_pct/drift_pct/trade_return_pct/excess_pct` | `horizon/status/base_shifted/b0_pct/b0_net_pct/b1_pct/b2_pct/b3_pct/max_close_display/min_close_display/price_jump_review` | 与 core 向量/状态机一致，避免同义字段两套 |
+| flags | 对象布尔 | 内部码数组 `list[str]` | 与 `flag=` 词表服务端映射；新增旗标免破坏结构 |
+| quality | 对象（`forward_complete`/`calendar_basis`/...） | `list[str]`；`price_jump_review` 及前瞻非 ok 状态进入该列表 | 详情按“质量提示码”展示；日历基准在 page 级 assumptions |
+| ranking | 嵌套对象含 CI/相对位置 | 列表页扁平 `buy_excess_pct`/`sell_avoid_pct`/`combined_pct`/`rank`/`quadrant`；CI/相对位置在 `summary.ranking` | 契合零口径字符串，避免每行重复大对象 |
+| 变更规则 | — | 以上为当前实现口径；若改回示意结构须 bump `definition_version` 并同步 SDK/测试 | — |

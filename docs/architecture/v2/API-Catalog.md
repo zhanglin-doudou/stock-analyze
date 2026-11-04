@@ -48,7 +48,7 @@
 - ETag `W/"<version>"`（列表含查询指纹），写响应返新 ETag；`If-Match` 不匹配 → 409 `VERSION_CONFLICT`（遵循 PRD FR-L4，不采用 412）。
 - 格式：金额**定点字符串 2 位** `"1234.56"`；价格 6 位、数量 4 位；比率十进制小数；时间 ISO 8601 UTC；业务日 `YYYY-MM-DD`（Asia/Shanghai）；`blocked` 时 `value` **字段缺省**。软删默认过滤 `deleted_at NULL`，`include_deleted=true` 仅本人；注销物理级联删除，审计留事件元数据。
 
-## §1 端点总表（93 个；API-089 预留不计数，API-090~094 为设计登记；Path 省略公共前缀 `/api/v1`，标注「根」者不在前缀下）
+## §1 端点总表（93 个；API-089 预留不计数，API-090~094 已实现（2026-11-05）；Path 省略公共前缀 `/api/v1`，标注「根」者不在前缀下）
 | API-ID | Method | Path | 用途 | FR | 认证/scope | 幂等 | 同步/异步 | 优先级 | 主要成功码 |
 |---|---|---|---|---|---|---|---|---|---|
 | API-001 | POST | `/auth/register` | 注册账号 | L2 | 公开 | 支持 | 同步 | P0 | 201 |
@@ -147,10 +147,10 @@
 
 
 
-> **编号说明（2026-11-05）**：**API-089 预留、暂不实现**，不进入 §1 计数；本任务（FIFO 回合分析增强）从 **API-090** 起编号。API-090~094 为**设计登记**：详细契约见 §2.6，当前 runtime OpenAPI 尚未实现，`make api-check` 会列为“后续期次未实现”，不阻断一期/二期门禁。实现时同步 OpenAPI 快照、SDK、§6 用例与 DEV-PLAN 排期。
+> **编号说明（2026-11-05）**：**API-089 预留、暂不实现**，不进入 §1 计数；本任务（FIFO 回合分析增强）从 **API-090** 起编号。API-090~094 已于 2026-11-05 **实现并验收**：详细契约见 §2.6，OpenAPI 快照 / SDK / API 测试 / 隔离矩阵 / DEV-PLAN 已同步（commit `8a958d8`）。
 
 ## §2 分域详细契约
-> 下列 39 个端点为**详细契约**（34 个现有 + 5 个设计登记 API-090~094）；其余端点的请求/响应字段以 `openapi/openapi.json` 为准（§1 已登记、§6 已配验收用例）。断言均为可脚本执行：状态码 + 字段值 + 状态迁移 + 副作用。
+> 下列 39 个端点为**详细契约**（34 个既有 + 5 个已实现 API-090~094）；其余端点的请求/响应字段以 `openapi/openapi.json` 为准（§1 已登记、§6 已配验收用例）。断言均为可脚本执行：状态码 + 字段值 + 状态迁移 + 副作用。
 ### 2.1 认证、导入与流水
 #### API-001 POST /auth/register
 - 用途：注册账号；FR-L2；认证：公开；幂等：支持；同步。
@@ -465,8 +465,8 @@
 #### API-092 GET /rounds/insights
 - 用途：回合洞察列表 + 汇总；FR-R1/R8；认证 read；同步；operationId `listRoundInsights`。
 - 请求 query：`period`（默认 close_date 归属）/`bucket=all|short|swing|trend`/`flag`（addon_decline、sold_too_early、reason_missing、horizon_pending、corporate_action）/`has_reason`/`reason_code`/`security_code`/`sort`（combined_20、buy_excess_20、sell_avoid_20、close_date 及负向）/`limit`/`cursor`/`include_summary`。
-- 响应 200：`period`、`period_basis`、`event_period_basis`、`definition_version`、`data_as_of`、`ranking_as_of`、`benchmark_id`、`basis="benchmark_excess_20d"`、`summary{swing,addon,sell_fly,reason_coverage,ranking,pending}`、`items[]`、`next_cursor`、`has_more`、`missing[]`、`assumptions`、`disclaimer`。
-- `items[]` 关键字段：`round_id/security_code/close_date/holding_trading_days/bucket/buy_reason/sell_reason/forward{buy,sell}{5,10,20}{exec_gross_pct,drift_pct,trade_return_pct,excess_pct,status}/flags/ranking{buy_excess_20_pct,sell_avoid_20_pct,combined_20_pct,quadrant,sample_status,ci_low_pct,ci_high_pct}/quality`。
+- 响应 200：`period`、`period_basis`、`definition_version`、`data_as_of`、`ranking_as_of`、`benchmark_id`、`basis="benchmark_excess_20d"`、`item_total`、`summary{swing,addon,sell_fly,reason_coverage,ranking,pending}`、`items[]`、`next_cursor`、`has_more`、`missing[]`、`assumptions`、`disclaimer`。
+- `items[]` 关键字段（实现口径，详见设计 §6.3/附录 C）：`round_id/security_code/status/open_date/close_date/holding_days_legacy/holding_trading_days/bucket/pnl/return_rate_pct/buy_trade/sell_trade/buy_excess_pct/sell_avoid_pct/combined_pct/rank/quadrant/flags[]/quality[]/missed_profit_worst_display/missed_profit_end_display`；`buy_trade`/`sell_trade` = `trade_id/date/price_display/quantity_display/amount_display/reason/reason_label/forward{"5","10","20"}`，其中每档前瞻含 `horizon/status/base_shifted/b0_pct/b0_net_pct/b1_pct/b2_pct/b3_pct/max_close_display/min_close_display/price_jump_review`。
 - 错误码：INVALID_PERIOD(422)、UNKNOWN_QUERY_PARAM(400)、INVALID_SORT_FIELD(400)、INVALID_CURSOR(400)、ADMIN_CANNOT_READ_TRADES(403)。
 - 验收：`/rounds/insights` 返回 200（非动态路由 404）；所有数值有 `_pct/_display/label`；缺失 null 不 0；n<30 不排名；`sort` 白名单；summary 不随 cursor 变化；跨用户仅本人。
 
@@ -697,14 +697,14 @@ data: {"job_id":"job_01J9Z6","status":"succeeded","result_ref":"/api/v1/reports/
 | API-085 | assets_chart_view | 200 且 points 按日期升序、v∈[0,1] 字符串、amount_label 为后端定点串；blocked 行不进入序列；未构建 n_points=0；跨用户空序列、admin 403、无 token 401；limit 0/501→422；只读无副作用 | fx_round30 | P0 |
 | API-087 | sectors_overview | 200 且行业 `Σ market_value + unclassified == equity_market_value`、`Σ weight ≈ 1`；hhi/effective_n/top1/top3 与 golden 一致；概念 `Σ exposure>1` 时 caveat 非空 + weight_mode=overlapping；未同步 200+missing 全 null；coverage<0.90→insufficient+hhi=null；未来 as_of/level/taxonomy→422；benchmark=nope→422 UNKNOWN_BENCHMARK；limit=501→422；admin 403、无 token 401、B 账号隔离；If-None-Match→304 空 body；只读无副作用 | fx_sector | P0 |
 | API-088 | sectors_catalog | 200 且 items 按 (level,sector_code) 升序、L3 path 恰 3 层、L1/L2 member_count 为后代去重求和；未同步 200+items=[]+catalog_version=null+SECTOR_DATA_MISSING；is_active=false 默认不返回；损坏 cursor→400 INVALID_CURSOR；taxonomy/level 非法→422；admin 403、无 token 401 | fx_sector | P1 |
-| API-090 | trade_reason_upsert（设计） | 201/200；If-Match 旧值 409；跨用户 404；理由写入后 ETag 变化；审计无明文 | fx_round_insights | P0 |
-| API-091 | trade_reason_delete（设计） | 204；重复删除 204；跨用户 404 | fx_round_insights | P0 |
-| API-092 | round_insights_list（设计） | 200；路由不被 `/{round_id}` 吞；筛选/排序白名单；`_pct/_display/label`；缺失 null 不 0；n<30 不排名 | fx_round_insights | P0 |
-| API-093 | round_insights_detail（设计） | 200；逐笔理由/5/10/20 四口径；跨用户 404；不混旧/新持有天 | fx_round_insights | P1 |
-| API-094 | round_insights_refresh（设计） | 200/202+Location；Idempotency-Key 重放；单飞；data_as_of=DB max；GET 不写 | fx_round_insights | P1 |
+| API-090 | trade_reason_upsert（已实现） | 201/200；If-Match 旧值 409；跨用户 404；理由写入后 ETag 变化；审计无明文 | fx_round_insights | P0 |
+| API-091 | trade_reason_delete（已实现） | 204；重复删除 204；跨用户 404 | fx_round_insights | P0 |
+| API-092 | round_insights_list（已实现） | 200；路由不被 `/{round_id}` 吞；筛选/排序白名单；`_pct/_display/label`；缺失 null 不 0；n<30 不排名 | fx_round_insights | P0 |
+| API-093 | round_insights_detail（已实现） | 200；逐笔理由/5/10/20 四口径；跨用户 404；不混旧/新持有天 | fx_round_insights | P1 |
+| API-094 | round_insights_refresh（已实现） | 200/202+Location；Idempotency-Key 重放；单飞；data_as_of=DB max；GET 不写 | fx_round_insights | P1 |
 
 
-> **设计登记（API-090~094）**：上述 5 行是 2026-11-05 设计登记，当前尚未实现；实现时补 `backend/tests/api/test_api_090_*.py` … `test_api_094_*.py`、§6 脚本与 OpenAPI 示例。现有 88 个端点的验收矩阵不变。
+> **实现说明（API-090~094，2026-11-05）**：上述 5 行已实现并通过 `test_api_090_091_trade_reasons.py`、`test_api_092_094_round_insights.py`、`test_api_028_031_rounds.py`、契约与隔离矩阵；OpenAPI 示例与 SDK 已同步。既有 88 个端点的验收矩阵不变。
 
 ### 6.1 端到端脚本（5 条，覆盖「注册登录 → PAT → preview → commit → 取指标 → 下载月报」）
 ```bash

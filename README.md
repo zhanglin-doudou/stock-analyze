@@ -2,15 +2,16 @@
 
 面向个人投资者的交易复盘系统：导入券商对账单，自动落库/分类/对账，建立 FIFO 回合、净值/资产序列与三域指标，并在 Dashboard 中聚合展示。
 
-> **当前阶段（2026-11-04）**
+> **当前阶段（2026-11-05）**
 >
 > - **一期**：已完成（认证/多租户/RLS、导入、任务队列、流水维护、契约链路）。
 > - **二期核心**：已完成验收或已落地——FIFO 回合、`GET /nav`、资产表、18 指标引擎与 `/metrics`、**Dashboard 两板块（API-084）**、`POST /jobs/rebuild-period`（API-083）、**板块数据底座（API-087/088 + `/sectors`）**。
 > - **Period2-08 五因子归因**：**08a~08g 已交付并验收（2026-11-02）**，2026-11-04 完成口径收口——[设计 v1.0](docs/architecture/2026-11-02-five-factor-attribution.md) / [交叉评审](docs/reviews/2026-11-02-DevDesign-Review-five-factor-attribution.md)；含 `GET /attribution`（API-036）与 [`/attribution` 页](http://127.0.0.1:5173/attribution)。月报同源接入仍属 Period2-09（09b），未开始。
+> - **Period2-18 FIFO 回合洞察增强**：**已交付并验收（2026-11-05）**——迁移 `0012_review_round_insights`、真实交易日历 B0~B3 前瞻收益、持有期分桶/旗标、`/rounds/insights` 页、回合详情洞察区块、逐笔理由编辑；含 `PUT/DELETE /trades/{trade_id}/reason`（API-090/091）、`GET /rounds/insights`（API-092）、`GET /rounds/{round_id}/insights`（API-093）、`POST /rounds/insights/refresh`（API-094）。设计见 [2026-11-04-fifo-round-insights.md](docs/architecture/2026-11-04-fifo-round-insights.md)。未覆盖：>5000 笔转后台 202 分支（构造方式见验收记录）。
 > - **二期剩余**：月报、导出、设置增强、报告/导出前端页按计划**暂停**；前端已预留 `/reports`、`/exports` 占位入口，验收中按缺失清单 SKIP，不伪造数据。
 > - **三期**：未开始。
 >
-> 设计与验收记录见 [Dashboard 设计](docs/architecture/2026-10-28-dashboard.md)、[月度报告设计](docs/architecture/2026-10-28-monthly-report.md)、[S10 验收记录](docs/reviews/2026-10-27-p207-S10-acceptance.md)。
+> 设计与验收记录见 [Dashboard 设计](docs/architecture/2026-10-28-dashboard.md)、[月度报告设计](docs/architecture/2026-10-28-monthly-report.md)、[S10 验收记录](docs/reviews/2026-10-27-p207-S10-acceptance.md)、[回合洞察设计](docs/architecture/2026-11-04-fifo-round-insights.md)。
 
 ## 架构一览
 
@@ -26,6 +27,7 @@
 - **对账单导入**：华泰账单解析、列映射预检、预览不落库 → 提交异步任务 → 批次撤销、隔离区、bag 去重、断链补差。
 - **流水维护**：游标分页 / ETag / If-Match 并发控制 / 修正 / 软删恢复 / 历史。
 - **FIFO 回合**：稳定配对、分批减仓、股息归属、送转/配股、桥接恒等式；回合列表与配对明细。
+- **回合洞察**：`/rounds/insights` + 详情洞察区块——持有期分桶（scalp/swing/position）、买卖 5/10/20 日 B0~B3 前瞻收益（真实交易日历、缺失显式 null）、加仓/卖飞/止损反弹旗标、逐笔买/卖理由与覆盖率；全部数字由后端格式化，前端只展示。
 - **净值与收益**：份额法 TWR、XIRR/MWR、日资产/现金流、`GET /nav`。
 - **资产快照**：`review.asset_daily` 逐日现金/市值/成本/浮盈；`GET /assets`、`POST /assets/build`。
 - **三域指标**：18 个指标（核心 10 + 探索 8）、DAG/`definition_version`/CI/门禁状态机、`/metrics` 与三段式解释/下钻；月度一键构建（API-083）rounds→assets→nav→metrics。

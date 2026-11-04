@@ -183,6 +183,7 @@ open http://localhost:5173/dashboard
 | **Period2-15** | 前端零口径门禁 | ESLint 自定义规则（禁算术/禁结论拼接/禁裸 fetch/禁裸术语）+ AST 断言 | Period2-12 | 故意在页面算一次 `a-b` → `make lint` 失败 | 1 |
 | **Period2-16** | 资产表（每日资产快照） | `review.asset_daily/asset_build_state` + 迁移 0006、共享估值原语（`valuation.py`）、增量构建（变更指纹 + 水位线 + 45 天安全窗）、`GET /assets`、`POST /assets/build`、worker 行情装配、`docs/DATABASE.md` | Period2-03 | API-081/082 验收；增量结果与全量逐行相等；`GET /assets` 分页/过滤/blocked 显式 null、`build` 摘要齐全；门禁 82/82 | 2.5 |
 | **Period2-17** | 板块数据底座与看板 | 迁移 `0011_market_sectors` + `market` 6 表、`SectorDataSource` 端口 + akshare/replay 源 + `make sync-sectors`、`stock_core/sector/*` 纯函数（`E_map` 分母 / HHI / 概念暴露）、`GET /sectors/overview`（API-087）+ `GET /sectors`（API-088）、Dashboard 板块子块 + `/sectors` 页面（三级下钻/概念警示） | Period2-07/16 | `make sync-sectors ARGS='--dry-run'` 通过；API-087/088 验收（happy/越权/错误码）；行业 Σweight≈1、Σactive≈0，概念 `Σexposure>1` 带 `caveat`；Dashboard `[data-board]` 恰 2 个 + `links.sectors` | 2.5 |
+| **Period2-18** | FIFO 回合洞察增强（已交付 2026-11-05） | 迁移 `0012_review_round_insights`（理由/前瞻缓存）、`stock_core/insights/*`（真实日历、B0~B3、分类、聚合）、`stock_review/insights/*`、API-090~094、`/rounds/insights` 页与详情洞察区块、归因容差行 | Period2-02 | core 单测 41；API/契约/隔离 166；`pnpm -r test` 146；`api-check` 通过；未覆盖：202 >5000 笔分支（构造方式见验收记录） | 3 |
 
 ### 3.3 二期不做
 
@@ -358,9 +359,12 @@ make verify-p3
 | API-083 | 二 | Period2-07 | API-084 | 二 | Period2-12 |
 | API-085 | 二 | Period2-16 | API-086 | 二 | Period2-06 |
 | API-087 | 二 | Period2-17 | API-088 | 二 | Period2-17 |
+| API-090 | 二 | Period2-18 | API-091 | 二 | Period2-18 |
+| API-092 | 二 | Period2-18 | API-093 | 二 | Period2-18 |
+| API-094 | 二 | Period2-18 | | | |
 
-> **设计登记（2026-11-05）**：API-090~094（回合洞察/理由/前瞻/刷新）已登记 API-Catalog §1/§2.6，**期次/任务待 PM 排期**，暂不进入本表；API-089 预留不实现。
-> 校验：`make api-coverage` 读取本表与 [API-Catalog §1](architecture/v2/API-Catalog.md) 比对，当前为“已排期 88/88；Catalog 93（5 个设计登记待排期）”。
+> **实现状态（2026-11-05）**：API-090~094（回合洞察/理由/前瞻/刷新）已实现并验收，归属 **Period2-18**；API-089 预留不实现。
+> 校验：`make api-coverage` 当前输出 L1 3/4、L2 6/6、L3 5/5、L4 5/5、L5 6/6、其他 36/67；本表与 [API-Catalog §1](architecture/v2/API-Catalog.md) 的 API-090~094 已对齐。
 
 ### A.2 FR → 期次/主任务（28/28）
 
