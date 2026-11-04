@@ -137,6 +137,41 @@ async def _rebuild_period(
     return await rebuild_period_job(queue, session, job, clock, market_data)
 
 
+async def _refresh_round_insights(
+    _queue: JobQueue,
+    session: AsyncSession,
+    job: JobPayload,
+    clock: Clock,
+    market_data: MarketDataSource,
+) -> dict[str, Any] | None:
+    """API-094 异步分支：重算逐笔前瞻收益缓存（>5000 笔时入队）。"""
+    import uuid
+
+    from stock_review.insights.service import refresh_forwards
+
+    user_id = uuid.UUID(str(job["user_id"]))
+    params = job.get("params") or {}
+    result = await refresh_forwards(
+        session,
+        user_id,
+        market_data=market_data,
+        clock=clock,
+        period=params.get("period"),
+        scope=params.get("scope", "missing"),
+    )
+    return {
+        "computed": result.computed,
+        "skipped": result.skipped,
+        "pending": result.pending,
+        "no_calendar": result.no_calendar,
+        "no_bar": result.no_bar,
+        "corporate_action": result.corporate_action,
+        "divisor_missing": result.divisor_missing,
+        "stale_price": result.stale_price,
+        "data_as_of": result.data_as_of.isoformat() if result.data_as_of else None,
+    }
+
+
 HANDLERS: dict[str, JobHandler] = {
     "import_commit": _import_commit,
     "import_revoke": _import_revoke,
@@ -144,4 +179,5 @@ HANDLERS: dict[str, JobHandler] = {
     "rebuild_rounds": _rebuild_rounds,
     "build_assets": _build_assets,
     "rebuild_period": _rebuild_period,
+    "refresh_round_insights": _refresh_round_insights,
 }
