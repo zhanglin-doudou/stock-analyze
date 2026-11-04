@@ -27,6 +27,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from stock_contracts.errors import ErrorCode
 from stock_ledger.models import ImportBatch, Trade
+from stock_ledger.parsers.dedupe import dedupe_key as logical_dedupe_key
 from stock_worker.runner import WorkerRunner
 
 pytestmark = pytest.mark.api
@@ -103,31 +104,32 @@ async def _seed_trade(
 ) -> str:
     trade_id = f"trd_{uuid.uuid4().hex[:12]}"
     async with AsyncSession(engine) as session:
-        session.add(
-            Trade(
-                id=trade_id,
-                user_id=user_id,
-                batch_id=batch_id,
-                trade_date=trade_date,
-                security_code=security_code,
-                security_name=security_code,
-                side=side,
-                quantity_units=quantity_units,
-                price_units=price_units,
-                amount_units=amount_units,
-                commission_units=0,
-                stamp_tax_units=0,
-                other_fee_units=0,
-                cash_balance_units=None,
-                cash_balance_available=False,
-                category=side,
-                occurrence_idx=0,
-                source="import",
-                version=1,
-                summary="证券买入" if side == "buy" else "证券卖出",
-                dedupe_key=f"{security_code}:{uuid.uuid4().hex[:10]}",
-            )
+        row = Trade(
+            id=trade_id,
+            user_id=user_id,
+            batch_id=batch_id,
+            trade_date=trade_date,
+            security_code=security_code,
+            security_name=security_code,
+            side=side,
+            quantity_units=quantity_units,
+            price_units=price_units,
+            amount_units=amount_units,
+            commission_units=0,
+            stamp_tax_units=0,
+            other_fee_units=0,
+            cash_balance_units=None,
+            cash_balance_available=False,
+            category=side,
+            occurrence_idx=0,
+            source="import",
+            version=1,
+            summary="证券买入" if side == "buy" else "证券卖出",
+            dedupe_key="",
         )
+        # 与真实导入路径一致：去重键按业务要素计算（理由/筛选依赖它做逻辑键）。
+        row.dedupe_key = logical_dedupe_key(row)
+        session.add(row)
         await session.commit()
     return trade_id
 

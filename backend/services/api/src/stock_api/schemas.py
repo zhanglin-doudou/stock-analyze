@@ -286,6 +286,31 @@ class JobPage(BaseModel):
 
 
 # ── 流水（API-017~021、080）─────────────────────────────────
+class TradeReasonOut(BaseModel):
+    """逐笔理由（API-090/091；`/trades` 内嵌同一结构）。"""
+
+    trade_id: str
+    side: str
+    reason_code: str
+    reason_label: str
+    reason_text: str | None = None
+    emotion_code: str | None = None
+    emotion_label: str | None = None
+    tags: list[str] = Field(default_factory=list)
+    annotated_at: datetime
+    late_annotated: bool
+    version: int
+
+
+class TradeReasonIn(StrictModel):
+    """PUT 理由入参；`reason_text` 上限 500、tags<=8。"""
+
+    reason_code: str = Field(min_length=1, max_length=24)
+    reason_text: str | None = Field(default=None, max_length=500)
+    emotion_code: str | None = Field(default=None, max_length=16)
+    tags: list[str] = Field(default_factory=list, max_length=8)
+
+
 class TradeOut(BaseModel):
     trade_id: str
     trade_date: date
@@ -315,6 +340,8 @@ class TradeOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     provenance: dict[str, Any] | None = None
+    # additive：逐笔理由（未标注为 null）；详情 ETag 同时受 reason.version 影响。
+    reason: TradeReasonOut | None = None
 
 
 class TradePage(BaseModel):
@@ -1499,3 +1526,166 @@ def attribution_payload(out: AttributionOut) -> dict[str, Any]:
             factor.pop("ratio", None)
             factor.pop("share", None)
     return payload
+
+
+# ── 回合洞察（API-092~094，设计 2026-11-04）──────────────────
+class ForwardReturnOut(BaseModel):
+    """前瞻收益（B0~B3）；`*_pct`/`*_display` 均为后端格式化字符串。"""
+
+    horizon: int
+    status: Literal[
+        "ok",
+        "pending",
+        "no_calendar",
+        "no_bar",
+        "stale_price",
+        "corporate_action",
+        "divisor_missing",
+    ]
+    base_shifted: bool
+    b0_pct: str | None = None
+    b0_net_pct: str | None = None
+    b1_pct: str | None = None
+    b2_pct: str | None = None
+    b3_pct: str | None = None
+    max_close_display: str | None = None
+    min_close_display: str | None = None
+    price_jump_review: bool = False
+
+
+class TradeSideInsightOut(BaseModel):
+    trade_id: str
+    date: date
+    price_display: str | None = None
+    quantity_display: str | None = None
+    amount_display: str | None = None
+    reason: TradeReasonOut | None = None
+    reason_label: str | None = None
+    forward: dict[str, ForwardReturnOut] = Field(default_factory=dict)
+
+
+class RoundInsightItemOut(BaseModel):
+    round_id: str
+    security_code: str
+    security_name: str
+    status: str
+    open_date: date
+    close_date: date | None = None
+    holding_days_legacy: int
+    holding_trading_days: int | None = None
+    bucket: Literal["short", "swing", "trend", "unknown"]
+    pnl: str
+    return_rate_pct: str
+    buy_trade: TradeSideInsightOut | None = None
+    sell_trade: TradeSideInsightOut | None = None
+    buy_excess_pct: str | None = None
+    sell_avoid_pct: str | None = None
+    combined_pct: str | None = None
+    rank: int | None = None
+    quadrant: str | None = None
+    flags: list[str] = Field(default_factory=list)
+    quality: list[str] = Field(default_factory=list)
+    missed_profit_worst_display: str | None = None
+    missed_profit_end_display: str | None = None
+
+
+class InsightBucketSummaryOut(BaseModel):
+    closed: int
+    short: int
+    swing: int
+    trend: int
+    avg_holding_trading_days: str | None = None
+    win_rate_pct: str | None = None
+    avg_pnl_display: str | None = None
+    total_pnl_display: str | None = None
+
+
+class InsightReasonShareOut(BaseModel):
+    code: str
+    label: str
+    count: int
+    share_pct: str
+
+
+class InsightReasonCoverageOut(BaseModel):
+    annotated: int
+    total_rounds: int
+    coverage_pct: str | None = None
+    by_code: list[InsightReasonShareOut] = Field(default_factory=list)
+
+
+class InsightRankingOut(BaseModel):
+    n_sample: int
+    n_eligible: int
+    sample_status: Literal["ok", "insufficient", "no_conclusion"]
+    combined_median_pct: str | None = None
+    combined_avg_pct: str | None = None
+    quadrant_counts: dict[str, int] = Field(default_factory=dict)
+    per_stock: list[dict[str, Any]] = Field(default_factory=list)
+    basis: str
+    definition_version: str
+
+
+class InsightsSummaryOut(BaseModel):
+    swing: InsightBucketSummaryOut
+    addon: dict[str, Any]
+    sell_fly: dict[str, Any]
+    reason_coverage: InsightReasonCoverageOut
+    ranking: InsightRankingOut
+    pending: dict[str, int]
+
+
+class RoundInsightsPageOut(BaseModel):
+    period: str
+    period_basis: str
+    definition_version: str
+    data_as_of: date | None = None
+    ranking_as_of: date | None = None
+    benchmark_id: str
+    basis: str
+    item_total: int
+    summary: InsightsSummaryOut | None = None
+    items: list[RoundInsightItemOut]
+    next_cursor: str | None = None
+    has_more: bool
+    missing: list[str] = Field(default_factory=list)
+    assumptions: list[str] = Field(default_factory=list)
+    disclaimer: str
+
+
+class RoundInsightDetailOut(BaseModel):
+    round_id: str
+    security_code: str
+    security_name: str
+    status: str
+    open_date: date
+    close_date: date | None = None
+    holding_days_legacy: int
+    holding_trading_days: int | None = None
+    bucket: Literal["short", "swing", "trend", "unknown"]
+    pnl: str
+    return_rate_pct: str
+    buy_trade: TradeSideInsightOut | None = None
+    sell_trade: TradeSideInsightOut | None = None
+    fills: list[dict[str, Any]] = Field(default_factory=list)
+    flags: list[str] = Field(default_factory=list)
+    quality: list[str] = Field(default_factory=list)
+    ranking: dict[str, Any] = Field(default_factory=dict)
+    disclaimer: str
+
+
+class RoundInsightsRefreshIn(StrictModel):
+    period: str | None = Field(default=None, max_length=40)
+    scope: Literal["missing", "all"] = "missing"
+
+
+class RoundInsightsRefreshOut(BaseModel):
+    computed: int
+    skipped: int
+    pending: int
+    no_calendar: int
+    no_bar: int
+    corporate_action: int
+    divisor_missing: int
+    stale_price: int
+    data_as_of: date | None = None

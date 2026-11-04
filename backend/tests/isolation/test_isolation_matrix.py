@@ -227,6 +227,10 @@ RESOURCE_MATRIX: list[tuple[str, str]] = [
     ("delete", "/summary-rules/{rule_id}"),
     ("get", "/rounds/{round_id}"),
     ("get", "/rounds/{round_id}/fills"),
+    # 2026-11-05（API-090/091/093）
+    ("put", "/trades/{trade_id}/reason"),
+    ("delete", "/trades/{trade_id}/reason"),
+    ("get", "/rounds/{round_id}/insights"),
 ]
 
 #: 业务数据端点：admin 一律 403（运维角色不碰明细）
@@ -258,6 +262,12 @@ ADMIN_FORBIDDEN: list[tuple[str, str]] = [
     ("get", "/sectors"),
     # 2026-11-02（API-036）：五因子归因（身份越权 → 403）
     ("get", "/attribution"),
+    # 2026-11-05（API-090~094）：逐笔理由与回合洞察（身份越权 → 403）
+    ("put", "/trades/{trade_id}/reason"),
+    ("delete", "/trades/{trade_id}/reason"),
+    ("get", "/rounds/insights"),
+    ("get", "/rounds/{round_id}/insights"),
+    ("post", "/rounds/insights/refresh"),
 ]
 
 #: 列表型端点：A/B 各自造数据，B 的列表不得包含 A 的行（跨租户列表隔离）
@@ -275,6 +285,8 @@ LIST_ISOLATION_MATRIX: list[tuple[str, str]] = [
     ("get", "/assets/chart"),
     # Period2-12：Dashboard 跨租户不串号（B 的持仓/计数为空，A 自己可见）
     ("get", "/dashboard"),
+    # 2026-11-05（API-092）：回合洞察列表（period=2026-06 命中隔离种子回合）
+    ("get", "/rounds/insights"),
 ]
 
 #: 无凭证 → 401：覆盖全部受保护端点（gate_tenant_coverage.py 校验 23/23 完整）。
@@ -336,6 +348,13 @@ UNAUTHENTICATED_MATRIX: list[tuple[str, str]] = [
     ("get", "/sectors"),
     # 2026-11-02（API-036 五因子归因）
     ("get", "/attribution"),
+    # 2026-11-05（API-090/091/093 逐笔理由/回合洞察详情）
+    ("put", "/trades/{trade_id}/reason"),
+    ("delete", "/trades/{trade_id}/reason"),
+    ("get", "/rounds/{round_id}/insights"),
+    # 2026-11-05（API-092/094 回合洞察列表/刷新）
+    ("get", "/rounds/insights"),
+    ("post", "/rounds/insights/refresh"),
 ]
 
 #: 路径参数占位值（只用于越权/401 用例；资源不存在时恰好也走 404 分支）。
@@ -362,6 +381,8 @@ _REQUIRED_QUERY: dict[str, str] = {
     "/metrics/{metric_id}/drilldown": "?period=2026-06",
     # 2026-11-02（API-036）：period 必填，缺了会 422 而非 401/403
     "/attribution": "?period=2026-06",
+    # 2026-11-05（API-092）：period 必填（StrictQueryRoute 校验）
+    "/rounds/insights": "?period=2026-06",
 }
 
 
@@ -400,6 +421,11 @@ def _unauth_kwargs(method: str, template: str) -> dict[str, Any]:
     elif template == "/assets/build":
         kwargs["headers"] = {"Idempotency-Key": "unauth-probe-" + "x" * 20}
     elif template == "/jobs/rebuild-period":
+        kwargs["headers"] = {"Idempotency-Key": "unauth-probe-" + "x" * 20}
+        kwargs["json"] = {"period": "2026-06"}
+    elif template == "/trades/{trade_id}/reason" and method == "put":
+        kwargs["json"] = {"reason_code": "plan_build"}
+    elif template == "/rounds/insights/refresh":
         kwargs["headers"] = {"Idempotency-Key": "unauth-probe-" + "x" * 20}
         kwargs["json"] = {"period": "2026-06"}
     return kwargs
@@ -444,6 +470,9 @@ async def test_cross_account_returns_404(
             if template == "/summary-rules/{rule_id}"
             else {"note": "跨租户越权尝试"}
         )
+    elif method == "put":
+        # 2026-11-05（API-090）：理由写入需通过 body 校验才能抵达资源归属判定
+        json_body = {"reason_code": "plan_build"}
     # intruder 用「真实存在但属于别人」的 id 访问
     url = api_prefix + _fill(template, **ids)
     resp = await _call(client, method, url, headers, json_body=json_body)
@@ -540,6 +569,7 @@ async def test_cross_account_list_isolated(
         "/jobs": "job_id",
         "/summary-rules": "rule_id",
         "/rounds": "round_id",
+        "/rounds/insights": "round_id",
     }[template]
     expected = {
         "trade_id": trade_id,
@@ -564,7 +594,14 @@ async def test_admin_forbidden_on_business_data(
     template: str,
 ) -> None:
     url = api_prefix + template + _REQUIRED_QUERY.get(template, "")
-    resp = await _call(client, method, url, admin.headers)
+    headers = dict(admin.headers)
+    json_body: dict[str, Any] | None = None
+    if method == "put":
+        json_body = {"reason_code": "plan_build"}
+    elif template == "/rounds/insights/refresh":
+        headers["Idempotency-Key"] = "admin-probe-" + "x" * 20
+        json_body = {"period": "2026-06"}
+    resp = await _call(client, method, url, headers, json_body=json_body)
     assert resp.status_code == 403, f"{method.upper()} {template} → {resp.status_code}"
     assert resp.json()["code"] == ErrorCode.ADMIN_CANNOT_READ_TRADES.value
 

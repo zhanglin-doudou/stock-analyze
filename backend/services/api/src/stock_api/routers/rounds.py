@@ -20,27 +20,43 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, Query, Request, Response
 from fastapi.responses import JSONResponse
+from sqlalchemy import select
+from stock_contracts.enums import Role
 from stock_contracts.errors import ApiError, ErrorCode, FieldError
 from stock_core.values import Money, Qty, Ratio
+from stock_platform.audit import record as audit_record
 from stock_platform.idempotency import IdempotencyStore
 from stock_platform.tenant import TenantContext
 
 from stock_api.deps import get_state, get_tenant
 from stock_api.routing import StrictQueryRoute
 from stock_api.schemas import (
+    ForwardReturnOut,
+    InsightBucketSummaryOut,
+    InsightRankingOut,
+    InsightReasonCoverageOut,
+    InsightReasonShareOut,
+    InsightsSummaryOut,
     JobAcceptedOut,
     JobLinks,
     RebuildRoundsIn,
     RoundFillOut,
     RoundFillPage,
+    RoundInsightDetailOut,
+    RoundInsightItemOut,
+    RoundInsightsPageOut,
+    RoundInsightsRefreshIn,
+    RoundInsightsRefreshOut,
     RoundOut,
     RoundPage,
+    TradeSideInsightOut,
 )
 
 router = APIRouter(tags=["rounds"], route_class=StrictQueryRoute)
 
 _JOBS_PREFIX = "/api/v1/jobs"
 _ENDPOINT_REBUILD = "POST /jobs/rebuild-rounds"
+_ENDPOINT_INSIGHTS_REFRESH = "POST /rounds/insights/refresh"
 _PERIOD_RE = re.compile(r"^(\d{4})-(\d{2})$")
 _VALID_STATUSES = frozenset({"open", "closed", "data_error"})
 
@@ -130,6 +146,386 @@ async def list_rounds_endpoint(
         items=[_round_out(dto) for dto in dtos],
         next_cursor=next_cursor,
         has_more=next_cursor is not None,
+    )
+
+
+def _forward_out(view: Any) -> ForwardReturnOut:
+    return ForwardReturnOut(
+        horizon=view.horizon,
+        status=view.status,
+        base_shifted=view.base_shifted,
+        b0_pct=view.b0_pct,
+        b0_net_pct=view.b0_net_pct,
+        b1_pct=view.b1_pct,
+        b2_pct=view.b2_pct,
+        b3_pct=view.b3_pct,
+        max_close_display=view.max_close_display,
+        min_close_display=view.min_close_display,
+        price_jump_review=view.price_jump_review,
+    )
+
+
+def _side_out(view: Any) -> TradeSideInsightOut | None:
+    if view is None:
+        return None
+    return TradeSideInsightOut(
+        trade_id=view.trade_id,
+        date=view.date,
+        price_display=view.price_display,
+        quantity_display=view.quantity_display,
+        amount_display=view.amount_display,
+        reason=_trade_reason_out(view.reason),
+        reason_label=view.reason_label,
+        forward={str(horizon): _forward_out(item) for horizon, item in view.forward.items()},
+    )
+
+
+def _trade_reason_out(dto: Any) -> Any:
+    if dto is None:
+        return None
+    from stock_api.routers.trades import _reason_out
+
+    return _reason_out(dto)
+
+
+def _item_out(item: Any) -> RoundInsightItemOut:
+    return RoundInsightItemOut(
+        round_id=item.round_id,
+        security_code=item.security_code,
+        security_name=item.security_name,
+        status=item.status,
+        open_date=item.open_date,
+        close_date=item.close_date,
+        holding_days_legacy=item.holding_days_legacy,
+        holding_trading_days=item.holding_trading_days,
+        bucket=item.bucket,
+        pnl=str(Money(item.pnl_units)),
+        return_rate_pct=Ratio(item.return_rate_units).as_pct(2),
+        buy_trade=_side_out(item.buy_trade),
+        sell_trade=_side_out(item.sell_trade),
+        buy_excess_pct=_pct_units(item.buy_excess_units),
+        sell_avoid_pct=_pct_units(item.sell_avoid_units),
+        combined_pct=_pct_units(item.combined_units),
+        rank=item.rank,
+        quadrant=item.quadrant,
+        flags=item.flags,
+        quality=list(dict.fromkeys(item.quality)),
+        missed_profit_worst_display=(
+            str(Money(item.missed_profit_worst_units))
+            if item.missed_profit_worst_units is not None
+            else None
+        ),
+        missed_profit_end_display=(
+            str(Money(item.missed_profit_end_units))
+            if item.missed_profit_end_units is not None
+            else None
+        ),
+    )
+
+
+def _pct_units(units: int | None) -> str | None:
+    return None if units is None else Ratio(units).as_pct(2)
+
+
+def _summary_out(summary: Any) -> InsightsSummaryOut:
+    swing = summary.swing
+    return InsightsSummaryOut(
+        swing=InsightBucketSummaryOut(
+            closed=swing.closed,
+            short=swing.short,
+            swing=swing.swing,
+            trend=swing.trend,
+            avg_holding_trading_days=swing.avg_holding_trading_days,
+            win_rate_pct=swing.win_rate_pct,
+            avg_pnl_display=swing.avg_pnl_display,
+            total_pnl_display=swing.total_pnl_display,
+        ),
+        addon=summary.addon,
+        sell_fly=summary.sell_fly,
+        reason_coverage=InsightReasonCoverageOut(
+            annotated=summary.reason_coverage.annotated,
+            total_rounds=summary.reason_coverage.total_rounds,
+            coverage_pct=summary.reason_coverage.coverage_pct,
+            by_code=[
+                InsightReasonShareOut(
+                    code=row.code,
+                    label=row.label,
+                    count=row.count,
+                    share_pct=row.share_pct,
+                )
+                for row in summary.reason_coverage.by_code
+            ],
+        ),
+        ranking=InsightRankingOut(
+            n_sample=summary.ranking.n_sample,
+            n_eligible=summary.ranking.n_eligible,
+            sample_status=summary.ranking.sample_status,
+            combined_median_pct=summary.ranking.combined_median_pct,
+            combined_avg_pct=summary.ranking.combined_avg_pct,
+            quadrant_counts=summary.ranking.quadrant_counts,
+            per_stock=summary.ranking.per_stock,
+            basis=summary.ranking.basis,
+            definition_version=summary.ranking.definition_version,
+        ),
+        pending=summary.pending,
+    )
+
+
+@router.get(
+    "/rounds/insights",
+    response_model=RoundInsightsPageOut,
+    operation_id="listRoundInsights",
+)
+async def list_round_insights_endpoint(
+    request: Request,
+    ctx: Annotated[TenantContext, Depends(get_tenant)],
+    period: Annotated[str | None, Query()] = None,
+    bucket: Annotated[str | None, Query()] = None,
+    flag: Annotated[list[str] | None, Query()] = None,
+    has_reason: Annotated[bool | None, Query()] = None,
+    reason_code: Annotated[str | None, Query(max_length=24)] = None,
+    security_code: Annotated[str | None, Query()] = None,
+    sort: Annotated[str, Query()] = "combined",
+    sort_dir: Annotated[str, Query()] = "desc",
+    include_summary: Annotated[bool, Query()] = True,
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    cursor: Annotated[str | None, Query()] = None,
+) -> RoundInsightsPageOut:
+    """API-092：回合洞察列表（静态路由必须先于 `/rounds/{round_id}`）。"""
+    ctx.forbid_admin_trades()
+    user_id = ctx.require_user()
+    state = get_state(request)
+    from stock_review.insights.service import get_insights_page
+
+    flags: list[str] = []
+    for raw in flag or []:
+        flags.extend(part.strip() for part in raw.split(",") if part.strip())
+    async with state.db.session(user_id=user_id, begin=True) as session:
+        page = await get_insights_page(
+            session,
+            user_id,
+            market_data=state.market_data,
+            clock=state.clock,
+            period=period,
+            bucket=bucket,
+            flags=flags,
+            has_reason=has_reason,
+            reason_code=reason_code,
+            security_code=security_code,
+            sort=sort,
+            sort_dir=sort_dir,
+            include_summary=include_summary,
+            limit=limit,
+            cursor=cursor,
+        )
+    return RoundInsightsPageOut(
+        period=page.period,
+        period_basis=page.period_basis,
+        definition_version=page.definition_version,
+        data_as_of=page.data_as_of,
+        ranking_as_of=page.ranking_as_of,
+        benchmark_id=page.benchmark_id,
+        basis=page.basis,
+        item_total=page.item_total,
+        summary=_summary_out(page.summary) if page.summary is not None else None,
+        items=[_item_out(item) for item in page.items],
+        next_cursor=page.next_cursor,
+        has_more=page.has_more,
+        missing=page.missing,
+        assumptions=page.assumptions,
+        disclaimer=page.disclaimer,
+    )
+
+
+@router.get(
+    "/rounds/{round_id}/insights",
+    response_model=RoundInsightDetailOut,
+    operation_id="getRoundInsight",
+)
+async def get_round_insights_endpoint(
+    round_id: str,
+    request: Request,
+    ctx: Annotated[TenantContext, Depends(get_tenant)],
+) -> RoundInsightDetailOut:
+    """API-093：单回合洞察详情（回合基础 + 配对明细 + 每笔理由/前瞻）。"""
+    ctx.forbid_admin_trades()
+    user_id = ctx.require_user()
+    state = get_state(request)
+    from stock_review.insights.service import get_round_insight
+
+    async with state.db.session(user_id=user_id, begin=True) as session:
+        detail = await get_round_insight(
+            session,
+            user_id,
+            round_id=round_id,
+            market_data=state.market_data,
+            clock=state.clock,
+        )
+    fills = [
+        {
+            **{key: value for key, value in fill.items() if key not in {"buy", "sell"}},
+            "buy": _side_out(fill["buy"]),
+            "sell": _side_out(fill["sell"]),
+        }
+        for fill in detail.fills
+    ]
+    return RoundInsightDetailOut(
+        round_id=detail.round_id,
+        security_code=detail.security_code,
+        security_name=detail.security_name,
+        status=detail.status,
+        open_date=detail.open_date,
+        close_date=detail.close_date,
+        holding_days_legacy=detail.holding_days_legacy,
+        holding_trading_days=detail.holding_trading_days,
+        bucket=detail.bucket,
+        pnl=str(Money(detail.pnl_units)),
+        return_rate_pct=Ratio(detail.return_rate_units).as_pct(2),
+        buy_trade=_side_out(detail.buy_trade),
+        sell_trade=_side_out(detail.sell_trade),
+        fills=fills,
+        flags=detail.flags,
+        quality=list(dict.fromkeys(detail.quality)),
+        ranking=detail.ranking,
+        disclaimer=detail.disclaimer,
+    )
+
+
+@router.post(
+    "/rounds/insights/refresh",
+    response_model=RoundInsightsRefreshOut,
+    operation_id="refreshRoundInsights",
+    responses={
+        202: {
+            "model": JobAcceptedOut,
+            "description": "预计处理超过 5000 笔，转后台作业（Location: /jobs/{id}）",
+        }
+    },
+)
+async def refresh_round_insights_endpoint(
+    payload: RoundInsightsRefreshIn,
+    request: Request,
+    response: Response,
+    ctx: Annotated[TenantContext, Depends(get_tenant)],
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+) -> RoundInsightsRefreshOut | JobAcceptedOut | JSONResponse:
+    """API-094：重算前瞻收益缓存；>5000 笔转 202 作业。"""
+    ctx.forbid_admin_trades()
+    user_id = ctx.require_write()
+    state = get_state(request)
+    if not idempotency_key or not 16 <= len(idempotency_key) <= 128:
+        raise ApiError(
+            ErrorCode.VALIDATION_ERROR,
+            errors=[FieldError("Idempotency-Key", "required", "该操作必须携带幂等键(16~128)")],
+        )
+    if payload.scope == "all" and ctx.role is not Role.ADMIN:
+        raise ApiError(ErrorCode.FORBIDDEN, detail="scope=all 仅管理员可执行")
+
+    from sqlalchemy import func
+    from stock_ledger.models import Trade
+    from stock_review.insights.service import _resolve_period, refresh_forwards
+
+    resolved = _resolve_period(payload.period, state.clock)
+    async with state.db.session(user_id=user_id, begin=True) as session:
+        count = await session.scalar(
+            select(func.count())
+            .select_from(Trade)
+            .where(
+                Trade.user_id == user_id,
+                Trade.deleted_at.is_(None),
+                Trade.trade_date >= resolved.start,
+                Trade.trade_date <= resolved.end,
+            )
+        )
+    if (count or 0) > 5000:
+        scope_key = f"round_insights:{user_id}"
+        body_json = json.dumps(
+            payload.model_dump(mode="json"), sort_keys=True, separators=(",", ":")
+        )
+        request_hash = hashlib.sha256(body_json.encode("utf-8")).hexdigest()
+        async with state.db.session(user_id=user_id, begin=True) as session:
+            record = await state.idempotency.begin(
+                session,
+                user_id=user_id,
+                endpoint=_ENDPOINT_INSIGHTS_REFRESH,
+                key=idempotency_key,
+                request_hash=request_hash,
+            )
+            if record is not None:
+                replayed = IdempotencyStore.payload_of(record)
+                if replayed is not None:
+                    return JSONResponse(
+                        content=replayed,
+                        status_code=IdempotencyStore.status_of(record),
+                        headers={
+                            "Idempotency-Replayed": "true",
+                            "Location": f"{_JOBS_PREFIX}/{replayed.get('job_id')}",
+                            "Retry-After": "1",
+                        },
+                    )
+            job_id, reused = await state.queue.enqueue(
+                session,
+                kind="refresh_round_insights",
+                user_id=user_id,
+                scope_key=scope_key,
+                params={"period": resolved.label, "scope": payload.scope},
+            )
+            accepted = JobAcceptedOut(
+                job_id=job_id,
+                type="refresh_round_insights",
+                status="pending",
+                links=JobLinks(
+                    self=f"{_JOBS_PREFIX}/{job_id}",
+                    events=f"{_JOBS_PREFIX}/{job_id}/events",
+                ),
+            )
+            await state.idempotency.complete(
+                session,
+                user_id=user_id,
+                endpoint=_ENDPOINT_INSIGHTS_REFRESH,
+                key=idempotency_key,
+                status_code=202,
+                body=accepted.model_dump(mode="json"),
+                job_id=job_id,
+            )
+        response.headers["Location"] = f"{_JOBS_PREFIX}/{job_id}"
+        response.headers["Retry-After"] = "1"
+        if reused:
+            response.headers["X-Job-Reused"] = "true"
+        return accepted
+
+    async with state.db.session(user_id=user_id, begin=True) as session:
+        result = await refresh_forwards(
+            session,
+            user_id,
+            market_data=state.market_data,
+            clock=state.clock,
+            period=payload.period,
+            scope=payload.scope,
+        )
+        await audit_record(
+            session,
+            action="round_insights.refresh",
+            actor_id=user_id,
+            target_type="round_insights",
+            target_id=str(user_id),
+            meta={
+                "computed": result.computed,
+                "skipped": result.skipped,
+                "period": resolved.label,
+            },
+            request_id=request.headers.get("x-request-id"),
+        )
+    return RoundInsightsRefreshOut(
+        computed=result.computed,
+        skipped=result.skipped,
+        pending=result.pending,
+        no_calendar=result.no_calendar,
+        no_bar=result.no_bar,
+        corporate_action=result.corporate_action,
+        divisor_missing=result.divisor_missing,
+        stale_price=result.stale_price,
+        data_as_of=result.data_as_of,
     )
 
 
