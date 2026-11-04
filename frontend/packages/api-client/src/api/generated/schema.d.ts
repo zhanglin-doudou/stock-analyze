@@ -1299,7 +1299,7 @@ export interface components {
              * @default warning
              * @enum {string}
              */
-            severity: "blocker" | "warning";
+            severity: "blocker" | "warning" | "info";
             /** What To Do */
             what_to_do: string;
         };

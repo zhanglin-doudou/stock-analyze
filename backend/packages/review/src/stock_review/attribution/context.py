@@ -39,12 +39,17 @@ BEGIN_SOURCE_ZERO = "zero"
 
 @dataclass(frozen=True, slots=True)
 class MissingEntry:
-    """`missing[]` 条目（响应字段，不是 `ErrorCode`；§4.4 码表）。"""
+    """`missing[]` 条目（响应字段，不是 `ErrorCode`；§4.4 码表）。
+
+    `severity`：`"warning"`（数据质量缺口，默认）或 `"info"`（不影响归因口径的提示，
+    如退市/非在交易标的缺行业映射）；blocker 由 API 层按码表提升。
+    """
 
     field: str
     code: str
     reason: str
     what_to_do: str
+    severity: str = "warning"
 
 
 @dataclass(frozen=True, slots=True)

@@ -1395,7 +1395,7 @@ class AttributionMissingOut(StrictModel):
     field: str
     field_label: str | None = None
     code: str
-    severity: Literal["blocker", "warning"] = "warning"
+    severity: Literal["blocker", "warning", "info"] = "warning"
     reason: str
     what_to_do: str
 

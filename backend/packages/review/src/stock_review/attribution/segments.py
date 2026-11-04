@@ -36,6 +36,7 @@ from stock_ledger.models import Trade
 from stock_platform.symbols import classify_symbol
 
 from stock_review.application.valuation import (
+    PRICE_LOOKBACK,
     QTY_PRICE_SCALE,
     category,
     is_money_fund_row,
@@ -78,6 +79,10 @@ class SymbolPlan:
     price_fallback: bool = False  # 参考价用了前收（≤45 天窗口）
     sector_fallback: bool = False  # 指数参考日与个股参考日不一致
     bucket_kind: str = "none"  # corporate_action_pnl | unattributed_price_pnl | none
+    # 是否属于可归因 universe：A 股 stock 类且期末附近仍有行情。
+    # 退市/长期停牌（期末 45 天内无任何 bar）为 False——缺行业映射时降级为 info，
+    # 因为这类标的本就不参与归因（§4.4）。
+    in_universe: bool = True
 
 
 @dataclass(slots=True)
@@ -123,6 +128,18 @@ def _close_entry(
     if index == 0:
         return None
     return entries[index - 1]
+
+
+def _in_universe(
+    ladder: Mapping[str, list[tuple[date, int]]], symbol: str, expected_p1_date: date
+) -> bool:
+    """是否仍在可归因 universe 内（期末 `PRICE_LOOKBACK` 窗口内仍有行情）。
+
+    退市/长期停牌的标的期末附近没有任何 bar（或最后一根早于 45 天窗口）→ False：
+    这类标的即使缺行业映射也不影响归因口径，`missing[]` 降为 info（§4.4）。
+    """
+    entry = _close_entry(ladder, symbol, expected_p1_date)
+    return entry is not None and (expected_p1_date - entry[0]) <= PRICE_LOOKBACK
 
 
 def _fee_basis_unknown(trade: Trade) -> bool:
@@ -274,6 +291,7 @@ def _plan_for_symbol(
 ) -> SymbolPlan:
     """单标的计划：先按优先级判剔除，再两级分摊构段（§3.3）。"""
     trades_amount = sum(t.amount_units for t in trades_sym)
+    in_universe = klass == "stock" and _in_universe(ladder, code, expected_p1_date)
 
     def _excluded(reason: str | None, bucket: str) -> SymbolPlan:
         return SymbolPlan(
@@ -287,6 +305,7 @@ def _plan_for_symbol(
             trades_amount_units=trades_amount,
             dividend_units=0,
             bucket_kind=bucket,
+            in_universe=in_universe,
         )
 
     bucket = "corporate_action_pnl" if code in corporate else "unattributed_price_pnl"
@@ -521,6 +540,7 @@ def _plan_for_symbol(
         price_fallback=price_fallback,
         sector_fallback=sector_fallback,
         bucket_kind="none",
+        in_universe=in_universe,
     )
 
 

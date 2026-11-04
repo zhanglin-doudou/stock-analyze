@@ -412,6 +412,36 @@ describe("AttributionPage", () => {
     expect(details?.textContent).toContain("BRIDGE_MISMATCH");
   });
 
+  it("数据质量：info 提示不计入缺口数，单独展示中性色提示标签", async () => {
+    getAttribution.mockResolvedValue(
+      attribution({
+        // 后端 status 仍按 missing 存在性判为 degraded；info 只是展示分层，
+        // 不参与数据质量缺口计数（也不把整页状态翻回 ok）。
+        status: "degraded",
+        missing: [
+          {
+            code: "SECTOR_MAPPING_MISSING",
+            field: "factors",
+            field_label: "因子归因",
+            severity: "info",
+            reason: "2 个标的无行业归属（已退市或不在可归因范围内，不影响归因口径）：600077,600636",
+            what_to_do: "无需处理",
+          },
+        ],
+      }),
+    );
+    renderPage();
+
+    await screen.findByTestId("attr-quality");
+    expect(screen.getByTestId("attr-quality-summary").textContent).toContain(
+      "无数据质量缺口（1 条提示）",
+    );
+    const item = screen.getByTestId("attr-missing-SECTOR_MAPPING_MISSING");
+    expect(item.getAttribute("data-severity")).toBe("info");
+    expect(item.querySelector(".attr-severity")?.textContent).toContain("提示");
+    expect(item.textContent).toContain("不影响归因口径");
+  });
+
   it("加载态：骨架屏 + aria-busy（U-13）", async () => {
     getAttribution.mockReturnValue(new Promise(() => undefined));
     renderPage();

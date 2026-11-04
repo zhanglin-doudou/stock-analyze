@@ -35,7 +35,7 @@ from stock_core.attribution.ranking import (
 )
 from stock_core.fifo import build_rounds
 from stock_ledger.models import Trade
-from stock_review.application.attribution import _mirror_view
+from stock_review.application.attribution import _exclusion_missing, _mirror_view
 from stock_review.application.rebuild import trades_to_events
 from stock_review.attribution.context import (
     BEGIN_SOURCE_STATEMENT,
@@ -195,7 +195,12 @@ def _asset_row(
     )
 
 
-def _build_bundle(trades: list[Trade], *, memberships: dict[str, str]):  # type: ignore[no-untyped-def]
+def _build_bundle(
+    trades: list[Trade],
+    *,
+    memberships: dict[str, str],
+    ladder: dict[str, list[tuple[date, int]]] | None = None,
+):  # type: ignore[no-untyped-def]
     """两次 FIFO 重放 + build_symbol_plans（与应用层编排同参）。"""
     res_all = build_rounds(trades_to_events([t for t in trades if t.trade_date <= T1]))
     res_pre = build_rounds(trades_to_events([t for t in trades if t.trade_date < T0]))
@@ -205,7 +210,7 @@ def _build_bundle(trades: list[Trade], *, memberships: dict[str, str]):  # type:
         t1=T1,
         res_all=res_all,
         res_pre=res_pre,
-        ladder=LADDER,
+        ladder=LADDER if ladder is None else ladder,
         memberships=memberships,
         sector_ladder=SECTOR_LADDER,
         corporate={},
@@ -431,6 +436,33 @@ def test_mapping_missing_symbol_is_candidate_and_excluded() -> None:
     # 修复回归：stock 类因缺口剔除仍是候选（零可归因段 → blocked 而非 ok）。
     assert bundle.has_candidate is True
     assert bundle.excluded_by_reason == {REASON_MAPPING: ["600000"]}
+    # 仍在交易（期末 45 天内仍有行情）→ 可归因 universe 内 → warning（数据质量缺口）。
+    assert plan.in_universe is True
+    entry = _exclusion_missing(REASON_MAPPING, ["600000"])
+    assert entry is not None
+    assert entry.severity == "warning"
+    assert "数据质量缺口" in entry.reason
+
+
+def test_mapping_missing_delisted_symbol_is_info() -> None:
+    """退市标的（期末 45 天内无行情）缺行业映射：不在可归因 universe → info。"""
+    delisted = {"600000": [(date(2025, 1, 10), 9_500_000)]}
+    bundle = _build_bundle(_golden_trades(), memberships={}, ladder=delisted)
+    plan = bundle.plans[0]
+    assert plan.reason_code == REASON_MAPPING
+    assert plan.in_universe is False
+
+    entry = _exclusion_missing(REASON_MAPPING, ["600000"], severity="info")
+    assert entry is not None
+    assert entry.severity == "info"
+    assert "不影响归因口径" in entry.reason
+    assert entry.what_to_do == "无需处理"
+
+    en = _exclusion_missing(REASON_MAPPING, ["600000"], lang="en", severity="info")
+    assert en is not None
+    assert en.severity == "info"
+    assert "does not affect attribution" in en.reason
+    assert en.what_to_do == "no action needed"
 
 
 def test_p0_blocked_row_blocks_window() -> None:

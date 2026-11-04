@@ -135,6 +135,24 @@ _BRIDGE_TOLERANCE_UNITS: Final[int] = 1
 _RESIDUAL_MIN_UNITS: Final[int] = 100
 # NOT_PIT 判定（§4.3）：快照日距期末 >90 天 → degraded。
 _NOT_PIT_DAYS: Final[int] = 90
+# 缺行业映射文案（zh/en × warning/info）：info = 不影响归因口径的提示；
+# warning = 数据质量缺口（仍在交易的 A 股缺行业映射）。`lang` 只换文案不换数字。
+_MAPPING_COPY: Final[dict[tuple[str, str], tuple[str, str]]] = {
+    ("zh", "warning"): ("缺行业归属（数据质量缺口）", "同步成分/确认 A 股"),
+    ("zh", "info"): ("无行业归属（已退市或不在可归因范围内，不影响归因口径）", "无需处理"),
+    (
+        "en",
+        "warning",
+    ): ("missing industry mapping (data-quality gap)", "sync sector members / confirm A-share"),
+    (
+        "en",
+        "info",
+    ): (
+        "missing industry mapping (delisted or outside attributable universe; "
+        "does not affect attribution)",
+        "no action needed",
+    ),
+}
 
 # factors[].code 的固定产品名（FACTOR_NAMES 键为 str，FactorCode 是 StrEnum）。
 
@@ -566,10 +584,37 @@ def _blocked_result(
     )
 
 
-def _exclusion_missing(reason: str, codes: Sequence[str]) -> MissingEntry | None:
-    """标的剔除 → `missing[]` 披露条目（资产类别排除不进 missing[]）。"""
+def _exclusion_missing(
+    reason: str,
+    codes: Sequence[str],
+    *,
+    lang: str = "zh",
+    severity: str = "warning",
+) -> MissingEntry | None:
+    """标的剔除 → `missing[]` 披露条目（资产类别排除不进 missing[]）。
+
+    `severity`：缺行业映射按「是否属于可归因 universe」分级——退市/非在交易标的
+    降为 `info`（不影响归因口径），仍在交易的 A 股保持 `warning`（数据质量缺口）。
+    `lang` 只切换该码的中英文案，不改变数字（§5.5）；其他码暂保持中文。
+    """
+    shown = sorted(codes)[:8]
+    if reason == REASON_MAPPING:
+        copy_key = ("en" if lang == "en" else "zh", "warning" if severity == "warning" else "info")
+        note, action = _MAPPING_COPY[copy_key]
+        if lang == "en":
+            suffix = f" (+{len(codes) - len(shown)} more)" if len(codes) > len(shown) else ""
+            reason_text = f"{len(codes)} symbol(s) {note}: {','.join(shown)}{suffix}"
+        else:
+            suffix = f" 等 {len(codes)} 只" if len(codes) > len(shown) else ""
+            reason_text = f"{len(codes)} 个标的{note}：{','.join(shown)}{suffix}"
+        return MissingEntry(
+            field="factors",
+            code=reason,
+            reason=reason_text,
+            what_to_do=action,
+            severity=severity,
+        )
     label = {
-        REASON_MAPPING: ("缺行业归属", "同步成分/确认 A 股"),
         REASON_BAR: ("行业指数日线缺失", "运行 make sync-sectors ARGS='--start …'"),
         REASON_PRICE: ("参考价缺失", "补行情"),
         REASON_CORPORATE: ("区间内送转/配股", "等待复权能力（P2）"),
@@ -578,13 +623,13 @@ def _exclusion_missing(reason: str, codes: Sequence[str]) -> MissingEntry | None
     }.get(reason)
     if label is None:
         return None
-    shown = sorted(codes)[:8]
     suffix = f" 等 {len(codes)} 只" if len(codes) > len(shown) else ""
     return MissingEntry(
         field="factors",
         code=reason,
         reason=f"{len(codes)} 个标的（{label[0]}）：{','.join(shown)}{suffix}",
         what_to_do=label[1],
+        severity=severity,
     )
 
 
@@ -980,10 +1025,23 @@ async def build_attribution(
         per_symbol=split.per_symbol,
         base_basis=base_basis,
     )
+    plan_by_code = {plan.security_code: plan for plan in bundle.plans}
     for reason, codes in bundle.excluded_by_reason.items():
-        entry = _exclusion_missing(reason, codes)
-        if entry is not None:
-            missing.append(entry)
+        if reason == REASON_MAPPING:
+            # 按「是否属于可归因 universe」分级：退市/非在交易 → info；
+            # 仍在交易的 A 股缺行业映射 → warning（数据质量缺口）。
+            info_codes = [code for code in codes if not plan_by_code[code].in_universe]
+            warn_codes = [code for code in codes if plan_by_code[code].in_universe]
+        else:
+            info_codes, warn_codes = [], list(codes)
+        if info_codes:
+            entry = _exclusion_missing(reason, info_codes, lang=lang, severity="info")
+            if entry is not None:
+                missing.append(entry)
+        if warn_codes:
+            entry = _exclusion_missing(reason, warn_codes, lang=lang)
+            if entry is not None:
+                missing.append(entry)
     if bundle.price_fallback_symbols:
         missing.append(
             MissingEntry(

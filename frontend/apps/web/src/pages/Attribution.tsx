@@ -171,7 +171,12 @@ const USER_ACTION_LABELS: Record<string, string> = {
   COVERAGE_LOW: '查看下方覆盖率与未归因标的',
 };
 
-const SEVERITY_ORDER: Record<string, number> = { blocker: 0, warning: 1 };
+const SEVERITY_ORDER: Record<string, number> = { blocker: 0, warning: 1, info: 2 };
+const SEVERITY_LABELS: Record<string, string> = {
+  blocker: '阻断',
+  warning: '降级',
+  info: 'ⓘ 提示',
+};
 
 /** 只读展示用：assumptions 中字符串项（U-06/U-11）。 */
 function assumptionText(
@@ -272,7 +277,7 @@ function MissingList({
           data-severity={item.severity}
         >
           <span className="attr-severity" data-severity={item.severity}>
-            {item.severity === 'blocker' ? '阻断' : '降级'}
+            {SEVERITY_LABELS[item.severity] ?? '降级'}
           </span>
           <strong>{item.reason}</strong>
           <span className="muted">影响：{item.field_label ?? item.field}</span>
@@ -470,16 +475,26 @@ function CaliberNotes({ data }: { data: Attribution }): ReactElement {
 }
 
 function QualityCard({ data }: { data: Attribution }): ReactElement {
+  const missing = data.missing ?? [];
+  // info 只是提示（不影响归因口径），不计入数据质量缺口数。
+  const gapCount = missing.filter((item) => item.severity !== 'info').length;
+  const infoCount = missing.length - gapCount;
+  const summary =
+    gapCount > 0
+      ? `数据质量缺口 ${gapCount} 项`
+      : infoCount > 0
+        ? `无数据质量缺口（${infoCount} 条提示）`
+        : '无数据质量缺口';
   return (
     <section className="dash-panel attr-panel" data-testid="attr-quality">
       <div className="attr-panel-head">
         <h2>数据质量</h2>
-        <span className="muted">
-          数据截至 {data.data_as_of ?? '—'} · 口径 {data.definition_version}
+        <span className="muted" data-testid="attr-quality-summary">
+          {summary} · 数据截至 {data.data_as_of ?? '—'} · 口径 {data.definition_version}
         </span>
       </div>
-      {(data.missing ?? []).length > 0 ? (
-        <MissingList missing={data.missing ?? []} />
+      {missing.length > 0 ? (
+        <MissingList missing={missing} />
       ) : (
         <p className="muted">本期无降级项。</p>
       )}

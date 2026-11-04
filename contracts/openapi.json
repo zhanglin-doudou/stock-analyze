@@ -758,7 +758,8 @@
             "default": "warning",
             "enum": [
               "blocker",
-              "warning"
+              "warning",
+              "info"
             ],
             "title": "Severity",
             "type": "string"

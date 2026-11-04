@@ -159,7 +159,7 @@ def _to_out(result: AttributionResult) -> AttributionOut:
                 field=item.field,
                 field_label=_FIELD_LABELS.get(item.field, item.field),
                 code=item.code,
-                severity="blocker" if item.code in _BLOCKER_CODES else "warning",
+                severity="blocker" if item.code in _BLOCKER_CODES else item.severity,
                 reason=item.reason,
                 what_to_do=item.what_to_do,
             )
