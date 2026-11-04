@@ -469,13 +469,15 @@ function ResidualCard({ data }: { data: Attribution }): ReactElement {
       </ul>
       {unattributed.length > 0 ? (
         <details className="attr-unattributed-details">
-          <summary className="muted">
-            未归因标的明细（共 {data.coverage?.unattributed?.length ?? 0} 只，展示前 5）
-          </summary>
+          <summary className="muted">未归因标的明细（按金额降序，最多 5 只）</summary>
           <ul className="attr-unattributed" data-testid="attr-unattributed">
             {unattributed.map((item) => (
               <li key={item.security_code}>
-                <strong>{item.security_code}</strong>
+                {/* 代码 + 名称同一行数据；名称缺失只显示代码（不做占位错配）。 */}
+                <strong>
+                  {item.security_code}
+                  {item.security_name ? ` ${item.security_name}` : ''}
+                </strong>
                 <span className="muted">
                   {labelFor(SYMBOL_CLASS_LABELS, item.symbol_class)}
                 </span>

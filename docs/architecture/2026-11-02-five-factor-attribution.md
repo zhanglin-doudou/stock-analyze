@@ -363,7 +363,7 @@ else:
 
 - **候选集来自全历史 FIFO**：`fills_by_code ∪ open_by_code ∪ 区间内持仓类行`，因此长期持有、早已清仓、已退市的标的都会生成 `SymbolPlan`；`coverage.symbols_total` 统计的正是该候选集（**不是**本期参与数，字段名保持不变）。
 - **"参与本期"** = 期末仍有未平仓 lot、`close_date ∈ [T0,T1]` 的 closed fill、或区间内有持仓类流水（`buy`/`rights`/`new_stock`/`sell`/`bonus`）。
-- **不参与本期的标的**：**不产生 `missing[]` 条目**（其缺映射/缺价/缺指数/公司行动与本期的归因口径无关），`SymbolPlan.in_universe=False`，整标的金额仍进 `unattributed_price_pnl` 残差桶；仅统计在 `symbols_total` 内。
+- **不参与本期的标的**：**不产生 `missing[]` 条目**（其缺映射/缺价/缺指数/公司行动与本期的归因口径无关），`SymbolPlan.in_universe=False`，整标的金额仍进 `unattributed_price_pnl` 残差桶；仅统计在 `symbols_total` 内。**同样不进入 `coverage.unattributed[]` 明细**（明细与 missing 复用同一 `participating` 判据，只披露本期相关标的，2026-11-04 修订）。
 - **参与本期**的 A 股缺行业映射 → `warning`（数据质量缺口）；持有但停牌（期末仍有未平仓 lot）同样参与、同样 `warning`。
 - `PRICE_LOOKBACK`（45 天）**仅**用于 `PRICE_REF_FALLBACK`（参考价前收回退判定），**不再**参与"是否可归因"判定。
 
@@ -376,9 +376,11 @@ capital_ratio      = div_round(capital_attributed, capital_total, scale=8)      
 segments_total / segments_attributed
 symbols_total       = 全历史候选标的数（含本期未参与；字段名不变，语义见下）
 symbols_attributed  = 有可归因段的标的数
-unattributed[]     = 最多 5 条 {security_code, symbol_class, reason_code, amount}（按 |amount| 降序）
+unattributed[]     = 最多 5 条 {security_code, security_name, symbol_class, reason_code, amount}（按 |amount| 降序；仅本期参与标的）
 ```
 
+- `security_name` 来源：`ledger.trade.security_name`（按 canonical 代码取最新非空值，空白压缩为单空格；仓库无独立证券主数据表），缺失为 `null`，前端只展示代码。
+- `unattributed[]` 按标的只覆盖 `corporate_action_pnl` / `unattributed_price_pnl` 两桶；`interest` / `other_cashflow` / `dividend_without_position` 为账户级，不进明细（故明细合计不必等于 Σ桶）。
 - **结论门禁**（D-09）：`summary` 允许 iff `total_pnl` 可得 && `n_attributed_segments ≥ 10` && `capital_ratio ≥ 0.90` && `valuation_gap_ratio ≤ 5%`；**例外**：`capital_total==0`（空账户/无可归因候选）时允许固定句 summary（"本期无交易/无持仓变化"或"本期无可归因 A 股"）；`blocked` 必封；`insufficient` 只给事实句不给行动建议。
 - `symbol_class`：`stock`/`fund`/`bond`/`money_fund`/`new_stock`/`pseudo`（复用 `stock_platform.symbols.classify_symbol` 与 `valuation.is_money_fund_row`）。
 

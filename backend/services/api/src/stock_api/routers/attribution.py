@@ -120,6 +120,7 @@ def _to_out(result: AttributionResult) -> AttributionOut:
             unattributed=[
                 AttributionUnattributedOut(
                     security_code=entry.security_code,
+                    security_name=entry.security_name,
                     symbol_class=entry.symbol_class,
                     reason_code=entry.reason_code,
                     amount=str(Money(entry.amount_units)),

@@ -1114,7 +1114,7 @@
       },
       "AttributionUnattributedOut": {
         "additionalProperties": false,
-        "description": "一条未归因标的披露（amount = 其残差桶金额，可为 0）。",
+        "description": "一条未归因标的披露（amount = 其残差桶金额，可为 0）。\n\n仅披露本期参与标的；`security_name` 缺失时为 null（前端只展示代码）。",
         "properties": {
           "amount": {
             "title": "Amount",
@@ -1134,6 +1134,17 @@
           "security_code": {
             "title": "Security Code",
             "type": "string"
+          },
+          "security_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Security Name"
           },
           "symbol_class": {
             "title": "Symbol Class",

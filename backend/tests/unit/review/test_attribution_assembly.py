@@ -37,6 +37,7 @@ from stock_core.fifo import build_rounds
 from stock_ledger.models import Trade
 from stock_review.application.attribution import (
     _aggregate_status,
+    _display_name,
     _exclusion_missing,
     _mirror_view,
     _residual_missing,
@@ -68,6 +69,7 @@ from stock_review.attribution.segments import (
     REASON_CORPORATE,
     REASON_MAPPING,
     REASON_PRICE,
+    SymbolPlan,
     _first_entry_within,
     build_symbol_plans,
 )
@@ -421,6 +423,89 @@ def test_golden_residual_buckets_and_coverage() -> None:
     assert coverage.unattributed == ()
 
 
+def test_coverage_unattributed_only_participating_with_names() -> None:
+    """明细只披露本期参与标的（非参与的历史候选被过滤），并带代码对应名称。"""
+    plans = [
+        SymbolPlan(
+            security_code="600000",
+            symbol_class="stock",
+            attributed=False,
+            reason_code=REASON_MAPPING,
+            participating=True,
+        ),
+        # 历史清仓/退市：本期无持仓、无窗口流水 → 不进明细（金额 0）。
+        SymbolPlan(
+            security_code="000009",
+            symbol_class="stock",
+            attributed=False,
+            reason_code=None,
+            participating=False,
+        ),
+        SymbolPlan(
+            security_code="110059",
+            symbol_class="bond",
+            attributed=False,
+            reason_code=None,
+            participating=True,
+        ),
+    ]
+    decomposition = decompose([], 0, extra_fee_units=0)
+    coverage = build_coverage(
+        plans=plans,
+        decomposition=decomposition,
+        per_symbol={"600000": -50_000, "110059": 120_000, "511990": 3_000},
+        base_basis="market",
+        names={
+            "600000": "浦发银行",
+            "110059": "建工转债",
+            "511990": "华宝添益",
+            "000009": "中国宝安",
+        },
+    )
+    # 按 |amount| 降序；计划外但在窗口内有余额的 511990 以 pseudo 披露。
+    assert [entry.security_code for entry in coverage.unattributed] == [
+        "110059",
+        "600000",
+        "511990",
+    ]
+    assert [entry.security_name for entry in coverage.unattributed] == [
+        "建工转债",
+        "浦发银行",
+        "华宝添益",
+    ]
+    assert coverage.unattributed[2].symbol_class == "pseudo"
+
+
+def test_display_name_collapses_whitespace() -> None:
+    """账单名称可能含换行/多空白 → 压成单空格；空串/None → None（前端只显示代码）。"""
+    assert _display_name("华泰紫金天\n天发货币") == "华泰紫金天 天发货币"
+    assert _display_name("   ") is None
+    assert _display_name(None) is None
+
+
+def test_coverage_unattributed_name_falls_back_to_none() -> None:
+    """名称缺失 → None（前端只展示代码，不做占位错配）。"""
+    plans = [
+        SymbolPlan(
+            security_code="600000",
+            symbol_class="stock",
+            attributed=False,
+            reason_code=REASON_PRICE,
+            participating=True,
+        )
+    ]
+    decomposition = decompose([], 0, extra_fee_units=0)
+    coverage = build_coverage(
+        plans=plans,
+        decomposition=decomposition,
+        per_symbol={"600000": 0},
+        base_basis="market",
+        names={},
+    )
+    (entry,) = coverage.unattributed
+    assert entry.security_name is None
+
+
 def test_golden_summary_insufficient_sample() -> None:
     """3 段 < 门禁 10 段 → 只给事实句；文案过裸术语/建议门禁。"""
     trades = _golden_trades()
@@ -742,7 +827,7 @@ def test_residual_missing_within_tolerance_is_info() -> None:
     assert entry is not None
     assert entry.code == "RESIDUAL_WITHIN_TOLERANCE"
     assert entry.severity == "info"
-    assert entry.reason == "未归因 40.76 元，低于期末资产 1%（阈值 100.00 元）"
+    assert entry.reason == "未归因 40.76 元，低于期末资产 0.20%（阈值 100.00 元）"
     assert entry.what_to_do == "无需处理"
 
 

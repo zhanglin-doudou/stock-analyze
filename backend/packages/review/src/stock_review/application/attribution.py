@@ -650,6 +650,13 @@ def _aggregate_status(
     return "ok"
 
 
+def _display_name(raw: str | None) -> str | None:
+    """账单名称的展示形态：压缩空白（账单里可能含换行），空白视为缺失 → None。"""
+    if not raw:
+        return None
+    return " ".join(raw.split()) or None
+
+
 def _residual_missing(*, unattributed_units: int, tolerance_units: int) -> MissingEntry | None:
     """残差披露（§4.4）：超容差 → `RESIDUAL_LARGE`(warning)；容差内非零 → info。
 
@@ -663,7 +670,7 @@ def _residual_missing(*, unattributed_units: int, tolerance_units: int) -> Missi
         return MissingEntry(
             field="residual",
             code="RESIDUAL_LARGE",
-            reason=f"未归因金额 {amount} 元（绝对值）超过容差 {tolerance} 元（期末总资产的 1%）",
+            reason=f"未归因金额 {amount} 元（绝对值）超过容差 {tolerance} 元（期末总资产的 {_tolerance_pct_ratio().as_pct()}）",
             what_to_do="看 residual_breakdown",
         )
     if unattributed_units != 0:
@@ -671,7 +678,7 @@ def _residual_missing(*, unattributed_units: int, tolerance_units: int) -> Missi
             field="residual",
             code="RESIDUAL_WITHIN_TOLERANCE",
             severity="info",
-            reason=f"未归因 {amount} 元，低于期末资产 1%（阈值 {tolerance} 元）",
+            reason=f"未归因 {amount} 元，低于期末资产 {_tolerance_pct_ratio().as_pct()}（阈值 {tolerance} 元）",
             what_to_do="无需处理",
         )
     return None
@@ -942,6 +949,13 @@ async def build_attribution(
         (trade.security_code, trade.security_name) for trade in trades
     )
     canonical = partial(canonical_code, bond_alias)
+    # 名称来源：仓库无独立证券主数据表，`security_name` 随账单落在 `ledger.trade`；
+    # 按 canonical 代码记最新非空名称（与 nav/dashboard 同口径），缺失即 None。
+    code_names: dict[str, str] = {}
+    for trade in trades:
+        name = _display_name(trade.security_name)
+        if name:
+            code_names[canonical(trade.security_code)] = name
     res_all = build_rounds(
         trades_to_events([t for t in trades if t.trade_date <= resolved.end], bond_alias=bond_alias)
     )
@@ -1139,6 +1153,7 @@ async def build_attribution(
         decomposition=decomposition,
         per_symbol=split.per_symbol,
         base_basis=base_basis,
+        names=code_names,
     )
     plan_by_code = {plan.security_code: plan for plan in bundle.plans}
     for reason, codes in bundle.excluded_by_reason.items():

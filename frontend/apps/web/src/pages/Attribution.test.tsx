@@ -148,9 +148,17 @@ function attribution(overrides: Partial<Attribution> = {}): Attribution {
       unattributed: [
         {
           security_code: "110059",
+          security_name: "建工转债",
           symbol_class: "convertible_bond",
           reason_code: "CB_EXCLUDED",
           amount: "120.00",
+        },
+        {
+          // 名称缺失：只展示代码，不做占位错配。
+          security_code: "600519",
+          symbol_class: "stock",
+          reason_code: null,
+          amount: "0.00",
         },
       ],
     },
@@ -234,7 +242,12 @@ describe("AttributionPage", () => {
     expect(bar).not.toBeNull();
     expect((bar as HTMLElement).style.getPropertyValue("--w")).toBe("59.40%");
     expect(bar?.getAttribute("data-tone")).toBe("negative");
-    expect(screen.getByTestId("attr-unattributed").textContent).toContain("110059");
+    const rows = screen.getByTestId("attr-unattributed").querySelectorAll("li");
+    expect(rows).toHaveLength(2);
+    expect(rows[0].textContent).toContain("110059 建工转债");
+    // 名称缺失只显示代码。
+    expect(rows[1].textContent).toContain("600519");
+    expect(rows[1].textContent).not.toContain("未知");
     expect(screen.getByTestId("attr-residual-tolerance").textContent).toContain(
       "容差 1,000.00 元（期末总资产 500,000.00 元）",
     );

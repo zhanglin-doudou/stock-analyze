@@ -1367,9 +1367,13 @@ class AttributionSampleOut(StrictModel):
 
 
 class AttributionUnattributedOut(StrictModel):
-    """一条未归因标的披露（amount = 其残差桶金额，可为 0）。"""
+    """一条未归因标的披露（amount = 其残差桶金额，可为 0）。
+
+    仅披露本期参与标的；`security_name` 缺失时为 null（前端只展示代码）。
+    """
 
     security_code: str
+    security_name: str | None = None
     symbol_class: str
     reason_code: str | None = None
     amount: str

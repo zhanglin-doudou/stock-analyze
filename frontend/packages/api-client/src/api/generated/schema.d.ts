@@ -1426,6 +1426,8 @@ export interface components {
         /**
          * AttributionUnattributedOut
          * @description 一条未归因标的披露（amount = 其残差桶金额，可为 0）。
+         *
+         *     仅披露本期参与标的；`security_name` 缺失时为 null（前端只展示代码）。
          */
         AttributionUnattributedOut: {
             /** Amount */
@@ -1434,6 +1436,8 @@ export interface components {
             reason_code?: string | null;
             /** Security Code */
             security_code: string;
+            /** Security Name */
+            security_name?: string | null;
             /** Symbol Class */
             symbol_class: string;
         };
