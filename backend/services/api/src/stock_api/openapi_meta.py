@@ -92,6 +92,9 @@ MONEY_FIELDS = frozenset(
         "unattributed_price_pnl",
         "dividend_without_position",
         "other_cashflow",
+        # 2026-11-04（API-036）：残差对账派生金额（与 residual 同 2 位）
+        "unattributed_symbols_total",
+        "account_level_total",
     }
 )
 PRICE_FIELDS = frozenset({"price", "unit_nav"})

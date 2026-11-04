@@ -99,6 +99,7 @@ from stock_review.attribution.residual import (
     BUCKET_INTEREST,
     BUCKET_OTHER,
     BUCKET_UNATTRIBUTED,
+    ResidualSplit,
     split_residual,
 )
 from stock_review.attribution.segments import (
@@ -193,6 +194,22 @@ class AttributionSample:
 
 
 @dataclass(frozen=True, slots=True)
+class ResidualReconciliation:
+    """残差对账（§4.4）：标的合计 + 账户级桶合计 == residual（全部为标度整数分）。
+
+    - `unattributed_symbols_total`：`split.per_symbol` 合计（= corporate_action_pnl +
+      unattributed_price_pnl 中落到标的的部分，含被 5 条展示上限截断的标的）；
+    - `account_level_total`：不按标的分摊的桶（interest / other_cashflow /
+      dividend_without_position）+ valuation_gap；
+    - 等式由构造保证：residual = Σ五桶 + valuation_gap。
+    """
+
+    unattributed_symbols_total_units: int
+    account_level_total_units: int
+    residual_units: int
+
+
+@dataclass(frozen=True, slots=True)
 class AttributionResult:
     """`GET /attribution` 应用层结果（§6.2；金额标度整数，API 层格式化）。
 
@@ -227,6 +244,7 @@ class AttributionResult:
     data_as_of: date | None
     inputs_hash: str
     links: Mapping[str, str]
+    residual_reconciliation: ResidualReconciliation | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -655,6 +673,26 @@ def _display_name(raw: str | None) -> str | None:
     if not raw:
         return None
     return " ".join(raw.split()) or None
+
+
+def _residual_reconciliation(
+    *, split: ResidualSplit, gap_units: int, residual_units: int
+) -> ResidualReconciliation:
+    """残差对账（§4.4，标度整数）：Σper_symbol + (dividend+interest+other+gap) == residual。
+
+    `per_symbol` 是 corporate/unattributed 两桶中**落到标的**的部分（含被 5 条
+    展示上限截断的标的），因此恒等于两桶之和；等式由 `residual = Σ五桶 + gap` 保证。
+    """
+    return ResidualReconciliation(
+        unattributed_symbols_total_units=sum(split.per_symbol.values()),
+        account_level_total_units=(
+            split.buckets[BUCKET_DIVIDEND]
+            + split.buckets[BUCKET_INTEREST]
+            + split.buckets[BUCKET_OTHER]
+            + gap_units
+        ),
+        residual_units=residual_units,
+    )
 
 
 def _residual_missing(*, unattributed_units: int, tolerance_units: int) -> MissingEntry | None:
@@ -1345,6 +1383,12 @@ async def build_attribution(
         BUCKET_OTHER: split.buckets[BUCKET_OTHER],
         BUCKET_GAP: gap_units,
     }
+    # 对账行（§4.4）：标的合计 + 账户级桶合计 = residual（后端派生，前端零口径）。
+    reconciliation = _residual_reconciliation(
+        split=split,
+        gap_units=gap_units,
+        residual_units=decomposition.residual_units,
+    )
     return AttributionResult(
         model="five_factor",
         ratio_basis="amount/total_pnl",
@@ -1375,4 +1419,5 @@ async def build_attribution(
             "rounds": "/rounds",
             "reports": "/reports",
         },
+        residual_reconciliation=reconciliation,
     )

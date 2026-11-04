@@ -41,6 +41,7 @@ from stock_review.application.attribution import (
     _exclusion_missing,
     _mirror_view,
     _residual_missing,
+    _residual_reconciliation,
     _sector_start_fallback_missing,
 )
 from stock_review.application.rebuild import trades_to_events
@@ -61,6 +62,7 @@ from stock_review.attribution.residual import (
     BUCKET_INTEREST,
     BUCKET_OTHER,
     BUCKET_UNATTRIBUTED,
+    ResidualSplit,
     split_residual,
 )
 from stock_review.attribution.segments import (
@@ -504,6 +506,55 @@ def test_coverage_unattributed_name_falls_back_to_none() -> None:
     )
     (entry,) = coverage.unattributed
     assert entry.security_name is None
+
+
+@pytest.mark.parametrize(
+    ("per_symbol", "bucket_values", "gap_units", "residual_units", "expect_account"),
+    [
+        # 2026-06 实测：标的 -5,712.00 + 账户级（interest 1.43）= -5,710.57
+        (
+            {"001237": -571_200},
+            {BUCKET_UNATTRIBUTED: -571_200, BUCKET_INTEREST: 143},
+            0,
+            -571_057,
+            143,
+        ),
+        # 2026-07：全 0
+        ({}, {}, 0, 0, 0),
+        # valuation_gap 非零 → 由账户级吸收
+        ({}, {}, -12_345, -12_345, -12_345),
+        # 明细为空但账户级有股息
+        ({}, {BUCKET_DIVIDEND: 8_800}, 0, 8_800, 8_800),
+    ],
+)
+def test_residual_reconciliation_identity(
+    per_symbol: dict[str, int],
+    bucket_values: dict[str, int],
+    gap_units: int,
+    residual_units: int,
+    expect_account: int,
+) -> None:
+    """对账等式严格成立（分）：标的合计 + 账户级桶合计 == residual。"""
+    buckets = {
+        BUCKET_CORPORATE: 0,
+        BUCKET_UNATTRIBUTED: 0,
+        BUCKET_DIVIDEND: 0,
+        BUCKET_INTEREST: 0,
+        BUCKET_OTHER: 0,
+        **bucket_values,
+    }
+    split = ResidualSplit(
+        buckets=buckets, fee_bucketed_units=0, fee_indep_units=0, per_symbol=dict(per_symbol)
+    )
+    reconciliation = _residual_reconciliation(
+        split=split, gap_units=gap_units, residual_units=residual_units
+    )
+    assert reconciliation.unattributed_symbols_total_units == sum(per_symbol.values())
+    assert reconciliation.account_level_total_units == expect_account
+    assert (
+        reconciliation.unattributed_symbols_total_units + reconciliation.account_level_total_units
+        == reconciliation.residual_units
+    )
 
 
 def test_golden_summary_insufficient_sample() -> None:

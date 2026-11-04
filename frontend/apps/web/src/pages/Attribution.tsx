@@ -467,6 +467,16 @@ function ResidualCard({ data }: { data: Attribution }): ReactElement {
           </li>
         ))}
       </ul>
+      {/* 对账行：全部数字来自后端派生字段（零口径，不在前端加总/取整）。 */}
+      {data.residual_reconciliation ? (
+        <p className="attr-reconciliation" data-testid="attr-reconciliation">
+          明细合计 {formatMoney(data.residual_reconciliation.unattributed_symbols_total)} + 账户级{' '}
+          {formatMoney(data.residual_reconciliation.account_level_total)} ={' '}
+          <strong className="num">
+            {formatMoney(data.residual_reconciliation.residual)}
+          </strong>
+        </p>
+      ) : null}
       {unattributed.length > 0 ? (
         <details className="attr-unattributed-details">
           <summary className="muted">未归因标的明细（按金额降序，最多 5 只）</summary>

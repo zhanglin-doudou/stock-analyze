@@ -33,6 +33,7 @@ from stock_api.schemas import (
     AttributionMissingOut,
     AttributionOut,
     AttributionPresentationOut,
+    AttributionReconciliationOut,
     AttributionSampleOut,
     AttributionUnattributedOut,
     attribution_payload,
@@ -148,6 +149,19 @@ def _to_out(result: AttributionResult) -> AttributionOut:
         residual_ratio_pct=pct_str(result.residual_ratio_units),
         residual_breakdown=breakdown,
         residual_breakdown_labels=breakdown_labels,
+        residual_reconciliation=(
+            None
+            if result.residual_reconciliation is None
+            else AttributionReconciliationOut(
+                unattributed_symbols_total=str(
+                    Money(result.residual_reconciliation.unattributed_symbols_total_units)
+                ),
+                account_level_total=str(
+                    Money(result.residual_reconciliation.account_level_total_units)
+                ),
+                residual=str(Money(result.residual_reconciliation.residual_units)),
+            )
+        ),
         sample=AttributionSampleOut(
             n_segments=result.sample.n_segments,
             n_attributed_segments=result.sample.n_attributed_segments,

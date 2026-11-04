@@ -125,6 +125,11 @@ function attribution(overrides: Partial<Attribution> = {}): Attribution {
       other: "0.00",
       valuation_gap: "0.00",
     },
+    residual_reconciliation: {
+      unattributed_symbols_total: "120.00",
+      account_level_total: "0.00",
+      residual: "120.00",
+    },
     sample: {
       n_segments: 14,
       n_attributed_segments: 12,
@@ -314,6 +319,7 @@ describe("AttributionPage", () => {
         residual: null,
         residual_ratio: null,
         residual_breakdown: null,
+        residual_reconciliation: null,
         coverage: null,
         factors: FACTORS.map((factor) => ({
           ...factor,
@@ -391,6 +397,11 @@ describe("AttributionPage", () => {
           other: "0.00",
           valuation_gap: "0.00",
         },
+        residual_reconciliation: {
+          unattributed_symbols_total: "0.00",
+          account_level_total: "0.00",
+          residual: "0.00",
+        },
         factors: FACTORS.map((factor) => ({
           ...factor,
           amount: "0.00",
@@ -434,6 +445,10 @@ describe("AttributionPage", () => {
     );
     expect(screen.getByTestId("attr-factor-selection").textContent).toContain("0.00");
     expect(screen.queryByTestId("attr-missing")).toBeNull();
+    // 明细为空时对账行仍为 0 + 0 = 0（全部来自后端派生字段）。
+    expect(screen.getByTestId("attr-reconciliation").textContent).toBe(
+      "明细合计 0.00 元 + 账户级 0.00 元 = 0.00 元",
+    );
   });
 
   it("残差去向：桶按金额降序、正负含义、残差比 >100% 提示（U-08）", async () => {
@@ -451,6 +466,11 @@ describe("AttributionPage", () => {
           unattributed_price_pnl: "未归因标的损益",
           valuation_gap: "估值差（未能解释）",
         },
+        residual_reconciliation: {
+          unattributed_symbols_total: "445625.33",
+          account_level_total: "-336016.03",
+          residual: "109609.30",
+        },
       }),
     );
     renderPage();
@@ -464,6 +484,10 @@ describe("AttributionPage", () => {
     expect(amounts[2]).toContain("-336,022.00");
     expect(screen.getByTestId("attr-residual").textContent).toContain("正数=未归因收益");
     expect(screen.getByTestId("attr-residual").textContent).toContain("残差大于本期总损益");
+    // 对账行：标的 445,625.33 + 账户级（利息 5.97 − 估值差 336,022.00）= 残差 109,609.30。
+    expect(screen.getByTestId("attr-reconciliation").textContent).toContain(
+      "445,625.33 元 + 账户级 -336,016.03 元 = 109,609.30 元",
+    );
   });
 
   it("数据质量：阻断项优先、显示用户动作、开发命令折叠（U-10）", async () => {

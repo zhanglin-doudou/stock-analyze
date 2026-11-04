@@ -371,6 +371,14 @@
   line-height: var(--lh-normal);
 }
 
+.attr-reconciliation {
+  margin: 0 0 var(--s3);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-normal);
+  /* 负号 + 千分位长金额在窄屏可断行，不横向溢出。 */
+  overflow-wrap: anywhere;
+}
+
 .attr-ratio-warn {
   margin-left: 4px;
   color: var(--down);

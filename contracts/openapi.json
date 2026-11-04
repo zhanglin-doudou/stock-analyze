@@ -785,7 +785,7 @@
       },
       "AttributionOut": {
         "additionalProperties": false,
-        "description": "五因子归因响应（§6.2；金额 2 位 / 比率 scale=8 定点字符串）。\n\nblocked 缺省语义（§6.3 评审 P0-7 冻结）：`status=\"blocked\"` 时\n`total_pnl/base_capital/residual/residual_ratio/residual_breakdown/coverage`\n整键省略，`factors[].amount/ratio/share` 逐项省略（code/name/rank/conclusion 保留）；\n非 blocked 时 ratio=None 显式输出 null（PNL_NEAR_ZERO，附 `ratio_na_reason`）。",
+        "description": "五因子归因响应（§6.2；金额 2 位 / 比率 scale=8 定点字符串）。\n\nblocked 缺省语义（§6.3 评审 P0-7 冻结）：`status=\"blocked\"` 时\n`total_pnl/base_capital/residual/residual_ratio/residual_breakdown/coverage`\n`residual_reconciliation` 整键省略，`factors[].amount/ratio/share` 逐项省略\n（code/name/rank/conclusion 保留）；非 blocked 时 ratio=None 显式输出 null\n（PNL_NEAR_ZERO，附 `ratio_na_reason`）。",
         "properties": {
           "assumptions": {
             "additionalProperties": true,
@@ -944,6 +944,16 @@
             ],
             "title": "Residual Ratio Pct"
           },
+          "residual_reconciliation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AttributionReconciliationOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "sample": {
             "$ref": "#/components/schemas/AttributionSampleOut"
           },
@@ -1066,6 +1076,31 @@
           "tone"
         ],
         "title": "AttributionPresentationOut",
+        "type": "object"
+      },
+      "AttributionReconciliationOut": {
+        "additionalProperties": false,
+        "description": "残差对账（后端派生，前端零口径）：标的合计 + 账户级桶合计 == residual。",
+        "properties": {
+          "account_level_total": {
+            "title": "Account Level Total",
+            "type": "string"
+          },
+          "residual": {
+            "title": "Residual",
+            "type": "string"
+          },
+          "unattributed_symbols_total": {
+            "title": "Unattributed Symbols Total",
+            "type": "string"
+          }
+        },
+        "required": [
+          "unattributed_symbols_total",
+          "account_level_total",
+          "residual"
+        ],
+        "title": "AttributionReconciliationOut",
         "type": "object"
       },
       "AttributionSampleOut": {

@@ -1414,13 +1414,22 @@ class AttributionLinksOut(StrictModel):
     reports: str
 
 
+class AttributionReconciliationOut(StrictModel):
+    """残差对账（后端派生，前端零口径）：标的合计 + 账户级桶合计 == residual。"""
+
+    unattributed_symbols_total: str
+    account_level_total: str
+    residual: str
+
+
 class AttributionOut(StrictModel):
     """五因子归因响应（§6.2；金额 2 位 / 比率 scale=8 定点字符串）。
 
     blocked 缺省语义（§6.3 评审 P0-7 冻结）：`status="blocked"` 时
     `total_pnl/base_capital/residual/residual_ratio/residual_breakdown/coverage`
-    整键省略，`factors[].amount/ratio/share` 逐项省略（code/name/rank/conclusion 保留）；
-    非 blocked 时 ratio=None 显式输出 null（PNL_NEAR_ZERO，附 `ratio_na_reason`）。
+    `residual_reconciliation` 整键省略，`factors[].amount/ratio/share` 逐项省略
+    （code/name/rank/conclusion 保留）；非 blocked 时 ratio=None 显式输出 null
+    （PNL_NEAR_ZERO，附 `ratio_na_reason`）。
     """
 
     model: str
@@ -1442,6 +1451,7 @@ class AttributionOut(StrictModel):
     residual_ratio_pct: str | None = None
     residual_breakdown: dict[str, str] | None = None
     residual_breakdown_labels: dict[str, str] | None = None
+    residual_reconciliation: AttributionReconciliationOut | None = None
     sample: AttributionSampleOut
     coverage: AttributionCoverageOut | None = None
     missing: list[AttributionMissingOut] = Field(default_factory=list)
@@ -1459,6 +1469,7 @@ _BLOCKED_OMIT_KEYS: tuple[str, ...] = (
     "residual",
     "residual_ratio",
     "residual_breakdown",
+    "residual_reconciliation",
     "coverage",
 )
 
