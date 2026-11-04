@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen, within } from "@testing-library/react";
-import { MemoryRouter, Route, Routes } from "react-router-dom";
-import { Layout, RequireAuth } from "./router";
+import { MemoryRouter, Route, RouterProvider, Routes, createMemoryRouter } from "react-router-dom";
+import { Layout, RequireAuth, appRoutes } from "./router";
+import { pageMeta } from "./layout/navigation";
 import { clearSession, saveTokens } from "./store/session";
 
 afterEach(() => {
@@ -29,9 +30,19 @@ describe("router / Layout（FT-09 导航与登录保护）", () => {
     const labels = within(screen.getByRole("navigation", { name: "主导航" }))
       .getAllByRole("link")
       .map((item) => item.textContent);
-    expect(labels.slice(0, 5)).toEqual(["看板", "交易流水", "回合", "净值与收益", "指标"]);
+    expect(labels.slice(0, 6)).toEqual(["看板", "交易流水", "回合", "回合洞察", "净值与收益", "指标"]);
     // 当前页激活态由 NavLink 提供
     expect(link.getAttribute("aria-current")).toBe("page");
+  });
+
+  it("/rounds/insights 命中静态路由（不被 rounds/:roundId 吃掉）", async () => {
+    saveTokens({ access_token: "access-token", refresh_token: "refresh-token" });
+    const memory = createMemoryRouter(appRoutes, { initialEntries: ["/rounds/insights"] });
+    render(<RouterProvider router={memory} />);
+
+    expect(await screen.findByRole("heading", { name: "回合洞察" })).toBeTruthy();
+    // 面包屑/标题不能被“回合详情”前缀规则误伤。
+    expect(pageMeta("/rounds/insights").title).toBe("回合洞察");
   });
 
   it("未登录访问 /assets 跳转登录页", () => {

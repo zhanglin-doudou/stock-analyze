@@ -1,0 +1,508 @@
+import { useCallback, useEffect, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
+import {
+  newIdempotencyKey,
+  type JobAccepted,
+  type RoundInsightItem,
+  type RoundInsightsPage,
+  type RoundInsightsRefreshOut,
+} from "@sa/api-client";
+import { api } from "../client";
+import { Cursor } from "../ui/Cursor";
+import { ProblemView } from "../ui/Problem";
+import { DataTable, type DataTableColumn } from "../ui/DataTable";
+
+/** 设计 §6.3 的 `flag` 词表（前端只做筛选选择，不参与计算）。 */
+const FLAG_OPTIONS = [
+  { value: "", label: "全部" },
+  { value: "addon_decline", label: "加仓后下跌" },
+  { value: "sold_too_early", label: "卖飞" },
+  { value: "reason_missing", label: "缺理由" },
+  { value: "horizon_pending", label: "前瞻待算" },
+  { value: "corporate_action", label: "公司行动" },
+];
+
+const BUCKET_OPTIONS = [
+  { value: "", label: "全部持有期" },
+  { value: "short", label: "短线（≤1 日）" },
+  { value: "swing", label: "波段（2~20 日）" },
+  { value: "trend", label: "趋势（>20 日）" },
+];
+
+const SORT_OPTIONS = [
+  { value: "combined", label: "综合（买卖两侧）" },
+  { value: "buy", label: "买入侧" },
+  { value: "sell", label: "卖出侧" },
+  { value: "pnl", label: "盈亏" },
+  { value: "return", label: "收益率" },
+  { value: "close_date", label: "平仓日" },
+];
+
+const FLAG_LABELS: Record<string, string> = {
+  addon: "加仓",
+  dip_sequence: "越跌越买",
+  below_avg: "低于均价加仓",
+  continued_decline: "加仓后下跌",
+  profit_taking: "止盈",
+  profit_take_fly: "卖飞",
+  stop_loss_rebound: "止损后反弹",
+  rising_sell_sequence: "越涨越卖",
+  full_exit: "清仓",
+  partial_exit: "部分卖出",
+  same_day: "当日回转",
+};
+
+const BUCKET_LABELS: Record<string, string> = {
+  short: "短线（≤1 日）",
+  swing: "波段（2~20 日）",
+  trend: "趋势（>20 日）",
+  unknown: "未知",
+};
+
+interface InsightTab {
+  id: string;
+  label: string;
+  bucket?: string;
+  flag?: string;
+  hasReason?: string;
+}
+
+/** 设计 §7.1 的 Tabs：每个 Tab 只映射到既有筛选参数，不额外计算。 */
+const TABS: InsightTab[] = [
+  { id: "", label: "回合表现" },
+  { id: "swing", label: "波段", bucket: "swing" },
+  { id: "addon", label: "抄底", flag: "addon_decline" },
+  { id: "sellfly", label: "卖飞", flag: "sold_too_early" },
+  { id: "reason", label: "待补理由", hasReason: "false" },
+];
+
+/** 泛型对象在 SDK 里是 `{[key: string]: unknown}`，此处只做显示层收窄（不改口径）。 */
+interface AddonSummary {
+  count: number;
+  declined_after_addon: number;
+  declined_pct?: string | null;
+  avg_dip_pct?: string | null;
+}
+interface SellFlySummary {
+  sell_count: number;
+  profit_take_fly: number;
+  stop_loss_rebound: number;
+  fly_pct?: string | null;
+  missed_profit_worst_display?: string | null;
+  missed_profit_end_display?: string | null;
+}
+interface RankingSummary {
+  n_sample: number;
+  n_eligible: number;
+  sample_status: string;
+  combined_median_pct?: string | null;
+  combined_avg_pct?: string | null;
+  quadrant_counts?: Record<string, number>;
+}
+interface PendingSummary {
+  forward_recompute: number;
+  reason_missing: number;
+}
+
+const SAMPLE_STATUS_LABELS: Record<string, string> = {
+  ok: "样本充足（≥30）",
+  insufficient: "样本不足",
+  no_conclusion: "样本过少，暂不下结论",
+};
+
+function text(value: string | null | undefined): string {
+  return value ?? "—";
+}
+
+function pnlClass(value: string | null | undefined): string {
+  if (value === null || value === undefined) return "money";
+  if (value.startsWith("-")) return "money money-neg";
+  if (value.startsWith("0")) return "money";
+  return "money money-pos";
+}
+
+function flagLabel(flag: string): string {
+  return FLAG_LABELS[flag] ?? flag;
+}
+
+/** 回合洞察（/rounds/insights）：事后统计，只渲染后端产出字符串（前端零口径）。 */
+export function RoundInsights() {
+  const [search, setSearch] = useSearchParams();
+  const period = search.get("period") ?? "";
+  const bucket = search.get("bucket") ?? "";
+  const flag = search.get("flag") ?? "";
+  const hasReason = search.get("has_reason") ?? "";
+  const securityCode = search.get("security_code") ?? "";
+  const sort = search.get("sort") ?? "combined";
+
+  const [codeDraft, setCodeDraft] = useState(securityCode);
+  const [page, setPage] = useState<RoundInsightsPage | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+  const [notice, setNotice] = useState("");
+  const [refreshing, setRefreshing] = useState(false);
+
+  const setParam = useCallback(
+    (key: string, value: string) => {
+      const next = new URLSearchParams(search);
+      if (value) next.set(key, value);
+      else next.delete(key);
+      next.delete("cursor");
+      setSearch(next, { replace: true });
+    },
+    [search, setSearch],
+  );
+
+  const load = useCallback(
+    async (cursor?: string) => {
+      setLoading(true);
+      setError(null);
+      try {
+        setPage(
+          await api.rounds.insights({
+            period: period || undefined,
+            bucket: bucket || undefined,
+            flag: flag ? [flag] : undefined,
+            has_reason: hasReason === "" ? undefined : hasReason === "true",
+            security_code: securityCode || undefined,
+            sort,
+            sort_dir: "desc",
+            include_summary: true,
+            limit: 50,
+            cursor,
+          }),
+        );
+      } catch (err) {
+        setError(err);
+      } finally {
+        setLoading(false);
+      }
+    },
+    [period, bucket, flag, hasReason, securityCode, sort],
+  );
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function refresh(): Promise<void> {
+    setRefreshing(true);
+    setError(null);
+    setNotice("");
+    try {
+      const result = await api.rounds.refreshInsights(
+        { period: period || null, scope: "missing" },
+        newIdempotencyKey(),
+      );
+      if ("job_id" in result) {
+        const accepted = result as JobAccepted;
+        setNotice(`已提交后台刷新任务（${accepted.job_id}）；期间可继续浏览旧结果。`);
+      } else {
+        const stats = result as RoundInsightsRefreshOut;
+        setNotice(
+          `刷新完成：计算 ${stats.computed}，跳过（缓存有效）${stats.skipped}，待算 ${stats.pending}。`,
+        );
+      }
+      await load();
+    } catch (err) {
+      setError(err);
+    } finally {
+      setRefreshing(false);
+    }
+  }
+
+  const columns: Array<DataTableColumn<RoundInsightItem>> = [
+    {
+      key: "security",
+      header: "代码 / 名称",
+      priority: 1,
+      render: (row) => (
+        <Link to={`/rounds/${row.round_id}`}>
+          {`${row.security_code} ${row.security_name ?? ""}`.trim()}
+        </Link>
+      ),
+    },
+    { key: "close", header: "平仓日", priority: 2, render: (row) => row.close_date ?? "—" },
+    { key: "holding", header: "持有交易日", priority: 2, align: "right", render: (row) => text(row.holding_trading_days?.toString()) },
+    {
+      key: "bucket",
+      header: "持有期",
+      priority: 2,
+      render: (row) => BUCKET_LABELS[row.bucket] ?? row.bucket,
+    },
+    {
+      key: "pnl",
+      header: "盈亏",
+      priority: 1,
+      align: "right",
+      render: (row) => <span className={pnlClass(row.pnl)}>{text(row.pnl)}</span>,
+    },
+    { key: "return", header: "收益率", priority: 1, align: "right", render: (row) => text(row.return_rate_pct) },
+    {
+      key: "buy_b3",
+      header: "买入后相对基准（20 日）",
+      priority: 2,
+      align: "right",
+      render: (row) => text(row.buy_trade?.forward?.["20"]?.b3_pct),
+    },
+    {
+      key: "sell_b3",
+      header: "卖出后相对基准（20 日）",
+      priority: 2,
+      align: "right",
+      render: (row) => text(row.sell_trade?.forward?.["20"]?.b3_pct),
+    },
+    { key: "buy_reason", header: "买入理由", priority: 2, render: (row) => text(row.buy_trade?.reason_label) },
+    { key: "sell_reason", header: "卖出理由", priority: 2, render: (row) => text(row.sell_trade?.reason_label) },
+    {
+      key: "flags",
+      header: "旗标",
+      priority: 3,
+      render: (row) =>
+        row.flags?.length ? (
+          <span className="chips">
+            {row.flags.map((item) => (
+              <span key={item} className="chip">
+                {flagLabel(item)}
+              </span>
+            ))}
+          </span>
+        ) : (
+          "—"
+        ),
+    },
+  ];
+
+  const summary = page?.summary;
+  const addon = summary?.addon as AddonSummary | undefined;
+  const sellFly = summary?.sell_fly as SellFlySummary | undefined;
+  const ranking = summary?.ranking as RankingSummary | undefined;
+  const pending = summary?.pending as PendingSummary | undefined;
+
+  return (
+    <div>
+      <h1>回合洞察</h1>
+      <p className="muted">
+        {page?.disclaimer ??
+          "以下为事后统计，仅用于个人复盘，不构成投资建议；不评价个人能力，不预测收益；" +
+            "相对基准为 hs300_tr ETF 代理；缺失/公司行动显示 —，不显示 0%。"}
+      </p>
+
+      {page?.missing?.length ? (
+        <div className="notice notice-warn">
+          数据不完整：{page.missing.join("、")}；缺失数值显示「—」，不显示 0%。
+        </div>
+      ) : null}
+      {notice ? <div className="notice">{notice}</div> : null}
+      {error ? <ProblemView error={error} /> : null}
+
+      <div className="row-actions" role="tablist" aria-label="回合洞察视图">
+        {TABS.map((tab) => {
+          const active =
+            tab.id === ""
+              ? bucket === "" && flag === "" && hasReason === ""
+              : bucket === (tab.bucket ?? "") && flag === (tab.flag ?? "") && hasReason === (tab.hasReason ?? "");
+          return (
+            <button
+              key={tab.id || "all"}
+              className={active ? "btn" : "btn btn-ghost"}
+              type="button"
+              role="tab"
+              aria-selected={active}
+              onClick={() => {
+                const next = new URLSearchParams();
+                if (tab.bucket) next.set("bucket", tab.bucket);
+                if (tab.flag) next.set("flag", tab.flag);
+                if (tab.hasReason) next.set("has_reason", tab.hasReason);
+                if (period) next.set("period", period);
+                next.delete("cursor");
+                setSearch(next, { replace: true });
+              }}
+            >
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="card filters">
+        <label>
+          统计月份
+          <input
+            type="month"
+            value={period}
+            onChange={(event) => setParam("period", event.target.value)}
+          />
+        </label>
+        <label>
+          持有期
+          <select value={bucket} onChange={(event) => setParam("bucket", event.target.value)}>
+            {BUCKET_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          旗标
+          <select value={flag} onChange={(event) => setParam("flag", event.target.value)}>
+            {FLAG_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          理由
+          <select value={hasReason} onChange={(event) => setParam("has_reason", event.target.value)}>
+            <option value="">全部</option>
+            <option value="true">已标注理由</option>
+            <option value="false">未标注理由</option>
+          </select>
+        </label>
+        <label>
+          证券代码
+          <input
+            type="text"
+            value={codeDraft}
+            placeholder="如 600519"
+            onChange={(event) => setCodeDraft(event.target.value)}
+            onBlur={() => setParam("security_code", codeDraft)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") setParam("security_code", codeDraft);
+            }}
+          />
+        </label>
+        <label>
+          排序
+          <select value={sort} onChange={(event) => setParam("sort", event.target.value)}>
+            {SORT_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="row-actions">
+          <button className="btn" type="button" onClick={() => void refresh()} disabled={refreshing}>
+            {refreshing ? "刷新中…" : "刷新前瞻"}
+          </button>
+        </div>
+      </div>
+
+      {summary ? (
+        <div className="cards">
+          <div className="card">
+            <h3>持有期分布</h3>
+            <p className="muted">
+              已平仓 {summary.swing.closed} · 短线 {summary.swing.short} · 波段 {summary.swing.swing} ·
+              趋势 {summary.swing.trend}
+            </p>
+            <div className="kv">
+              <span>平均持有交易日</span>
+              <strong>{text(summary.swing.avg_holding_trading_days)}</strong>
+              <span>胜率</span>
+              <strong>{text(summary.swing.win_rate_pct)}</strong>
+            </div>
+            <div className="kv">
+              <span>平均盈亏</span>
+              <strong>{text(summary.swing.avg_pnl_display)}</strong>
+              <span>合计盈亏</span>
+              <strong>{text(summary.swing.total_pnl_display)}</strong>
+            </div>
+          </div>
+
+          <div className="card">
+            <h3>加仓与后续下跌</h3>
+            {addon ? (
+              <p className="muted">
+                加仓 {addon.count} 次，后续下跌 {addon.declined_after_addon} 次；
+                下跌占比 {text(addon.declined_pct)}；平均回撤 {text(addon.avg_dip_pct)}。
+              </p>
+            ) : (
+              <p className="muted">—</p>
+            )}
+            <h3 style={{ marginTop: 16 }}>卖飞</h3>
+            {sellFly ? (
+              <p className="muted">
+                卖出 {sellFly.sell_count} 次；卖飞 {sellFly.profit_take_fly}（止盈）/{" "}
+                {sellFly.stop_loss_rebound}（止损后反弹）；占比 {text(sellFly.fly_pct)}；
+                最差少赚 {text(sellFly.missed_profit_worst_display)}，期末少赚{" "}
+                {text(sellFly.missed_profit_end_display)}。
+              </p>
+            ) : (
+              <p className="muted">—</p>
+            )}
+          </div>
+
+          <div className="card">
+            <h3>理由覆盖</h3>
+            <p className="muted">
+              已标注 {summary.reason_coverage.annotated} / {summary.reason_coverage.total_rounds}，
+              覆盖率 {text(summary.reason_coverage.coverage_pct)}
+            </p>
+            {summary.reason_coverage.by_code?.length ? (
+              <span className="chips">
+                {summary.reason_coverage.by_code.map((row) => (
+                  <span key={row.code} className="chip">
+                    {row.label} {row.share_pct}
+                  </span>
+                ))}
+              </span>
+            ) : null}
+          </div>
+
+          <div className="card">
+            <h3>20 日相对基准排序</h3>
+            {ranking ? (
+              <>
+                <p className="muted">
+                  样本 {ranking.n_sample} / 可排序 {ranking.n_eligible}；{SAMPLE_STATUS_LABELS[ranking.sample_status] ?? ranking.sample_status}
+                </p>
+                <div className="kv">
+                  <span>中位数</span>
+                  <strong>{text(ranking.combined_median_pct)}</strong>
+                  <span>均值</span>
+                  <strong>{text(ranking.combined_avg_pct)}</strong>
+                </div>
+              </>
+            ) : (
+              <p className="muted">—</p>
+            )}
+            {pending ? (
+              <p className="muted">
+                待刷新前瞻 {pending.forward_recompute} · 缺理由 {pending.reason_missing}
+              </p>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {page && page.item_total === 0 && !loading ? (
+        <p className="muted">
+          本月还没有可统计的回合。导入账单后系统会自动建立回合；也可到
+          <Link to="/rounds">「回合」页</Link>手动重建。
+        </p>
+      ) : null}
+
+      {page && page.items.length > 0 ? (
+        <DataTable columns={columns} rows={page.items} rowKey={(row) => row.round_id} caption="回合洞察明细" />
+      ) : null}
+
+      {page && page.has_more ? (
+        <Cursor
+          hasMore={page.has_more}
+          nextCursor={page.next_cursor ?? null}
+          disabled={loading}
+          onNext={() => void load(page.next_cursor ?? undefined)}
+        />
+      ) : null}
+
+      {page?.assumptions?.length ? (
+        <p className="muted">口径假设：{page.assumptions.join("；")}</p>
+      ) : null}
+    </div>
+  );
+}

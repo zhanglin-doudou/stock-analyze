@@ -1,9 +1,17 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useState, type ReactElement } from "react";
 import { Link, useParams } from "react-router-dom";
-import type { Round, RoundFill, RoundFillPage } from "@sa/api-client";
+import type {
+  ForwardReturnOut,
+  Round,
+  RoundFill,
+  RoundFillPage,
+  RoundInsightDetail,
+  TradeSideInsightOut,
+} from "@sa/api-client";
 import { api } from "../client";
 import { ProblemView } from "../ui/Problem";
 import { DataTable, type DataTableColumn } from "../ui/DataTable";
+import { TradeReasonForm } from "../ui/TradeReasonForm";
 import "./detail.css";
 import { roundStatusLabel } from "./Rounds";
 
@@ -13,11 +21,127 @@ function signedClass(value: string): string {
   return "money money-pos";
 }
 
-/** 回合详情（/rounds/:roundId）：回合级口径 + FIFO 配对明细（可追溯到买卖流水）。 */
+const BUCKET_LABELS: Record<string, string> = {
+  short: "短线（≤1 日）",
+  swing: "波段（2~20 日）",
+  trend: "趋势（>20 日）",
+  unknown: "持有期未知",
+};
+
+const QUADRANT_LABELS: Record<string, string> = {
+  both_positive: "买入后与卖出后均优于基准",
+  buy_positive_sell_negative: "买入后优于基准，卖出后不及持有",
+  buy_negative_sell_positive: "买入后不及基准，卖出后优于继续持有",
+  both_negative: "买入后与卖出后均不及基准",
+};
+
+const FLAG_LABELS: Record<string, string> = {
+  addon: "加仓",
+  dip_sequence: "越跌越买",
+  below_avg: "低于均价加仓",
+  continued_decline: "加仓后下跌",
+  profit_taking: "止盈",
+  profit_take_fly: "卖飞",
+  stop_loss_rebound: "止损后反弹",
+  rising_sell_sequence: "越涨越卖",
+  full_exit: "清仓",
+  partial_exit: "部分卖出",
+  same_day: "当日回转",
+};
+
+interface RankingDetail {
+  rank?: number | null;
+  buy_excess_pct?: string | null;
+  sell_avoid_pct?: string | null;
+  combined_pct?: string | null;
+  quadrant?: string | null;
+  basis?: string;
+  definition_version?: string;
+}
+
+const STATUS_LABELS: Record<string, string> = {
+  ok: "数据完整",
+  pending: "还差交易日（未到窗口）",
+  no_calendar: "缺交易日历",
+  no_bar: "缺行情",
+  stale_price: "最近收盘已过 5 个交易日",
+  corporate_action: "窗口内含公司行动（未复权）",
+  divisor_missing: "缺基准序列（不排名）",
+};
+
+/** 术语映射（设计 §7.1）：页面不露 B0/B1/B2/B3 裸码。 */
+const FORWARD_ROWS = [
+  { key: "b0_pct", label: "执行价差（毛，相对当日收盘）" },
+  { key: "b1_pct", label: "事件后走势（收盘到收盘）" },
+  { key: "b2_pct", label: "成交后收益（按含费净价）" },
+  { key: "b3_pct", label: "相对基准超额（20 日排序口径）" },
+] as const;
+
+const HORIZONS = ["5", "10", "20"] as const;
+
+function text(value: string | null | undefined): string {
+  return value ?? "—";
+}
+
+function flagLabel(flag: string): string {
+  return FLAG_LABELS[flag] ?? flag;
+}
+
+function statusLabel(status: string): string {
+  return STATUS_LABELS[status] ?? status;
+}
+
+interface ForwardCell {
+  value: string | null;
+  status: string;
+}
+
+function forwardCell(
+  side: TradeSideInsightOut | null | undefined,
+  horizon: string,
+  key: string,
+): ForwardCell {
+  const forward: ForwardReturnOut | undefined = side?.forward?.[horizon];
+  if (!forward) return { value: null, status: "no_bar" };
+  return { value: forward[key as keyof ForwardReturnOut] as string | null, status: forward.status };
+}
+
+function forwardTable(side: TradeSideInsightOut | null | undefined, caption: string): ReactElement {
+  return (
+    <DataTable
+      caption={caption}
+      columns={[
+        { key: "metric", header: "口径", render: (row: { label: string }) => row.label },
+        ...HORIZONS.map((horizon) => ({
+          key: horizon,
+          header: `${horizon} 日`,
+          align: "right" as const,
+          render: (row: { cells: Record<string, ForwardCell> }) => {
+            const cell = row.cells[horizon];
+            if (cell.value !== null) return cell.value;
+            // 缺失一律 `—` + 原因（不显示 0%），原因来自后端 status。
+            return <span title={statusLabel(cell.status)}>—</span>;
+          },
+        })),
+      ]}
+      rows={FORWARD_ROWS.map((row) => ({
+        label: row.label,
+        cells: Object.fromEntries(
+          HORIZONS.map((horizon) => [horizon, forwardCell(side, horizon, row.key)]),
+        ) as Record<string, ForwardCell>,
+      }))}
+      rowKey={(row) => row.label}
+      emptyText="暂无前瞻数据"
+    />
+  );
+}
+
+/** 回合详情（/rounds/:roundId）：回合级口径 + FIFO 配对明细 + 回合洞察（API-093）。 */
 export function RoundDetail() {
   const { roundId } = useParams<{ roundId: string }>();
   const [round, setRound] = useState<Round | null>(null);
   const [fills, setFills] = useState<RoundFillPage | null>(null);
+  const [insight, setInsight] = useState<RoundInsightDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown>(null);
 
@@ -26,13 +150,20 @@ export function RoundDetail() {
     setLoading(true);
     setError(null);
     try {
-      const [detail, fillPage] = await Promise.all([api.rounds.get(roundId), api.rounds.fills(roundId)]);
+      const [detail, fillPage, insightDetail] = await Promise.all([
+        api.rounds.get(roundId),
+        api.rounds.fills(roundId),
+        // 洞察是增强块：失败时详情/配对仍可用，不让整页报错。
+        api.rounds.insight(roundId).catch(() => null),
+      ]);
       setRound(detail);
       setFills(fillPage);
+      setInsight(insightDetail);
     } catch (err) {
       setError(err);
       setRound(null);
       setFills(null);
+      setInsight(null);
     } finally {
       setLoading(false);
     }
@@ -41,6 +172,8 @@ export function RoundDetail() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  const ranking = (insight?.ranking ?? {}) as RankingDetail;
 
   const columns: Array<DataTableColumn<RoundFill>> = [
     { key: "seq", header: "#", render: (row) => row.sequence },
@@ -147,6 +280,119 @@ export function RoundDetail() {
           <p className="detail-note">
             数据重建时间：{round.rebuilt_at} · 去 <Link to="/trades">交易流水</Link> 核对原始行。
           </p>
+
+          {insight ? (
+            <>
+              <h2 className="detail-section-title">操作理由</h2>
+              <div className="detail-card">
+                <h3>买入侧</h3>
+                {insight.buy_trade ? (
+                  <>
+                    <p className="muted">
+                      流水 <code>{insight.buy_trade.trade_id}</code> · {insight.buy_trade.date} · 净价{" "}
+                      {text(insight.buy_trade.price_display)} · 金额 {text(insight.buy_trade.amount_display)}
+                    </p>
+                    <TradeReasonForm
+                      tradeId={insight.buy_trade.trade_id}
+                      side="buy"
+                      initial={insight.buy_trade.reason ?? null}
+                      onSaved={() => void load()}
+                      onDeleted={() => void load()}
+                    />
+                  </>
+                ) : (
+                  <p className="muted">该回合没有可标注的买入流水。</p>
+                )}
+                <h3>卖出侧</h3>
+                {insight.sell_trade ? (
+                  <>
+                    <p className="muted">
+                      流水 <code>{insight.sell_trade.trade_id}</code> · {insight.sell_trade.date} · 净价{" "}
+                      {text(insight.sell_trade.price_display)} · 金额 {text(insight.sell_trade.amount_display)}
+                    </p>
+                    <TradeReasonForm
+                      tradeId={insight.sell_trade.trade_id}
+                      side="sell"
+                      initial={insight.sell_trade.reason ?? null}
+                      onSaved={() => void load()}
+                      onDeleted={() => void load()}
+                    />
+                  </>
+                ) : (
+                  <p className="muted">持仓中回合尚无卖出流水；卖出后可标注卖出理由。</p>
+                )}
+              </div>
+
+              <h2 className="detail-section-title">5 / 10 / 20 行情日</h2>
+              <div className="detail-card">
+                <p className="muted">
+                  持有交易日（按基准日历）：{text(insight.holding_trading_days?.toString())}
+                  {` · 持有期：${BUCKET_LABELS[insight.bucket] ?? insight.bucket}`}
+                </p>
+                <h3>买入后</h3>
+                {forwardTable(insight.buy_trade, "买入侧前瞻收益")}
+                <h3>卖出后</h3>
+                {insight.sell_trade ? (
+                  forwardTable(insight.sell_trade, "卖出侧前瞻收益")
+                ) : (
+                  <p className="muted">尚未卖出，卖出后才有卖后 5/10/20 数据。</p>
+                )}
+                <p className="muted">
+                  缺失或公司行动显示「—」并给出原因，不显示 0%；公司行动（分红/送转/配股）本期不复权，
+                  价格收益一律留空，避免“假跌”。
+                </p>
+              </div>
+
+              <h2 className="detail-section-title">标签 / 排序</h2>
+              <div className="detail-card">
+                <p>
+                  旗标：
+                  {insight.flags?.length ? (
+                    <span className="chips">
+                      {insight.flags.map((flag) => (
+                        <span key={flag} className="chip">
+                          {flagLabel(flag)}
+                        </span>
+                      ))}
+                    </span>
+                  ) : (
+                    " —"
+                  )}
+                </p>
+                <table className="detail-stats">
+                  <tbody>
+                    <tr>
+                      <th>买入后相对基准（20 日）</th>
+                      <td>{text(ranking.buy_excess_pct)}</td>
+                      <th>卖出后相对基准（20 日）</th>
+                      <td>{text(ranking.sell_avoid_pct)}</td>
+                    </tr>
+                    <tr>
+                      <th>综合（买卖两侧）</th>
+                      <td>{text(ranking.combined_pct)}</td>
+                      <th>排序名次</th>
+                      <td>{ranking.rank == null ? "未参与排名" : String(ranking.rank)}</td>
+                    </tr>
+                    <tr>
+                      <th>象限</th>
+                      <td colSpan={3}>
+                        {ranking.quadrant ? QUADRANT_LABELS[ranking.quadrant] ?? ranking.quadrant : "—"}
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+                <p className="muted">
+                  口径 {text(ranking.basis)} · 定义版本 {text(ranking.definition_version)}；
+                  原始百分点为相对基准的事后表现，不是能力分或收益预测。
+                </p>
+                {insight.quality?.length ? (
+                  <p className="muted">数据质量：{insight.quality.join("、")}</p>
+                ) : null}
+              </div>
+
+              <p className="detail-note">{insight.disclaimer}</p>
+            </>
+          ) : null}
         </>
       ) : null}
     </div>

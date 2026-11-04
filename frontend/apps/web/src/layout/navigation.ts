@@ -30,6 +30,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { to: "/trades", label: "交易流水", icon: "trades" },
       { to: "/rounds", label: "回合", icon: "rounds" },
+      { to: "/rounds/insights", label: "回合洞察", icon: "insights" },
     ],
   },
   {
@@ -66,6 +67,8 @@ const STATIC_PAGES: Record<string, PageMeta> = {
   "/dashboard": { title: "看板", breadcrumb: ["概览", "看板"] },
   "/trades": { title: "交易流水", breadcrumb: ["交易", "交易流水"] },
   "/rounds": { title: "回合", breadcrumb: ["交易", "回合"] },
+  // 静态路由必须能被精确命中：否则会被 `/rounds/` 前缀规则误判为“回合详情”。
+  "/rounds/insights": { title: "回合洞察", breadcrumb: ["交易", "回合洞察"] },
   "/nav": { title: "净值与收益", breadcrumb: ["分析", "净值与收益"] },
   "/metrics": { title: "指标", breadcrumb: ["分析", "指标"] },
   "/sectors": { title: "板块分析", breadcrumb: ["分析", "板块分析"] },

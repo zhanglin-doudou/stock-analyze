@@ -1,5 +1,5 @@
 import { lazy, type ReactElement } from "react";
-import { Navigate, createBrowserRouter } from "react-router-dom";
+import { Navigate, createBrowserRouter, type RouteObject } from "react-router-dom";
 import { AppShell } from "./layout/AppShell";
 import { useIsAuthenticated } from "./store/session";
 import { FeaturePlaceholder } from "./pages/ComingSoon";
@@ -25,6 +25,9 @@ const Rounds = lazy(() => import("./pages/Rounds").then((m) => ({ default: m.Rou
 const RoundDetail = lazy(() =>
   import("./pages/RoundDetail").then((m) => ({ default: m.RoundDetail })),
 );
+const RoundInsights = lazy(() =>
+  import("./pages/RoundInsights").then((m) => ({ default: m.RoundInsights })),
+);
 const NavPage = lazy(() => import("./pages/Nav").then((m) => ({ default: m.Nav })));
 const Assets = lazy(() => import("./pages/Assets").then((m) => ({ default: m.Assets })));
 const Metrics = lazy(() => import("./pages/Metrics").then((m) => ({ default: m.Metrics })));
@@ -42,7 +45,8 @@ const Import = lazy(() => import("./pages/Import").then((m) => ({ default: m.Imp
 const Imports = lazy(() => import("./pages/Imports").then((m) => ({ default: m.Imports })));
 const Settings = lazy(() => import("./pages/Settings").then((m) => ({ default: m.Settings })));
 
-export const router = createBrowserRouter([
+/** 路由表（导出供测试用 memory router 复放；顺序即匹配优先级）。 */
+export const appRoutes: RouteObject[] = [
   { path: "/login", element: <Login /> },
   { path: "/register", element: <Register /> },
   {
@@ -57,6 +61,8 @@ export const router = createBrowserRouter([
       { path: "dashboard", element: <Dashboard /> },
       { path: "trades", element: <Trades /> },
       { path: "rounds", element: <Rounds /> },
+      // 静态路由必须先于 `rounds/:roundId` 注册，否则 /rounds/insights 会被当成 roundId。
+      { path: "rounds/insights", element: <RoundInsights /> },
       { path: "rounds/:roundId", element: <RoundDetail /> },
       { path: "nav", element: <NavPage /> },
       { path: "assets", element: <Assets /> },
@@ -94,4 +100,6 @@ export const router = createBrowserRouter([
     ],
   },
   { path: "*", element: <Navigate to="/" replace /> },
-]);
+];
+
+export const router = createBrowserRouter(appRoutes);

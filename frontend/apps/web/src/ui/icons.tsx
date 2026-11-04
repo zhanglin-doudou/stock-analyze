@@ -4,6 +4,7 @@ export type IconName =
   | "grid"
   | "trades"
   | "rounds"
+  | "insights"
   | "nav"
   | "assets"
   | "metrics"
@@ -34,6 +35,14 @@ const PATHS: Record<IconName, ReactNode> = {
     <>
       <path d="M20 8a8 8 0 1 0 1 6" />
       <path d="M20 3v5h-5" />
+    </>
+  ),
+  insights: (
+    <>
+      <path d="M4 20V11" />
+      <path d="M10 20V6" />
+      <path d="M16 20v-6" />
+      <path d="M22 20V4" />
     </>
   ),
   nav: (

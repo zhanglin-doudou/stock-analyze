@@ -46,6 +46,10 @@ import type {
   RevokeResult,
   Round,
   RoundFillPage,
+  RoundInsightDetail,
+  RoundInsightsPage,
+  RoundInsightsRefreshIn,
+  RoundInsightsRefreshOut,
   RoundPage,
   SectorCatalogPage,
   SectorsOverview,
@@ -56,6 +60,8 @@ import type {
   TradePage,
   TradePageDocument,
   TradePatchIn,
+  TradeReason,
+  TradeReasonIn,
   VersionOut,
 } from "./contract";
 
@@ -226,6 +232,21 @@ export interface GetAttributionQuery {
   model?: "five_factor" | "brinson_industry";
   benchmark?: string;
   classification_lookahead?: "deny" | "allow";
+}
+
+/** API-092 回合洞察列表查询（`flag` 词表见设计 §6.3；period 省略 = 当前月）。 */
+export interface ListRoundInsightsQuery {
+  period?: string;
+  bucket?: string;
+  flag?: string[];
+  has_reason?: boolean;
+  reason_code?: string;
+  security_code?: string;
+  sort?: string;
+  sort_dir?: "asc" | "desc";
+  include_summary?: boolean;
+  limit?: number;
+  cursor?: string;
 }
 
 /** API-088 板块目录查询（公共数据；level/parent/q 过滤 + 游标分页）。 */
@@ -605,6 +626,27 @@ export function createClient(options: ClientOptions) {
     history(tradeId: string, query: CursorQuery = {}) {
       return send<TradeHistoryPage>({ path: `/trades/${tradeId}/history`, query }).then((r) => r.data);
     },
+    /** API-090：读取单笔理由（随 TradeOut.reason 内嵌；此处单独读便于表单初始化）。 */
+    reason(tradeId: string) {
+      return send<TradeReason | null>({ path: `/trades/${tradeId}/reason` }).then((r) => r.data);
+    },
+    /** API-090：upsert 理由（更新时必须带 If-Match/version）。 */
+    putReason(tradeId: string, body: TradeReasonIn, version?: number) {
+      return send<TradeReason>({
+        path: `/trades/${tradeId}/reason`,
+        method: "PUT",
+        body,
+        ifMatch: version === undefined ? undefined : `"${version}"`,
+      }).then((r) => ({ reason: r.data, etag: r.headers.get("ETag") }));
+    },
+    /** API-091：软删理由（幂等 204；带 version 做并发保护）。 */
+    deleteReason(tradeId: string, version?: number) {
+      return send<void>({
+        path: `/trades/${tradeId}/reason`,
+        method: "DELETE",
+        ifMatch: version === undefined ? undefined : `"${version}"`,
+      }).then(() => undefined);
+    },
   };
 
   const rounds = {
@@ -634,6 +676,38 @@ export function createClient(options: ClientOptions) {
     rebuild(body: RebuildRoundsBody, idempotencyKey: string) {
       return send<JobAccepted>({
         path: "/jobs/rebuild-rounds",
+        method: "POST",
+        body,
+        idempotencyKey,
+      }).then((r) => r.data);
+    },
+    /** API-092：回合洞察列表（后端产出全部数值/百分比，前端零口径渲染）。 */
+    insights(query: ListRoundInsightsQuery = {}) {
+      return send<RoundInsightsPage>({
+        path: "/rounds/insights",
+        query: {
+          period: query.period,
+          bucket: query.bucket,
+          flag: query.flag?.join(","),
+          has_reason: query.has_reason,
+          reason_code: query.reason_code,
+          security_code: query.security_code,
+          sort: query.sort,
+          sort_dir: query.sort_dir,
+          include_summary: query.include_summary,
+          limit: query.limit,
+          cursor: query.cursor,
+        },
+      }).then((r) => r.data);
+    },
+    /** API-093：单回合洞察详情（含逐笔理由/前瞻/旗标/排序）。 */
+    insight(roundId: string) {
+      return send<RoundInsightDetail>({ path: `/rounds/${roundId}/insights` }).then((r) => r.data);
+    },
+    /** API-094：刷新前瞻（≤5000 笔同步 200；超过转 202 作业）。 */
+    refreshInsights(body: RoundInsightsRefreshIn, idempotencyKey: string) {
+      return send<RoundInsightsRefreshOut | JobAccepted>({
+        path: "/rounds/insights/refresh",
         method: "POST",
         body,
         idempotencyKey,
