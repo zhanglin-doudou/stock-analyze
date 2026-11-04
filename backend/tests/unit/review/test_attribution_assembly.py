@@ -62,8 +62,11 @@ from stock_review.attribution.residual import (
     split_residual,
 )
 from stock_review.attribution.segments import (
+    REASON_ASSET_CLASS,
     REASON_BAR,
+    REASON_CORPORATE,
     REASON_MAPPING,
+    REASON_PRICE,
     _first_entry_within,
     build_symbol_plans,
 )
@@ -209,6 +212,7 @@ def _build_bundle(
     memberships: dict[str, str],
     ladder: dict[str, list[tuple[date, int]]] | None = None,
     sector_ladder: dict[str, list[tuple[date, int]]] | None = None,
+    corporate: dict[str, str] | None = None,
 ):  # type: ignore[no-untyped-def]
     """两次 FIFO 重放 + build_symbol_plans（与应用层编排同参）。"""
     res_all = build_rounds(trades_to_events([t for t in trades if t.trade_date <= T1]))
@@ -222,7 +226,7 @@ def _build_bundle(
         ladder=LADDER if ladder is None else ladder,
         memberships=memberships,
         sector_ladder=SECTOR_LADDER if sector_ladder is None else sector_ladder,
-        corporate={},
+        corporate=corporate or {},
         canonical=lambda c: c,
         expected_p0_date=P0_DATE,
         expected_p1_date=T1,
@@ -445,7 +449,7 @@ def test_mapping_missing_symbol_is_candidate_and_excluded() -> None:
     # 修复回归：stock 类因缺口剔除仍是候选（零可归因段 → blocked 而非 ok）。
     assert bundle.has_candidate is True
     assert bundle.excluded_by_reason == {REASON_MAPPING: ["600000"]}
-    # 仍在交易（期末 45 天内仍有行情）→ 可归因 universe 内 → warning（数据质量缺口）。
+    # 本期有未平仓 lot/区间内交易 → 参与本期 → 可归因 universe 内 → warning。
     assert plan.in_universe is True
     entry = _exclusion_missing(REASON_MAPPING, ["600000"])
     assert entry is not None
@@ -453,25 +457,17 @@ def test_mapping_missing_symbol_is_candidate_and_excluded() -> None:
     assert "数据质量缺口" in entry.reason
 
 
-def test_mapping_missing_delisted_symbol_is_info() -> None:
-    """退市标的（期末 45 天内无行情）缺行业映射：不在可归因 universe → info。"""
-    delisted = {"600000": [(date(2025, 1, 10), 9_500_000)]}
-    bundle = _build_bundle(_golden_trades(), memberships={}, ladder=delisted)
+def test_mapping_missing_non_participating_symbol_skips_missing() -> None:
+    """已清仓/退市（本期无参与）标的缺行业映射：不产生 missing 条目（§4.4）。"""
+    bundle = _build_bundle(_retired_trades(), memberships={}, ladder={})
+    assert len(bundle.plans) == 1
     plan = bundle.plans[0]
-    assert plan.reason_code == REASON_MAPPING
+    assert plan.attributed is False
+    assert plan.reason_code is None
     assert plan.in_universe is False
-
-    entry = _exclusion_missing(REASON_MAPPING, ["600000"], severity="info")
-    assert entry is not None
-    assert entry.severity == "info"
-    assert "不影响归因口径" in entry.reason
-    assert entry.what_to_do == "无需处理"
-
-    en = _exclusion_missing(REASON_MAPPING, ["600000"], lang="en", severity="info")
-    assert en is not None
-    assert en.severity == "info"
-    assert "does not affect attribution" in en.reason
-    assert en.what_to_do == "no action needed"
+    assert bundle.excluded_by_reason == {REASON_ASSET_CLASS: ["600636"]}
+    # 装配层已把该标的落到资产类别占位键；应用层对未知码不出条目。
+    assert _exclusion_missing(REASON_ASSET_CLASS, ["600636"]) is None
 
 
 def test_p0_blocked_row_blocks_window() -> None:
@@ -738,3 +734,112 @@ def test_status_nonzero_bucket_or_large_gap_still_degrades() -> None:
         )
         == "ok"
     )
+
+
+def _retired_trades() -> list[Trade]:
+    """600636：区间前买入并清仓（模拟已退市/本期无参与的历史标的）。"""
+    return [
+        _trade(
+            trade_date=date(2025, 1, 10),
+            security_code="600636",
+            side="buy",
+            category="buy",
+            quantity_units=1_000_000,
+            price_units=1_000_000,
+            amount_units=-100_050,
+            commission_units=50,
+        ),
+        _trade(
+            trade_date=date(2025, 1, 20),
+            security_code="600636",
+            side="sell",
+            category="sell",
+            quantity_units=1_000_000,
+            price_units=1_200_000,
+            amount_units=119_950,
+            commission_units=50,
+        ),
+    ]
+
+
+def test_closed_before_period_symbol_skips_missing() -> None:
+    """历史清仓/退市标的（本期无持仓、无区间内平仓/开仓）不进 missing[]。
+
+    候选集来自全历史 FIFO，但「是否参与本期」优先于映射/价格/指数剔除判定。
+    """
+    trades = _golden_trades() + _retired_trades()  # 600636 无行情、无行业映射
+    bundle = _build_bundle(trades, memberships=MEMBERSHIPS)
+    plan = {p.security_code: p for p in bundle.plans}["600636"]
+    assert plan.attributed is False
+    assert plan.reason_code is None  # 不再产生 REASON_MAPPING
+    assert plan.in_universe is False
+    assert REASON_MAPPING not in bundle.excluded_by_reason
+    assert "600636" in bundle.excluded_by_reason[REASON_ASSET_CLASS]
+    # 应用层按 REASON_ASSET_CLASS 生成 missing 时返回 None → 不产生条目。
+    assert _exclusion_missing(REASON_ASSET_CLASS, ["600636"]) is None
+
+
+def test_suspended_held_symbol_still_warns_on_missing_mapping() -> None:
+    """期末仍有未平仓 lot 的停牌股仍参与本期 → 缺映射按 warning 披露。"""
+    trades = [*_golden_trades(), _retired_trades()[0]]  # 600636 只买不卖、无行情、无映射
+    bundle = _build_bundle(trades, memberships=MEMBERSHIPS)
+    plan = {p.security_code: p for p in bundle.plans}["600636"]
+    assert plan.in_universe is True
+    assert plan.reason_code == REASON_MAPPING
+    assert bundle.excluded_by_reason[REASON_MAPPING] == ["600636"]
+    entry = _exclusion_missing(REASON_MAPPING, ["600636"], severity="warning")
+    assert entry is not None and entry.severity == "warning"
+
+
+def test_active_symbol_missing_mapping_still_warns() -> None:
+    """本期参与（区间内买卖平仓）的活跃股缺映射 → 仍按 warning 披露。"""
+    trades = [
+        *_golden_trades(),
+        _trade(
+            trade_date=date(2025, 3, 5),
+            security_code="600636",
+            side="buy",
+            category="buy",
+            quantity_units=100_000,
+            price_units=1_000_000,
+            amount_units=-10_005,
+            commission_units=5,
+        ),
+        _trade(
+            trade_date=date(2025, 3, 20),
+            security_code="600636",
+            side="sell",
+            category="sell",
+            quantity_units=100_000,
+            price_units=1_200_000,
+            amount_units=11_995,
+            commission_units=5,
+        ),
+    ]
+    bundle = _build_bundle(trades, memberships=MEMBERSHIPS)
+    plan = {p.security_code: p for p in bundle.plans}["600636"]
+    assert plan.in_universe is True
+    assert plan.reason_code == REASON_MAPPING
+    entry = _exclusion_missing(REASON_MAPPING, ["600636"], severity="warning")
+    assert entry is not None and entry.severity == "warning"
+
+
+def test_non_participating_symbol_skips_all_reason_codes() -> None:
+    """无参与标的即使命中 corporate/mapping/bar/price 缺口，也一律不产生 missing[]。"""
+    bundle = _build_bundle(
+        _retired_trades(),
+        memberships={},  # 缺映射
+        ladder={},  # 缺个股行情（REASON_PRICE）
+        sector_ladder={},  # 缺行业指数（REASON_BAR）
+        corporate={"600636": "S1"},  # 命中区间内公司行动（REASON_CORPORATE）
+    )
+    plan = bundle.plans[0]
+    assert plan.reason_code is None
+    assert plan.in_universe is False
+    # 仅落在资产类别占位键（应用层不生成 missing 条目）。
+    assert set(bundle.excluded_by_reason) == {REASON_ASSET_CLASS}
+    assert bundle.excluded_by_reason[REASON_ASSET_CLASS] == ["600636"]
+    assert bundle.has_candidate is False
+    assert _exclusion_missing(REASON_CORPORATE, ["600636"]) is not None  # 有缺口本会披露
+    assert _exclusion_missing(REASON_BAR, ["600636"]) is not None
+    assert _exclusion_missing(REASON_PRICE, ["600636"]) is not None

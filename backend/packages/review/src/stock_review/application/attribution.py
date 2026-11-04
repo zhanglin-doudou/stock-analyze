@@ -135,8 +135,9 @@ _BRIDGE_TOLERANCE_UNITS: Final[int] = 1
 _RESIDUAL_MIN_UNITS: Final[int] = 100
 # NOT_PIT 判定（§4.3）：快照日距期末 >90 天 → degraded。
 _NOT_PIT_DAYS: Final[int] = 90
-# 缺行业映射文案（zh/en × warning/info）：info = 不影响归因口径的提示；
-# warning = 数据质量缺口（仍在交易的 A 股缺行业映射）。`lang` 只换文案不换数字。
+# 缺行业映射文案（zh/en × warning/info）：warning = 数据质量缺口（参与本期且缺映射）；
+# info 分支为防御保留（装配层已让「本期不参与」标的提前跳过、不产生 missing[]）。
+# `lang` 只换文案不换数字。
 _MAPPING_COPY: Final[dict[tuple[str, str], tuple[str, str]]] = {
     ("zh", "warning"): ("缺行业归属（数据质量缺口）", "同步成分/确认 A 股"),
     ("zh", "info"): ("无行业归属（已退市或不在可归因范围内，不影响归因口径）", "无需处理"),
@@ -628,8 +629,8 @@ def _aggregate_status(
 ) -> str:
     """ok/degraded 聚合（§4.4；blocked 由短路路径决定，此处不负责）。
 
-    只有 `severity=info` 的提示（如 look-ahead 披露、退市无映射）不影响归因口径，
-    不降级；任一 warning/blocker、非空未归因桶、或残差超阈值 → degraded。
+    只有 `severity=info` 的提示（如 look-ahead 披露、板块指数期初回退）不影响归因
+    口径，不降级；任一 warning/blocker、非空未归因桶、或残差超阈值 → degraded。
     """
     if (
         any(item.severity != "info" for item in missing)
@@ -649,8 +650,8 @@ def _exclusion_missing(
 ) -> MissingEntry | None:
     """标的剔除 → `missing[]` 披露条目（资产类别排除不进 missing[]）。
 
-    `severity`：缺行业映射按「是否属于可归因 universe」分级——退市/非在交易标的
-    降为 `info`（不影响归因口径），仍在交易的 A 股保持 `warning`（数据质量缺口）。
+    `severity`：缺行业映射按「是否参与本期」分级——参与本期（有持仓/区间内交易）
+    为 `warning`（数据质量缺口）；`info` 分支为防御保留（正常路径已提前跳过）。
     `lang` 只切换该码的中英文案，不改变数字（§5.5）；其他码暂保持中文。
     """
     shown = sorted(codes)[:8]

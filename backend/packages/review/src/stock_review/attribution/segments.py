@@ -36,7 +36,6 @@ from stock_ledger.models import Trade
 from stock_platform.symbols import classify_symbol
 
 from stock_review.application.valuation import (
-    PRICE_LOOKBACK,
     QTY_PRICE_SCALE,
     category,
     is_money_fund_row,
@@ -84,9 +83,9 @@ class SymbolPlan:
     price_fallback: bool = False  # 参考价用了前收（≤45 天窗口）
     sector_fallback: bool = False  # 指数参考日与个股参考日不一致
     bucket_kind: str = "none"  # corporate_action_pnl | unattributed_price_pnl | none
-    # 是否属于可归因 universe：A 股 stock 类且期末附近仍有行情。
-    # 退市/长期停牌（期末 45 天内无任何 bar）为 False——缺行业映射时降级为 info，
-    # 因为这类标的本就不参与归因（§4.4）。
+    # 是否属于可归因 universe：A 股 stock 类且**参与本期**（期末有未平仓 lot、
+    # 区间内有平仓、或区间内有持仓类流水）。不参与本期的历史清仓/退市标的不产生
+    # missing[]；参与但缺映射/缺价的仍按 warning 披露（§4.4）。
     in_universe: bool = True
     # 期初回退明细（缺失参考日, 实际取到的日期）；None 表示期末严格匹配。
     sector_start_fallback: tuple[date, date] | None = None
@@ -137,18 +136,6 @@ def _close_entry(
     if index == 0:
         return None
     return entries[index - 1]
-
-
-def _in_universe(
-    ladder: Mapping[str, list[tuple[date, int]]], symbol: str, expected_p1_date: date
-) -> bool:
-    """是否仍在可归因 universe 内（期末 `PRICE_LOOKBACK` 窗口内仍有行情）。
-
-    退市/长期停牌的标的期末附近没有任何 bar（或最后一根早于 45 天窗口）→ False：
-    这类标的即使缺行业映射也不影响归因口径，`missing[]` 降为 info（§4.4）。
-    """
-    entry = _close_entry(ladder, symbol, expected_p1_date)
-    return entry is not None and (expected_p1_date - entry[0]) <= PRICE_LOOKBACK
 
 
 def _first_entry_within(
@@ -317,9 +304,15 @@ def _plan_for_symbol(
     dividends: Mapping[str, int],
     fallback_anchors: Mapping[str, int],
 ) -> SymbolPlan:
-    """单标的计划：先按优先级判剔除，再两级分摊构段（§3.3）。"""
+    """单标的计划：先判「本期是否参与」与剔除优先级，再两级分摊构段（§3.3）。"""
     trades_amount = sum(t.amount_units for t in trades_sym)
-    in_universe = klass == "stock" and _in_universe(ladder, code, expected_p1_date)
+    closed_fills = [f for f in fills_sym if t0 <= f.close_date <= t1]
+    open_lots = list(open_sym)
+    holding_rows = [t for t in trades_sym if category(t) in _COST_ADD | {"sell", "bonus"}]
+    # 候选集来自**全历史** FIFO（长期持有/已清仓标的都会生成 plan），但只有在本期仍有
+    # 未平仓 lot、区间内平仓、或区间内有持仓类流水时才算「参与本期」。
+    participating = bool(closed_fills or open_lots or holding_rows)
+    in_universe = klass == "stock" and participating
 
     def _excluded(reason: str | None, bucket: str) -> SymbolPlan:
         return SymbolPlan(
@@ -336,6 +329,11 @@ def _plan_for_symbol(
             in_universe=in_universe,
         )
 
+    # 本期不参与（无持仓、无区间内平仓/开仓、无窗口持仓行）→ 不产生 missing[] 条目
+    # （§4.4：历史清仓/退市标的与其数据缺口不影响本期归因口径）。
+    if not participating:
+        return _excluded(None, "unattributed_price_pnl")
+
     bucket = "corporate_action_pnl" if code in corporate else "unattributed_price_pnl"
     if code in corporate:
         return _excluded(REASON_CORPORATE, bucket)
@@ -346,8 +344,6 @@ def _plan_for_symbol(
     if code not in memberships:
         return _excluded(REASON_MAPPING, bucket)
 
-    closed_fills = [f for f in fills_sym if t0 <= f.close_date <= t1]
-    open_lots = list(open_sym)
     if not closed_fills and not open_lots:
         # 窗口内无段（零金额中签/送转通知行标的等）：不产生段，行金额由残差桶吸收。
         return _excluded(None, "unattributed_price_pnl")

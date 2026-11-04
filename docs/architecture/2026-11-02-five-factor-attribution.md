@@ -25,7 +25,7 @@
 | **D-03** | **「买点 / 卖点」怎么量化** | **执行质量口径**：买点 = `base − 毛买入额`（买得比"建仓日收盘"低为正）；卖点 = `毛卖出额 − q×卖出日收盘`（卖得比收盘高为正）。可加总、可复算、与"操作稳定性/追涨杀跌"直接对应 | PRD-v1 原文"追涨分位与买入后 5 日回撤的**回归贡献**"：统计口径无法逐分闭合、不可单笔复算、排序不稳；该行为改由 `timing.chase_quantile`/`timing.sold_too_early` 承担，结论中引用 | 可加总性；**需 PRD 勘误**；**A-04** |
 | **D-04** | 区间边界参考价 `P0/P1` | `P0 = 严格早于 T0 的最后一个交易日收盘`（不早于 45 天窗口，`PRICE_LOOKBACK`）；`P1 = ≤T1 的最后一个交易日收盘`（停牌用最近可得收盘，与 `valuation.close_on_or_before` 同源；**行业指数必须取与 P1 同一日期**）。**不做 `same_day` 静默兜底**：P0/P1/建仓日/卖出日参考价缺失 → 该标的剔除（§4.4），不做近似 | 用 T0 当日收盘当 P0（把 T0 涨跌算进区间，且与股息现金制冲突）；用期初成本 | 首日损益/区间前 lot 的板块起点；**A-05**（与 D-07 联动） |
 | **D-05** | 股息归到哪个因子、按什么时点 | **现金制**：区间内 `category=dividend` 的**到账日**净额（税后）按标的整额**加进 `selection`**（不要求该标的有段）；**不按除息日**、不逐 lot 裁剪历史累计股息。与 `asset_daily` 现金口径一致，天然避免"除息前/后 P0 配对"的双计问题（§3.4.1） | 权责发生制（按除息日）：需新增除息日字段（账单无），且要与 P0 时点严格配对，否则重复计息 | 股息归属与可对账性 |
-| **D-06** | 哪些持仓进因子 | **仅"可归因标的"**：A 股股票（非伪代码/非货基/非债/非基金/非新股待上市）**且**行业映射可得**且**所需参考价/行业指数可得。债券/ETF/LOF/货基/未映射股票 → **残差**并进入 `coverage`/`residual_breakdown` | 全部标的强制摊入（给债券/货基编造"选股/板块"）；新增第六因子（破坏契约） | 残差规模；P2 资产类别扩展（§10.7） |
+| **D-06** | 哪些持仓进因子 | **仅"可归因标的"**：A 股股票（非伪代码/非货基/非债/非基金/非新股待上市）**且参与本期**（期末有未平仓 lot、`close_date ∈ [T0,T1]` 的平仓、或区间内有持仓类流水）**且**行业映射可得**且**所需参考价/行业指数可得。债券/ETF/LOF/货基/未映射股票 → **残差**并进入 `coverage`/`residual_breakdown` | 全部标的强制摊入（给债券/货基编造"选股/板块"）；新增第六因子（破坏契约） | 残差规模；P2 资产类别扩展（§10.7） |
 | **D-07** | **行业成分时点（PIT）** | **默认严格 fail-closed**：`period_end < first_sync_on` 或 `memberships_at(period_end)` 为空 → **blocked** + `SECTOR_HISTORY_NOT_COVERED`。**可选显式例外**：query `classification_lookahead=allow`（默认 `deny`）时，用最早可用快照并标 `assumptions.classification_lookahead=true`、`status=degraded`、`missing[]=SECTOR_CLASSIFICATION_LOOKAHEAD`；启用需人工批准并修订 `AGENTS.md` 板块铁律 5 | ① 默认就用未来成分（look-ahead，违规）；② 永远 blocked（老账单/历史区间不可用，产品不可用） | 历史可用性；**A-05**；**需修订 AGENTS.md** |
 | **D-08** | 因子排序与占比语义 | `rank` 按 **`\|amount\|` 降序**（tie-break 固定因子序）；双分母：`ratio = amount / total_pnl`（贡献率，可超 ±100%，可负）与 `share = \|amount\| / Σ\|amount\|`（构成比，0..1，用于条形宽度）；`residual_ratio = 1e8 − Σratio_i`（plug）；`\|total_pnl\| < max(100 分, 0.5%×Σ\|amount\|)` → `ratio=null` + `ratio_na_reason="PNL_NEAR_ZERO"`（`share` 仍给） | 按 `\|ratio\|` 排序（负 total_pnl 语义翻转、除法放大噪声）；只给单一 ratio（负 total_pnl 时构成比不可读） | 验收②③；**A-07** |
 | **D-09** | 结论/文案门禁 | `summary` 允许条件：`total_pnl` 可得 **且** `n_attributed_segments ≥ 10` **且** `valuation_gap_ratio ≤ 5%` **且** `coverage.capital_ratio ≥ 0.90`；与 `status` 解耦（`degraded` 不自动封口，`blocked` 必封）。全量词表断言（禁裸术语）+ 禁买卖建议 | 把 `status=ok` 设为硬前提：任一缺映射即永不出结论（过严）；不看 valuation_gap（结论建立在估值差上） | FR-R8/FR-D3 合规；**A-07** |
@@ -351,7 +351,15 @@ else:
 |---|---|---|---|
 | 1 | 无 `V_end`/`V_begin`；边界行 blocked；区间内 blocked 行；`T1 > data_as_of`；`V_end` 早于 `latest_workday(min(valuation_end,T1))`；FIFO 致命错误；`period_end < first_sync_on` 且未开 look-ahead；**存在可归因候选标的**（A 股且区间内有持仓/交易）**但零个可归因段**（板块数据全缺/全部缺映射） | `blocked` | `total_pnl`/`base_capital`/`factors[].amount`/`residual`/`residual_breakdown`/`coverage` 数值键 **全部缺省**；`factors[]` 保留 `code/name/rank`，`ratio/conclusion=null`；给 `missing[]`+`what_to_do` |
 | 2 | 任一标的剔除（缺映射/缺指数/缺价/公司行动/费用口径未知/超卖）；`degraded` 资产行；`BRIDGE_MISMATCH`；`RESIDUAL_LARGE`；`SECTOR_CLASSIFICATION_NOT_PIT`；`SECTOR_BAR_FALLBACK` | `degraded` | 全给，`coverage`/`missing[]` 披露 |
-| 3 | 其余（含"区间无交易且资产无变化"、**无任何可归因候选标的**，如仅债券/货基账户、仅 `severity=info` 的提示如 look-ahead 启用或退市无映射） | `ok`（有未归因桶则 `degraded`） | 全给（五因子可为 0，`summary` 给"本期无交易/无持仓变化"或"本期无可归因 A 股"；`capital_total==0` 时 `capital_ratio=null`，`summary` 用固定句） |
+| 3 | 其余（含"区间无交易且资产无变化"、**无任何可归因候选标的**，如仅债券/货基账户、仅 `severity=info` 的提示如 look-ahead 启用或板块指数期初回退） | `ok`（有未归因桶则 `degraded`） | 全给（五因子可为 0，`summary` 给"本期无交易/无持仓变化"或"本期无可归因 A 股"；`capital_total==0` 时 `capital_ratio=null`，`summary` 用固定句） |
+
+**候选集 vs「参与本期」（2026-11-04 修订）**：
+
+- **候选集来自全历史 FIFO**：`fills_by_code ∪ open_by_code ∪ 区间内持仓类行`，因此长期持有、早已清仓、已退市的标的都会生成 `SymbolPlan`；`coverage.symbols_total` 统计的正是该候选集（**不是**本期参与数，字段名保持不变）。
+- **"参与本期"** = 期末仍有未平仓 lot、`close_date ∈ [T0,T1]` 的 closed fill、或区间内有持仓类流水（`buy`/`rights`/`new_stock`/`sell`/`bonus`）。
+- **不参与本期的标的**：**不产生 `missing[]` 条目**（其缺映射/缺价/缺指数/公司行动与本期的归因口径无关），`SymbolPlan.in_universe=False`，整标的金额仍进 `unattributed_price_pnl` 残差桶；仅统计在 `symbols_total` 内。
+- **参与本期**的 A 股缺行业映射 → `warning`（数据质量缺口）；持有但停牌（期末仍有未平仓 lot）同样参与、同样 `warning`。
+- `PRICE_LOOKBACK`（45 天）**仅**用于 `PRICE_REF_FALLBACK`（参考价前收回退判定），**不再**参与"是否可归因"判定。
 
 **覆盖率**（全部后端算好）：
 
@@ -359,7 +367,9 @@ else:
 capital_total      = Σ_{全部标的} base（无价标的用净成本兜底，标 coverage.base_basis="mixed"）
 capital_attributed = Σ_{可归因标的} base
 capital_ratio      = div_round(capital_attributed, capital_total, scale=8)      # total=0 → null
-segments_total / segments_attributed / symbols_total / symbols_attributed
+segments_total / segments_attributed
+symbols_total       = 全历史候选标的数（含本期未参与；字段名不变，语义见下）
+symbols_attributed  = 有可归因段的标的数
 unattributed[]     = 最多 5 条 {security_code, symbol_class, reason_code, amount}（按 |amount| 降序）
 ```
 
@@ -494,7 +504,7 @@ async def build_attribution(
 2. `trades = TradeRepository.list_all(user_id)`；`assets = AssetRepository.series(...)`；按 §3.2 算 `V_begin/V_end/CF`，blocked 条件短路（不读行情/板块）。
 3. `build_rounds(trades_to_events(trades ≤ T1))` 得 fills/open lots/data_errors；同时 `build_rounds(trades < T0)` 得 `q0`。
 4. 公司行动识别（`corporate.py`）：区间内 `bonus/rights` 事件 → 标的剔除。
-5. 可归因集合（`classify_symbol` + 行业映射 + 参考价/指数可得）；参考价 `load_prices(..., cached_only=True)`；指数 `SectorRepository.board_bars(keys, P0_date, P1_date)`。
+5. 可归因集合：先判「参与本期」（`segments.py`，§4.4），再按 `classify_symbol` + 行业映射 + 参考价/指数可得；参考价 `load_prices(..., cached_only=True)`；指数 `SectorRepository.board_bars(keys, P0_date, P1_date)`。本期不参与的标的不进 `missing[]`。
 6. `segments.py` 两级 `_allocate` 构段（§3.3）；股息按标的汇总、按段 base 分摊（无段 → 残差桶）。
 7. `FiveFactorModel().decompose(segments, total_pnl)` → `Decomposition`；`residual.py` 拆桶（资产口径逐标的 P&L）；`coverage.py` 状态/覆盖；`presentation.py` 结论/display；`inputs_hash`。
 8. 组装 `AttributionResult`（金额 int，API 层格式化）。
