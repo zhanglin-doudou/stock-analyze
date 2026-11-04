@@ -999,7 +999,7 @@ def test_status_info_only_missing_is_ok() -> None:
     """只剩 info 提示（如 look-ahead 披露）时不降级：整页 ok（§4.4）。"""
     status = _aggregate_status(
         [_info_entry(), _info_entry("SECTOR_MAPPING_MISSING")],
-        unattributed_units=0,
+        judgement_units=0,
         tolerance_units=100,
     )
     assert status == "ok"
@@ -1013,54 +1013,150 @@ def test_status_warning_missing_degrades() -> None:
         reason="缺行业指数日线",
         what_to_do="补板块日线",
     )
-    assert _aggregate_status([warn], unattributed_units=0, tolerance_units=100) == "degraded"
+    assert _aggregate_status([warn], judgement_units=0, tolerance_units=100) == "degraded"
 
 
 def test_status_residual_tolerance_boundary() -> None:
-    """|未归因金额| 超容差 → degraded；等于容差或容差内 → ok。"""
+    """|未归因标的损益| 超容差 → degraded；等于容差或容差内 → ok。"""
     assert (
-        _aggregate_status([_info_entry()], unattributed_units=101, tolerance_units=100)
-        == "degraded"
+        _aggregate_status([_info_entry()], judgement_units=101, tolerance_units=100) == "degraded"
     )
-    # 负残差按绝对值比较。
+    # 负值按绝对值比较。
     assert (
-        _aggregate_status([_info_entry()], unattributed_units=-101, tolerance_units=100)
-        == "degraded"
+        _aggregate_status([_info_entry()], judgement_units=-101, tolerance_units=100) == "degraded"
     )
     # 等于容差（含）不降级。
-    assert _aggregate_status([_info_entry()], unattributed_units=100, tolerance_units=100) == "ok"
-    assert (
-        _aggregate_status([_info_entry()], unattributed_units=4_076, tolerance_units=10_000) == "ok"
-    )
+    assert _aggregate_status([_info_entry()], judgement_units=100, tolerance_units=100) == "ok"
+    assert _aggregate_status([_info_entry()], judgement_units=4_076, tolerance_units=10_000) == "ok"
 
 
 def test_residual_missing_within_tolerance_is_info() -> None:
-    """容差内非零残差 → info 提示（不降级），文案带金额/阈值。"""
-    entry = _residual_missing(unattributed_units=4_076, tolerance_units=10_000)
+    """容差内非零 → info 提示（不降级），文案以「未归因标的损益」为主语。"""
+    entry = _residual_missing(judgement_units=4_076, tolerance_units=10_000)
     assert entry is not None
     assert entry.code == "RESIDUAL_WITHIN_TOLERANCE"
     assert entry.severity == "info"
-    assert entry.reason == "未归因 40.76 元，低于期末资产 0.20%（阈值 100.00 元）"
+    assert entry.reason == ("未归因标的损益 40.76 元，低于期末资产 0.20%（阈值 100.00 元）")
     assert entry.what_to_do == "无需处理"
 
 
 def test_residual_missing_over_tolerance_is_warning() -> None:
-    """超容差（负残差取绝对值）→ RESIDUAL_LARGE warning。"""
-    entry = _residual_missing(unattributed_units=-571_057, tolerance_units=10_000)
+    """超容差（负值取绝对值）→ RESIDUAL_LARGE warning。"""
+    entry = _residual_missing(judgement_units=-571_057, tolerance_units=10_000)
     assert entry is not None
     assert entry.code == "RESIDUAL_LARGE"
     assert entry.severity == "warning"
     assert "5710.57" in entry.reason
     assert "100.00" in entry.reason
-    assert entry.what_to_do == "看 residual_breakdown"
+    assert entry.what_to_do == "看未归因标的明细（unattributed[]）"
 
 
 def test_residual_missing_zero_tolerance_edge() -> None:
-    """期末总资产为 0 → 容差 0：零残差不产生条目，非零即超容差。"""
-    assert _residual_missing(unattributed_units=0, tolerance_units=0) is None
-    entry = _residual_missing(unattributed_units=1, tolerance_units=0)
+    """期末总资产为 0 → 容差 0：零值不产生条目，非零即超容差。"""
+    assert _residual_missing(judgement_units=0, tolerance_units=0) is None
+    entry = _residual_missing(judgement_units=1, tolerance_units=0)
     assert entry is not None
     assert entry.code == "RESIDUAL_LARGE"
+
+
+def _judgement_units(split: ResidualSplit) -> int:
+    """降级判定基数（应用层同一表达式）：标的级两部分合计。"""
+    return sum(split.per_symbol.values())
+
+
+def test_judgement_basis_excludes_interest_bucket() -> None:
+    """只有账户级 interest 非零、标的级为 0 → 不降级、不产生条目（§4.4 新口径）。"""
+    split = split_residual(
+        plans=[],
+        trades=[
+            _trade(
+                trade_date=date(2025, 3, 14),
+                security_code="CASH",
+                side="",
+                category="interest",
+                amount_units=500_000,  # +5,000.00 利息
+            )
+        ],
+        t0=T0,
+        t1=T1,
+        begin_date=P0_DATE,
+        end_date=T1,
+        bucket_mv={},
+        money_fund_balances={},
+        holdings_at={},
+        corporate={},
+        canonical=lambda c: c,
+    )
+    assert split.buckets[BUCKET_INTEREST] == 500_000
+    judgement = _judgement_units(split)
+    assert judgement == 0
+    assert _residual_missing(judgement_units=judgement, tolerance_units=100) is None
+    assert (
+        _aggregate_status([_info_entry()], judgement_units=judgement, tolerance_units=100) == "ok"
+    )
+
+
+def test_judgement_basis_excludes_ipo_bucket() -> None:
+    """只有 ipo_pnl（打新收益，破发为负）非零 → 不降级、不产生条目。"""
+    plans = [
+        SymbolPlan(
+            security_code="001237",
+            symbol_class="new_stock",
+            attributed=False,
+            reason_code=None,
+            participating=True,
+        )
+    ]
+    split = split_residual(
+        plans=plans,
+        trades=[
+            _trade(
+                trade_date=date(2025, 3, 20),
+                security_code="001237",
+                side="sell",
+                category="sell",
+                quantity_units=1_000_000,
+                price_units=40_000_000,
+                amount_units=400_000,  # +4,000.00
+            )
+        ],
+        t0=T0,
+        t1=T1,
+        begin_date=P0_DATE,
+        end_date=T1,
+        bucket_mv={"001237": (900_000, 0)},  # 期初 9,000.00 → 期末 0 ⇒ −5,000.00
+        money_fund_balances={},
+        holdings_at={"001237": (100_000, 0)},
+        corporate={},
+        canonical=lambda c: c,
+    )
+    assert split.buckets[BUCKET_IPO] == -500_000
+    judgement = _judgement_units(split)
+    assert judgement == 0
+    assert _residual_missing(judgement_units=judgement, tolerance_units=100) is None
+    assert _aggregate_status([], judgement_units=judgement, tolerance_units=100) == "ok"
+
+
+def test_judgement_basis_ignores_valuation_gap() -> None:
+    """`valuation_gap` 不参与判定（仅披露）：gap 非零也不产生降级/条目。"""
+    split = split_residual(
+        plans=[],
+        trades=[],
+        t0=T0,
+        t1=T1,
+        begin_date=P0_DATE,
+        end_date=T1,
+        bucket_mv={},
+        money_fund_balances={},
+        holdings_at={},
+        corporate={},
+        canonical=lambda c: c,
+    )
+    judgement = _judgement_units(split)
+    gap_units = -300_000  # valuation_gap 由应用层 plug，不进入判定基数
+    assert judgement == 0 and gap_units != 0
+    assert _residual_missing(judgement_units=judgement, tolerance_units=0) is None
+    assert _aggregate_status([], judgement_units=judgement, tolerance_units=0) == "ok"
 
 
 def _retired_trades() -> list[Trade]:

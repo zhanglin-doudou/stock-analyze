@@ -245,12 +245,13 @@ selection + sector + buy_timing + sell_timing − F
 - **CASH 行不进入标的级桶**（避免与 `interest`/`other_cashflow` 双计）；标的级桶只按 `security_code` 归集。
 - **分组（2026-11-04 补充）**：`corporate_action_pnl`/`unattributed_price_pnl` 为**标的级桶**（落 `unattributed[]` 明细）；`dividend_without_position`/`interest`/`ipo_pnl`/`other_cashflow`/`valuation_gap` 为**账户级桶**（不落标的明细，`ipo_pnl` 亦然）。恒等式 `residual = Σ标的级桶 + Σ账户级桶`，其中 `residual_reconciliation.account_level_total = dividend + interest + ipo + other + gap`。
 - **容差（2026-11-04 修订）** = 期末账户总资产（`review.asset_daily.total_assets_units` 区间末行）× **0.2%**（标度整数分，向下取整；常量 `RESIDUAL_TOLERANCE_PCT = Decimal("0.002")`）。
-- 判定用**未归因金额合计** = `|residual|`（即 `|Σ桶|`，含 `valuation_gap`）：
-  - `|residual| > 容差` → `status=degraded` + `RESIDUAL_LARGE`；
-  - `0 < |residual| ≤ 容差` → `RESIDUAL_WITHIN_TOLERANCE`（`severity=info`），**不降级**；
-  - `residual == 0` → 不产生条目。
-- 多桶符号相反时按**合计净额**判定（各桶分别小于但合计超过仍命中）；负残差取绝对值；期末总资产为 0 → 容差 0（非零即超容差）。
-- 已解释桶（公司行动/未归因标的/利息/打新收益/其他）**同样计入合计**（原「已解释桶不触发」规则取消）。
+- **判定基数（2026-11-04 口径调整）** = **未归因标的损益合计** = `corporate_action_pnl + unattributed_price_pnl`（恒等于 `Σper_symbol` / `residual_reconciliation.unattributed_symbols_total`，即 `unattributed[]` 覆盖的标的级部分）：
+  - `|基数| > 容差` → `status=degraded` + `RESIDUAL_LARGE`；
+  - `0 < |基数| ≤ 容差` → `RESIDUAL_WITHIN_TOLERANCE`（`severity=info`），**不降级**；
+  - `基数 == 0` → 不产生条目（账户级桶/估值差再大也不触发）。
+- **不参与判定的桶**：`interest`/`dividend_without_position`/`other_cashflow`/`ipo_pnl`（账户级）与 `valuation_gap`。它们照常进 `residual_breakdown` 与对账行（金额不隐藏），但**不得**导致 `degraded`；`residual` 本身仍完整展示。
+- 标的级两桶符号相反时按**合计净额**判定；负值取绝对值；期末总资产为 0 → 容差 0（非零即超容差）。
+- `valuation_gap` 的独立守门保留为**结论门禁**（D-09，见下条）；`BRIDGE_MISMATCH` 属于 MTM↔bridge 对账，与本判定无关。
 - 结论门禁用 `valuation_gap_ratio = |valuation_gap| / max(|total_pnl|, 1 元)`：>5% 不出 `summary`（D-09）。
 - 残差**不是错误**：它显式回答"这部分钱归不了因（标的类型/数据缺口）"，用 `coverage`/`missing[]` 量化；**禁止**把公司行动/未归因标的的金额硬塞进"选股"制造假归因。
 
@@ -359,7 +360,7 @@ else:
 |---|---|---|---|
 | 1 | 无 `V_end`/`V_begin`；边界行 blocked；区间内 blocked 行；`T1 > data_as_of`；`V_end` 早于 `latest_workday(min(valuation_end,T1))`；FIFO 致命错误；`period_end < first_sync_on` 且未开 look-ahead；**存在可归因候选标的**（A 股且区间内有持仓/交易）**但零个可归因段**（板块数据全缺/全部缺映射） | `blocked` | `total_pnl`/`base_capital`/`factors[].amount`/`residual`/`residual_breakdown`/`coverage` 数值键 **全部缺省**；`factors[]` 保留 `code/name/rank`，`ratio/conclusion=null`；给 `missing[]`+`what_to_do` |
 | 2 | 任一标的剔除（缺映射/缺指数/缺价/公司行动/费用口径未知/超卖）；`degraded` 资产行；`BRIDGE_MISMATCH`；`RESIDUAL_LARGE`；`SECTOR_CLASSIFICATION_NOT_PIT`；`SECTOR_BAR_FALLBACK` | `degraded` | 全给，`coverage`/`missing[]` 披露 |
-| 3 | 其余（含"区间无交易且资产无变化"、**无任何可归因候选标的**，如仅债券/货基账户、仅 `severity=info` 的提示如 look-ahead 启用或板块指数期初回退） | `ok`（有未归因桶则 `degraded`） | 全给（五因子可为 0，`summary` 给"本期无交易/无持仓变化"或"本期无可归因 A 股"；`capital_total==0` 时 `capital_ratio=null`，`summary` 用固定句） |
+| 3 | 其余（含"区间无交易且资产无变化"、**无任何可归因候选标的**，如仅债券/货基账户、仅 `severity=info` 的提示如 look-ahead 启用或板块指数期初回退） | `ok`（**未归因标的损益**超容差则 `degraded`；仅账户级桶/估值差非零不降级） | 全给（五因子可为 0，`summary` 给"本期无交易/无持仓变化"或"本期无可归因 A 股"；`capital_total==0` 时 `capital_ratio=null`，`summary` 用固定句） |
 
 **候选集 vs「参与本期」（2026-11-04 修订）**：
 
@@ -384,6 +385,7 @@ unattributed[]     = 最多 5 条 {security_code, security_name, symbol_class, r
 - `security_name` 来源：`ledger.trade.security_name`（按 canonical 代码取最新非空值，空白压缩为单空格；仓库无独立证券主数据表），缺失为 `null`，前端只展示代码。
 - `unattributed[]` 按标的只覆盖 `corporate_action_pnl` / `unattributed_price_pnl` 两桶；`interest` / `ipo_pnl`（打新收益） / `other_cashflow` / `dividend_without_position` 为账户级，不进明细（故明细合计不必等于 Σ桶）——`ipo_pnl` 标的因此不出现在 `unattributed[]`。
 - **残差对账（2026-11-04）**：后端派生 `residual_reconciliation{unattributed_symbols_total, account_level_total, residual}`，前端零口径只展示。`unattributed_symbols_total = Σper_symbol`（含被 5 条展示上限截断的标的）；`account_level_total = dividend + interest + ipo_pnl + other + valuation_gap`；恒等式 `unattributed_symbols_total + account_level_total == residual` 由 `residual = Σ各桶 + valuation_gap` 构造保证（标度整数分，无取整误差）。blocked 时整键省略。
+- **降级判定基数（2026-11-04 口径调整）**：`RESIDUAL_LARGE` / `RESIDUAL_WITHIN_TOLERANCE` 只用 `unattributed_symbols_total`（= `corporate_action_pnl + unattributed_price_pnl`）与容差比较；`interest`/`dividend_without_position`/`other_cashflow`/`ipo_pnl` 与 `valuation_gap` **不参与判定**（金额照常展示）。`residual_tolerance` 字段语义不变（仍是容差本身）。
 - **明细截断（2026-11-04）**：展示上限为单一常量 `UNATTRIBUTED_LIMIT = 5`（`stock_review.attribution.coverage`，API 以 `display_limit` 透出，前端不再硬编码/截断）。`residual_reconciliation` 另给 additive 字段 `listed_total`（前 5 条金额合计）、`others_count`（第 6 条及以后的标的数）、`others_total`（其余金额合计）；恒等式 `listed_total + others_total == unattributed_symbols_total` 由同一 `per_symbol` 切分保证。前端仅当 `others_count > 0` 时追加「其余 N 只」汇总行（非标的、不可点击，金额列显示 `others_total`；行内无伪代码）。
 - **结论门禁**（D-09）：`summary` 允许 iff `total_pnl` 可得 && `n_attributed_segments ≥ 10` && `capital_ratio ≥ 0.90` && `valuation_gap_ratio ≤ 5%`；**例外**：`capital_total==0`（空账户/无可归因候选）时允许固定句 summary（"本期无交易/无持仓变化"或"本期无可归因 A 股"）；`blocked` 必封；`insufficient` 只给事实句不给行动建议。
 - `symbol_class`：`stock`/`fund`/`bond`/`money_fund`/`new_stock`/`pseudo`（复用 `stock_platform.symbols.classify_symbol` 与 `valuation.is_money_fund_row`）。
@@ -410,8 +412,8 @@ unattributed[]     = 最多 5 条 {security_code, security_name, symbol_class, r
 | `CORPORATE_ACTION_ADJUSTMENT_MISSING` | 区间内含送转/配股 | 该标的剔除（残差桶） | P2 复权能力（§10.6） |
 | `FEE_BASIS_UNKNOWN` | 费用三列全 0 但净额无法反解 | 该标的剔除 | 人工核对流水 |
 | `SEGMENT_DATA_ERROR` | FIFO 超卖/负持仓/未匹配配股 | 该标的剔除 | 对账/修正流水 |
-| `RESIDUAL_LARGE` | `\|residual\| > 期末总资产 × 0.2%` | 披露/降级 | 看 `residual_breakdown` |
-| `RESIDUAL_WITHIN_TOLERANCE` | `0 < \|residual\| ≤ 期末总资产 × 0.2%` | 仅 info（不降级） | 无需处理 |
+| `RESIDUAL_LARGE` | `\|未归因标的损益\| > 期末总资产 × 0.2%` | 披露/降级 | 看未归因标的明细（`unattributed[]`） |
+| `RESIDUAL_WITHIN_TOLERANCE` | `0 < \|未归因标的损益\| ≤ 期末总资产 × 0.2%` | 仅 info（不降级） | 无需处理 |
 
 ### 4.5 性能与预算
 
@@ -728,7 +730,7 @@ test "$(curl -sS -o /dev/null -w '%{http_code}' "$BASE/attribution?period=2026-0
 PageHeader：期间选择 + 状态徽标（ok/degraded/blocked）+ 数据截至 + 基准回显
 ① 摘要卡：summary + total_pnl + 五因子（固定顺序）条形/瀑布：
    name、amount、ratio（后端百分比串）、share、rank、conclusion、presentation.bar_pct（直接作 CSS 宽度）
-② 残差卡：residual + residual_breakdown 六桶 + coverage.capital_ratio + 未归因清单（≤5）
+② 残差卡：residual + residual_breakdown 七桶 + coverage.capital_ratio + 未归因清单（≤5）
 ③ 数据质量卡：missing[]（中文文案 + what_to_do 链接：资产页/板块同步/流水）
 ④ 空/降级态：blocked → 不渲染任何金额，只渲染 ③；insufficient → 渲染金额、结论区"样本不足"
 ```
@@ -850,7 +852,7 @@ MODELS: dict[str, Callable[[], AttributionModel]] = {
 | R-09 | 性能：全量 trades + 双次 FIFO + 行情 | 端点超时 | 预算 1.5s；只取 `[P0,P1]` 行情；缓存优先；不落库 | ✅ A-09 已批准（按推荐） |
 | R-10 | 历史区间资产表 blocked/stale 比例 | 归因对老数据不可用 | blocked + what_to_do；资产表构建覆盖优先 | ✅ A-10 已批准（按推荐） |
 | R-11 | 结论文案合规（禁买卖建议/裸术语） | 合规风险 | 模板 + 词表/正则断言；人工抽检 | — |
-| R-12 | 残差容差（期末总资产 0.2%）与 ratio 阈值（100 分/0.5%）需校准 | 结论时有时无/口径扯皮 | 上线前用真实用户/夹具分布校准；配置化常量 | ✅ A-07 已批准（2026-11-04 改为 0.2%×V_end） |
+| R-12 | 残差容差（期末总资产 0.2%）与 ratio 阈值（100 分/0.5%）需校准 | 结论时有时无/口径扯皮 | 上线前用真实用户/夹具分布校准；配置化常量 | ✅ A-07 已批准（2026-11-04 改为 0.2%×V_end；降级判定基数＝未归因标的损益，账户级桶/估值差不参与） |
 | R-13 | `definition_version` 未来变更导致历史不可比 | 趋势断点 | 版本号 + 趋势 breaks（P3-02）；旧值保留 | — |
 
 **HITL 升级清单（2026-11-02 已全部批准，按推荐方向执行；实现期如遇新歧义仍按 HITL 协议升级）**：A-01（排期/范围）、A-02（D-01 总损益口径）、A-03（D-02 板块语义 + sector 文档修订）、A-04（D-03 买点卖点口径 + PRD 勘误）、A-05（D-07 PIT + AGENTS.md 例外）、A-06（08a 数据源 spike）、A-07（残差/覆盖/ratio 阈值）、A-08（前端范围）、A-09（性能实测）、A-10（历史资产表可用性）、A-11（公司行动剔除范围）。
