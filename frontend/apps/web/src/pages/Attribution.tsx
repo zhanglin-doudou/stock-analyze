@@ -637,7 +637,8 @@ function QualityCard({ data }: { data: Attribution }): ReactElement {
 export function AttributionPage(): ReactElement {
   const [params, setParams] = useSearchParams();
   const period = params.get('period') ?? yearToDateRange();
-  const allowLookahead = (params.get('lookahead') ?? 'allow') === 'allow';
+  // 与归因设计 §4.3 一致：lookahead 必须显式请求，默认 deny（不得默认回溯未来信息）。
+  const allowLookahead = (params.get('lookahead') ?? 'deny') === 'allow';
 
   const query = useQuery({
     queryKey: ['attribution', period, allowLookahead],
