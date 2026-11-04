@@ -36,6 +36,7 @@ from stock_core.attribution.ranking import (
 from stock_core.fifo import build_rounds
 from stock_ledger.models import Trade
 from stock_review.application.attribution import (
+    _aggregate_status,
     _exclusion_missing,
     _mirror_view,
     _sector_start_fallback_missing,
@@ -43,6 +44,7 @@ from stock_review.application.attribution import (
 from stock_review.application.rebuild import trades_to_events
 from stock_review.attribution.context import (
     BEGIN_SOURCE_STATEMENT,
+    MissingEntry,
     resolve_asset_window,
 )
 from stock_review.attribution.coverage import MIN_SAMPLE_SEGMENTS, build_coverage
@@ -678,3 +680,61 @@ def test_sector_start_fallback_missing_copy_bilingual() -> None:
     assert "2025-02-28 → 2025-03-05" in en.reason
     assert "holiday" in en.reason
     assert en.what_to_do == "no action needed (holiday gap; fallback close used)"
+
+
+def _info_entry(code: str = "SECTOR_CLASSIFICATION_LOOKAHEAD") -> MissingEntry:
+    return MissingEntry(
+        field="classification_as_of",
+        code=code,
+        reason="行业归属为最新快照回溯，可能与当时实际归属不符；仅用于历史回看",
+        what_to_do="仅用于回看历史；考核用途请以当时时点成分复核",
+        severity="info",
+    )
+
+
+def test_status_info_only_missing_is_ok() -> None:
+    """只剩 info 提示（如 look-ahead 披露）时不降级：整页 ok（§4.4）。"""
+    status = _aggregate_status(
+        [_info_entry(), _info_entry("SECTOR_MAPPING_MISSING")],
+        unexplained_bucket=False,
+        gap_units=0,
+        residual_threshold=100,
+    )
+    assert status == "ok"
+
+
+def test_status_warning_missing_degrades() -> None:
+    """任一 warning 级 missing → degraded（旧行为不变）。"""
+    warn = MissingEntry(
+        field="factors",
+        code="SECTOR_BAR_MISSING",
+        reason="缺行业指数日线",
+        what_to_do="补板块日线",
+    )
+    assert (
+        _aggregate_status([warn], unexplained_bucket=False, gap_units=0, residual_threshold=100)
+        == "degraded"
+    )
+
+
+def test_status_nonzero_bucket_or_large_gap_still_degrades() -> None:
+    """只有 info 提示，但未归因桶非空 / 残差超阈值 → 仍 degraded（不抹掉）。"""
+    assert (
+        _aggregate_status(
+            [_info_entry()], unexplained_bucket=True, gap_units=0, residual_threshold=100
+        )
+        == "degraded"
+    )
+    assert (
+        _aggregate_status(
+            [_info_entry()], unexplained_bucket=False, gap_units=101, residual_threshold=100
+        )
+        == "degraded"
+    )
+    # 阈值内（含等于）仍 ok。
+    assert (
+        _aggregate_status(
+            [_info_entry()], unexplained_bucket=False, gap_units=100, residual_threshold=100
+        )
+        == "ok"
+    )

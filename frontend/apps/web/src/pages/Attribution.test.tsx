@@ -599,7 +599,8 @@ describe("AttributionPage", () => {
   it("lookahead：URL 带 allow 时请求 allow、勾选并显示警告条", async () => {
     getAttribution.mockResolvedValue(
       attribution({
-        status: "degraded",
+        // 回溯披露已降为 info：无 warning 级因素时整页仍为 ok（区别于 warning 聚合）。
+        status: "ok",
         missing: [
           {
             code: "SECTOR_CLASSIFICATION_LOOKAHEAD",
@@ -627,6 +628,8 @@ describe("AttributionPage", () => {
 
     const banner = await screen.findByTestId("attr-lookahead-banner");
     expect(banner.textContent).toContain("最新行业成分回溯历史");
+    // 只有 info 提示不降级：徽标为「正常」。
+    expect(screen.getByTestId("attr-status-badge").textContent).toBe("正常");
     expect(getAttribution).toHaveBeenCalledWith({
       period: "2026-06",
       classification_lookahead: "allow",

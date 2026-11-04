@@ -619,6 +619,27 @@ def _sector_start_fallback_missing(
     )
 
 
+def _aggregate_status(
+    missing: Sequence[MissingEntry],
+    *,
+    unexplained_bucket: bool,
+    gap_units: int,
+    residual_threshold: int,
+) -> str:
+    """ok/degraded 聚合（§4.4；blocked 由短路路径决定，此处不负责）。
+
+    只有 `severity=info` 的提示（如 look-ahead 披露、退市无映射）不影响归因口径，
+    不降级；任一 warning/blocker、非空未归因桶、或残差超阈值 → degraded。
+    """
+    if (
+        any(item.severity != "info" for item in missing)
+        or unexplained_bucket
+        or abs(gap_units) > residual_threshold
+    ):
+        return "degraded"
+    return "ok"
+
+
 def _exclusion_missing(
     reason: str,
     codes: Sequence[str],
@@ -1136,10 +1157,11 @@ async def build_attribution(
     unexplained_bucket = any(
         value != 0 for key, value in split.buckets.items() if key != BUCKET_GAP
     )
-    status = (
-        "degraded"
-        if (missing or unexplained_bucket or abs(gap_units) > residual_threshold)
-        else "ok"
+    status = _aggregate_status(
+        missing,
+        unexplained_bucket=unexplained_bucket,
+        gap_units=gap_units,
+        residual_threshold=residual_threshold,
     )
 
     # ── 13. 因子 / 结论 / assumptions / hash ──────────────────────

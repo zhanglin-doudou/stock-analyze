@@ -350,8 +350,8 @@ else:
 | 优先级 | 条件 | status | 金额字段 |
 |---|---|---|---|
 | 1 | 无 `V_end`/`V_begin`；边界行 blocked；区间内 blocked 行；`T1 > data_as_of`；`V_end` 早于 `latest_workday(min(valuation_end,T1))`；FIFO 致命错误；`period_end < first_sync_on` 且未开 look-ahead；**存在可归因候选标的**（A 股且区间内有持仓/交易）**但零个可归因段**（板块数据全缺/全部缺映射） | `blocked` | `total_pnl`/`base_capital`/`factors[].amount`/`residual`/`residual_breakdown`/`coverage` 数值键 **全部缺省**；`factors[]` 保留 `code/name/rank`，`ratio/conclusion=null`；给 `missing[]`+`what_to_do` |
-| 2 | 任一标的剔除（缺映射/缺指数/缺价/公司行动/费用口径未知/超卖）；`degraded` 资产行；`BRIDGE_MISMATCH`；`RESIDUAL_LARGE`；`SECTOR_CLASSIFICATION_NOT_PIT`；`SECTOR_BAR_FALLBACK`；look-ahead 启用 | `degraded` | 全给，`coverage`/`missing[]` 披露 |
-| 3 | 其余（含"区间无交易且资产无变化"、**无任何可归因候选标的**，如仅债券/货基账户） | `ok`（有未归因桶则 `degraded`） | 全给（五因子可为 0，`summary` 给"本期无交易/无持仓变化"或"本期无可归因 A 股"；`capital_total==0` 时 `capital_ratio=null`，`summary` 用固定句） |
+| 2 | 任一标的剔除（缺映射/缺指数/缺价/公司行动/费用口径未知/超卖）；`degraded` 资产行；`BRIDGE_MISMATCH`；`RESIDUAL_LARGE`；`SECTOR_CLASSIFICATION_NOT_PIT`；`SECTOR_BAR_FALLBACK` | `degraded` | 全给，`coverage`/`missing[]` 披露 |
+| 3 | 其余（含"区间无交易且资产无变化"、**无任何可归因候选标的**，如仅债券/货基账户、仅 `severity=info` 的提示如 look-ahead 启用或退市无映射） | `ok`（有未归因桶则 `degraded`） | 全给（五因子可为 0，`summary` 给"本期无交易/无持仓变化"或"本期无可归因 A 股"；`capital_total==0` 时 `capital_ratio=null`，`summary` 用固定句） |
 
 **覆盖率**（全部后端算好）：
 
