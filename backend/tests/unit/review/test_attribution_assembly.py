@@ -43,6 +43,7 @@ from stock_review.application.attribution import (
     _residual_missing,
     _residual_reconciliation,
     _sector_start_fallback_missing,
+    _valuation_gap_missing,
 )
 from stock_review.application.rebuild import trades_to_events
 from stock_review.attribution.context import (
@@ -57,9 +58,11 @@ from stock_review.attribution.coverage import (
     build_coverage,
 )
 from stock_review.attribution.presentation import (
+    GAP_RATIO_MAX,
     assert_copy_compliance,
     build_summary,
     factor_conclusion,
+    gap_ratio_units,
 )
 from stock_review.attribution.residual import (
     BUCKET_CORPORATE,
@@ -1135,6 +1138,61 @@ def test_judgement_basis_excludes_ipo_bucket() -> None:
     assert judgement == 0
     assert _residual_missing(judgement_units=judgement, tolerance_units=100) is None
     assert _aggregate_status([], judgement_units=judgement, tolerance_units=100) == "ok"
+
+
+def test_valuation_gap_info_only_and_status_unchanged() -> None:
+    """|gap| > 容差 → info 披露（不发 warning、不改变 status）。"""
+    entry = _valuation_gap_missing(
+        gap_units=50_000,
+        tolerance_units=10_000,
+        v_end_units=5_000_000,
+        total_pnl_units=-200_000,
+    )
+    assert entry is not None
+    assert entry.code == "VALUATION_GAP_ABOVE_TOLERANCE"
+    assert entry.severity == "info"
+    assert entry.field == "residual"
+    assert "500.00" in entry.reason  # 估值差金额
+    assert "100.00" in entry.reason  # 容差
+    assert "50000.00" in entry.reason  # 期末总资产
+    # info 条目不影响状态（即使标的级为 0）。
+    assert _aggregate_status([entry], judgement_units=0, tolerance_units=10_000) == "ok"
+
+
+def test_valuation_gap_at_or_below_tolerance_is_silent() -> None:
+    """|gap| 等于/低于容差 → 不产生条目；0 → 不产生条目。"""
+    base = {"v_end_units": 5_000_000, "total_pnl_units": -200_000, "tolerance_units": 10_000}
+    assert _valuation_gap_missing(gap_units=10_000, **base) is None
+    assert _valuation_gap_missing(gap_units=-10_000, **base) is None
+    assert _valuation_gap_missing(gap_units=0, **base) is None
+
+
+def test_valuation_gap_negative_uses_absolute() -> None:
+    """负值按绝对值判定与展示（reason 不带负号）。"""
+    entry = _valuation_gap_missing(
+        gap_units=-50_000,
+        tolerance_units=10_000,
+        v_end_units=5_000_000,
+        total_pnl_units=-200_000,
+    )
+    assert entry is not None
+    assert "估值差 500.00 元" in entry.reason
+    assert "-500" not in entry.reason
+
+
+def test_valuation_gap_info_coexists_with_d09_gate() -> None:
+    """D-09（gap 占比 >5% → 不出 summary）触发时，info 披露仍产生、二者不重复告警。"""
+    gap_units, total_pnl_units = 600_000, 100_000
+    assert gap_ratio_units(gap_units, total_pnl_units) > GAP_RATIO_MAX  # summary 被抑制
+    entry = _valuation_gap_missing(
+        gap_units=gap_units,
+        tolerance_units=10_000,
+        v_end_units=5_000_000,
+        total_pnl_units=total_pnl_units,
+    )
+    assert entry is not None  # 门禁不产生码，info 独立披露
+    assert entry.severity == "info"
+    assert entry.code == "VALUATION_GAP_ABOVE_TOLERANCE"
 
 
 def test_judgement_basis_ignores_valuation_gap() -> None:

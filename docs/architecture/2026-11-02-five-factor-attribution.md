@@ -252,6 +252,7 @@ selection + sector + buy_timing + sell_timing − F
 - **不参与判定的桶**：`interest`/`dividend_without_position`/`other_cashflow`/`ipo_pnl`（账户级）与 `valuation_gap`。它们照常进 `residual_breakdown` 与对账行（金额不隐藏），但**不得**导致 `degraded`；`residual` 本身仍完整展示。
 - 标的级两桶符号相反时按**合计净额**判定；负值取绝对值；期末总资产为 0 → 容差 0（非零即超容差）。
 - `valuation_gap` 的独立守门保留为**结论门禁**（D-09，见下条）；`BRIDGE_MISMATCH` 属于 MTM↔bridge 对账，与本判定无关。
+- **估值差披露（2026-11-04，仅披露）**：`|valuation_gap| > 容差` 时追加一条 `severity=info` 的 `VALUATION_GAP_ABOVE_TOLERANCE`（`field=residual`）；`|gap| ≤ 容差` 或为 0 不产生条目。**不改变 status**（info 不降级）；与 D-09 门禁互相独立——门禁只抑制 `summary`、不产生任何码，二者可同时出现且不构成重复告警。
 - 结论门禁用 `valuation_gap_ratio = |valuation_gap| / max(|total_pnl|, 1 元)`：>5% 不出 `summary`（D-09）。
 - 残差**不是错误**：它显式回答"这部分钱归不了因（标的类型/数据缺口）"，用 `coverage`/`missing[]` 量化；**禁止**把公司行动/未归因标的的金额硬塞进"选股"制造假归因。
 
@@ -386,6 +387,7 @@ unattributed[]     = 最多 5 条 {security_code, security_name, symbol_class, r
 - `unattributed[]` 按标的只覆盖 `corporate_action_pnl` / `unattributed_price_pnl` 两桶；`interest` / `ipo_pnl`（打新收益） / `other_cashflow` / `dividend_without_position` 为账户级，不进明细（故明细合计不必等于 Σ桶）——`ipo_pnl` 标的因此不出现在 `unattributed[]`。
 - **残差对账（2026-11-04）**：后端派生 `residual_reconciliation{unattributed_symbols_total, account_level_total, residual}`，前端零口径只展示。`unattributed_symbols_total = Σper_symbol`（含被 5 条展示上限截断的标的）；`account_level_total = dividend + interest + ipo_pnl + other + valuation_gap`；恒等式 `unattributed_symbols_total + account_level_total == residual` 由 `residual = Σ各桶 + valuation_gap` 构造保证（标度整数分，无取整误差）。blocked 时整键省略。
 - **降级判定基数（2026-11-04 口径调整）**：`RESIDUAL_LARGE` / `RESIDUAL_WITHIN_TOLERANCE` 只用 `unattributed_symbols_total`（= `corporate_action_pnl + unattributed_price_pnl`）与容差比较；`interest`/`dividend_without_position`/`other_cashflow`/`ipo_pnl` 与 `valuation_gap` **不参与判定**（金额照常展示）。`residual_tolerance` 字段语义不变（仍是容差本身）。
+- **估值差披露（2026-11-04）**：`|valuation_gap| > 容差` 时 `missing[]` 追加 `VALUATION_GAP_ABOVE_TOLERANCE`（`severity=info`、`field=residual`，zh/en 文案含金额/容差/期末总资产/占比），**不影响 `status`**；≤ 容差或 0 不产生。D-09（占比 >5% 不出 `summary`）是独立门禁，不产生码，二者共存。
 - **明细截断（2026-11-04）**：展示上限为单一常量 `UNATTRIBUTED_LIMIT = 5`（`stock_review.attribution.coverage`，API 以 `display_limit` 透出，前端不再硬编码/截断）。`residual_reconciliation` 另给 additive 字段 `listed_total`（前 5 条金额合计）、`others_count`（第 6 条及以后的标的数）、`others_total`（其余金额合计）；恒等式 `listed_total + others_total == unattributed_symbols_total` 由同一 `per_symbol` 切分保证。前端仅当 `others_count > 0` 时追加「其余 N 只」汇总行（非标的、不可点击，金额列显示 `others_total`；行内无伪代码）。
 - **结论门禁**（D-09）：`summary` 允许 iff `total_pnl` 可得 && `n_attributed_segments ≥ 10` && `capital_ratio ≥ 0.90` && `valuation_gap_ratio ≤ 5%`；**例外**：`capital_total==0`（空账户/无可归因候选）时允许固定句 summary（"本期无交易/无持仓变化"或"本期无可归因 A 股"）；`blocked` 必封；`insufficient` 只给事实句不给行动建议。
 - `symbol_class`：`stock`/`fund`/`bond`/`money_fund`/`new_stock`/`pseudo`（复用 `stock_platform.symbols.classify_symbol` 与 `valuation.is_money_fund_row`）。
@@ -414,6 +416,7 @@ unattributed[]     = 最多 5 条 {security_code, security_name, symbol_class, r
 | `SEGMENT_DATA_ERROR` | FIFO 超卖/负持仓/未匹配配股 | 该标的剔除 | 对账/修正流水 |
 | `RESIDUAL_LARGE` | `\|未归因标的损益\| > 期末总资产 × 0.2%` | 披露/降级 | 看未归因标的明细（`unattributed[]`） |
 | `RESIDUAL_WITHIN_TOLERANCE` | `0 < \|未归因标的损益\| ≤ 期末总资产 × 0.2%` | 仅 info（不降级） | 无需处理 |
+| `VALUATION_GAP_ABOVE_TOLERANCE` | `\|valuation_gap\| > 期末总资产 × 0.2%`（≤ 容差或 0 不产生） | 仅 info（**不降级**；与 D-09 门禁独立共存） | 核对估值/对账口径（仅披露） |
 
 ### 4.5 性能与预算
 

@@ -90,6 +90,8 @@ from stock_review.attribution.presentation import (
     build_summary,
     factor_conclusion,
     factor_presentation,
+    gap_ratio_units,
+    pct_str,
     summary_na_reason,
 )
 from stock_review.attribution.residual import (
@@ -657,6 +659,50 @@ def _sector_start_fallback_missing(
 def _tolerance_pct_ratio() -> Ratio:
     """容差比例的 API 定点表示（唯一来源仍是 `RESIDUAL_TOLERANCE_PCT`）。"""
     return Ratio(int(RESIDUAL_TOLERANCE_PCT * RATIO_SCALE))
+
+
+def _valuation_gap_missing(
+    *,
+    gap_units: int,
+    tolerance_units: int,
+    v_end_units: int,
+    total_pnl_units: int,
+    lang: str = "zh",
+) -> MissingEntry | None:
+    """估值差披露（仅 `info`，**不改变 status**）：`|valuation_gap| > 容差` 时给出条目。
+
+    容差与降级判定同源（期末总资产 × `RESIDUAL_TOLERANCE_PCT`）；`|gap| ≤ 容差`
+    或为 0 时不产生条目（与既有 0 值无条目规则一致）。本码是**披露**，与 D-09
+    （`valuation_gap_ratio > 5%` 不出 `summary`）互相独立：门禁只抑制结论、不产生
+    任何码；二者可同时存在，不构成重复告警。`field="residual"`：估值差本身是残差
+    桶（`valuation_gap`），归入残差类披露（与 `RESIDUAL_*` 同组）。
+    """
+    magnitude = abs(gap_units)
+    if magnitude == 0 or magnitude <= tolerance_units:
+        return None
+    gap = Money(magnitude)
+    tolerance = Money(tolerance_units)
+    assets = Money(v_end_units)
+    ratio = pct_str(gap_ratio_units(gap_units, total_pnl_units))
+    if lang == "en":
+        return MissingEntry(
+            field="residual",
+            code="VALUATION_GAP_ABOVE_TOLERANCE",
+            severity="info",
+            reason=f"Valuation gap {gap} CNY (absolute) exceeds tolerance {tolerance} CNY "
+            f"({_tolerance_pct_ratio().as_pct()} of period-end assets {assets} CNY); "
+            f"{ratio} of period P&L, disclosure only",
+            what_to_do="check reconciliation/valuation basis",
+        )
+    return MissingEntry(
+        field="residual",
+        code="VALUATION_GAP_ABOVE_TOLERANCE",
+        severity="info",
+        reason=f"估值差 {gap} 元（绝对值）超过容差 {tolerance} 元"
+        f"（期末总资产 {assets} 元 × {_tolerance_pct_ratio().as_pct()}），"
+        f"占本期损益 {ratio}；仅披露，不影响状态",
+        what_to_do="核对估值/对账口径（仅披露）",
+    )
 
 
 def _aggregate_status(
@@ -1290,6 +1336,16 @@ async def build_attribution(
     )
     if residual_entry is not None:
         missing.append(residual_entry)
+
+    gap_entry = _valuation_gap_missing(
+        gap_units=gap_units,
+        tolerance_units=residual_tolerance_units,
+        v_end_units=window.v_end_units,
+        total_pnl_units=window.total_pnl_units,
+        lang=lang,
+    )
+    if gap_entry is not None:
+        missing.append(gap_entry)
 
     status = _aggregate_status(
         missing,
