@@ -399,6 +399,20 @@ function SummaryCard({ data }: { data: Attribution }): ReactElement {
   );
 }
 
+interface ResidualTolerance {
+  amount?: string | null;
+  pct?: string | null;
+  base?: string | null;
+}
+
+/** 容差信息来自后端 `assumptions.residual_tolerance`；前端只窄化读取，不改数值。 */
+function readResidualTolerance(
+  assumptions: Attribution["assumptions"],
+): ResidualTolerance | null {
+  const value = assumptions?.residual_tolerance;
+  return typeof value === 'object' && value !== null ? (value as ResidualTolerance) : null;
+}
+
 function ResidualCard({ data }: { data: Attribution }): ReactElement {
   // 桶按金额从大到小排序（只做展示排序，不解析数值；U-08）。
   const buckets = Object.entries(data.residual_breakdown ?? {}).sort(
@@ -406,6 +420,10 @@ function ResidualCard({ data }: { data: Attribution }): ReactElement {
   );
   // 展示条数与「其余 N 只」均由后端切分（`display_limit` 单一来源），前端不截断。
   const unattributed = data.coverage?.unattributed ?? [];
+  const tolerance = readResidualTolerance(data.assumptions);
+  // 是否容差内由后端 missing[] 码决定，前端不做数值比较。
+  const withinTolerance =
+    data.missing?.some((item) => item.code === 'RESIDUAL_WITHIN_TOLERANCE') ?? false;
   return (
     <section className="dash-panel attr-panel" data-testid="attr-residual">
       <div className="attr-panel-head">
@@ -422,6 +440,21 @@ function ResidualCard({ data }: { data: Attribution }): ReactElement {
         残差是五因子未能解释的损益。正数=未归因收益（抬高本期损益），
         负数=估值差/账面与市值口径差异（拉低本期损益）。
       </p>
+      {/* 容差行：金额/期末总资产/比例均直接展示后端串；不比较数值、不取整。 */}
+      {tolerance ? (
+        <p className="attr-residual-tolerance" data-testid="attr-residual-tolerance">
+          {tolerance.amount != null || tolerance.base != null
+            ? `容差 ${formatMoney(tolerance.amount)}（期末总资产 ${formatMoney(tolerance.base)}）`
+            : `容差比例 ${formatPct(tolerance.pct)}（期末资产未知，数据阻断时不判定）`}
+          <span className="muted" data-testid="attr-residual-tolerance-status">
+            {withinTolerance
+              ? '容差内（不降级）'
+              : data.status === 'blocked'
+                ? '—（数据阻断，无法判定）'
+                : '超出容差（已降级）'}
+          </span>
+        </p>
+      ) : null}
       <div className="dash-kpi-grid attr-kpis">
         <div
           className="dash-kpi"
