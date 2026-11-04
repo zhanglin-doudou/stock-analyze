@@ -122,6 +122,7 @@ function attribution(overrides: Partial<Attribution> = {}): Attribution {
       unattributed: "120.00",
       dividend: "0.00",
       interest: "0.00",
+      ipo_pnl: "0.00",
       other: "0.00",
       valuation_gap: "0.00",
     },
@@ -516,6 +517,35 @@ describe("AttributionPage", () => {
     // 对账行：标的 445,625.33 + 账户级（利息 5.97 − 估值差 336,022.00）= 残差 109,609.30。
     expect(screen.getByTestId("attr-reconciliation").textContent).toContain(
       "445,625.33 元 + 账户级 -336,016.03 元 = 109,609.30 元",
+    );
+  });
+
+  it("打新收益桶：破发负值按后端标签展示，账户级对账含新桶（U-19）", async () => {
+    getAttribution.mockResolvedValue(
+      attribution({
+        residual: "-5000.00",
+        residual_breakdown: { ipo_pnl: "-5000.00", unattributed_price_pnl: "0.00" },
+        residual_breakdown_labels: { ipo_pnl: "打新收益", unattributed_price_pnl: "未归因标的损益" },
+        residual_reconciliation: {
+          unattributed_symbols_total: "0.00",
+          listed_total: "0.00",
+          others_count: 0,
+          others_total: "0.00",
+          display_limit: 5,
+          account_level_total: "-5000.00",
+          residual: "-5000.00",
+        },
+        coverage: { ...attribution().coverage!, unattributed: [] },
+      }),
+    );
+    renderPage();
+
+    const buckets = await screen.findByTestId("attr-residual-buckets");
+    expect(buckets.textContent).toContain("打新收益");
+    expect(buckets.textContent).toContain("-5,000.00 元");
+    // 新桶并入账户级：0.00 + (-5,000.00) = -5,000.00。
+    expect(screen.getByTestId("attr-reconciliation").textContent).toContain(
+      "明细合计 0.00 元 + 账户级 -5,000.00 元 = -5,000.00 元",
     );
   });
 

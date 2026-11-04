@@ -97,6 +97,7 @@ from stock_review.attribution.residual import (
     BUCKET_DIVIDEND,
     BUCKET_GAP,
     BUCKET_INTEREST,
+    BUCKET_IPO,
     BUCKET_OTHER,
     BUCKET_UNATTRIBUTED,
     ResidualSplit,
@@ -198,13 +199,14 @@ class ResidualReconciliation:
     """残差对账（§4.4）：标的合计 + 账户级桶合计 == residual（全部为标度整数分）。
 
     - `unattributed_symbols_total`：`split.per_symbol` 合计（= corporate_action_pnl +
-      unattributed_price_pnl 中落到标的的部分，含被 5 条展示上限截断的标的）；
-    - `account_level_total`：不按标的分摊的桶（interest / other_cashflow /
-      dividend_without_position）+ valuation_gap；
+      unattributed_price_pnl 中落到标的的部分，含被展示上限截断的标的；`ipo_pnl`
+      是账户级桶，不落标的）；
+    - `account_level_total`：不按标的分摊的桶（interest / ipo_pnl（打新收益） /
+      other_cashflow / dividend_without_position）+ valuation_gap；
     - `listed_total` / `others_count` / `others_total`：明细展示前 `display_limit`
       条的金额合计、其后标的数与其金额合计；`listed_total + others_total ==
       unattributed_symbols_total`；
-    - 等式由构造保证：residual = Σ五桶 + valuation_gap。
+    - 等式由构造保证：residual = Σ各桶 + valuation_gap。
     """
 
     unattributed_symbols_total_units: int
@@ -689,10 +691,11 @@ def _residual_reconciliation(
     gap_units: int,
     residual_units: int,
 ) -> ResidualReconciliation:
-    """残差对账（§4.4，标度整数）：Σper_symbol + (dividend+interest+other+gap) == residual。
+    """残差对账（§4.4，标度整数）：Σper_symbol + (dividend+interest+ipo+other+gap) == residual。
 
     `per_symbol` 是 corporate/unattributed 两桶中**落到标的**的部分（含被展示上限
-    截断的标的），因此恒等于两桶之和；等式由 `residual = Σ五桶 + gap` 保证。
+    截断的标的），恒等于这两桶之和；`ipo_pnl` 为账户级桶，不进 `per_symbol`，只在
+    `account_level_total` 中计一次；等式由 `residual = Σ桶 + gap` 保证。
     `listed + others` 由 `coverage` 的已展示/未展示分组给出，同样恒等于 Σper_symbol。
     """
     return ResidualReconciliation(
@@ -700,6 +703,7 @@ def _residual_reconciliation(
         account_level_total_units=(
             split.buckets[BUCKET_DIVIDEND]
             + split.buckets[BUCKET_INTEREST]
+            + split.buckets[BUCKET_IPO]
             + split.buckets[BUCKET_OTHER]
             + gap_units
         ),
@@ -1396,6 +1400,7 @@ async def build_attribution(
         BUCKET_UNATTRIBUTED: split.buckets[BUCKET_UNATTRIBUTED],
         BUCKET_DIVIDEND: split.buckets[BUCKET_DIVIDEND],
         BUCKET_INTEREST: split.buckets[BUCKET_INTEREST],
+        BUCKET_IPO: split.buckets[BUCKET_IPO],
         BUCKET_OTHER: split.buckets[BUCKET_OTHER],
         BUCKET_GAP: gap_units,
     }

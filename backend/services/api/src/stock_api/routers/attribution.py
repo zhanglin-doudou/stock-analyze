@@ -54,8 +54,18 @@ _BUCKET_LABELS: dict[str, str] = {
     "unattributed_price_pnl": "未归因标的损益",
     "dividend_without_position": "无持仓分红",
     "interest": "利息",
+    "ipo_pnl": "打新收益",
     "other_cashflow": "其他现金流",
     "valuation_gap": "估值差（未能解释）",
+}
+_BUCKET_LABELS_EN: dict[str, str] = {
+    "corporate_action_pnl": "Corporate actions",
+    "unattributed_price_pnl": "Unattributed symbol P&L",
+    "dividend_without_position": "Dividends without position",
+    "interest": "Interest",
+    "ipo_pnl": "New-share (IPO) P&L",
+    "other_cashflow": "Other cash flows",
+    "valuation_gap": "Valuation gap (unexplained)",
 }
 _BLOCKER_CODES: frozenset[str] = frozenset(
     {
@@ -94,12 +104,13 @@ def _factor_out(factor: AttributionFactor) -> AttributionFactorOut:
     )
 
 
-def _to_out(result: AttributionResult) -> AttributionOut:
+def _to_out(result: AttributionResult, *, lang: str = "zh") -> AttributionOut:
     breakdown: dict[str, str] | None = None
     breakdown_labels: dict[str, str] | None = None
     if result.residual_breakdown is not None:
         breakdown = {key: str(Money(v)) for key, v in result.residual_breakdown.items()}
-        breakdown_labels = {key: _BUCKET_LABELS.get(key, key) for key in breakdown}
+        labels = _BUCKET_LABELS_EN if lang == "en" else _BUCKET_LABELS
+        breakdown_labels = {key: labels.get(key, key) for key in breakdown}
     coverage: AttributionCoverageOut | None = None
     if result.coverage is not None:
         coverage = AttributionCoverageOut(
@@ -212,6 +223,7 @@ async def get_attribution_endpoint(
     ctx.forbid_admin_trades()
     user_id = ctx.require_user()
     state = get_state(request)
+    lang = _language(accept_language)
     async with state.db.session(user_id=user_id, begin=True) as session:
         result = await build_attribution(
             session,
@@ -223,12 +235,12 @@ async def get_attribution_endpoint(
             clock=state.clock,
             market_data=get_market_data(request),
             sector_data=get_sector_data(request),
-            lang=_language(accept_language),
+            lang=lang,
             lookahead_enabled=state.settings.sector_lookahead_enabled,
         )
     # blocked 整键省略在载荷层完成（见 `attribution_payload`）：直接返回 JSONResponse
     # 可绕过 response_model 的 None 补全，同时保留 OpenAPI 完整字段表。
-    return JSONResponse(content=attribution_payload(_to_out(result)))
+    return JSONResponse(content=attribution_payload(_to_out(result, lang=lang)))
 
 
 __all__ = ["router"]

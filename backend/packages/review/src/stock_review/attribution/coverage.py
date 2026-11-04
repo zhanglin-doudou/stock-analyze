@@ -5,7 +5,8 @@ capital_total      = Σ_{全部标的} base（无价标的用净成本兜底，b
 capital_attributed = Σ_{可归因标的} base
 capital_ratio      = div_round(capital_attributed, capital_total, scale=8)   # total=0 → None
 unattributed[]     = 最多 5 条 {security_code, security_name, symbol_class, reason_code, amount}
-                     （仅 `participating=True` 的标的，按 |amount| 降序）
+                     （仅 `participating=True` 且非 `new_stock` 的标的，按 |amount| 降序；
+                     `new_stock` 标的的损益由账户级 `ipo_pnl` 桶披露，不进本清单）
 ```
 
 - 可归因标的的 base = `Σ段 base`（两级分摊后，含区间内建仓 lot）；
@@ -89,8 +90,11 @@ def build_coverage(
     # 候选 `plans` 来自全历史 FIFO（含已清仓/退市标的），明细只披露**本期参与**的标的：
     # 复用与 `missing[]` 同一判据 `participating`（窗口内平仓 ∪ 期末未平仓 lot ∪
     # 窗口内持仓类行），避免把历史标的透传到残差明细（§4.4）。
+    # `new_stock` 标的已由账户级 `ipo_pnl` 桶披露，不进未归因明细（避免与账户级对账重复）。
     plan_by_code = {
-        plan.security_code: plan for plan in plans if not plan.attributed and plan.participating
+        plan.security_code: plan
+        for plan in plans
+        if not plan.attributed and plan.participating and plan.symbol_class != "new_stock"
     }
     entries: list[UnattributedEntry] = []
     seen: set[str] = set()

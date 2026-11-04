@@ -75,7 +75,7 @@
 
 1. `GET /api/v1/attribution?period=YYYY-MM&model=five_factor` 返回 5 因子 + 残差，`Σfactors.amount + residual = total_pnl`（≤0.01 元）；**真门禁不是恒等式本身（plug 恒真），而是**：受控 fixture 下 `residual==0`、`coverage`/`missing[]` 完整、`residual_breakdown` 各桶独立可复算（§7.2）。
 2. 每个因子带**人话结论**（无裸术语、无买卖建议）与排序；单因子主导 fixture 排序正确。
-3. 明确**残差去哪了**：残差必须拆到固定桶（未归因价格损益/未归属股息/利息/其他现金流/公司行动/估值差），桶之和=residual。
+3. 明确**残差去哪了**：残差必须拆到固定桶（未归因价格损益/未归属股息/利息/打新收益/其他现金流/公司行动/估值差），桶之和=residual。
 4. 明确**降级**：缺板块指数、缺成分映射、缺行情、资产表 blocked/stale、区间含公司行动时返回 200 + `status/missing[]`，**绝不用 0/等权/未来成分冒充**；无法给 `total_pnl` 时 `status="blocked"` 且金额字段缺省。
 5. 结果可被 **Dashboard / 月报 / 前端归因页** 零口径消费；同输入同输出（`inputs_hash` 确定性）。
 6. 不新增表/迁移；不改现有 18 指标口径；不重写 FIFO。
@@ -235,20 +235,22 @@ selection + sector + buy_timing + sell_timing − F
 | 桶 | 含义（互斥规则） | 公式（分） |
 |---|---|---|
 | `corporate_action_pnl` | D-12 被剔除的送转/配股标的的**整标的区间损益**（含其股息；因 `Σamount` 已含股息行，不单列） | `(end_MV − begin_MV) + Σ_{该标的区间 trade.amount_units}`；MV 用资产表同源原语（可转债 ×10、债券 divisor、新股按成本） |
-| `unattributed_price_pnl` | **不可归因但可估值**的整标的区间损益（含其股息）：D-06 排除的债券/ETF/基金/未映射股票，或因数据缺口被剔除的 A 股（缺行业指数/缺参考价/缺费用口径/超卖） | 同上；无行情/无法估值 → 不进本桶（进 `valuation_gap`）；`missing[]` 给出各自 reason |
+| `unattributed_price_pnl` | **不可归因但可估值**的整标的区间损益（含其股息）：D-06 排除的债券/ETF/基金/未映射股票，或因数据缺口被剔除的 A 股（缺行业指数/缺参考价/缺费用口径/超卖）；**不含 `new_stock` 标的**（见 `ipo_pnl`） | 同上；无行情/无法估值 → 不进本桶（进 `valuation_gap`）；`missing[]` 给出各自 reason |
 | `dividend_without_position` | 不属于上述两类的"无持仓但区间到账"股息（应极少） | `Σ dividend 行 amount`（标的未进入任何标的级桶，且未计入 selection） |
 | `interest` | 利息（货基收益/结息；`category=interest`，代码多为 CASH） | `Σ interest 行 amount` |
+| `ipo_pnl` | **打新收益**（账户级，与 `interest` 同级）：本期被 `new_stock` 资产类别排除的标的的整标的区间盯市损益（可为负＝破发；标签固定「打新收益」/“New-share (IPO) P&L”） | 同标的级公式 `(end_MV − begin_MV) + Σamount + Σ三费列`；按 `symbol_class=new_stock` 路由，不落 `unattributed[]` 标的明细 |
 | `other_cashflow` | 未分类现金流（打新冻结/补差/`other`/NULL 分类） | `Σ 其余非交易行 amount`（排除上面已归集的行） |
-| `valuation_gap` | 资产表口径差 + 取整 + 无法逐项解释的剩余 | `residual − Σ前五桶`（**plug，可为负**） |
+| `valuation_gap` | 资产表口径差 + 取整 + 无法逐项解释的剩余 | `residual − Σ其余桶`（**plug，可为负**） |
 
 - **CASH 行不进入标的级桶**（避免与 `interest`/`other_cashflow` 双计）；标的级桶只按 `security_code` 归集。
+- **分组（2026-11-04 补充）**：`corporate_action_pnl`/`unattributed_price_pnl` 为**标的级桶**（落 `unattributed[]` 明细）；`dividend_without_position`/`interest`/`ipo_pnl`/`other_cashflow`/`valuation_gap` 为**账户级桶**（不落标的明细，`ipo_pnl` 亦然）。恒等式 `residual = Σ标的级桶 + Σ账户级桶`，其中 `residual_reconciliation.account_level_total = dividend + interest + ipo + other + gap`。
 - **容差（2026-11-04 修订）** = 期末账户总资产（`review.asset_daily.total_assets_units` 区间末行）× **0.2%**（标度整数分，向下取整；常量 `RESIDUAL_TOLERANCE_PCT = Decimal("0.002")`）。
 - 判定用**未归因金额合计** = `|residual|`（即 `|Σ桶|`，含 `valuation_gap`）：
   - `|residual| > 容差` → `status=degraded` + `RESIDUAL_LARGE`；
   - `0 < |residual| ≤ 容差` → `RESIDUAL_WITHIN_TOLERANCE`（`severity=info`），**不降级**；
   - `residual == 0` → 不产生条目。
 - 多桶符号相反时按**合计净额**判定（各桶分别小于但合计超过仍命中）；负残差取绝对值；期末总资产为 0 → 容差 0（非零即超容差）。
-- 已解释桶（公司行动/未归因标的/利息/其他）**同样计入合计**（原「已解释桶不触发」规则取消）。
+- 已解释桶（公司行动/未归因标的/利息/打新收益/其他）**同样计入合计**（原「已解释桶不触发」规则取消）。
 - 结论门禁用 `valuation_gap_ratio = |valuation_gap| / max(|total_pnl|, 1 元)`：>5% 不出 `summary`（D-09）。
 - 残差**不是错误**：它显式回答"这部分钱归不了因（标的类型/数据缺口）"，用 `coverage`/`missing[]` 量化；**禁止**把公司行动/未归因标的的金额硬塞进"选股"制造假归因。
 
@@ -380,8 +382,8 @@ unattributed[]     = 最多 5 条 {security_code, security_name, symbol_class, r
 ```
 
 - `security_name` 来源：`ledger.trade.security_name`（按 canonical 代码取最新非空值，空白压缩为单空格；仓库无独立证券主数据表），缺失为 `null`，前端只展示代码。
-- `unattributed[]` 按标的只覆盖 `corporate_action_pnl` / `unattributed_price_pnl` 两桶；`interest` / `other_cashflow` / `dividend_without_position` 为账户级，不进明细（故明细合计不必等于 Σ桶）。
-- **残差对账（2026-11-04）**：后端派生 `residual_reconciliation{unattributed_symbols_total, account_level_total, residual}`，前端零口径只展示。`unattributed_symbols_total = Σper_symbol`（含被 5 条展示上限截断的标的）；`account_level_total = dividend + interest + other + valuation_gap`；恒等式 `unattributed_symbols_total + account_level_total == residual` 由 `residual = Σ五桶 + valuation_gap` 构造保证（标度整数分，无取整误差）。blocked 时整键省略。
+- `unattributed[]` 按标的只覆盖 `corporate_action_pnl` / `unattributed_price_pnl` 两桶；`interest` / `ipo_pnl`（打新收益） / `other_cashflow` / `dividend_without_position` 为账户级，不进明细（故明细合计不必等于 Σ桶）——`ipo_pnl` 标的因此不出现在 `unattributed[]`。
+- **残差对账（2026-11-04）**：后端派生 `residual_reconciliation{unattributed_symbols_total, account_level_total, residual}`，前端零口径只展示。`unattributed_symbols_total = Σper_symbol`（含被 5 条展示上限截断的标的）；`account_level_total = dividend + interest + ipo_pnl + other + valuation_gap`；恒等式 `unattributed_symbols_total + account_level_total == residual` 由 `residual = Σ各桶 + valuation_gap` 构造保证（标度整数分，无取整误差）。blocked 时整键省略。
 - **明细截断（2026-11-04）**：展示上限为单一常量 `UNATTRIBUTED_LIMIT = 5`（`stock_review.attribution.coverage`，API 以 `display_limit` 透出，前端不再硬编码/截断）。`residual_reconciliation` 另给 additive 字段 `listed_total`（前 5 条金额合计）、`others_count`（第 6 条及以后的标的数）、`others_total`（其余金额合计）；恒等式 `listed_total + others_total == unattributed_symbols_total` 由同一 `per_symbol` 切分保证。前端仅当 `others_count > 0` 时追加「其余 N 只」汇总行（非标的、不可点击，金额列显示 `others_total`；行内无伪代码）。
 - **结论门禁**（D-09）：`summary` 允许 iff `total_pnl` 可得 && `n_attributed_segments ≥ 10` && `capital_ratio ≥ 0.90` && `valuation_gap_ratio ≤ 5%`；**例外**：`capital_total==0`（空账户/无可归因候选）时允许固定句 summary（"本期无交易/无持仓变化"或"本期无可归因 A 股"）；`blocked` 必封；`insufficient` 只给事实句不给行动建议。
 - `symbol_class`：`stock`/`fund`/`bond`/`money_fund`/`new_stock`/`pseudo`（复用 `stock_platform.symbols.classify_symbol` 与 `valuation.is_money_fund_row`）。
@@ -576,7 +578,7 @@ Authorization: Bearer <jwt|pat>
 | `base_capital` | money | `Σ全部标的 base`（无价标的用净成本，`coverage.base_basis` 披露）；blocked 缺省 |
 | `factors[]` | array | **固定 5 项、固定顺序** `[selection, sector, buy_timing, sell_timing, fee]`；每项 `code`（`sector` 必含）、`name`（选股/板块配置/买点/卖点/费用）、`amount`（money，blocked 缺省）、`ratio`（string 或 null）、`share`（string 或 null）、`rank`（1..5，blocked 也保留）、`conclusion`（string 或 null）、`presentation{bar_pct, ratio_pct, tone}`（`tone ∈ positive/negative/flat`；`bar_pct` 由 share 派的绝对百分比串，**前端直接作 CSS 宽度**） |
 | `residual` / `residual_ratio` | money / ratio 或 null | 残差与 plug 占比 |
-| `residual_breakdown` | object | `{corporate_action_pnl, unattributed_price_pnl, dividend_without_position, interest, other_cashflow, valuation_gap}`（money，blocked 缺省） |
+| `residual_breakdown` | object | `{corporate_action_pnl, unattributed_price_pnl, dividend_without_position, interest, ipo_pnl, other_cashflow, valuation_gap}`（money，blocked 缺省）；标签由 `residual_breakdown_labels` 按 `Accept-Language` 给出（`ipo_pnl` 中文「打新收益」/英文 “New-share (IPO) P&L”） |
 | `status` | enum | `ok` / `degraded` / `blocked` |
 | `sample` | object | `{n_segments, n_attributed_segments, n_rounds, n_symbols, min_n:10, sample_status: ok 或 insufficient}`（`insufficient`=结论受样本限制，金额照给） |
 | `coverage` | object | §4.4；blocked 时数值键缺省 |

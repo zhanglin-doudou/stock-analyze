@@ -65,6 +65,7 @@ from stock_review.attribution.residual import (
     BUCKET_CORPORATE,
     BUCKET_DIVIDEND,
     BUCKET_INTEREST,
+    BUCKET_IPO,
     BUCKET_OTHER,
     BUCKET_UNATTRIBUTED,
     ResidualSplit,
@@ -394,6 +395,7 @@ def test_golden_residual_buckets_and_coverage() -> None:
     assert split.buckets == {
         BUCKET_DIVIDEND: 0,
         BUCKET_INTEREST: 0,
+        BUCKET_IPO: 0,
         BUCKET_CORPORATE: 0,
         BUCKET_UNATTRIBUTED: 0,
         BUCKET_OTHER: 0,
@@ -428,6 +430,105 @@ def test_golden_residual_buckets_and_coverage() -> None:
         1,
     )
     assert coverage.unattributed == ()
+
+
+def test_split_routes_new_stock_to_ipo_bucket() -> None:
+    """`new_stock` 标的的本期盯市损益进 `ipo_pnl`（账户级），不进 `unattributed_price_pnl`；
+    破发（负值）同样只进 ipo_pnl；其余非归因标的仍留在 unattributed。
+    """
+    plans = [
+        SymbolPlan(
+            security_code="001237",
+            symbol_class="new_stock",
+            attributed=False,
+            reason_code=None,
+            participating=True,
+        ),
+        SymbolPlan(
+            security_code="110059",
+            symbol_class="bond",
+            attributed=False,
+            reason_code=None,
+            participating=True,
+        ),
+    ]
+    trades = [
+        _trade(
+            trade_date=date(2025, 3, 20),
+            security_code="001237",
+            side="sell",
+            category="sell",
+            quantity_units=1_000_000,  # 100 股
+            price_units=40_000_000,  # 40.00
+            amount_units=400_000,  # +4,000.00
+        ),
+        _trade(
+            trade_date=date(2025, 3, 25),
+            security_code="110059",
+            side="sell",
+            category="sell",
+            quantity_units=100_000,
+            price_units=120_000_000,
+            amount_units=1_200_000,  # +12,000.00
+        ),
+    ]
+    split = split_residual(
+        plans=plans,
+        trades=trades,
+        t0=T0,
+        t1=T1,
+        begin_date=P0_DATE,
+        end_date=T1,
+        # 001237：期初 9,000.00 → 期末 0，卖出 +4,000.00 ⇒ −5,000.00（破发）
+        bucket_mv={"001237": (900_000, 0), "110059": (0, 0)},
+        money_fund_balances={},
+        holdings_at={"001237": (100_000, 0), "110059": (100_000, 0)},
+        corporate={},
+        canonical=lambda c: c,
+    )
+    assert split.buckets[BUCKET_IPO] == -500_000
+    assert split.buckets[BUCKET_UNATTRIBUTED] == 1_200_000
+    # 账户级桶不落 `per_symbol`（避免与 `account_level_total` 双计）。
+    assert split.per_symbol == {"110059": 1_200_000}
+
+    # 一致口径：`new_stock` 标的由 `ipo_pnl` 桶披露，不再进 `unattributed[]` 明细。
+    coverage = build_coverage(
+        plans=plans,
+        decomposition=decompose([], 0, extra_fee_units=0),
+        per_symbol=split.per_symbol,
+        base_basis="market",
+    )
+    assert [entry.security_code for entry in coverage.unattributed] == ["110059"]
+    assert coverage.unattributed[0].amount_units == 1_200_000
+
+
+def test_split_ipo_bucket_is_zero_without_new_stock() -> None:
+    """无 `new_stock` 标的时新桶为 0，不产生额外条目/金额（沿用缺省 0）。"""
+    plans = [
+        SymbolPlan(
+            security_code="110059",
+            symbol_class="bond",
+            attributed=False,
+            reason_code=None,
+            participating=True,
+        )
+    ]
+    split = split_residual(
+        plans=plans,
+        trades=[],
+        t0=T0,
+        t1=T1,
+        begin_date=P0_DATE,
+        end_date=T1,
+        bucket_mv={"110059": (0, 0)},
+        money_fund_balances={},
+        holdings_at={"110059": (100_000, 0)},
+        corporate={},
+        canonical=lambda c: c,
+    )
+    assert split.buckets[BUCKET_IPO] == 0
+    # 桶值 0 的标的仍出现在 per_symbol（金额 0），不产生新桶金额。
+    assert split.per_symbol == {"110059": 0}
 
 
 def test_coverage_unattributed_only_participating_with_names() -> None:
@@ -530,6 +631,14 @@ def test_coverage_unattributed_name_falls_back_to_none() -> None:
         ({}, {}, -12_345, -12_345, -12_345),
         # 明细为空但账户级有股息
         ({}, {BUCKET_DIVIDEND: 8_800}, 0, 8_800, 8_800),
+        # 打新收益（破发为负）只进账户级：标的 120.00 + 账户级（-3.00 + 1.43）
+        (
+            {"110059": 120_000},
+            {BUCKET_UNATTRIBUTED: 120_000, BUCKET_IPO: -300, BUCKET_INTEREST: 143},
+            0,
+            119_843,
+            -157,
+        ),
     ],
 )
 def test_residual_reconciliation_identity(
@@ -545,6 +654,7 @@ def test_residual_reconciliation_identity(
         BUCKET_UNATTRIBUTED: 0,
         BUCKET_DIVIDEND: 0,
         BUCKET_INTEREST: 0,
+        BUCKET_IPO: 0,
         BUCKET_OTHER: 0,
         **bucket_values,
     }

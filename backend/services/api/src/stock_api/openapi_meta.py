@@ -1672,6 +1672,7 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
                 "unattributed_price_pnl": "0.00",
                 "dividend_without_position": "0.00",
                 "interest": "0.00",
+                "ipo_pnl": "0.00",
                 "other_cashflow": "0.00",
                 "valuation_gap": "0.00",
             },
