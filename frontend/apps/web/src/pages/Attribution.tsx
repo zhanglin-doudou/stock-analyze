@@ -216,18 +216,6 @@ function lookaheadActive(data: Attribution | undefined): boolean {
   return data?.assumptions?.['classification_lookahead'] === true;
 }
 
-/** 只读展示用：容差金额与分母（assumptions.residual_tolerance，金额为后端定点字符串）。 */
-function residualToleranceText(data: Attribution): string | undefined {
-  const value = data.assumptions?.['residual_tolerance'];
-  if (value == null || typeof value !== 'object') return undefined;
-  const tolerance = value as Record<string, unknown>;
-  const amount =
-    typeof tolerance.amount === 'string' ? tolerance.amount : undefined;
-  const base = typeof tolerance.base === 'string' ? tolerance.base : undefined;
-  if (amount == null || base == null) return undefined;
-  // 比例口径只在后端（`assumptions.residual_tolerance.pct`），前端零口径不解析/换算。
-  return `容差 ${formatMoney(amount)}（期末总资产 ${formatMoney(base)}）`;
-}
 
 function StatusBadge({ status }: { status: string }): ReactElement {
   return (
@@ -418,10 +406,6 @@ function ResidualCard({ data }: { data: Attribution }): ReactElement {
   );
   // 展示条数与「其余 N 只」均由后端切分（`display_limit` 单一来源），前端不截断。
   const unattributed = data.coverage?.unattributed ?? [];
-  const toleranceText = residualToleranceText(data);
-  const withinTolerance = (data.missing ?? []).some(
-    (item) => item.code === 'RESIDUAL_WITHIN_TOLERANCE',
-  );
   return (
     <section className="dash-panel attr-panel" data-testid="attr-residual">
       <div className="attr-panel-head">
@@ -431,21 +415,6 @@ function ResidualCard({ data }: { data: Attribution }): ReactElement {
           {formatPct(data.residual_ratio_pct)}
           {pctExceeds100(data.residual_ratio_pct) ? (
             <span className="attr-ratio-warn">（残差大于本期总损益）</span>
-          ) : null}
-          {toleranceText ? (
-            <span data-testid="attr-residual-tolerance">
-              {' '}
-              · {toleranceText}
-            </span>
-          ) : null}
-          {withinTolerance ? (
-            <span
-              className="muted"
-              data-testid="attr-residual-tolerance-status"
-            >
-              {' '}
-              · 容差内（不降级）
-            </span>
           ) : null}
         </span>
       </div>
