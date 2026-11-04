@@ -36,6 +36,8 @@ class JobType(StrEnum):
     EXPORT_CREATE = "export_create"
     BACKUP = "backup"
     RESTORE_DRILL = "restore_drill"
+    # Period2-09（设计 2026-11-04）：回合洞察前瞻收益批量重算。
+    REFRESH_ROUND_INSIGHTS = "refresh_round_insights"
 
 
 class JobStatus(StrEnum):
@@ -124,3 +126,95 @@ class WarningCode(StrEnum):
     RECONCILIATION_AUTOFILLED = "RECONCILIATION_AUTOFILLED"
     # 可转债「数量(手) × 10 × 单张价」与发生金额偏差超容差：口径异常留痕（不阻断）。
     CBOND_AMOUNT_INCONSISTENT = "CBOND_AMOUNT_INCONSISTENT"
+
+
+# ── 回合洞察（Period2-09，设计 2026-11-04）────────────────────────
+
+
+class TradeReasonCode(StrEnum):
+    """买卖理由码；买入/卖出集合分别由 BUY_REASON_CODES / SELL_REASON_CODES 校验。"""
+
+    PLAN_BUILD = "plan_build"
+    ADD_ON = "add_on"
+    BOTTOM_FISH = "bottom_fish"
+    CHASE = "chase"
+    REBOUND = "rebound"
+    DCA = "dca"
+    NEWS = "news"
+    EMOTION = "emotion"
+    PLAN_REDUCE = "plan_reduce"
+    TAKE_PROFIT = "take_profit"
+    STOP_LOSS = "stop_loss"
+    BREAK_EVEN = "break_even"
+    REBALANCE = "rebalance"
+    FEAR = "fear"
+    OTHER = "other"
+
+
+# 理由码与买卖方向绑定（同一 code 不允许同时出现在两侧）。
+BUY_REASON_CODES: frozenset[str] = frozenset(
+    {
+        TradeReasonCode.PLAN_BUILD,
+        TradeReasonCode.ADD_ON,
+        TradeReasonCode.BOTTOM_FISH,
+        TradeReasonCode.CHASE,
+        TradeReasonCode.REBOUND,
+        TradeReasonCode.DCA,
+        TradeReasonCode.NEWS,
+        TradeReasonCode.EMOTION,
+        TradeReasonCode.OTHER,
+    }
+)
+SELL_REASON_CODES: frozenset[str] = frozenset(
+    {
+        TradeReasonCode.PLAN_REDUCE,
+        TradeReasonCode.TAKE_PROFIT,
+        TradeReasonCode.STOP_LOSS,
+        TradeReasonCode.BREAK_EVEN,
+        TradeReasonCode.REBALANCE,
+        TradeReasonCode.FEAR,
+        TradeReasonCode.NEWS,
+        TradeReasonCode.OTHER,
+    }
+)
+
+
+class EmotionCode(StrEnum):
+    CALM = "calm"
+    ANXIOUS = "anxious"
+    GREEDY = "greedy"
+    FEAR = "fear"
+    IMPULSIVE = "impulsive"
+    OTHER = "other"
+
+
+class ForwardReturnStatus(StrEnum):
+    OK = "ok"
+    PENDING = "pending"
+    NO_CALENDAR = "no_calendar"
+    NO_BAR = "no_bar"
+    STALE_PRICE = "stale_price"
+    CORPORATE_ACTION = "corporate_action"
+    DIVISOR_MISSING = "divisor_missing"
+
+
+class RoundBucket(StrEnum):
+    SHORT = "short"
+    SWING = "swing"
+    TREND = "trend"
+    UNKNOWN = "unknown"
+
+
+class InsightQualityFlag(StrEnum):
+    """洞察行质量标记（响应字段，不改变 HTTP 状态）。"""
+
+    PRICE_JUMP_REVIEW = "price_jump_review"
+    COST_BASIS_WARNING = "cost_basis_warning"
+    NO_CALENDAR = "no_calendar"
+    NO_BAR = "no_bar"
+    PENDING = "pending"
+    STALE_PRICE = "stale_price"
+    CORPORATE_ACTION = "corporate_action"
+    DIVISOR_MISSING = "divisor_missing"
+    ADDON_SEQUENCE = "addon_sequence"
+    RISING_SELL_SEQUENCE = "rising_sell_sequence"

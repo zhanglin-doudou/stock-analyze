@@ -38,6 +38,9 @@ class TradeFilters:
     date_to: date | None = None
     category: str | None = None
     include_deleted: bool = False
+    # 理由过滤（API-017 additive）：逻辑键在 / 不在集合内；由上层（review）计算。
+    dedupe_keys: tuple[str, ...] | None = None
+    exclude_dedupe_keys: tuple[str, ...] | None = None
 
 
 @dataclass(slots=True)
@@ -204,6 +207,8 @@ async def list_trades(
         date_to=spec.date_to,
         category=spec.category,
         include_deleted=spec.include_deleted,
+        dedupe_keys=spec.dedupe_keys,
+        exclude_dedupe_keys=spec.exclude_dedupe_keys,
     )
     return [trade_to_dto(row) for row in rows], next_cursor, _etag(rows)
 

@@ -346,12 +346,18 @@ class TradeRepository:
         date_to: date | None = None,
         category: str | None = None,
         include_deleted: bool = False,
+        dedupe_keys: Sequence[str] | None = None,
+        exclude_dedupe_keys: Sequence[str] | None = None,
     ) -> tuple[list[Trade], str | None]:
         """按 (trade_date DESC, id DESC) 游标翻页；多取 1 行判断是否还有下一页。"""
         capped = max(1, min(limit, CURSOR_MAX_LIMIT))
         stmt = select(Trade).where(Trade.user_id == user_id)
         if not include_deleted:
             stmt = stmt.where(Trade.deleted_at.is_(None))
+        if dedupe_keys is not None:
+            stmt = stmt.where(Trade.dedupe_key.in_(list(dedupe_keys)))
+        if exclude_dedupe_keys is not None:
+            stmt = stmt.where(Trade.dedupe_key.not_in(list(exclude_dedupe_keys)))
         if security_code is not None:
             stmt = stmt.where(Trade.security_code == security_code)
         if side is not None:
