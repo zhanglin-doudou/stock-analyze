@@ -25,7 +25,7 @@ TEST_DIRS = (REPO_ROOT / "backend/tests/api", REPO_ROOT / "backend/tests/isolati
 API_PREFIX = "/api/v1"
 ROOT_MARK = "（根）"
 EXPECTED_PERIOD1 = 30
-EXPECTED_ALL_ENDPOINTS = 88
+EXPECTED_ALL_ENDPOINTS = 93  # 88 已排期 + API-090~094 设计登记；API-089 预留不计数
 EXPECTED_PERIOD2 = 34
 
 # 07 指标端点所属任务（DEV-PLAN A.1 第 3/6 列）：Period2-06 = 指标端点，
@@ -83,7 +83,7 @@ def load_period1_ids() -> list[str]:
 
 
 def load_catalog_endpoints() -> dict[str, dict[str, object]]:
-    """API-Catalog §1：API-ID → {method, path, root}（80 行）。"""
+    """API-Catalog §1：API-ID → {method, path, root}（93 行，含 5 个设计登记）。"""
     text = API_CATALOG.read_text(encoding="utf-8")
     block = _section(text, "## §1", "## §2")
     endpoints: dict[str, dict[str, object]] = {}

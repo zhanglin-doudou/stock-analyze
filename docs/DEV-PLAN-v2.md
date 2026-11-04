@@ -3,7 +3,7 @@
 > **命名约定**：期次写全称 `Period1/Period2/Period3`，期次任务 ID 为 `Period1-01`；优先级仍可简写 `P0/P1/P2/P3`。
 
 
-> 依据：[PRD-v2.md](prd/PRD-v2.md)（28 FR + 15 NFR）｜[Architecture-v2.md](Architecture-v2.md)｜[API-Catalog.md](architecture/v2/API-Catalog.md)（88 端点）
+> 依据：[PRD-v2.md](prd/PRD-v2.md)（28 FR + 15 NFR）｜[Architecture-v2.md](Architecture-v2.md)｜[API-Catalog.md](architecture/v2/API-Catalog.md)（93 端点：88 已排期 + 5 个设计登记待排期）
 > 编排原则：**本地可验证优先，部署与交付最后做**。
 > 估时口径：1 名资深全栈 + AI 编码辅助；1 人日 = 6 小时有效开发。总计 **≈ 102.0–105.5 人日**（Period2-08 已交付，按 8.0~11.5 计；单线程约 20 周；并行轨道可压到 ≈ 13–15 周）。
 
@@ -310,7 +310,7 @@ make verify-p3
 
 ## 附录 A：端点与需求覆盖
 
-### A.1 端点 → 期次/任务（88/88）
+### A.1 端点 → 期次/任务（88/88 已排期；另有 5 个设计登记待排期）
 
 | 端点 | 期次 | 任务 | 端点 | 期次 | 任务 |
 |---|---|---|---|---|---|
@@ -359,7 +359,8 @@ make verify-p3
 | API-085 | 二 | Period2-16 | API-086 | 二 | Period2-06 |
 | API-087 | 二 | Period2-17 | API-088 | 二 | Period2-17 |
 
-> 校验：`make api-coverage` 读取本表与 [API-Catalog §1](architecture/v2/API-Catalog.md) 比对，断言 `已映射 / 总数 == 1.0`。
+> **设计登记（2026-11-05）**：API-090~094（回合洞察/理由/前瞻/刷新）已登记 API-Catalog §1/§2.6，**期次/任务待 PM 排期**，暂不进入本表；API-089 预留不实现。
+> 校验：`make api-coverage` 读取本表与 [API-Catalog §1](architecture/v2/API-Catalog.md) 比对，当前为“已排期 88/88；Catalog 93（5 个设计登记待排期）”。
 
 ### A.2 FR → 期次/主任务（28/28）
 
@@ -419,4 +420,4 @@ make verify-p3
 | 二期 | 36.0 | 口径全链 + 四问 + 归因 + 月报 + 导出 + 板块 + ~37 个端点 |
 | 三期 | 23.0 | 闭环 + 趋势 + 提醒 + 分享 + 对话 + 审计 + 限流 + 性能 + 审计 |
 | 交付 | 8.0 | 镜像 + nginx + 迁移 + 备份恢复 + 安全 + CI/CD + 文档 |
-| **合计** | **96.0** | 88/88 端点 + 28/28 FR + 本地可验证 → 上云可交付 |
+| **合计** | **96.0** | 88/88 已排期端点 + 5 个设计登记（API-090~094，待排期）+ 28/28 FR + 本地可验证 → 上云可交付 |

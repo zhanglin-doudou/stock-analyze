@@ -48,7 +48,7 @@
 - ETag `W/"<version>"`（列表含查询指纹），写响应返新 ETag；`If-Match` 不匹配 → 409 `VERSION_CONFLICT`（遵循 PRD FR-L4，不采用 412）。
 - 格式：金额**定点字符串 2 位** `"1234.56"`；价格 6 位、数量 4 位；比率十进制小数；时间 ISO 8601 UTC；业务日 `YYYY-MM-DD`（Asia/Shanghai）；`blocked` 时 `value` **字段缺省**。软删默认过滤 `deleted_at NULL`，`include_deleted=true` 仅本人；注销物理级联删除，审计留事件元数据。
 
-## §1 端点总表（88 个；Path 省略公共前缀 `/api/v1`，标注「根」者不在前缀下）
+## §1 端点总表（93 个；API-089 预留不计数，API-090~094 为设计登记；Path 省略公共前缀 `/api/v1`，标注「根」者不在前缀下）
 | API-ID | Method | Path | 用途 | FR | 认证/scope | 幂等 | 同步/异步 | 优先级 | 主要成功码 |
 |---|---|---|---|---|---|---|---|---|---|
 | API-001 | POST | `/auth/register` | 注册账号 | L2 | 公开 | 支持 | 同步 | P0 | 201 |
@@ -139,9 +139,18 @@
 | API-086 | GET | `/metrics/catalog` | 18 个指标口径说明书（定义/方向/窗口/经验区间/版本） | D3/R8 | read | — | 同步 | P0 | 200 |
 | API-087 | GET | `/sectors/overview` | 板块概览（行业三级/概念暴露+集中度+偏好） | D1 | read | — | 同步 | P0 | 200 |
 | API-088 | GET | `/sectors` | 板块目录树（行业多级/概念列表，供筛选与钻取） | D1 | read | — | 同步 | P1 | 200 |
+| API-090 | PUT | `/trades/{trade_id}/reason` | 新增/更新买入/卖出理由（服务端按 dedupe_key 归并） | D4 | write | 支持 | 同步 | P0 | 201/200 |
+| API-091 | DELETE | `/trades/{trade_id}/reason` | 删除理由（软删，幂等） | D4 | write | 幂等 | 同步 | P0 | 204 |
+| API-092 | GET | `/rounds/insights` | 回合洞察列表（理由/前瞻/波段/抄底卖飞/20D 表现排序） | R1/R8 | read | — | 同步 | P0 | 200 |
+| API-093 | GET | `/rounds/{round_id}/insights` | 单回合洞察详情（逐笔理由/5/10/20 日四口径） | R8 | read | — | 同步 | P1 | 200 |
+| API-094 | POST | `/rounds/insights/refresh` | 补算/失效重算前瞻收益（手动/后续自动化同函数） | R8 | write | 必需 | 同步/异步 | P1 | 200/202 |
+
+
+
+> **编号说明（2026-11-05）**：**API-089 预留、暂不实现**，不进入 §1 计数；本任务（FIFO 回合分析增强）从 **API-090** 起编号。API-090~094 为**设计登记**：详细契约见 §2.6，当前 runtime OpenAPI 尚未实现，`make api-check` 会列为“后续期次未实现”，不阻断一期/二期门禁。实现时同步 OpenAPI 快照、SDK、§6 用例与 DEV-PLAN 排期。
 
 ## §2 分域详细契约
-> 下列 34 个端点为**详细契约**；其余 54 个的请求/响应字段以 `openapi/openapi.json` 为准（§1 已登记、§6 已配验收用例）。断言均为可脚本执行：状态码 + 字段值 + 状态迁移 + 副作用。
+> 下列 39 个端点为**详细契约**（34 个现有 + 5 个设计登记 API-090~094）；其余端点的请求/响应字段以 `openapi/openapi.json` 为准（§1 已登记、§6 已配验收用例）。断言均为可脚本执行：状态码 + 字段值 + 状态迁移 + 副作用。
 ### 2.1 认证、导入与流水
 #### API-001 POST /auth/register
 - 用途：注册账号；FR-L2；认证：公开；幂等：支持；同步。
@@ -433,6 +442,48 @@
 - 错误码：401、ADMIN_CANNOT_READ_TRADES(403)、UNKNOWN_QUERY_PARAM(400)、VALIDATION_ERROR(422)、INVALID_CURSOR(400)。
 - 验收断言：① 目录未同步 → 200 + `items=[]` + `catalog_version=null` + `SECTOR_DATA_MISSING`；② `items` 按 `(level, sector_code)` 升序，L3 的 `path` 恰 3 层；③ L1/L2 `member_count` 为后代 L3 成分去重求和；④ `is_active=false` 默认不返回；⑤ 损坏 cursor → 400 INVALID_CURSOR；⑥ admin 403、无 token 401。
 
+### 2.6 回合洞察与人工理由（2026-11-05 设计登记，未实现）
+
+> 设计依据：[FIFO 回合分析增强设计 v1.0](../2026-11-04-fifo-round-insights.md)（§4 数据模型、§6 API、§8 验收）。
+> 状态：**设计登记，暂未实现**；实现前 `make api-check` 将其列为“后续期次未实现”。实现时必须同步 OpenAPI 快照、SDK、§6 用例、隔离矩阵与 DEV-PLAN 排期。
+> **路由顺序**：`GET /rounds/insights` 必须注册在 `GET /rounds/{round_id}` 之前（FastAPI 按注册序匹配），否则会被动态路由吞掉；前端静态路由同理。
+
+#### API-090 PUT /trades/{trade_id}/reason
+- 用途：新增/更新一笔买入/卖出理由；FR-D4；认证：write；幂等：支持（按 `trade_dedupe_key`）；同步；operationId `upsertTradeReason`。
+- 请求：header `If-Match` 更新时必填（理由 version）；body `reason_code`(必填,枚举) / `reason_text`(≤500) / `emotion_code`(可选) / `tags`(≤8,每个≤16字)；**不接收 `annotated_at`**（服务端 Clock）。
+- 响应 201/200：`{trade_id, trade_dedupe_key, side, reason_code, reason_label, reason_text, emotion_code, tags, annotated_at, late_annotated, version, updated_at, etag}`；`late_annotated` 服务端计算。
+- 错误码：NOT_FOUND(404)、VALIDATION_ERROR(422)、VERSION_CONFLICT(409)、ADMIN_CANNOT_READ_TRADES(403)。
+- 验收：201/200；If-Match 旧值 409；跨用户 404；理由写入后 `/trades` ETag 变化（理由 version 纳入）；审计无 reason_text 明文；重导入后按 dedupe_key 仍关联。
+
+#### API-091 DELETE /trades/{trade_id}/reason
+- 用途：软删理由；FR-D4；认证：write；幂等：幂等；同步；operationId `deleteTradeReason`。
+- 请求：path only；可选 `If-Match`。
+- 响应 204（无 body）；重复删除 204。
+- 错误码：NOT_FOUND(404)、ADMIN_CANNOT_READ_TRADES(403)。
+- 验收：204；列表/详情不再返回；跨用户 404；审计存在。
+
+#### API-092 GET /rounds/insights
+- 用途：回合洞察列表 + 汇总；FR-R1/R8；认证 read；同步；operationId `listRoundInsights`。
+- 请求 query：`period`（默认 close_date 归属）/`bucket=all|short|swing|trend`/`flag`（addon_decline、sold_too_early、reason_missing、horizon_pending、corporate_action）/`has_reason`/`reason_code`/`security_code`/`sort`（combined_20、buy_excess_20、sell_avoid_20、close_date 及负向）/`limit`/`cursor`/`include_summary`。
+- 响应 200：`period`、`period_basis`、`event_period_basis`、`definition_version`、`data_as_of`、`ranking_as_of`、`benchmark_id`、`basis="benchmark_excess_20d"`、`summary{swing,addon,sell_fly,reason_coverage,ranking,pending}`、`items[]`、`next_cursor`、`has_more`、`missing[]`、`assumptions`、`disclaimer`。
+- `items[]` 关键字段：`round_id/security_code/close_date/holding_trading_days/bucket/buy_reason/sell_reason/forward{buy,sell}{5,10,20}{exec_gross_pct,drift_pct,trade_return_pct,excess_pct,status}/flags/ranking{buy_excess_20_pct,sell_avoid_20_pct,combined_20_pct,quadrant,sample_status,ci_low_pct,ci_high_pct}/quality`。
+- 错误码：INVALID_PERIOD(422)、UNKNOWN_QUERY_PARAM(400)、INVALID_SORT_FIELD(400)、INVALID_CURSOR(400)、ADMIN_CANNOT_READ_TRADES(403)。
+- 验收：`/rounds/insights` 返回 200（非动态路由 404）；所有数值有 `_pct/_display/label`；缺失 null 不 0；n<30 不排名；`sort` 白名单；summary 不随 cursor 变化；跨用户仅本人。
+
+#### API-093 GET /rounds/{round_id}/insights
+- 用途：单回合逐笔理由/前瞻/标签/排序详情；FR-R8；认证 read；同步；operationId `getRoundInsight`。
+- 响应 200：回合基础 + `holding_trading_days` + `fills[]` + 每笔 buy/sell `reason` + `forward{5,10,20}` + `flags` + `ranking` + `quality[]` + `data_as_of`。
+- 错误码：NOT_FOUND(404)、ADMIN_CANNOT_READ_TRADES(403)。
+- 验收：字段齐全；跨用户 404；理由/前瞻逐笔可追溯；不混旧 `holding_days` 与真实 TD。
+
+#### API-094 POST /rounds/insights/refresh
+- 用途：手动补算/失效重算前瞻收益；FR-R8；认证 write；幂等：**必需**（Idempotency-Key）；同步/异步；operationId `refreshRoundInsights`。
+- 请求：header `Idempotency-Key`；body `period`(可选)/`scope="missing"`（默认；`all` 仅内部维护）。
+- 响应 200：`{computed,skipped,pending,no_calendar,no_bar,corporate_action,divisor_missing,data_as_of}`；预估 >5000 trade → 202 + `{job_id,type,status,links}` + `Location: /api/v1/jobs/{job_id}`。
+- 错误码：VALIDATION_ERROR(422)、IDEMPOTENCY_KEY_REUSED(422)、IDEMPOTENCY_IN_PROGRESS(409)、JOB_ALREADY_RUNNING(409)、QUOTA_EXCEEDED(429)、ADMIN_CANNOT_READ_TRADES(403)。
+- 验收：同 key 重放同一结果；并发单飞；只读行情缓存不联网；`data_as_of` 用 daily_bar 最大日；202 时 job 可查。
+
+
 ## §3 错误码总表
 
 > `GET /api/v1/errors` 返回本表机器可读版本；`code` 发布后不得改名或复用。`SAMPLE_INSUFFICIENT`/`NAV_UNRELIABLE`/`IMPORT_MISSING_CASH_BALANCE` 为 200 降级/警告码。
@@ -646,6 +697,14 @@ data: {"job_id":"job_01J9Z6","status":"succeeded","result_ref":"/api/v1/reports/
 | API-085 | assets_chart_view | 200 且 points 按日期升序、v∈[0,1] 字符串、amount_label 为后端定点串；blocked 行不进入序列；未构建 n_points=0；跨用户空序列、admin 403、无 token 401；limit 0/501→422；只读无副作用 | fx_round30 | P0 |
 | API-087 | sectors_overview | 200 且行业 `Σ market_value + unclassified == equity_market_value`、`Σ weight ≈ 1`；hhi/effective_n/top1/top3 与 golden 一致；概念 `Σ exposure>1` 时 caveat 非空 + weight_mode=overlapping；未同步 200+missing 全 null；coverage<0.90→insufficient+hhi=null；未来 as_of/level/taxonomy→422；benchmark=nope→422 UNKNOWN_BENCHMARK；limit=501→422；admin 403、无 token 401、B 账号隔离；If-None-Match→304 空 body；只读无副作用 | fx_sector | P0 |
 | API-088 | sectors_catalog | 200 且 items 按 (level,sector_code) 升序、L3 path 恰 3 层、L1/L2 member_count 为后代去重求和；未同步 200+items=[]+catalog_version=null+SECTOR_DATA_MISSING；is_active=false 默认不返回；损坏 cursor→400 INVALID_CURSOR；taxonomy/level 非法→422；admin 403、无 token 401 | fx_sector | P1 |
+| API-090 | trade_reason_upsert（设计） | 201/200；If-Match 旧值 409；跨用户 404；理由写入后 ETag 变化；审计无明文 | fx_round_insights | P0 |
+| API-091 | trade_reason_delete（设计） | 204；重复删除 204；跨用户 404 | fx_round_insights | P0 |
+| API-092 | round_insights_list（设计） | 200；路由不被 `/{round_id}` 吞；筛选/排序白名单；`_pct/_display/label`；缺失 null 不 0；n<30 不排名 | fx_round_insights | P0 |
+| API-093 | round_insights_detail（设计） | 200；逐笔理由/5/10/20 四口径；跨用户 404；不混旧/新持有天 | fx_round_insights | P1 |
+| API-094 | round_insights_refresh（设计） | 200/202+Location；Idempotency-Key 重放；单飞；data_as_of=DB max；GET 不写 | fx_round_insights | P1 |
+
+
+> **设计登记（API-090~094）**：上述 5 行是 2026-11-05 设计登记，当前尚未实现；实现时补 `backend/tests/api/test_api_090_*.py` … `test_api_094_*.py`、§6 脚本与 OpenAPI 示例。现有 88 个端点的验收矩阵不变。
 
 ### 6.1 端到端脚本（5 条，覆盖「注册登录 → PAT → preview → commit → 取指标 → 下载月报」）
 ```bash
