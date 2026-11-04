@@ -600,6 +600,10 @@
             "title": "Symbols Attributed",
             "type": "integer"
           },
+          "symbols_participating": {
+            "title": "Symbols Participating",
+            "type": "integer"
+          },
           "symbols_total": {
             "title": "Symbols Total",
             "type": "integer"
@@ -620,7 +624,8 @@
           "segments_total",
           "segments_attributed",
           "symbols_total",
-          "symbols_attributed"
+          "symbols_attributed",
+          "symbols_participating"
         ],
         "title": "AttributionCoverageOut",
         "type": "object"
@@ -8623,6 +8628,7 @@
                     "segments_attributed": 7,
                     "segments_total": 7,
                     "symbols_attributed": 1,
+                    "symbols_participating": 1,
                     "symbols_total": 1,
                     "unattributed": []
                   },

@@ -1687,6 +1687,7 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
                 "segments_attributed": 7,
                 "symbols_total": 1,
                 "symbols_attributed": 1,
+                "symbols_participating": 1,
                 "unattributed": [],
             },
             "missing": [],

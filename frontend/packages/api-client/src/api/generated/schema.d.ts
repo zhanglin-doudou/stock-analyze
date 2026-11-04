@@ -1244,6 +1244,8 @@ export interface components {
             segments_total: number;
             /** Symbols Attributed */
             symbols_attributed: number;
+            /** Symbols Participating */
+            symbols_participating: number;
             /** Symbols Total */
             symbols_total: number;
             /** Unattributed */

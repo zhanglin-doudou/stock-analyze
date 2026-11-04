@@ -87,6 +87,8 @@ class SymbolPlan:
     # 区间内有平仓、或区间内有持仓类流水）。不参与本期的历史清仓/退市标的不产生
     # missing[]；参与但缺映射/缺价的仍按 warning 披露（§4.4）。
     in_universe: bool = True
+    # 是否参与本期（不限标的类别；coverage.symbols_participating 口径）。
+    participating: bool = False
     # 期初回退明细（缺失参考日, 实际取到的日期）；None 表示期末严格匹配。
     sector_start_fallback: tuple[date, date] | None = None
 
@@ -327,6 +329,7 @@ def _plan_for_symbol(
             dividend_units=0,
             bucket_kind=bucket,
             in_universe=in_universe,
+            participating=participating,
         )
 
     # 本期不参与（无持仓、无区间内平仓/开仓、无窗口持仓行）→ 不产生 missing[] 条目
@@ -580,6 +583,7 @@ def _plan_for_symbol(
         sector_fallback=sector_fallback,
         bucket_kind="none",
         in_universe=in_universe,
+        participating=True,
         sector_start_fallback=start_fallback,
     )
 

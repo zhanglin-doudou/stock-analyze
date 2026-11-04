@@ -410,7 +410,7 @@ function ResidualCard({ data }: { data: Attribution }): ReactElement {
       <div className="dash-kpi-grid attr-kpis">
         <div
           className="dash-kpi"
-          title="三种覆盖口径：资金权重=已归因权益市值/应归因权益市值；标的=已归因数/持仓数；段=已归因段/可归因段"
+          title="三种覆盖口径：资金权重=已归因权益市值/应归因权益市值；标的=已归因数/本期参与数（历史候选含本期未参与，仅统计口径）；段=已归因段/可归因段"
         >
           <span className="dash-kpi-label">资金覆盖率（按资金权重）</span>
           <strong className="num" data-testid="attr-capital-ratio">
@@ -418,7 +418,7 @@ function ResidualCard({ data }: { data: Attribution }): ReactElement {
           </strong>
           <span className="dash-kpi-hint" data-testid="attr-coverage-bases">
             {data.coverage
-              ? `按标的 ${data.coverage.symbols_attributed}/${data.coverage.symbols_total} · 按段 ${data.coverage.segments_attributed}/${data.coverage.segments_total} · ${labelFor(COVERAGE_BASE_LABELS, data.coverage.base_basis)}`
+              ? `按标的 ${data.coverage.symbols_attributed}/${data.coverage.symbols_participating} · 按段 ${data.coverage.segments_attributed}/${data.coverage.segments_total} · ${labelFor(COVERAGE_BASE_LABELS, data.coverage.base_basis)}`
               : '—'}
           </span>
         </div>
@@ -491,7 +491,8 @@ function CaliberNotes({ data }: { data: Attribution }): ReactElement {
         <dd>{labelFor(TOTAL_PNL_BASIS_LABELS, data.total_pnl_basis)}</dd>
       </dl>
       <p className="attr-caliber-term">
-        术语：残差 = 未归属（与结论中的“未归属”同义）；板块配置 = 用户常说的“板块”。
+        术语：残差 = 未归属（与结论中的“未归属”同义）；板块配置 = 用户常说的“板块”；
+        本期参与标的 = 期末有持仓或区间内有买卖的标的（历史候选另计，仅统计口径）。
       </p>
       <details className="attr-tech-details">
         <summary className="muted">

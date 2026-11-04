@@ -116,6 +116,7 @@ def _to_out(result: AttributionResult) -> AttributionOut:
             segments_attributed=result.coverage.segments_attributed,
             symbols_total=result.coverage.symbols_total,
             symbols_attributed=result.coverage.symbols_attributed,
+            symbols_participating=result.coverage.symbols_participating,
             unattributed=[
                 AttributionUnattributedOut(
                     security_code=entry.security_code,

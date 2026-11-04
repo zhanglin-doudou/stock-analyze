@@ -1388,6 +1388,7 @@ class AttributionCoverageOut(StrictModel):
     segments_attributed: int
     symbols_total: int
     symbols_attributed: int
+    symbols_participating: int
     unattributed: list[AttributionUnattributedOut] = Field(default_factory=list)
 
 

@@ -408,7 +408,15 @@ def test_golden_residual_buckets_and_coverage() -> None:
     assert coverage.capital_ratio_units == 100_000_000
     assert coverage.base_basis == "market"
     assert (coverage.segments_total, coverage.segments_attributed) == (3, 3)
-    assert (coverage.symbols_total, coverage.symbols_attributed) == (1, 1)
+    assert (
+        coverage.symbols_total,
+        coverage.symbols_participating,
+        coverage.symbols_attributed,
+    ) == (
+        1,
+        1,
+        1,
+    )
     assert coverage.unattributed == ()
 
 

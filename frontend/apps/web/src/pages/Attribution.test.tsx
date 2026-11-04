@@ -144,6 +144,7 @@ function attribution(overrides: Partial<Attribution> = {}): Attribution {
       segments_attributed: 12,
       symbols_total: 6,
       symbols_attributed: 5,
+      symbols_participating: 5,
       unattributed: [
         {
           security_code: "110059",
@@ -208,7 +209,7 @@ describe("AttributionPage", () => {
     expect(screen.getByTestId("attr-factor-selection").textContent).toContain("拖累 1,900.00 元");
     expect(screen.getByTestId("attr-factor-fee").textContent).toContain("费用");
     expect(screen.getByTestId("attr-capital-ratio").textContent).toContain("98.9%");
-    expect(screen.getByTestId("attr-coverage-bases").textContent).toContain("按标的 5/6");
+    expect(screen.getByTestId("attr-coverage-bases").textContent).toContain("按标的 5/5");
     expect(screen.getByTestId("attr-coverage-bases").textContent).toContain("市值与现金混合");
     expect(screen.getByTestId("attr-data-sources").textContent).toContain(
       "资产 2026-06-30 · 行情 2026-06-30 · 板块 2026-06-29",
@@ -379,6 +380,7 @@ describe("AttributionPage", () => {
           segments_attributed: 0,
           symbols_total: 0,
           symbols_attributed: 0,
+          symbols_participating: 0,
           unattributed: [],
         },
       }),

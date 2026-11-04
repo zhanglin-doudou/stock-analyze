@@ -53,6 +53,7 @@ class Coverage:
     segments_attributed: int
     symbols_total: int
     symbols_attributed: int
+    symbols_participating: int  # 本期参与候选数（participating=True 的 plan 数）
     unattributed: tuple[UnattributedEntry, ...]
 
 
@@ -106,6 +107,7 @@ def build_coverage(
         segments_total=decomposition.n_segments,
         segments_attributed=decomposition.n_attributed_segments,
         symbols_total=len(plans),
+        symbols_participating=sum(1 for plan in plans if plan.participating),
         symbols_attributed=sum(1 for plan in plans if plan.attributed),
         unattributed=tuple(entries[:UNATTRIBUTED_LIMIT]),
     )
