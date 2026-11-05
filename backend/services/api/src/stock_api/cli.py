@@ -1125,7 +1125,7 @@ async def _sync_sector_bars(*, start: date | None = None, dry_run: bool = False)
     if dry_run:
         emit("✅ 检查完成（未联网、未写库）")
     elif report.status == "skipped":
-        emit("✅ 无需回填（bar_as_of 已是最新）")
+        emit("ℹ️ 未写入新数据（原因见上方 message）")
     else:
         emit("✅ 板块日线同步完成")
     return 0
