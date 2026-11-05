@@ -1,49 +1,198 @@
-import { Suspense, useEffect, useState } from "react";
-import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
+import { Suspense, useEffect, useRef, useState } from "react";
+import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { clearSession } from "../store/session";
 import { loadPreferences, resolveTheme, updatePreferences, type Theme } from "../theme/theme";
 import { CommandPalette } from "../ui/CommandPalette";
 import { Icon } from "../ui/icons";
-import { NAV_GROUPS, SETTINGS_ITEM, pageMeta, type NavItem } from "./navigation";
+import {
+  NAV_GROUPS,
+  SETTINGS_ITEM,
+  activeGroupId,
+  isNavItemActive,
+  pageMeta,
+  type NavGroup,
+  type NavItem,
+} from "./navigation";
+import { useMediaQuery } from "./useMediaQuery";
 import "./app-shell.css";
 
-function navClass({ isActive }: { isActive: boolean }): string {
-  return isActive ? "shell-nav-link is-active" : "shell-nav-link";
+interface SubLinkProps {
+  item: NavItem;
+  active: boolean;
+  tabIndex?: number;
+  onNavigate?: () => void;
 }
 
-function RailLink({ item }: { item: NavItem }) {
+/** 二级菜单项：图标 + 中文 + 占位标签；compact 模式下由 flyout 展示。 */
+function SubLink({ item, active, tabIndex, onNavigate }: SubLinkProps) {
+  const label = item.placeholder ? `${item.label}（占位）` : item.label;
   return (
-    <NavLink
+    <Link
       to={item.to}
-      className={navClass}
-      aria-label={item.placeholder ? `${item.label}（占位）` : item.label}
-      title={item.placeholder ? `${item.label}（占位）` : item.label}
+      className={`shell-sub-link${active ? " is-active" : ""}${
+        item.placeholder ? " is-placeholder" : ""
+      }`}
+      aria-current={active ? "page" : undefined}
+      aria-label={label}
+      title={label}
+      tabIndex={tabIndex}
+      onClick={onNavigate}
     >
-      <Icon name={item.icon} />
-      <span className="sr-only">{item.label}</span>
-    </NavLink>
+      <span className="shell-sub-icon" aria-hidden="true">
+        <Icon name={item.icon} size={15} />
+      </span>
+      <span className="shell-sub-label">{item.label}</span>
+      {item.placeholder ? <span className="shell-mini-tag">占位</span> : null}
+      {active ? <span className="shell-active-dot" aria-hidden="true" /> : null}
+    </Link>
+  );
+}
+
+function GroupSection({
+  group,
+  pathname,
+  expanded,
+  open,
+  flyoutOpen,
+  onToggle,
+  onNavigate,
+}: {
+  group: NavGroup;
+  pathname: string;
+  expanded: boolean;
+  open: boolean;
+  flyoutOpen: boolean;
+  onToggle: () => void;
+  onNavigate: () => void;
+}) {
+  const active = group.items.some((item) => isNavItemActive(pathname, item.to));
+  const drawerId = `shell-drawer-${group.id}`;
+  const controls = expanded || flyoutOpen ? drawerId : undefined;
+
+  return (
+    <div
+      className={`shell-group${active ? " is-active" : ""}${open ? " is-open" : ""}`}
+      role="group"
+      aria-label={group.label}
+      data-group={group.id}
+    >
+      <button
+        type="button"
+        className="shell-group-trigger"
+        aria-label={group.label}
+        aria-expanded={expanded ? open : flyoutOpen}
+        aria-controls={controls}
+        data-tooltip={group.label}
+        onClick={onToggle}
+      >
+        <span className="shell-group-icon" aria-hidden="true">
+          <Icon name={group.icon} size={18} />
+        </span>
+        <span className="shell-group-label">{group.label}</span>
+        <span className="shell-group-chevron" aria-hidden="true">
+          <Icon name="chevron" size={13} />
+        </span>
+      </button>
+
+      {expanded ? (
+        <div
+          id={drawerId}
+          className="shell-drawer"
+          data-open={open ? "true" : "false"}
+          aria-hidden={!open}
+        >
+          <div className="shell-drawer-inner">
+            {group.items.map((item) => (
+              <SubLink
+                key={item.to}
+                item={item}
+                active={isNavItemActive(pathname, item.to)}
+                tabIndex={open ? undefined : -1}
+                onNavigate={onNavigate}
+              />
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {!expanded && flyoutOpen ? (
+        <div id={drawerId} className="shell-flyout" role="region" aria-label={`${group.label}菜单`}>
+          <div className="shell-flyout-head">
+            <span>{group.label}</span>
+            <span className="shell-flyout-hint">快速前往</span>
+          </div>
+          <div className="shell-flyout-list">
+            {group.items.map((item) => (
+              <SubLink
+                key={item.to}
+                item={item}
+                active={isNavItemActive(pathname, item.to)}
+                onNavigate={onNavigate}
+              />
+            ))}
+          </div>
+        </div>
+      ) : null}
+    </div>
   );
 }
 
 /**
- * Phase 1b · 应用外壳（A+ 混合）：左侧 76px 图标栏 + 顶部面包屑/命令入口/账户。
- * - 导航按 5 组分组（D8），占位入口保留；
- * - 页面标题与面包屑由路由推导（document.title 同步）；
- * - 内容区统一 max-width 1440 + tokens 间距，旧页面沿用现有卡片样式。
+ * 应用外壳：两级侧栏（展开/紧凑）+ 顶栏 + 内容区。
+ * - >=1280px：展开 220px，一级分组手风琴（互斥展开，默认第一组），二级项缩进；
+ * - <=1279px：紧凑 68px，只显示一级图标；hover 显示分组名，点击弹出二级 flyout；
+ * - 专注模式隐藏侧栏；主题切换在顶栏保留。
  */
 export function AppShell() {
   const location = useLocation();
   const navigate = useNavigate();
   const meta = pageMeta(location.pathname);
+  const expanded = useMediaQuery("(min-width: 1280px)");
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
   const [theme, setTheme] = useState<Theme>(() => loadPreferences().theme);
+  const [openGroupId, setOpenGroupId] = useState<string>(
+    () => activeGroupId(location.pathname) ?? NAV_GROUPS[0]?.id ?? "overview",
+  );
+  const [flyoutGroupId, setFlyoutGroupId] = useState<string | null>(null);
+  const railRef = useRef<HTMLElement>(null);
   const resolvedTheme = resolveTheme(theme);
   const nextThemeLabel = resolvedTheme === "dark" ? "切换到浅色主题" : "切换到深色主题";
 
   useEffect(() => {
     document.title = `${meta.title} · 交易复盘`;
   }, [meta.title]);
+
+  // 路由切换：打开所属一级分组，关闭紧凑模式浮层。
+  useEffect(() => {
+    const group = activeGroupId(location.pathname);
+    if (group) setOpenGroupId(group);
+    setFlyoutGroupId(null);
+  }, [location.pathname]);
+
+  // 断点切换：展开时关闭 flyout；紧凑时保持当前分组但隐藏手风琴。
+  useEffect(() => {
+    if (expanded) setFlyoutGroupId(null);
+  }, [expanded]);
+
+  // 紧凑模式：点击浮层外 / Esc 关闭。
+  useEffect(() => {
+    if (!flyoutGroupId) return;
+    function onPointerDown(event: PointerEvent): void {
+      const target = event.target as Element | null;
+      if (target?.closest(".shell-flyout, .shell-group-trigger")) return;
+      setFlyoutGroupId(null);
+    }
+    function onKeyDown(event: globalThis.KeyboardEvent): void {
+      if (event.key === "Escape") setFlyoutGroupId(null);
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [flyoutGroupId]);
 
   // Phase 4b 键盘地图：⌘K/Ctrl+K 命令面板；F 切换专注模式（输入框内不触发）。
   useEffect(() => {
@@ -69,46 +218,87 @@ export function AppShell() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [paletteOpen]);
 
+  const settingsActive = isNavItemActive(location.pathname, SETTINGS_ITEM.to);
+
   return (
     <div className="app-shell" data-focus={focusMode ? "true" : "false"}>
       <a className="skip-link" href="#main-content">
         跳到主要内容
       </a>
-      <aside className="shell-rail">
+
+      <aside
+        ref={railRef}
+        className={`shell-rail${expanded ? " is-expanded" : " is-compact"}`}
+        data-nav-mode={expanded ? "expanded" : "compact"}
+      >
         <div className="shell-brand" aria-label="交易复盘">
           <span className="shell-brand-mark" aria-hidden="true">
             静
           </span>
+          <span className="shell-brand-text">
+            <strong>交易复盘</strong>
+            <small>个人复盘工作台</small>
+          </span>
         </div>
 
         <nav className="shell-nav" aria-label="主导航">
-          {NAV_GROUPS.map((group) => (
-            <div className="shell-nav-group" role="group" aria-label={group.label} key={group.id}>
-              <span className="sr-only">{group.label}</span>
-              {group.items.map((item) => (
-                <RailLink item={item} key={item.to} />
-              ))}
-            </div>
-          ))}
+          {NAV_GROUPS.map((group) => {
+            const open = openGroupId === group.id;
+            const flyoutOpen = flyoutGroupId === group.id;
+            return (
+              <GroupSection
+                key={group.id}
+                group={group}
+                pathname={location.pathname}
+                expanded={expanded}
+                open={open}
+                flyoutOpen={flyoutOpen}
+                onToggle={() => {
+                  if (expanded) {
+                    setOpenGroupId(group.id);
+                    return;
+                  }
+                  setFlyoutGroupId((current) => (current === group.id ? null : group.id));
+                }}
+                onNavigate={() => setFlyoutGroupId(null)}
+              />
+            );
+          })}
         </nav>
 
         <div className="shell-rail-spacer" />
-        <div className="shell-nav-group shell-nav-settings" role="group" aria-label="设置">
-          <RailLink item={SETTINGS_ITEM} />
+
+        <div className="shell-rail-bottom">
+          <Link
+            to={SETTINGS_ITEM.to}
+            className={`shell-sub-link shell-settings-link${settingsActive ? " is-active" : ""}`}
+            aria-current={settingsActive ? "page" : undefined}
+            aria-label="设置"
+            title="设置"
+            data-tooltip="设置"
+          >
+            <span className="shell-sub-icon" aria-hidden="true">
+              <Icon name="settings" size={16} />
+            </span>
+            <span className="shell-sub-label">设置</span>
+          </Link>
+          <button
+            type="button"
+            className="shell-sub-link shell-logout"
+            aria-label="登出"
+            title="登出"
+            data-tooltip="登出"
+            onClick={() => {
+              clearSession();
+              navigate("/login", { replace: true });
+            }}
+          >
+            <span className="shell-sub-icon" aria-hidden="true">
+              <Icon name="logout" size={16} />
+            </span>
+            <span className="shell-sub-label">登出</span>
+          </button>
         </div>
-        <button
-          type="button"
-          className="shell-nav-link shell-logout"
-          aria-label="登出"
-          title="登出"
-          onClick={() => {
-            clearSession();
-            navigate("/login", { replace: true });
-          }}
-        >
-          <Icon name="logout" />
-          <span className="sr-only">登出</span>
-        </button>
       </aside>
 
       <div className="shell-main">

@@ -76,6 +76,11 @@
     color: #000000;
   }
 
+  /* 侧栏隐藏后内容必须回到左边缘（避免 220px 空白） */
+  html .shell-main {
+    margin-left: 0 !important;
+  }
+
   /* ── 2. 隐藏外壳导航与操作类元素（非内容）───────────────────────── */
   html .skip-link,
   html .shell-rail,

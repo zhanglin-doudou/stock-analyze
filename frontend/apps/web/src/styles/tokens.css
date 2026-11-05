@@ -99,8 +99,8 @@
   /* ── 布局 ────────────────────────────────────────── */
   --gutter: 48px;
   --content-max: 1440px;
-  --rail-width: 76px;
-  --rail-width-compact: 64px;
+  --rail-width: 220px;
+  --rail-width-compact: 68px;
   --side-col: 400px;
   --topbar-h: 64px;
   --control-h: 34px;

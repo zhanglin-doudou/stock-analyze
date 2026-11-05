@@ -1,6 +1,7 @@
 import { lazy, type ReactElement } from "react";
 import { Navigate, createBrowserRouter, type RouteObject } from "react-router-dom";
 import { AppShell } from "./layout/AppShell";
+import { OnboardingGate } from "./layout/OnboardingGate";
 import { useIsAuthenticated } from "./store/session";
 import { FeaturePlaceholder } from "./pages/ComingSoon";
 import { Login } from "./pages/Login";
@@ -57,7 +58,7 @@ export const appRoutes: RouteObject[] = [
       </RequireAuth>
     ),
     children: [
-      { index: true, element: <Navigate to="/dashboard" replace /> },
+      { index: true, element: <OnboardingGate /> },
       { path: "dashboard", element: <Dashboard /> },
       { path: "trades", element: <Trades /> },
       { path: "rounds", element: <Rounds /> },

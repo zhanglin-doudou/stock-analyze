@@ -1,6 +1,6 @@
 /*
- * Phase 1b · AppShell 样式（只消费 styles/tokens.css 变量）
- * 旧页面仍使用 styles.css；本文件只负责外壳，不覆盖页面级类名。
+ * 应用外壳：两级侧栏（展开 220 / 紧凑 68）+ 顶栏 + 内容区。
+ * 只消费 styles/tokens.css；布局断点与 useMediaQuery(1280) 保持一致。
  */
 
 .sr-only {
@@ -39,7 +39,7 @@
   color: var(--text);
 }
 
-/* ── 左侧图标栏 ─────────────────────────────── */
+/* ── 侧栏骨架 ─────────────────────────────── */
 .shell-rail {
   position: fixed;
   inset: 0 auto 0 0;
@@ -47,110 +47,431 @@
   width: var(--rail-width);
   display: flex;
   flex-direction: column;
-  align-items: center;
   background: var(--surface);
   border-right: 1px solid var(--line);
+  transition: width 0.24s var(--ease);
 }
 
 .shell-brand {
-  width: 100%;
   height: var(--topbar-h);
-  display: grid;
-  place-items: center;
-  border-bottom: 1px solid var(--line);
   flex: none;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 0 var(--s4);
+  border-bottom: 1px solid var(--line);
 }
 
 .shell-brand-mark {
-  width: 32px;
-  height: 32px;
+  width: 34px;
+  height: 34px;
+  flex: none;
   display: grid;
   place-items: center;
-  border: 1px solid var(--text);
-  border-radius: 50%;
+  border-radius: 11px;
+  background: linear-gradient(
+    135deg,
+    var(--accent) 0%,
+    color-mix(in srgb, var(--accent) 62%, var(--text)) 100%
+  );
+  color: var(--accent-contrast);
   font-family: var(--font-display);
-  font-size: 15px;
+  font-size: 16px;
   line-height: 1;
+  box-shadow: var(--shadow-1);
+}
+
+.shell-brand-text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+}
+
+.shell-brand-text strong {
+  font-size: 13px;
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.02em;
   color: var(--text);
+  white-space: nowrap;
 }
 
+.shell-brand-text small {
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  color: var(--faint);
+  white-space: nowrap;
+}
+
+/* ── 一级/二级菜单 ─────────────────────────── */
 .shell-nav {
-  width: 100%;
-  padding: var(--s3) 0;
+  flex: 1;
+  min-height: 0;
   display: flex;
   flex-direction: column;
-  align-items: center;
+  gap: 6px;
+  padding: var(--s3) 10px;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
-.shell-nav-group {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 2px;
-  padding: var(--s2) 0;
-}
-
-.shell-nav-group + .shell-nav-group {
-  border-top: 1px solid var(--line);
-  margin-top: var(--s1);
-  padding-top: var(--s3);
-}
-
-.shell-nav-link {
+.shell-group {
   position: relative;
-  width: 48px;
-  height: 44px;
+  flex: none;
+  border-radius: 12px;
+  background: var(--surface-2);
+  transition: background 0.18s var(--ease);
+}
+
+.shell-group.is-active {
+  background: var(--accent-soft);
+}
+
+.shell-group-trigger {
+  width: 100%;
+  height: 40px;
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--text-2);
+  font: inherit;
+  font-size: 13px;
+  font-weight: var(--fw-semibold);
+  letter-spacing: 0.02em;
+  cursor: pointer;
+  transition: color 0.16s var(--ease), background 0.16s var(--ease);
+}
+
+.shell-group-trigger:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--surface) 72%, transparent);
+}
+
+.shell-group.is-active .shell-group-trigger {
+  color: var(--accent);
+}
+
+.shell-group-icon {
+  width: 26px;
+  height: 26px;
+  flex: none;
   display: grid;
   place-items: center;
-  border: 0;
-  border-radius: var(--r-sm);
-  background: transparent;
-  color: var(--faint);
-  cursor: pointer;
-  transition: color var(--dur) var(--ease), background var(--dur) var(--ease);
-}
-
-.shell-nav-link:hover {
-  color: var(--text);
-  background: var(--accent-soft);
-}
-
-.shell-nav-link.is-active {
+  border-radius: 8px;
+  background: var(--surface);
   color: var(--accent);
-  background: var(--accent-soft);
+  box-shadow: var(--shadow-1);
 }
 
-.shell-nav-link.is-active::before {
-  content: "";
-  position: absolute;
-  left: -14px;
-  top: 10px;
-  bottom: 10px;
-  width: 2px;
-  border-radius: 1px;
+.shell-group-label {
+  flex: 1;
+  min-width: 0;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.shell-group-chevron {
+  display: inline-flex;
+  color: var(--faint);
+  transition: transform 0.22s var(--ease);
+}
+
+.shell-group.is-open .shell-group-chevron {
+  transform: rotate(90deg);
+}
+
+.shell-drawer {
+  display: grid;
+  grid-template-rows: 0fr;
+  opacity: 0;
+  transition: grid-template-rows 0.28s var(--ease), opacity 0.18s var(--ease);
+}
+
+.shell-drawer[data-open="true"] {
+  grid-template-rows: 1fr;
+  opacity: 1;
+}
+
+.shell-drawer-inner {
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin: 0 6px 6px 13px;
+  padding: 2px 0 4px 10px;
+  border-left: 1px solid var(--line-strong);
+}
+
+.shell-sub-link {
+  position: relative;
+  min-height: 32px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 9px;
+  color: var(--muted);
+  font-size: 12.5px;
+  line-height: 1.3;
+  text-decoration: none;
+  transition: color 0.14s var(--ease), background 0.14s var(--ease);
+}
+
+.shell-sub-link:hover {
+  color: var(--text);
+  background: var(--surface);
+}
+
+.shell-sub-link.is-active {
+  color: var(--accent);
+  background: var(--surface);
+  font-weight: var(--fw-semibold);
+  box-shadow: var(--shadow-1);
+}
+
+.shell-sub-icon {
+  flex: none;
+  display: inline-flex;
+  color: currentColor;
+  opacity: 0.72;
+}
+
+.shell-sub-link.is-active .shell-sub-icon {
+  opacity: 1;
+}
+
+.shell-sub-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.shell-active-dot {
+  margin-left: auto;
+  width: 5px;
+  height: 5px;
+  flex: none;
+  border-radius: 50%;
   background: var(--accent);
 }
 
-.shell-nav-link:focus-visible,
-.shell-logout:focus-visible,
-.shell-command:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
+.shell-mini-tag {
+  margin-left: auto;
+  flex: none;
+  padding: 0 5px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-pill);
+  color: var(--faint);
+  font-size: 8.5px;
+  letter-spacing: 0.04em;
+  line-height: 14px;
 }
 
 .shell-rail-spacer {
   flex: 1;
 }
 
-.shell-nav-settings {
+.shell-rail-bottom {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 8px 10px 14px;
   border-top: 1px solid var(--line);
-  width: 100%;
-  margin-top: 0;
-  padding-bottom: var(--s2);
 }
 
+.shell-settings-link,
 .shell-logout {
-  margin-bottom: var(--s4);
+  width: 100%;
+  min-height: 34px;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 12.5px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.shell-settings-link.is-active {
+  color: var(--accent);
+  background: var(--accent-soft);
+  box-shadow: none;
+}
+
+/* ── 紧凑模式：仅一级图标 + hover 文字 + 点击 flyout ── */
+.shell-rail.is-compact {
+  width: var(--rail-width-compact);
+}
+
+.shell-rail.is-compact .shell-brand {
+  justify-content: center;
+  padding: 0;
+}
+
+.shell-rail.is-compact .shell-brand-text {
+  display: none;
+}
+
+.shell-rail.is-compact .shell-brand-mark {
+  width: 30px;
+  height: 30px;
+  font-size: 14px;
+  border-radius: 9px;
+}
+
+.shell-rail.is-compact .shell-nav {
+  align-items: center;
+  padding: 10px 8px;
+  /* flyout 需要溢出到侧栏外，不能沿用 expanded 的滚动裁剪 */
+  overflow: visible;
+}
+
+.shell-rail.is-compact .shell-group {
+  width: 48px;
+  background: transparent;
+}
+
+.shell-rail.is-compact .shell-group.is-active {
+  background: var(--accent-soft);
+}
+
+.shell-rail.is-compact .shell-group-trigger {
+  width: 48px;
+  height: 46px;
+  justify-content: center;
+  padding: 0;
+  border-radius: 11px;
+}
+
+.shell-rail.is-compact .shell-group-label,
+.shell-rail.is-compact .shell-group-chevron,
+.shell-rail.is-compact .shell-drawer {
+  display: none;
+}
+
+/* hover/focus 文字提示 */
+.shell-rail.is-compact .shell-group-trigger::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: calc(100% + 10px);
+  top: 50%;
+  z-index: var(--z-topbar);
+  padding: 4px 9px;
+  border-radius: 7px;
+  background: var(--text);
+  color: var(--bg);
+  font-size: 11px;
+  font-weight: var(--fw-regular);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  opacity: 0;
+  transform: translateY(-50%) scale(0.96);
+  transform-origin: left center;
+  pointer-events: none;
+  transition: opacity 0.14s var(--ease), transform 0.14s var(--ease);
+}
+
+.shell-rail.is-compact .shell-group-trigger:hover::after,
+.shell-rail.is-compact .shell-group-trigger:focus-visible::after {
+  opacity: 1;
+  transform: translateY(-50%) scale(1);
+}
+
+.shell-rail.is-compact .shell-rail-bottom {
+  align-items: center;
+  padding: 8px 8px 14px;
+}
+
+.shell-rail.is-compact .shell-settings-link,
+.shell-rail.is-compact .shell-logout {
+  width: 48px;
+  min-height: 44px;
+  justify-content: center;
+  padding: 0;
+}
+
+.shell-rail.is-compact .shell-rail-bottom .shell-sub-label {
+  display: none;
+}
+
+.shell-rail.is-compact .shell-rail-bottom .shell-sub-link::after {
+  content: attr(data-tooltip);
+  position: absolute;
+  left: calc(100% + 10px);
+  top: 50%;
+  z-index: var(--z-topbar);
+  padding: 4px 9px;
+  border-radius: 7px;
+  background: var(--text);
+  color: var(--bg);
+  font-size: 11px;
+  font-weight: var(--fw-regular);
+  white-space: nowrap;
+  opacity: 0;
+  transform: translateY(-50%) scale(0.96);
+  pointer-events: none;
+  transition: opacity 0.14s var(--ease), transform 0.14s var(--ease);
+}
+
+.shell-rail.is-compact .shell-rail-bottom .shell-sub-link:hover::after,
+.shell-rail.is-compact .shell-rail-bottom .shell-sub-link:focus-visible::after {
+  opacity: 1;
+  transform: translateY(-50%) scale(1);
+}
+
+/* 浮层 */
+.shell-flyout {
+  position: absolute;
+  left: calc(100% + 10px);
+  top: -4px;
+  z-index: var(--z-topbar);
+  width: 210px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+  animation: shell-flyout-in 0.18s var(--ease);
+}
+
+.shell-flyout-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  padding: 4px 8px 8px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: var(--fw-semibold);
+}
+
+.shell-flyout-hint {
+  color: var(--faint);
+  font-size: 9.5px;
+  font-weight: var(--fw-regular);
+  letter-spacing: 0.06em;
+}
+
+.shell-flyout-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+@keyframes shell-flyout-in {
+  from {
+    opacity: 0;
+    transform: translateX(-6px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
 }
 
 /* ── 顶栏 ──────────────────────────────────── */
@@ -159,6 +480,7 @@
   min-height: 100vh;
   display: flex;
   flex-direction: column;
+  transition: margin-left 0.24s var(--ease);
 }
 
 .shell-topbar {
@@ -183,10 +505,6 @@
   letter-spacing: 0.08em;
   color: var(--muted);
   white-space: nowrap;
-}
-
-.shell-crumb-root {
-  color: var(--muted);
 }
 
 .shell-crumb-sep {
@@ -215,8 +533,13 @@
   color: var(--faint);
   font: inherit;
   font-size: var(--fs-xs);
-  cursor: not-allowed;
-  opacity: 0.75;
+  cursor: pointer;
+  transition: border-color 0.14s var(--ease), color 0.14s var(--ease);
+}
+
+.shell-command:hover {
+  border-color: var(--line-strong);
+  color: var(--text);
 }
 
 .shell-command kbd {
@@ -251,24 +574,18 @@
   color: var(--text);
 }
 
-.shell-iconbtn:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
-
 .shell-iconbtn[aria-pressed="true"] {
   border-color: var(--accent);
   color: var(--accent);
+  background: var(--accent-soft);
 }
 
-.shell-tag {
-  font-size: 9px;
-  letter-spacing: 0.06em;
-  color: var(--faint);
-  border: 1px solid var(--line);
-  border-radius: var(--r-pill);
-  padding: 0 5px;
-  line-height: 15px;
+.shell-command:focus-visible,
+.shell-iconbtn:focus-visible,
+.shell-group-trigger:focus-visible,
+.shell-sub-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
 }
 
 .shell-status {
@@ -302,7 +619,7 @@
   font-size: var(--fs-sm);
 }
 
-/* 专注模式：隐藏图标栏，内容占满宽度（仍保留顶栏与退出按钮） */
+/* 专注模式：隐藏侧栏，内容占满宽度（顶栏保留退出按钮） */
 .app-shell[data-focus="true"] .shell-rail {
   display: none;
 }
@@ -311,7 +628,7 @@
   margin-left: 0;
 }
 
-/* ── 平板（iPad 横/竖）───────────────────────── */
+/* ── 紧凑断点（与 useMediaQuery 1280 对齐） ── */
 @media (max-width: 1279px) {
   .shell-rail {
     width: var(--rail-width-compact);
@@ -330,26 +647,7 @@
     padding: var(--s6) var(--s6) var(--s7);
   }
 
-  .shell-brand {
-    height: 58px;
-  }
-
-  .shell-brand-mark {
-    width: 28px;
-    height: 28px;
-    font-size: 13px;
-  }
-
-  .shell-nav-link {
-    width: 46px;
-  }
-
-  .shell-nav-link.is-active::before {
-    left: -9px;
-  }
-
-  .shell-command-text,
-  .shell-tag {
+  .shell-command-text {
     display: none;
   }
 }
@@ -370,10 +668,21 @@
   .shell-status {
     display: none;
   }
+
+  .shell-flyout {
+    width: min(210px, calc(100vw - 92px));
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .shell-nav-link {
+  .shell-rail,
+  .shell-main,
+  .shell-drawer,
+  .shell-group-trigger,
+  .shell-group-chevron,
+  .shell-flyout,
+  .skip-link {
     transition: none;
+    animation: none;
   }
 }

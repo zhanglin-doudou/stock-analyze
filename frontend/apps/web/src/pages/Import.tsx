@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link, useSearchParams } from "react-router-dom";
 import { newIdempotencyKey, type ImportBatch, type JobAccepted, type JobStatus, type Preview, type RevokeResult } from "@sa/api-client";
 import { api } from "../client";
 import { JobProgress } from "../ui/JobProgress";
@@ -10,6 +10,8 @@ import { RevokeBatchButton } from "../ui/RevokeBatch";
 import { Uploader } from "../ui/Uploader";
 
 export function Import() {
+  const [searchParams] = useSearchParams();
+  const firstRun = searchParams.get("welcome") === "1";
   const [preview, setPreview] = useState<Preview | null>(null);
   const [job, setJob] = useState<JobAccepted | null>(null);
   const [batchId, setBatchId] = useState<string | null>(null);
@@ -109,6 +111,22 @@ export function Import() {
         <p className="detail-sub">上传 → 预览列映射 → 确认导入 → 进度 → 批次结果；重复提交带幂等键。</p>
       </header>
 
+      {firstRun && !batch ? (
+        <section className="import-welcome" role="status" aria-live="polite">
+          <span className="import-welcome-kicker">开始使用</span>
+          <h2>先上传一份账单，再开始复盘</h2>
+          <p>
+            复盘需要真实的交易流水：上传券商导出的账单后，系统会自动识别列、生成回合、净值和指标。
+            没有账单时，后面的看板都会是空的。
+          </p>
+          <ol className="import-welcome-steps">
+            <li>选择账单文件（.xls / .xlsx / .csv，≤20MB）</li>
+            <li>检查列映射与预检结果</li>
+            <li>确认导入，自动建立回合与看板</li>
+          </ol>
+        </section>
+      ) : null}
+
       <Uploader disabled={busy} onFile={(file) => void onFile(file)} />
       <ProblemView error={error} onRetry={preview ? () => void commit() : undefined} />
 
@@ -193,6 +211,9 @@ export function Import() {
                 </Link>
                 <Link className="btn btn-ghost" to="/rounds">
                   查看回合
+                </Link>
+                <Link className="btn btn-ghost" to="/dashboard">
+                  去看板
                 </Link>
               </div>
               <p className="muted">
