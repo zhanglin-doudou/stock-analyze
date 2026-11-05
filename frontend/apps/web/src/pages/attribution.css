@@ -346,7 +346,7 @@
 }
 
 .attr-severity[data-severity='blocker'] {
-  color: var(--down);
+  color: var(--danger);
 }
 
 .attr-severity[data-severity='warning'] {
@@ -381,7 +381,7 @@
 
 .attr-ratio-warn {
   margin-left: 4px;
-  color: var(--down);
+  color: var(--warning);
 }
 
 .attr-unattributed-details {
@@ -440,14 +440,14 @@
 }
 
 .attr-lookahead-toggle input {
-  accent-color: var(--warning, #b45309);
+  accent-color: var(--warning);
 }
 
 .attr-lookahead-banner {
   margin: var(--s3) 0 0;
   padding: var(--s2) var(--s3);
-  border-left: 3px solid var(--warning, #b45309);
-  background: var(--warning-soft, #fef3c7);
+  border-left: 3px solid var(--warning);
+  background: var(--warning-soft);
   color: var(--text-2);
   font-size: var(--fs-sm);
 }

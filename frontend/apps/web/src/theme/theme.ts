@@ -3,7 +3,9 @@
  *
  * 设计（见 docs/reviews/2026-10-28-frontend-refactor/README.md §9）：
  * - 主题状态写在 <html> 的 data 属性上，CSS 只消费 tokens.css 变量；
- * - 默认 light + cozy + red-up（A 股红涨绿跌），D5 深色主题 Phase 5 再做；
+ * - 主题支持 light / dark / system；system 在 TS 层用 matchMedia 解析后写入
+ *   实际的 light|dark，CSS 仍只保留两态，不新增 prefers-color-scheme 分支；
+ * - 默认 light + cozy + red-up（A 股红涨绿跌）；
  * - 本模块不依赖 React，Phase 1 的 ThemeProvider 直接复用。
  */
 
@@ -11,11 +13,12 @@ export const THEME_STORAGE_KEY = "sa.theme";
 export const DENSITY_STORAGE_KEY = "sa.density";
 export const TREND_STORAGE_KEY = "sa.trend";
 
-export const THEMES = ["light", "dark"] as const;
+export const THEMES = ["light", "dark", "system"] as const;
 export const DENSITIES = ["cozy", "compact"] as const;
 export const TREND_COLORS = ["red-up", "green-up"] as const;
 
 export type Theme = (typeof THEMES)[number];
+export type ResolvedTheme = "light" | "dark";
 export type Density = (typeof DENSITIES)[number];
 export type TrendColor = (typeof TREND_COLORS)[number];
 
@@ -68,17 +71,46 @@ export function savePreferences(
   }
 }
 
+const THEME_COLORS: Record<ResolvedTheme, string> = {
+  light: "#f6f5f0",
+  dark: "#0b0e12",
+};
+
+/** 当前系统是否偏好深色；无 matchMedia（测试环境）时按浅色处理。 */
+export function systemPrefersDark(): boolean {
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+    return false;
+  }
+  return window.matchMedia("(prefers-color-scheme: dark)").matches;
+}
+
+/** 把 light|dark|system 解析成实际主题；system 依赖系统偏好。 */
+export function resolveTheme(theme: Theme, prefersDark = systemPrefersDark()): ResolvedTheme {
+  if (theme === "system") {
+    return prefersDark ? "dark" : "light";
+  }
+  return theme;
+}
+
+function syncThemeColor(resolved: ResolvedTheme, root: HTMLElement): void {
+  const meta = root.ownerDocument.querySelector<HTMLMetaElement>('meta[name="theme-color"]');
+  meta?.setAttribute("content", THEME_COLORS[resolved]);
+}
+
 /**
  * 把偏好写到根元素，供 CSS token 选择器消费。
  * 只使用 data-* 属性，不直接改 style，避免与组件样式打架。
+ * data-theme 始终写解析后的 light|dark，保证 CSS 只有两态。
  */
 export function applyPreferences(
   preferences: Preferences,
   root: HTMLElement = document.documentElement,
 ): void {
-  root.dataset.theme = preferences.theme;
+  const resolved = resolveTheme(preferences.theme);
+  root.dataset.theme = resolved;
   root.dataset.density = preferences.density;
   root.dataset.trend = preferences.trend;
+  syncThemeColor(resolved, root);
 }
 
 /** 应用并持久化（设置页切换入口用）。 */

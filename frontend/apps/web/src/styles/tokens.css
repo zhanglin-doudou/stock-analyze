@@ -59,6 +59,11 @@
   --info: #3b5f4b;
   --info-soft: rgba(59, 95, 75, 0.1);
 
+  /* ── 兼容别名（仅承接旧 styles.css 的命名，语义与上方完全一致）── */
+  --border: var(--line);
+  --warning: var(--warn);
+  --warning-soft: var(--warn-soft);
+
   /* ── 字体 ────────────────────────────────────────── */
   --font-ui: -apple-system, "SF Pro Text", "PingFang SC", "Hiragino Sans GB",
     "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
@@ -76,6 +81,7 @@
 
   --lh-tight: 1.2;
   --lh-body: 1.55;
+  --lh-normal: var(--lh-body);
 
   --fw-regular: 400;
   --fw-medium: 500;
@@ -172,8 +178,8 @@
   --text: #d7e0ea;
   --text-2: #aab7c7;
   --muted: #8a97a8;
-  /* dark 下次级微文字也需 ≥4.5:1（bg #0b0e12） */
-  --faint: #6f7d8e;
+  /* dark 下次级微文字也需 ≥4.5:1（#738193 对 surface #10151b 实测 4.62:1） */
+  --faint: #738193;
   --line: #1f2933;
   --line-strong: #2e3a47;
 

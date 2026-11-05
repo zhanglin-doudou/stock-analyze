@@ -20,6 +20,8 @@ function renderShell(path: string) {
 afterEach(() => {
   cleanup();
   clearSession();
+  window.localStorage.clear();
+  document.documentElement.removeAttribute("data-theme");
   document.title = "";
 });
 
@@ -47,6 +49,14 @@ describe("AppShell（Phase 1b）", () => {
     expect(shell?.getAttribute("data-focus")).toBe("false");
     fireEvent.keyDown(window, { key: "f" });
     expect(shell?.getAttribute("data-focus")).toBe("true");
+  });
+
+  it("顶栏主题按钮在浅/深之间切换并持久化", () => {
+    renderShell("/metrics");
+    fireEvent.click(screen.getByRole("button", { name: "切换到深色主题" }));
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    expect(window.localStorage.getItem("sa.theme")).toBe("dark");
+    expect(screen.getByRole("button", { name: "切换到浅色主题" })).toBeTruthy();
   });
 
   it("当前路由有 aria-current，且同步 document.title", () => {

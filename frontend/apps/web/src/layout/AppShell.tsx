@@ -1,6 +1,7 @@
 import { Suspense, useEffect, useState } from "react";
 import { NavLink, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { clearSession } from "../store/session";
+import { loadPreferences, resolveTheme, updatePreferences, type Theme } from "../theme/theme";
 import { CommandPalette } from "../ui/CommandPalette";
 import { Icon } from "../ui/icons";
 import { NAV_GROUPS, SETTINGS_ITEM, pageMeta, type NavItem } from "./navigation";
@@ -36,6 +37,9 @@ export function AppShell() {
   const meta = pageMeta(location.pathname);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
+  const [theme, setTheme] = useState<Theme>(() => loadPreferences().theme);
+  const resolvedTheme = resolveTheme(theme);
+  const nextThemeLabel = resolvedTheme === "dark" ? "切换到浅色主题" : "切换到深色主题";
 
   useEffect(() => {
     document.title = `${meta.title} · 交易复盘`;
@@ -128,6 +132,17 @@ export function AppShell() {
             <Icon name="search" size={15} />
             <span className="shell-command-text">搜索或跳转</span>
             <kbd>⌘K</kbd>
+          </button>
+          <button
+            type="button"
+            className="shell-iconbtn"
+            aria-label={nextThemeLabel}
+            title={nextThemeLabel}
+            onClick={() =>
+              setTheme(updatePreferences({ theme: resolvedTheme === "dark" ? "light" : "dark" }).theme)
+            }
+          >
+            <Icon name="theme" size={16} />
           </button>
           <button
             type="button"

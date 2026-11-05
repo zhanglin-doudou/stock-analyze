@@ -19,6 +19,7 @@ export type IconName =
   | "logout"
   | "chevron"
   | "focus"
+  | "theme"
   | "dot";
 
 const PATHS: Record<IconName, ReactNode> = {
@@ -133,6 +134,12 @@ const PATHS: Record<IconName, ReactNode> = {
       <path d="M20 9V5a1 1 0 0 0-1-1h-4" />
       <path d="M4 15v4a1 1 0 0 0 1 1h4" />
       <path d="M20 15v4a1 1 0 0 1-1 1h-4" />
+    </>
+  ),
+  theme: (
+    <>
+      <circle cx="12" cy="12" r="8" />
+      <path d="M12 4a8 8 0 0 1 0 16z" fill="currentColor" stroke="none" />
     </>
   ),
   dot: <circle cx="12" cy="12" r="3" fill="currentColor" stroke="none" />,

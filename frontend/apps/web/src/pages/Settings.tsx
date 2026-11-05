@@ -21,6 +21,7 @@ const DENSITY_OPTIONS: Array<{ value: Density; label: string; hint: string }> = 
 const THEME_OPTIONS: Array<{ value: Theme; label: string; hint: string }> = [
   { value: "light", label: "浅色", hint: "纸感浅色（默认）" },
   { value: "dark", label: "深色", hint: "暗色高对比，适合夜间复盘" },
+  { value: "system", label: "跟随系统", hint: "跟随操作系统浅色/深色偏好" },
 ];
 
 const TREND_OPTIONS: Array<{ value: TrendColor; label: string; hint: string }> = [
@@ -173,7 +174,7 @@ export function Settings() {
         <div className="settings-row">
           <div>
             <div className="settings-label">主题</div>
-            <div className="settings-hint">深色主题使用同名 token 覆盖，切换后立即生效。</div>
+            <div className="settings-hint">深色主题使用同名 token 覆盖；跟随系统时由系统偏好解析，切换后立即生效。</div>
           </div>
           <div className="settings-seg" role="group" aria-label="主题">
             {THEME_OPTIONS.map((option) => (

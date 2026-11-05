@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import indexHtml from "../../index.html?raw";
 import {
   DEFAULT_PREFERENCES,
   DENSITY_STORAGE_KEY,
@@ -7,7 +8,9 @@ import {
   applyPreferences,
   initPreferences,
   loadPreferences,
+  resolveTheme,
   savePreferences,
+  systemPrefersDark,
   updatePreferences,
 } from "./theme";
 
@@ -25,11 +28,30 @@ function makeStorage(): Storage {
   };
 }
 
+function stubSystemDark(matches: boolean): void {
+  vi.stubGlobal("matchMedia", (query: string) => ({
+    matches,
+    media: query,
+    onchange: null,
+    addListener: () => undefined,
+    removeListener: () => undefined,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+    dispatchEvent: () => false,
+  }));
+}
+
 beforeEach(() => {
   window.localStorage.clear();
   document.documentElement.removeAttribute("data-theme");
   document.documentElement.removeAttribute("data-density");
   document.documentElement.removeAttribute("data-trend");
+  document.head.querySelectorAll('meta[name="theme-color"]').forEach((meta) => meta.remove());
+});
+
+afterEach(() => {
+  vi.unstubAllGlobals();
+  document.head.querySelectorAll('meta[name="theme-color"]').forEach((meta) => meta.remove());
 });
 
 describe("theme 偏好", () => {
@@ -86,5 +108,55 @@ describe("theme 偏好", () => {
     const preferences = initPreferences(storage);
     expect(preferences).toEqual(DEFAULT_PREFERENCES);
     expect(document.documentElement.dataset.trend).toBe("red-up");
+  });
+
+  it("resolveTheme 把 system 解析为实际 light|dark", () => {
+    expect(resolveTheme("light")).toBe("light");
+    expect(resolveTheme("dark")).toBe("dark");
+    expect(resolveTheme("system", true)).toBe("dark");
+    expect(resolveTheme("system", false)).toBe("light");
+  });
+
+  it("system 通过 matchMedia 读取系统深色偏好", () => {
+    stubSystemDark(true);
+    expect(systemPrefersDark()).toBe(true);
+    expect(resolveTheme("system")).toBe("dark");
+    stubSystemDark(false);
+    expect(systemPrefersDark()).toBe(false);
+    expect(resolveTheme("system")).toBe("light");
+  });
+
+  it("无 matchMedia 时 system 回退浅色，不抛错", () => {
+    vi.stubGlobal("matchMedia", undefined);
+    expect(systemPrefersDark()).toBe(false);
+    expect(resolveTheme("system")).toBe("light");
+  });
+
+  it("system 偏好持久化为 system，根属性与 theme-color 写解析后的值", () => {
+    const storage = makeStorage();
+    storage.setItem(THEME_STORAGE_KEY, "system");
+    const meta = document.createElement("meta");
+    meta.name = "theme-color";
+    meta.content = "#f6f5f0";
+    document.head.append(meta);
+    stubSystemDark(true);
+
+    const preferences = initPreferences(storage);
+    expect(preferences.theme).toBe("system");
+    expect(document.documentElement.dataset.theme).toBe("dark");
+    expect(meta.getAttribute("content")).toBe("#0b0e12");
+
+    const next = updatePreferences({ theme: "system" }, storage);
+    expect(next.theme).toBe("system");
+    expect(storage.getItem(THEME_STORAGE_KEY)).toBe("system");
+  });
+
+  it("index.html 在模块脚本前预置主题，避免首屏闪烁", () => {
+    const boot = indexHtml.indexOf("sa.theme");
+    const moduleScript = indexHtml.indexOf('type="module"');
+    expect(boot).toBeGreaterThan(-1);
+    expect(boot).toBeLessThan(moduleScript);
+    expect(indexHtml).toContain("prefers-color-scheme: dark");
+    expect(indexHtml).toContain('meta[name="theme-color"]');
   });
 });
