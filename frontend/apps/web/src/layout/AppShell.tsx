@@ -353,7 +353,7 @@ export function AppShell() {
               if (next) setFlyoutGroupId(null);
             }}
           >
-            <Icon name="chevron" size={13} />
+            <Icon name="chevron" size={12} className="icon" />
           </button>
         ) : null}
       </aside>
