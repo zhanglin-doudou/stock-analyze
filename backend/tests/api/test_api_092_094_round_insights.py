@@ -376,3 +376,54 @@ async def test_api_094_scope_missing_skips_unchanged_fingerprint(
     assert first_body["computed"] >= 1
     assert second_body["computed"] == 0
     assert second_body["skipped"] == first_body["computed"]
+
+
+async def test_api_092_unsupported_symbol_degrades_not_404(
+    client, api_prefix, user, owner_engine, settings
+):
+    """回归：数据源不支持的标的不得让整页 404，降级为 `no_bar` + null。
+
+    2026-11-05 真实故障：`GET /api/v1/rounds/insights?period=2026-09` 因把全部交易
+    标的（含 754019，live 不在支持范围 / replay 夹具无该标的）批量传给行情端口，
+    `NOT_FOUND` 冒到 API 边界 → 整页 404。修复后请求经 `/api/v1` 前缀返回 200，
+    该标的的前瞻收益显式降级，其余标的与回合照常返回。
+    """
+    for trade_date, side, amount_units in (
+        (date(2026, 6, 2), "buy", -1_000_000),
+        (date(2026, 6, 20), "sell", 1_200_000),
+    ):
+        await _seed_trade(
+            owner_engine,
+            user_id=user.user_id,
+            trade_date=trade_date,
+            side=side,
+            quantity_units=1_000_000,
+            price_units=100_000_000 if side == "buy" else 120_000_000,
+            amount_units=amount_units,
+        )
+        await _seed_trade(
+            owner_engine,
+            user_id=user.user_id,
+            trade_date=trade_date,
+            side=side,
+            quantity_units=1_000_000,
+            price_units=100_000_000 if side == "buy" else 120_000_000,
+            amount_units=amount_units,
+            security_code="754019",
+        )
+    await _rebuild_and_drain(client, api_prefix, user, settings)
+
+    listing = await _list(client, api_prefix, user.headers, "?period=2026-06")
+    assert listing.status_code == 200, listing.text
+    body = listing.json()
+    items = {item["security_code"]: item for item in body["items"]}
+    assert set(items) == {"600519", "754019"}
+    unsupported = items["754019"]
+    assert unsupported["buy_trade"]["forward"]["5"]["status"] == "no_bar"
+    assert unsupported["buy_trade"]["forward"]["5"]["b1_pct"] is None
+    assert unsupported["sell_trade"]["forward"]["20"]["b1_pct"] is None
+    # 支持标的的既有口径不受影响（仍能取到行情）
+    assert items["600519"]["buy_trade"]["forward"]["5"]["status"] != "no_bar"
+
+    detail = await _detail(client, api_prefix, user.headers, unsupported["round_id"])
+    assert detail.status_code == 200, detail.text

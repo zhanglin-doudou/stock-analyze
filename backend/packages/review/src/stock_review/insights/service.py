@@ -310,6 +310,36 @@ class _MarketData:
     bars_version: str
 
 
+async def _fetch_bars(
+    market_data: MarketDataSource,
+    symbols: Sequence[str],
+    *,
+    start: date,
+    end: date,
+) -> list[Bar]:
+    """批量取区间日线；单个标的 `NOT_FOUND` 时逐只降级，不让整页 404。
+
+    数据源对不支持/未收录的标的抛 `ApiError(NOT_FOUND)`（live 不在支持范围时带
+    `market_failure=not_supported`；replay 夹具没有该标的）。与
+    `application.valuation.load_prices` 同一降级口径：整批失败后按标的重试，取不到
+    的标的按「无行情」处理 → 该标的前瞻收益显式 `no_bar` + null，其余标的与回合照常
+    返回。非 `NOT_FOUND` 的故障（行情源不可用/坏数据）仍然上抛，不伪装成缺数据。
+    """
+    try:
+        return list(await market_data.get_daily_bars(symbols, start, end))
+    except ApiError as exc:
+        if exc.code != ErrorCode.NOT_FOUND:
+            raise
+    collected: list[Bar] = []
+    for symbol in symbols:
+        try:
+            collected.extend(await market_data.get_daily_bars([symbol], start, end))
+        except ApiError as exc:
+            if exc.code != ErrorCode.NOT_FOUND:
+                raise
+    return collected
+
+
 async def _load_market(
     market_data: MarketDataSource,
     symbols: Iterable[str],
@@ -320,7 +350,7 @@ async def _load_market(
     benchmark_id = DEFAULT_BENCHMARK
     bench_symbol = benchmark_fetch_symbol(benchmark_id, market_data)
     wanted = sorted({symbol for symbol in symbols if symbol} | {bench_symbol})
-    bars = list(await market_data.get_daily_bars(wanted, start, end))
+    bars = await _fetch_bars(market_data, wanted, start=start, end=end)
     grouped: dict[str, list[tuple[date, int]]] = defaultdict(list)
     for bar in bars:
         grouped[bar.symbol].append((bar.trade_date, bar.close_units))
