@@ -10,7 +10,7 @@
 > 数据基线：本地 `1234@dev.com`，2026 年（截至 2026-11-04）；现有 FIFO 回合 99 笔已平仓、18 指标、资产表、行情缓存可用。
 > **本文是设计，不是实现**；所有阈值/公式为 v1.0 定稿，变更须 bump `definition_version`。
 >
-> **交付状态（2026-11-05）**：P0/P1 已落地并通过门禁。提交链：`5de8380`（契约/迁移/模型）→ `c2610a4`（core/review）→ `8a958d8`（API + OpenAPI 快照）→ `8317b4b` / `a9729e5` / `fdb01dd`（前端与归因容差/默认 lookahead）。
+> **交付状态（2026-11-05）**：P0/P1 已落地并通过门禁。提交链：`5de8380`（契约/迁移/模型）→ `c2610a4`（core/review）→ `8a958d8`（API + OpenAPI 快照）→ `8317b4b` / `a9729e5` / `fdb01dd`（前端与归因容差/默认 lookahead）。补验收链：`3bfb93d` / `3a17111`（F7）→ `da650e9`（S3）→ `1694095`（F8）。
 > **实现口径**：API-092 `items[]` 以本文件 §6.3 **当前正文**为准（`buy_trade` / `sell_trade` 内含 `reason` + `forward`），与 v1.0 初稿示意结构的差异见 **附录 C**；`quality` 在列表为 `list[str]`，详情逐笔见 §6.4。
 
 ---
@@ -783,8 +783,8 @@ PageHeader：期间（年/月/自定义，默认年）+ 数据截至 + “手动
 | AC-F4 | 不越 `data_as_of` | `data_as_of=max(market.daily_bar.trade_date)`；末日 > data_as_of → pending；不读未来 bar；补 as_of 回退测试 |
 | AC-F5 | 公司行动 fail-closed | 窗口内任何 `dividend/bonus/rights/other+关键词` → `status=corporate_action`、收益 null、不排名；fixture 覆盖 `category=other, summary="10送10"`；无已知 action 的单日 >25% → `price_jump_review` 不排名 |
 | AC-F6 | 停牌/无日历/退市 | 停牌按最近收盘+stale≤5；>5 → null；缺基准日历 → `no_calendar` 且不排名；新股/退市 null |
-| AC-F7 | B3 与 BHAR 对账 | 同一事件集/基准下，B3 与 `selection.bhar_20` 共用函数；均值对账（≤1e-8）；不得两套公式 |
-| AC-F8 | 刷新幂等/失效 | 同 `Idempotency-Key` 两次调用行数/值不变；trade_version/bars_fingerprint 变化触发重算；`scope=missing` 不重算已 ok；GET 不写 |
+| AC-F7 | B3 与 BHAR 对账 | 同一事件集/基准下，B3 与 `selection.bhar_20` 共用函数；均值对账（≤1e-8）；不得两套公式。**结论：通过（2026-11-05，`3bfb93d`/`3a17111`）**——唯一实现为 `portfolio_index.benchmark_adjusted_excess_units`，`test_b3_equals_bhar20_per_event_and_mean` 逐笔差 0、均值差 0 |
+| AC-F8 | 刷新幂等/失效 | 同 `Idempotency-Key` 两次调用行数/值不变；trade_version/bars_fingerprint 变化触发重算；`scope=missing` 不重算已 ok；GET 不写。**结论：通过（2026-11-05，`1694095`）**——指纹纳入区间内 `daily_bar` 的 `(max(trade_date), count, 内容摘要)` 等价版本量；`test_insights_fingerprint.py` 证明修订/新增使指纹变化，`test_api_094_scope_missing_skips_unchanged_fingerprint` 证明 bar 不变时 `scope=missing` 全跳过 |
 | AC-F9 | 批量/性能 | 5k/20k 两档 fixture：批量 IN 读 + ON CONFLICT 写；5k 单用户 p95 目标 ≤3s（实测校准，不达标则 202）；页面读取 p95 ≤1s |
 | AC-F10 | 缺失不伪造 | 无 bar/新股/退市/公司行动 → null+status；输出 0 或“0%”即 FAIL |
 | AC-F11 | 证券范围/账户/T+1 | 货基/CASH/债券/空代码/data_error 排除；多账户合并假设披露；`is_same_day`/`is_full_exit`/`is_new_stock` 正确；fixture |
@@ -796,7 +796,7 @@ PageHeader：期间（年/月/自定义，默认年）+ 数据截至 + “手动
 |---|---|---|
 | AC-S1 | 真实交易日定义 | 默认 `2≤holding_trading_days≤20` 为波段；`≤1` 超短、`>20` 趋势；用真实日历，不用 weekday；fixture `fx_swing_td` |
 | AC-S2 | 统计 | 数量/占比/胜率/收益/平均 TD 与手算一致；closed 按 close_date 归期；分母≤0/null 显式；`data_error` 排除 |
-| AC-S3 | fill/回合不混 | fill 级波段配对单独统计；测试断言两者不相加；`bucket_basis` 透出 |
+| AC-S3 | fill/回合不混 | fill 级波段配对单独统计；测试断言两者不相加；`bucket_basis` 透出。**结论：通过（2026-11-05，`da650e9`）**——页面级 `bucket_basis=round`、`summary.fill_swing`（`bucket_basis=fill`）、fill 明细 `holding_trading_days/bucket`；`test_api_092_ac_s3_fill_pairs_not_added_to_rounds` 断言 1 回合 vs 2 fill 不相加 |
 | AC-S4 | 对比/空样本 | 波段 vs 趋势并列；空样本 null 不 0；open 回合单列 |
 
 ### 8.4 抄底/卖飞（AC-D）
