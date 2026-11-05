@@ -261,9 +261,10 @@ export function RoundInsights() {
       render: (row) =>
         row.flags?.length ? (
           <span className="chips">
-            {row.flags.map((item) => (
+            {row.flags.map((item, index) => (
               <span key={item} className="chip">
                 {flagLabel(item)}
+                {index + 1 !== row.flags?.length && <span>, </span>}
               </span>
             ))}
           </span>

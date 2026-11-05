@@ -76,7 +76,7 @@ function makeFillPage(): RoundFillPage {
   };
 }
 
-function makeInsight(): RoundInsightDetail {
+function makeInsight(overrides: Partial<RoundInsightDetail> = {}): RoundInsightDetail {
   const forward = {
     horizon: 20,
     status: "ok" as const,
@@ -147,6 +147,7 @@ function makeInsight(): RoundInsightDetail {
       definition_version: "v1",
     },
     disclaimer: "以下为事后统计，仅用于个人复盘，不构成投资建议；不评价个人能力，不预测收益。",
+    ...overrides,
   };
 }
 
@@ -207,11 +208,39 @@ describe("RoundDetail 回合详情页", () => {
     expect(screen.getByText(/不随持有期变化/)).toBeTruthy();
     expect(screen.getByText("事后标注")).toBeTruthy();
     expect(screen.getByText("业绩超预期")).toBeTruthy();
-    // 卖后未到 20 日：pending → 只显示 —（不补 0%），并带原因 tooltip。
-    expect(screen.getAllByText("—").length).toBeGreaterThan(0);
+    // 卖后未到 20 日：pending → 内联「待满 20 个交易日」（不补 0%），tooltip 保留完整说明。
+    expect(screen.getAllByText("—（待满 20 个交易日）").length).toBeGreaterThan(0);
     expect(screen.getByText("卖飞")).toBeTruthy();
     expect(screen.getByText("买入后相对基准（20 日）")).toBeTruthy();
     expect(screen.getAllByText("-1.10%").length).toBeGreaterThan(0);
+  });
+
+  it("空值单元格内联后端原因：公司行动 / 行情缺失 / 待满交易日", async () => {
+    const base = makeInsight();
+    const buy = base.buy_trade!;
+    const ok10 = buy.forward!["10"]!;
+    const ok20 = buy.forward!["20"]!;
+    getInsight.mockResolvedValue({
+      ...base,
+      buy_trade: {
+        ...buy,
+        forward: {
+          "5": { ...ok20, status: "no_bar", b1_pct: null, b2_pct: null, b3_pct: null },
+          "10": ok10,
+          "20": { ...ok20, status: "corporate_action", b1_pct: null, b2_pct: null, b3_pct: null },
+        },
+      },
+    });
+    renderDetail();
+
+    expect(await screen.findByText("操作理由")).toBeTruthy();
+    // 每档 3 行（事件后走势/成交后收益/相对基准）都带原因，不再是裸「—」。
+    expect(screen.getAllByText("—（窗口含分红等公司行动）")).toHaveLength(3);
+    expect(screen.getAllByText("—（行情缺失）").length).toBeGreaterThanOrEqual(3);
+    expect(screen.getAllByText("—（待满 20 个交易日）")).toHaveLength(3);
+    expect(screen.queryByText("—")).toBeNull();
+    // 内联文案之外保留 tooltip 完整说明（三行各自带同一 status 的 title）。
+    expect(screen.getAllByTitle("窗口内含公司行动（未复权）")).toHaveLength(3);
   });
 
   it("洞察接口失败时回合详情/配对明细仍可用", async () => {

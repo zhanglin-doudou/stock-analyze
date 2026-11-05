@@ -95,6 +95,23 @@ function statusLabel(status: string): string {
   return STATUS_LABELS[status] ?? status;
 }
 
+/**
+ * 空值原因文案（设计 §7.2）：把后端 status 内联到单元格，避免只显示裸 `—` 让用户
+ * 误以为数据缺失。只做文案映射，不含任何数值计算；pending 的交易日数取自该档 horizon。
+ */
+const EMPTY_REASONS: Record<string, string> = {
+  corporate_action: "窗口含分红等公司行动",
+  no_bar: "行情缺失",
+  no_calendar: "基准数据缺失",
+  stale_price: "行情停更（超 5 个交易日）",
+  divisor_missing: "基准数据不足",
+};
+
+function emptyCellReason(status: string, horizon: string): string {
+  if (status === "pending") return `待满 ${horizon} 个交易日`;
+  return EMPTY_REASONS[status] ?? "";
+}
+
 interface ForwardCell {
   value: string | null;
   status: string;
@@ -136,8 +153,9 @@ function forwardTable(side: TradeSideInsightOut | null | undefined, caption: str
           render: (row: { cells: Record<string, ForwardCell> }) => {
             const cell = row.cells[horizon];
             if (cell.value !== null) return cell.value;
-            // 缺失一律 `—` + 原因（不显示 0%），原因来自后端 status。
-            return <span title={statusLabel(cell.status)}>—</span>;
+            // 缺失一律 `—（原因）`（不显示 0%），原因来自后端 status；tooltip 保留完整说明。
+            const reason = emptyCellReason(cell.status, horizon);
+            return <span title={statusLabel(cell.status)}>{reason ? `—（${reason}）` : "—"}</span>;
           },
         })),
       ]}
