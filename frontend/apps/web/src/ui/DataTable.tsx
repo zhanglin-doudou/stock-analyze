@@ -72,7 +72,12 @@ export function DataTable<T>({
 
   return (
     <div className="dt-wrap">
-      <table className="dt" aria-rowcount={rows.length} aria-colcount={columns.length}>
+      <table
+        className="dt"
+        aria-rowcount={rows.length}
+        aria-colcount={columns.length}
+        aria-busy={loading || undefined}
+      >
         <caption className="dt-caption">{caption}</caption>
         <thead>
           <tr>

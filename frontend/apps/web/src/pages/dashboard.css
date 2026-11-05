@@ -452,7 +452,7 @@
   gap: 6px;
 }
 
-/* ── 表格 ──────────────────────────────────── */
+/* ── 表格（消费 tokens 的 --table-* 组，与 DataTable 同观感）──── */
 .dash-table {
   width: 100%;
   border-collapse: collapse;
@@ -460,14 +460,20 @@
 }
 
 .dash-table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  height: var(--table-head-h);
   padding: 0 0 var(--s2);
-  border-bottom: 1px solid var(--line-strong);
+  background: var(--table-head-bg);
+  border-bottom: 1px solid var(--table-line-strong);
   font-size: var(--fs-micro);
   font-weight: var(--fw-regular);
   letter-spacing: 0.1em;
-  color: var(--muted);
+  color: var(--table-head-fg);
   text-align: right;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .dash-table th:first-child,
@@ -476,15 +482,21 @@
 }
 
 .dash-table td {
-  padding: 11px 0;
-  border-bottom: 1px solid var(--line);
+  height: var(--table-row-h);
+  padding: var(--s2) 0;
+  border-bottom: 1px solid var(--table-line);
   font-size: 13px;
   text-align: right;
   color: var(--text-2);
 }
 
-.dash-table tbody tr:hover {
-  background: var(--accent-soft);
+/* 斑马纹先于 hover 声明：同等特异性下 hover 覆盖条纹 */
+.dash-table tbody tr:nth-child(even) td {
+  background: var(--table-stripe-bg);
+}
+
+.dash-table tbody tr:hover td {
+  background: var(--table-hover-bg);
 }
 
 .dash-holding-name {

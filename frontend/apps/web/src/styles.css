@@ -121,22 +121,39 @@ input[type="checkbox"] {
   border-color: var(--accent);
 }
 
-/* table */
+/* table（消费 tokens 的 --table-* 组，与 DataTable 观感一致） */
 .table {
   width: 100%;
   border-collapse: collapse;
   background: var(--surface);
   margin: 8px 0;
+  font-variant-numeric: tabular-nums;
 }
 .table th,
 .table td {
-  border: 1px solid var(--border);
-  padding: 6px 8px;
+  border: 1px solid var(--table-line);
+  padding: var(--s2) var(--table-cell-px);
   text-align: left;
   vertical-align: top;
 }
 .table th {
-  background: var(--surface-2);
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  height: var(--table-head-h);
+  background: var(--table-head-bg);
+  color: var(--table-head-fg);
+  font-size: var(--fs-micro);
+  font-weight: var(--fw-regular);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.table tbody tr:nth-child(even) td {
+  background: var(--table-stripe-bg);
+}
+.table tbody tr:hover td {
+  background: var(--table-hover-bg);
 }
 .row-actions {
   display: flex;

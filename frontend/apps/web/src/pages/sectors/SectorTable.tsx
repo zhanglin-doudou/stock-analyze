@@ -1,10 +1,12 @@
 import { type ReactElement } from "react";
 import type { SectorRow, SectorTaxonomy } from "@sa/api-client";
 import { displayValue, signTone } from "../../ui/format";
+import "../../ui/data-table.css";
 
-function toneClass(value: string | null | undefined): string {
+function toneClass(value: string | null | undefined): string | undefined {
   const sign = signTone(value);
-  return sign === "none" || sign === "flat" ? "num" : `num is-${sign}`;
+  if (sign === "none" || sign === "flat") return undefined;
+  return `dt-tone-${sign}`;
 }
 
 function directionText(direction: string | null | undefined): string {
@@ -26,11 +28,11 @@ interface SectorTableProps {
  */
 export function SectorTable({ rows, taxonomy }: SectorTableProps): ReactElement {
   if (rows.length === 0) {
-    return <p className="dash-muted">暂无板块数据。</p>;
+    return <p className="muted">暂无板块数据。</p>;
   }
   const isConcept = taxonomy === "concept";
   return (
-    <table className="dash-table sector-table">
+    <table className="dt-static sector-table">
       <thead>
         <tr>
           <th>板块</th>
@@ -50,23 +52,23 @@ export function SectorTable({ rows, taxonomy }: SectorTableProps): ReactElement 
               data-level={row.level}
             >
               <td>
-                <span className="dash-holding-name">
+                <span className="dt-label">
                   {row.sector_name}
-                  <span className="dash-holding-code">{row.sector_code}</span>
+                  <span className="dt-label-code">{row.sector_code}</span>
                 </span>
               </td>
-              <td className="num">{displayValue(row.market_value_display ?? row.market_value)}</td>
+              <td>{displayValue(row.market_value_display ?? row.market_value)}</td>
               {isConcept ? (
-                <td className="num">{displayValue(row.exposure_pct ?? row.exposure)}</td>
+                <td>{displayValue(row.exposure_pct ?? row.exposure)}</td>
               ) : (
-                <td className="num">{displayValue(row.weight_pct ?? row.weight)}</td>
+                <td>{displayValue(row.weight_pct ?? row.weight)}</td>
               )}
               {isConcept ? (
                 <td>
-                  {row.overlap ? <span className="dash-badge is-degraded">多归属</span> : <span className="dash-muted">—</span>}
+                  {row.overlap ? <span className="badge badge-degraded">多归属</span> : <span className="muted">—</span>}
                 </td>
               ) : (
-                <td className="num">{displayValue(row.benchmark_weight_pct ?? row.benchmark_weight)}</td>
+                <td>{displayValue(row.benchmark_weight_pct ?? row.benchmark_weight)}</td>
               )}
               {isConcept ? null : (
                 <td className={toneClass(row.active_weight_pct ?? row.active_weight)}>
@@ -74,7 +76,7 @@ export function SectorTable({ rows, taxonomy }: SectorTableProps): ReactElement 
                   {displayValue(row.active_weight_pct ?? row.active_weight)}
                 </td>
               )}
-              <td className="num">{row.holding_count}</td>
+              <td>{row.holding_count}</td>
             </tr>
           );
         })}

@@ -121,6 +121,19 @@
   --panel-pad: 0px;
   --panel-gap: 24px;
 
+  /* ── 表格观感（DataTable 与旧手写表共用；颜色全部引用语义 token）──
+   * 斑马纹用 text 的 4% 叠层：浅色是深墨叠层、暗色是浅雾叠层，两套主题都可见。
+   * 因此无需在 [data-theme="dark"] 里再写一份表头/斑马纹规则。 */
+  --table-head-h: 36px;
+  --table-head-bg: var(--surface-2);
+  --table-head-fg: var(--muted);
+  --table-row-h: var(--row-h);
+  --table-cell-px: var(--s3);
+  --table-line: var(--line);
+  --table-line-strong: var(--line-strong);
+  --table-stripe-bg: color-mix(in srgb, var(--text) 4%, transparent);
+  --table-hover-bg: var(--accent-soft);
+
   /* ── 动效 ────────────────────────────────────────── */
   --ease: cubic-bezier(0.2, 0.6, 0.2, 1);
   --dur: 160ms;

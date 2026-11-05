@@ -121,7 +121,7 @@
   line-height: var(--lh-body);
 }
 
-/* 回合口径四列统计表 */
+/* 回合口径四列统计表（标签/值矩阵，无列头；消费 --table-* 行高与分隔线） */
 .detail-stats {
   width: 100%;
   border-collapse: collapse;
@@ -130,15 +130,16 @@
 
 .detail-stats th,
 .detail-stats td {
-  padding: 10px var(--s3);
-  border-bottom: 1px solid var(--line);
+  height: var(--table-row-h);
+  padding: var(--s2) var(--table-cell-px);
+  border-bottom: 1px solid var(--table-line);
   text-align: left;
   font-size: 13px;
 }
 
 .detail-stats th {
   width: 20%;
-  color: var(--muted);
+  color: var(--table-head-fg);
   font-weight: var(--fw-regular);
   font-size: var(--fs-xs);
 }
