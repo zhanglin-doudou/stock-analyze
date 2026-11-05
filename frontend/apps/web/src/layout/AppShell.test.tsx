@@ -47,6 +47,7 @@ function renderShell(path: string) {
 
 beforeEach(() => {
   mockMedia(true);
+  window.localStorage.clear();
 });
 
 afterEach(() => {
@@ -61,6 +62,8 @@ afterEach(() => {
 describe("AppShell 两级菜单", () => {
   it("大屏渲染 3 个一级分组，并默认展开当前路由分组", () => {
     renderShell("/metrics");
+    // 底部设置区靠 margin-top:auto 推到底部，不再依赖空 flex 占位节点
+    expect(document.querySelector(".shell-rail-spacer")).toBeNull();
     expect(screen.getByRole("navigation", { name: "主导航" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "跳到主要内容" })).toBeTruthy();
     for (const group of ["概览", "分析", "数据"]) {
@@ -84,6 +87,23 @@ describe("AppShell 两级菜单", () => {
     fireEvent.click(screen.getByRole("button", { name: "概览" }));
     expect(screen.getByRole("button", { name: "概览" }).getAttribute("aria-expanded")).toBe("true");
     expect(screen.queryByRole("link", { name: "资产" })).toBeNull();
+  });
+
+  it("大屏可通过边界中点按钮收起为一级图标，再展开", () => {
+    const { container } = renderShell("/metrics");
+    const rail = container.querySelector(".shell-rail");
+
+    fireEvent.click(screen.getByRole("button", { name: "收起菜单" }));
+    expect(screen.getByRole("button", { name: "展开菜单" })).toBeTruthy();
+    expect(rail?.className).toContain("is-compact");
+    expect(screen.queryByRole("link", { name: "指标" })).toBeNull();
+    expect(window.localStorage.getItem("sa.nav.collapsed")).toBe("1");
+
+    fireEvent.click(screen.getByRole("button", { name: "展开菜单" }));
+    expect(screen.getByRole("button", { name: "收起菜单" })).toBeTruthy();
+    expect(rail?.className).toContain("is-expanded");
+    expect(screen.getByRole("link", { name: "指标" }).getAttribute("aria-current")).toBe("page");
+    expect(window.localStorage.getItem("sa.nav.collapsed")).toBe("0");
   });
 
   it("中屏只显示图标：hover 是 CSS，点击一级图标弹出二级 flyout", () => {

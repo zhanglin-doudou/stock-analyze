@@ -137,6 +137,24 @@ function GroupSection({
   );
 }
 
+const NAV_COLLAPSED_KEY = "sa.nav.collapsed";
+
+function readRailCollapsed(): boolean {
+  try {
+    return window.localStorage.getItem(NAV_COLLAPSED_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function persistRailCollapsed(collapsed: boolean): void {
+  try {
+    window.localStorage.setItem(NAV_COLLAPSED_KEY, collapsed ? "1" : "0");
+  } catch {
+    // 隐私模式忽略即可，不影响当前会话
+  }
+}
+
 /**
  * 应用外壳：两级侧栏（展开/紧凑）+ 顶栏 + 内容区。
  * - >=1280px：展开 220px，一级分组手风琴（互斥展开，默认第一组），二级项缩进；
@@ -147,7 +165,9 @@ export function AppShell() {
   const location = useLocation();
   const navigate = useNavigate();
   const meta = pageMeta(location.pathname);
-  const expanded = useMediaQuery("(min-width: 1280px)");
+  const wide = useMediaQuery("(min-width: 1280px)");
+  const [railCollapsed, setRailCollapsed] = useState<boolean>(() => readRailCollapsed());
+  const expanded = wide && !railCollapsed;
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [focusMode, setFocusMode] = useState(false);
   const [theme, setTheme] = useState<Theme>(() => loadPreferences().theme);
@@ -156,6 +176,7 @@ export function AppShell() {
   );
   const [flyoutGroupId, setFlyoutGroupId] = useState<string | null>(null);
   const railRef = useRef<HTMLElement>(null);
+  const navRef = useRef<HTMLElement>(null);
   const resolvedTheme = resolveTheme(theme);
   const nextThemeLabel = resolvedTheme === "dark" ? "切换到浅色主题" : "切换到深色主题";
 
@@ -174,6 +195,22 @@ export function AppShell() {
   useEffect(() => {
     if (expanded) setFlyoutGroupId(null);
   }, [expanded]);
+
+  // 窗口高度不足时导航区可滚动；路由/展开分组变化后把当前项滚到可视区，
+  // 避免一级菜单展开后当前页被挤到折叠区之外。
+  useEffect(() => {
+    const nav = navRef.current;
+    if (!nav) return;
+    const active = nav.querySelector<HTMLElement>(".shell-sub-link.is-active");
+    if (!active) return;
+    const navRect = nav.getBoundingClientRect();
+    const linkRect = active.getBoundingClientRect();
+    if (linkRect.top < navRect.top) {
+      nav.scrollTop -= navRect.top - linkRect.top;
+    } else if (linkRect.bottom > navRect.bottom) {
+      nav.scrollTop += linkRect.bottom - navRect.bottom;
+    }
+  }, [location.pathname, openGroupId, expanded]);
 
   // 紧凑模式：点击浮层外 / Esc 关闭。
   useEffect(() => {
@@ -221,7 +258,11 @@ export function AppShell() {
   const settingsActive = isNavItemActive(location.pathname, SETTINGS_ITEM.to);
 
   return (
-    <div className="app-shell" data-focus={focusMode ? "true" : "false"}>
+    <div
+      className="app-shell"
+      data-focus={focusMode ? "true" : "false"}
+      data-nav-collapsed={expanded ? "false" : "true"}
+    >
       <a className="skip-link" href="#main-content">
         跳到主要内容
       </a>
@@ -241,7 +282,7 @@ export function AppShell() {
           </span>
         </div>
 
-        <nav className="shell-nav" aria-label="主导航">
+        <nav ref={navRef} className="shell-nav" aria-label="主导航">
           {NAV_GROUPS.map((group) => {
             const open = openGroupId === group.id;
             const flyoutOpen = flyoutGroupId === group.id;
@@ -265,8 +306,6 @@ export function AppShell() {
             );
           })}
         </nav>
-
-        <div className="shell-rail-spacer" />
 
         <div className="shell-rail-bottom">
           <Link
@@ -299,6 +338,24 @@ export function AppShell() {
             <span className="shell-sub-label">登出</span>
           </button>
         </div>
+
+        {wide ? (
+          <button
+            type="button"
+            className="shell-rail-toggle"
+            aria-label={expanded ? "收起菜单" : "展开菜单"}
+            aria-expanded={expanded}
+            title={expanded ? "收起菜单，专注右侧内容" : "展开菜单"}
+            onClick={() => {
+              const next = !railCollapsed;
+              setRailCollapsed(next);
+              persistRailCollapsed(next);
+              if (next) setFlyoutGroupId(null);
+            }}
+          >
+            <Icon name="chevron" size={13} />
+          </button>
+        ) : null}
       </aside>
 
       <div className="shell-main">
