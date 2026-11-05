@@ -10,6 +10,7 @@ import { displayValue } from "../ui/format";
 import { buildStateLabel, dataStatusLabel, isDataStatus } from "../ui/status";
 import { SectorTable } from "./sectors/SectorTable";
 import "./sectors.css";
+import './dashboard.css';
 
 function asTaxonomy(raw: string | null): SectorTaxonomy {
   return raw === "concept" ? "concept" : "industry";
