@@ -20,7 +20,10 @@ from stock_contracts.constants import SCALE_RATIO
 from stock_contracts.enums import ForwardReturnStatus
 
 from stock_core.insights import calendar as cal
-from stock_core.metrics.portfolio_index import compound_index
+from stock_core.metrics.portfolio_index import (
+    benchmark_adjusted_excess_units,
+    compound_index,
+)
 from stock_core.stats.numeric import div_round
 
 _ONE = 10**SCALE_RATIO
@@ -155,14 +158,16 @@ def compute_forward(
     pnet = price_net(trade)
     b0 = _execution_gap(trade.side, trade.price_units, c0)
     b0n = _execution_gap(trade.side, pnet, c0) if pnet else None
-    b1 = div_round(cn - c0, c0, scale=SCALE_RATIO)
+    # 个股腿满值 CN/C0，B1 与 B3 都由它派生，和 selection.bhar_* 共用同一口径。
+    stock_leg = div_round(cn, c0, scale=SCALE_RATIO)
+    b1 = stock_leg - _ONE
     b2 = div_round(cn - pnet, pnet, scale=SCALE_RATIO) if pnet else None
     status = ForwardReturnStatus.OK
     b3: int | None = None
     if bench_ret is None:
         status = ForwardReturnStatus.DIVISOR_MISSING
     else:
-        b3 = b1 - bench_ret
+        b3 = benchmark_adjusted_excess_units(stock_leg, bench_ret)
 
     return build(
         status,

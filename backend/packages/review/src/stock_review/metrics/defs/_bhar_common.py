@@ -18,7 +18,10 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from stock_contracts.constants import SCALE_RATIO
-from stock_core.metrics.portfolio_index import compound_index
+from stock_core.metrics.portfolio_index import (
+    benchmark_adjusted_excess_units,
+    compound_index,
+)
 from stock_core.stats.numeric import div_round
 
 from stock_review.metrics.defs._common import (
@@ -32,8 +35,6 @@ if TYPE_CHECKING:
     import datetime as _dt
 
     from stock_review.metrics.base import MetricContext
-
-_ONE: int = 10**SCALE_RATIO
 
 
 @dataclass(frozen=True, slots=True)
@@ -121,7 +122,7 @@ def compute_bhar_events(ctx: MetricContext, *, horizon: int) -> BharEvents | Non
                 security_code=trade.security_code,
                 event_date=trade.trade_date,
                 bench_index=j0,
-                bhar_units=stock_leg - (_ONE + bench_cum),
+                bhar_units=benchmark_adjusted_excess_units(stock_leg, bench_cum),
                 bench_cum_units=bench_cum,
             )
         )
