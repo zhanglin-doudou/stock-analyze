@@ -200,7 +200,11 @@ describe("RoundDetail 回合详情页", () => {
     renderDetail();
 
     expect(await screen.findByText("操作理由")).toBeTruthy();
-    expect(screen.getAllByText("执行价差（毛，相对当日收盘）").length).toBeGreaterThan(0);
+    // 执行价差是笔次固有属性：只展示一次（买/卖各一），不再随 5/10/20 维度重复。
+    expect(screen.getByText("执行价差（相对当日收盘）")).toBeTruthy();
+    expect(screen.queryByText("执行价差（毛，相对当日收盘）")).toBeNull();
+    expect(screen.getAllByText("0.50%")).toHaveLength(2);
+    expect(screen.getByText(/不随持有期变化/)).toBeTruthy();
     expect(screen.getByText("事后标注")).toBeTruthy();
     expect(screen.getByText("业绩超预期")).toBeTruthy();
     // 卖后未到 20 日：pending → 只显示 —（不补 0%），并带原因 tooltip。

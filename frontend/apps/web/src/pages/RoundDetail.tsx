@@ -69,9 +69,13 @@ const STATUS_LABELS: Record<string, string> = {
   divisor_missing: "缺基准序列（不排名）",
 };
 
-/** 术语映射（设计 §7.1）：页面不露 B0/B1/B2/B3 裸码。 */
+/**
+ * 术语映射（设计 §7.1）：页面不露 B0/B1/B2/B3 裸码。
+ *
+ * 这里只保留随 horizon 变化的 B1/B2/B3；B0 执行价差只依赖「成交价 + 成交当日收盘」，
+ * 与持有期无关，放到笔次固有属性（见 `executionGap`），不在 5/10/20 列里重复。
+ */
 const FORWARD_ROWS = [
-  { key: "b0_pct", label: "执行价差（毛，相对当日收盘）" },
   { key: "b1_pct", label: "事件后走势（收盘到收盘）" },
   { key: "b2_pct", label: "成交后收益（按含费净价）" },
   { key: "b3_pct", label: "相对基准超额（20 日排序口径）" },
@@ -104,6 +108,19 @@ function forwardCell(
   const forward: ForwardReturnOut | undefined = side?.forward?.[horizon];
   if (!forward) return { value: null, status: "no_bar" };
   return { value: forward[key as keyof ForwardReturnOut] as string | null, status: forward.status };
+}
+
+/**
+ * 执行价差（B0 毛）是笔次固有属性：只由「成交价 + 成交当日收盘」决定，三个 horizon
+ * 下是同一个数；仅在窗口未到/停牌等降级时才会缺值，故取首个有值的 horizon，只渲染
+ * 后端字符串，前端不做任何计算或取整。
+ */
+function executionGap(side: TradeSideInsightOut | null | undefined): string | null {
+  for (const horizon of HORIZONS) {
+    const value = side?.forward?.[horizon]?.b0_pct;
+    if (value != null) return value;
+  }
+  return null;
 }
 
 function forwardTable(side: TradeSideInsightOut | null | undefined, caption: string): ReactElement {
@@ -321,6 +338,35 @@ export function RoundDetail() {
                 ) : (
                   <p className="muted">持仓中回合尚无卖出流水；卖出后可标注卖出理由。</p>
                 )}
+              </div>
+
+              <h2 className="detail-section-title">执行价差（相对当日收盘）</h2>
+              <div className="detail-card">
+                <table className="detail-stats">
+                  <tbody>
+                    {insight.buy_trade ? (
+                      <tr>
+                        <th>买入侧（毛）</th>
+                        <td>{text(executionGap(insight.buy_trade))}</td>
+                        <th>成交日</th>
+                        <td>{insight.buy_trade.date}</td>
+                      </tr>
+                    ) : null}
+                    {insight.sell_trade ? (
+                      <tr>
+                        <th>卖出侧（毛）</th>
+                        <td>{text(executionGap(insight.sell_trade))}</td>
+                        <th>成交日</th>
+                        <td>{insight.sell_trade.date}</td>
+                      </tr>
+                    ) : null}
+                  </tbody>
+                </table>
+                <p className="muted">
+                  执行价差 = 成交价与<strong>成交当日收盘价</strong>的对比（买入：收盘−成交价；卖出：成交价−收盘；
+                  正 = 买得低 / 卖得高）。它只是该笔成交的固有属性，与当日收盘对比、<strong>不随持有期变化</strong>，
+                  因此不放在 5 / 10 / 20 日维度里重复展示。
+                </p>
               </div>
 
               <h2 className="detail-section-title">5 / 10 / 20 行情日</h2>
