@@ -19,8 +19,9 @@ help:
 	@echo "  make db-down        停止 DB"
 	@echo "  make db-reset       重建开发数据库（5433=销毁卷重建；本机 5432=TRUNCATE 数据+迁移）"
 	@echo "  make migrate        执行 Alembic 迁移（建 schema + 表 + RLS）"
+	@echo "  make migrate-check  校验库版本是否等于代码 head"
 	@echo "── 运行 ──────────────────────────────────────────────"
-	@echo "  make dev            起 api(热重载) + worker + web"
+	@echo "  make dev            起 api(热重载) + worker + web（启动前校验库版本；SKIP_MIGRATE_CHECK=1 跳过）"
 	@echo "  make api            仅起 FastAPI"
 	@echo "  make worker         仅起任务消费者"
 	@echo "  make web            仅起 Vite dev server"
@@ -100,8 +101,40 @@ migrate-check:
 	@$(ALEMBIC) check
 
 # ── 运行 ────────────────────────────────────────────────────
+.PHONY: db-version-guard
+db-version-guard:
+	@if [ "$$SKIP_MIGRATE_CHECK" = "1" ]; then \
+		echo "⚠️  SKIP_MIGRATE_CHECK=1：跳过数据库版本预检（仅用于前端/API 局部开发）"; \
+		exit 0; \
+	fi; \
+	db_host="$${STOCK_DB_HOST:-$$(sed -n 's/^STOCK_DB_HOST=//p' $(ENV_FILE) 2>/dev/null | tail -n1)}"; \
+	db_port="$${STOCK_DB_PORT:-$$(sed -n 's/^STOCK_DB_PORT=//p' $(ENV_FILE) 2>/dev/null | tail -n1)}"; \
+	db_name="$${STOCK_DB_NAME:-$$(sed -n 's/^STOCK_DB_NAME=//p' $(ENV_FILE) 2>/dev/null | tail -n1)}"; \
+	db_host="$${db_host:-127.0.0.1}"; db_port="$${db_port:-5432}"; db_name="$${db_name:-stock_analyze}"; \
+	log=$$(mktemp); \
+	if $(MAKE) -s migrate-check >"$$log" 2>&1; then \
+		cur=$$($(ALEMBIC) current 2>/dev/null | awk 'NR==1{print $$1}'); \
+		rm -f "$$log"; \
+		echo "✅ 数据库版本检查通过：$${cur:-head}（$${db_host}:$${db_port}/$${db_name}）"; \
+		exit 0; \
+	fi; \
+	if ! $(ALEMBIC) current >"$$log" 2>&1; then \
+		echo "❌ 无法连接数据库：$${db_host}:$${db_port}/$${db_name}（来自 .env 的 STOCK_DB_* 或环境变量覆盖）"; \
+		echo "   底层错误：$$(tail -n 1 "$$log")"; \
+		echo "   处理：确认 PostgreSQL 已启动（make db-up）且端口/账号正确，改好后重试 make dev。"; \
+		echo "   若只想起前端或 API（不校验库版本）：SKIP_MIGRATE_CHECK=1 make dev"; \
+		rm -f "$$log"; \
+		exit 2; \
+	fi; \
+	cur=$$(awk '!/^INFO/{print $$1; exit}' "$$log"); \
+	head=$$($(ALEMBIC) heads 2>/dev/null | awk 'NR==1{print $$1}'); \
+	rm -f "$$log"; \
+	echo "❌ 数据库版本落后：库 $${cur:-未初始化} / 代码 $${head:-未知}（$${db_host}:$${db_port}/$${db_name}）"; \
+	echo "   请执行 make migrate 后重试 make dev。"; \
+	exit 2
+
 .PHONY: dev
-dev:
+dev: db-version-guard
 	@echo "→ api:    http://127.0.0.1:8000/api/v1/openapi.json"
 	@echo "→ web:    http://127.0.0.1:5173"
 	@$(MAKE) -j3 api worker web

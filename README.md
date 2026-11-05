@@ -119,6 +119,16 @@ make dev
 | OpenAPI | http://127.0.0.1:8000/api/v1/openapi.json |
 | 健康检查 | `/healthz` · `/readyz` · `/version` · `/metrics` |
 
+#### 启动前的数据库版本检查
+
+`make dev` 会在起进程前自动校验 `.env` 中 `STOCK_DB_*` 指向的数据库（不是硬编码 5433）的 Alembic 版本是否等于代码 head（复用 `make migrate-check`）。检查失败会**立即中止**，避免 API 启动后才因 `SCHEMA_VERSION 不匹配` 崩溃：
+
+- **版本落后**：提示「库 0011 / 代码 0012」→ 执行 `make migrate` 后重试 `make dev`。
+- **连不上库**：提示目标 `host:port/name` 与底层错误 → 确认 PostgreSQL 已启动（`make db-up`）或修正 `.env` 的端口/账号；不会打印裸 traceback。
+- **跳过检查**：只开发前端/API 时用 `SKIP_MIGRATE_CHECK=1 make dev`；默认严格检查，不默认放行。
+
+`make api` / `make worker` / `make web` 是局部启动入口，不触发该检查。
+
 启动链路未变化：`/attribution` 页随 web 一起启动；归因读的是已构建的资产/净值序列，首次使用仍需按下方「首次看板数据」构建（API-083）。live 板块同步不随 `make dev` 自动执行，首次需注入 THS 登录态后手动跑 `make sync-sector-*`。
 
 ### 固定本地测试 / 体验账号
@@ -203,7 +213,7 @@ make help              # 全部目标
 
 # 环境/运行
 make env / db-up / db-bootstrap / migrate
-make dev               # api(热重载) + worker + web
+make dev               # api(热重载) + worker + web（启动前校验库版本）
 make api / worker / web
 
 # 数据
