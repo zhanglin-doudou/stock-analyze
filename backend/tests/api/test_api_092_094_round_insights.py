@@ -354,3 +354,25 @@ async def test_api_094_idempotency_key_is_required_on_repeat(client, api_prefix,
     assert first_body["computed"] + first_body["skipped"] == (
         second_body["computed"] + second_body["skipped"]
     )
+
+
+async def test_api_094_scope_missing_skips_unchanged_fingerprint(
+    client, api_prefix, user, scenario
+):
+    """F8 回归：区间内 bar 未变 → 指纹稳定 → `scope=missing` 全量跳过、不重算。"""
+    first = await client.post(
+        f"{api_prefix}/rounds/insights/refresh",
+        headers={**user.headers, "Idempotency-Key": _idem_key()},
+        json={"period": "2026-06", "scope": "missing"},
+    )
+    assert first.status_code == 200, first.text
+    second = await client.post(
+        f"{api_prefix}/rounds/insights/refresh",
+        headers={**user.headers, "Idempotency-Key": _idem_key()},
+        json={"period": "2026-06", "scope": "missing"},
+    )
+    assert second.status_code == 200, second.text
+    first_body, second_body = first.json(), second.json()
+    assert first_body["computed"] >= 1
+    assert second_body["computed"] == 0
+    assert second_body["skipped"] == first_body["computed"]

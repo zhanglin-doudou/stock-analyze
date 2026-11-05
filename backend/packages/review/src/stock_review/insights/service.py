@@ -258,14 +258,28 @@ def _resolve_period(period: str | None, clock: Clock) -> Period:
     return parse_period_label(label, today=clock.today())
 
 
-def _fingerprint(calendar: Sequence[date], bars: Sequence[Bar], benchmark_id: str) -> str:
+def _bar_version(bars: Sequence[Bar]) -> str:
+    """区间内 daily_bar 的等价版本量：最大交易日 + 条数 + 内容摘要。
+
+    行情端口没有 `updated_at`，用 `(max(trade_date), count, 内容 sha256)` 等价表达
+    “区间内新增/修订”：任一日线新增、删除或收盘价修订都会改变摘要。
+    """
+    if not bars:
+        return "empty"
+    digest = hashlib.sha256()
+    for bar in sorted(bars, key=lambda item: (item.symbol, item.trade_date)):
+        digest.update(f"{bar.symbol}:{bar.trade_date.isoformat()}:{bar.close_units};".encode())
+    latest = max(bar.trade_date for bar in bars)
+    return f"{latest.isoformat()}|{len(bars)}|{digest.hexdigest()}"
+
+
+def _fingerprint(calendar: Sequence[date], bars_version: str, benchmark_id: str) -> str:
     digest = hashlib.sha256()
     digest.update(benchmark_id.encode())
     digest.update(
-        f"|{calendar[0] if calendar else ''}|{calendar[-1] if calendar else ''}|".encode()
+        f"|{calendar[0] if calendar else ''}|{calendar[-1] if calendar else ''}|"
+        f"{bars_version}|".encode()
     )
-    for bar in bars:
-        digest.update(f"{bar.trade_date.isoformat()}:{bar.close_units};".encode())
     return digest.hexdigest()
 
 
@@ -293,6 +307,7 @@ class _MarketData:
     bench_series: tuple[tuple[date, int], ...]
     data_as_of: date | None
     benchmark_id: str
+    bars_version: str
 
 
 async def _load_market(
@@ -322,6 +337,7 @@ async def _load_market(
         bench_series=bench_series,
         data_as_of=data_as_of,
         benchmark_id=benchmark_id,
+        bars_version=_bar_version(bars),
     )
 
 
@@ -1005,7 +1021,7 @@ async def get_insights_page(
         end=max(clock.today(), resolved.end),
     )
     missing_calendar = not market.calendar
-    fingerprint = _fingerprint(market.calendar, [], market.benchmark_id)
+    fingerprint = _fingerprint(market.calendar, market.bars_version, market.benchmark_id)
     corporate = _corporate_action_dates(trades)
     states = _position_states(trades)
 
@@ -1146,7 +1162,7 @@ async def get_round_insight(
         start=min((trade.trade_date for trade in trades), default=round_row.open_date),
         end=max(clock.today(), round_row.close_date or round_row.open_date),
     )
-    fingerprint = _fingerprint(market.calendar, [], market.benchmark_id)
+    fingerprint = _fingerprint(market.calendar, market.bars_version, market.benchmark_id)
     corporate = _corporate_action_dates(trades)
     states = _position_states(trades)
     wanted = {trade.dedupe_key for trade in trades}
@@ -1270,7 +1286,7 @@ async def refresh_forwards(
     )
     corporate = _corporate_action_dates(all_trades)
     existing = await _cached_forwards(session, user_id, [trade.dedupe_key for trade in trades])
-    fingerprint = _fingerprint(market.calendar, [], market.benchmark_id)
+    fingerprint = _fingerprint(market.calendar, market.bars_version, market.benchmark_id)
 
     computed = 0
     skipped = 0
