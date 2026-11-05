@@ -9,6 +9,8 @@ import {
 } from "@sa/api-client";
 import { api } from "../client";
 import { Cursor } from "../ui/Cursor";
+import { FilterBar, FilterField } from "../ui/FilterBar";
+import { PeriodInput } from "../ui/PeriodInput";
 import { ProblemView } from "../ui/Problem";
 import { DataTable, type DataTableColumn } from "../ui/DataTable";
 
@@ -326,47 +328,62 @@ export function RoundInsights() {
         })}
       </div>
 
-      <div className="card filters">
-        <label>
-          统计月份
-          <input
-            type="month"
+      <FilterBar
+        ariaLabel="回合洞察筛选"
+        count={page ? `共 ${page.item_total} 条` : undefined}
+        actions={
+          <button className="btn" type="button" onClick={() => void refresh()} disabled={refreshing}>
+            {refreshing ? "刷新中…" : "刷新前瞻"}
+          </button>
+        }
+      >
+        <FilterField label="统计月份">
+          <PeriodInput
             value={period}
-            onChange={(event) => setParam("period", event.target.value)}
+            onChange={(value) => setParam("period", value)}
           />
-        </label>
-        <label>
-          持有期
-          <select value={bucket} onChange={(event) => setParam("bucket", event.target.value)}>
+        </FilterField>
+        <FilterField label="持有期">
+          <select
+            aria-label="持有期"
+            value={bucket}
+            onChange={(event) => setParam("bucket", event.target.value)}
+          >
             {BUCKET_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>
             ))}
           </select>
-        </label>
-        <label>
-          旗标
-          <select value={flag} onChange={(event) => setParam("flag", event.target.value)}>
+        </FilterField>
+        <FilterField label="旗标">
+          <select
+            aria-label="旗标"
+            value={flag}
+            onChange={(event) => setParam("flag", event.target.value)}
+          >
             {FLAG_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>
             ))}
           </select>
-        </label>
-        <label>
-          理由
-          <select value={hasReason} onChange={(event) => setParam("has_reason", event.target.value)}>
+        </FilterField>
+        <FilterField label="理由">
+          <select
+            aria-label="理由"
+            value={hasReason}
+            onChange={(event) => setParam("has_reason", event.target.value)}
+          >
             <option value="">全部</option>
             <option value="true">已标注理由</option>
             <option value="false">未标注理由</option>
           </select>
-        </label>
-        <label>
-          证券代码
+        </FilterField>
+        <FilterField label="证券代码">
           <input
             type="text"
+            aria-label="证券代码"
             value={codeDraft}
             placeholder="如 600519"
             onChange={(event) => setCodeDraft(event.target.value)}
@@ -375,23 +392,21 @@ export function RoundInsights() {
               if (event.key === "Enter") setParam("security_code", codeDraft);
             }}
           />
-        </label>
-        <label>
-          排序
-          <select value={sort} onChange={(event) => setParam("sort", event.target.value)}>
+        </FilterField>
+        <FilterField label="排序">
+          <select
+            aria-label="排序"
+            value={sort}
+            onChange={(event) => setParam("sort", event.target.value)}
+          >
             {SORT_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
               </option>
             ))}
           </select>
-        </label>
-        <div className="row-actions">
-          <button className="btn" type="button" onClick={() => void refresh()} disabled={refreshing}>
-            {refreshing ? "刷新中…" : "刷新前瞻"}
-          </button>
-        </div>
-      </div>
+        </FilterField>
+      </FilterBar>
 
       {summary ? (
         <div className="cards">

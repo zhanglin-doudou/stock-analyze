@@ -48,3 +48,22 @@ export function toRangeToken(from: string, to: string): string {
 export function periodYear(value: string): string {
   return value.slice(0, 4);
 }
+
+/**
+ * 期间 token → 闭区间日期串（`from`/`to`），用于只接受日期范围的旧筛选接口。
+ *
+ * 仅做日历换算（年初/年末、当月首末日），不解析或格式化任何业务数值；
+ * 空 token 表示「不按日期过滤」。
+ */
+export function periodToDateRange(value: string): { from: string; to: string } {
+  if (value === "") return { from: "", to: "" };
+  if (value.includes("..")) {
+    const [from = "", to = ""] = value.split("..");
+    return { from, to };
+  }
+  if (value.length === 4) return { from: `${value}-01-01`, to: `${value}-12-31` };
+  const monthEnd = new Date(`${value}-01T00:00:00`);
+  monthEnd.setMonth(monthEnd.getMonth() + 1, 0);
+  const day = String(monthEnd.getDate()).padStart(2, "0");
+  return { from: `${value}-01`, to: `${value}-${day}` };
+}

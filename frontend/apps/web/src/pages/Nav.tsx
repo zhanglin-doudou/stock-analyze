@@ -3,6 +3,7 @@ import { Link, useSearchParams } from "react-router-dom";
 import type { Nav, NavPoint, NavStatus } from "@sa/api-client";
 import { api } from "../client";
 import { currentMonth } from "../lib/date";
+import { FilterBar, FilterField } from "../ui/FilterBar";
 import { ProblemView } from "../ui/Problem";
 import { DataTable, type DataTableColumn } from "../ui/DataTable";
 import { MonthInput } from "../ui/MonthInput";
@@ -174,23 +175,27 @@ export function Nav() {
         本期不含基准对比，beta/alpha/IR 等指标留待后续版本。
       </p>
 
-      <div className="card filters">
-        <label>
-          月份
+      <FilterBar
+        ariaLabel="净值筛选"
+        count={result ? `共 ${result.points.length} 个净值日` : undefined}
+        actions={
+          <>
+            <button className="btn" type="button" disabled={loading} onClick={() => void build()}>
+              {loading ? "构建中…" : "构建净值与收益"}
+            </button>
+            <Link className="btn btn-ghost" to="/rounds">
+              查看回合
+            </Link>
+          </>
+        }
+      >
+        <FilterField label="月份">
           <MonthInput
             value={period}
             onChange={(value) => setSearchParams({ period: value })}
           />
-        </label>
-        <div className="row-actions">
-          <button className="btn" type="button" disabled={loading} onClick={() => void build()}>
-            {loading ? "构建中…" : "构建净值与收益"}
-          </button>
-          <Link className="btn btn-ghost" to="/rounds">
-            查看回合
-          </Link>
-        </div>
-      </div>
+        </FilterField>
+      </FilterBar>
 
       {notice ? <p className="notice">{notice}</p> : null}
       {formError ? <p className="field-error">{formError}</p> : null}

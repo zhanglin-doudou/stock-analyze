@@ -13,6 +13,7 @@ import { displayValue, signTone } from '../ui/format';
 import { SAMPLE_STATUS_LABELS, dataStatusLabel } from '../ui/status';
 import './dashboard.css';
 import './attribution.css';
+import '../ui/filter-bar.css';
 import { PeriodInput } from '../ui/PeriodInput';
 
 const TOTAL_PNL_BASIS_LABELS: Record<string, string> = {
@@ -704,37 +705,43 @@ export function AttributionPage(): ReactElement {
           </p>
         ) : null}
         <div className="dash-head-meta">
-          <PeriodInput
-            value={period}
-            disabled={query.isLoading}
-            defaultEnd={data?.data_as_of ?? undefined}
-            onChange={updatePeriod}
-          />
-          <nav className="attr-quick" aria-label="快捷区间">
-            {QUICK_RANGES.map((item) => (
-              <button
-                key={item.label}
-                type="button"
-                className="attr-quick-button"
-                disabled={query.isLoading}
-                onClick={() => updatePeriod(item.build())}
-              >
-                {item.label}
-              </button>
-            ))}
-          </nav>
-          <label
-            className="attr-lookahead-toggle"
-            title="行业归属取最新快照回溯历史区间，可能与当时实际归属不符（未来信息风险）"
+          <div
+            className="filter-bar filter-bar-embed"
+            role="group"
+            aria-label="归因期间筛选"
           >
-            <input
-              type="checkbox"
-              checked={allowLookahead}
+            <PeriodInput
+              value={period}
               disabled={query.isLoading}
-              onChange={(event) => updateLookahead(event.target.checked)}
+              defaultEnd={data?.data_as_of ?? undefined}
+              onChange={updatePeriod}
             />
-            使用最新行业成分回溯历史
-          </label>
+            <nav className="attr-quick" aria-label="快捷区间">
+              {QUICK_RANGES.map((item) => (
+                <button
+                  key={item.label}
+                  type="button"
+                  className="attr-quick-button"
+                  disabled={query.isLoading}
+                  onClick={() => updatePeriod(item.build())}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </nav>
+            <label
+              className="attr-lookahead-toggle"
+              title="行业归属取最新快照回溯历史区间，可能与当时实际归属不符（未来信息风险）"
+            >
+              <input
+                type="checkbox"
+                checked={allowLookahead}
+                disabled={query.isLoading}
+                onChange={(event) => updateLookahead(event.target.checked)}
+              />
+              使用最新行业成分回溯历史
+            </label>
+          </div>
           <span>
             页面状态 <StatusBadge status={data?.status ?? 'missing'} />
           </span>
