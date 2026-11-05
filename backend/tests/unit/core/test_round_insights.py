@@ -438,3 +438,22 @@ def test_quadrant() -> None:
     assert agg.quadrant(1, -1) == "buy_positive_sell_negative"
     assert agg.quadrant(-1, 1) == "buy_negative_sell_positive"
     assert agg.quadrant(-1, -1) == "both_negative"
+
+
+def test_swing_fill_pairs_range_and_no_additivity() -> None:
+    """AC-S3：fill 级波段配对仅 2–20 TD；与回合级统计独立（不可相加）。"""
+    beyond = CAL[-1] + timedelta(days=1)
+    fills = [
+        (CAL[0], CAL[0], 100),  # 同日 → 1 TD（超短，排除）
+        (CAL[0], CAL[1], 200),  # 1 TD（排除）
+        (CAL[0], CAL[2], 300),  # 2 TD（计入）
+        (CAL[0], CAL[20], -400),  # 20 TD（计入）
+        (CAL[0], CAL[21], 500),  # 21 TD（趋势，排除）
+        (beyond, beyond + timedelta(days=2), 600),  # 日历未覆盖 open_date → 排除
+    ]
+    stats = agg.swing_fill_pairs(fills, CAL)
+    assert stats.pairs == 2
+    assert stats.wins == 1
+    assert stats.pnl_units == (300, -400)
+    assert stats.holding_trading_days == (2, 20)
+    assert agg.swing_fill_pairs([], CAL).pairs == 0

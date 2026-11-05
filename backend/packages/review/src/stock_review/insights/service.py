@@ -119,6 +119,17 @@ class SummaryBucket:
 
 
 @dataclass(slots=True)
+class FillSwingBucket:
+    """fill 级波段配对（设计 §3.4）；统计单位是 fill，与回合级 `swing` 不可相加。"""
+
+    pairs: int
+    win_rate_pct: str | None
+    avg_holding_trading_days: str | None
+    avg_pnl_display: str | None
+    total_pnl_display: str | None
+
+
+@dataclass(slots=True)
 class RankingSummary:
     n_sample: int
     n_eligible: int
@@ -142,6 +153,7 @@ class ReasonCoverage:
 @dataclass(slots=True)
 class InsightsSummary:
     swing: SummaryBucket
+    fill_swing: FillSwingBucket
     addon: dict[str, Any]
     sell_fly: dict[str, Any]
     reason_coverage: ReasonCoverage
@@ -154,6 +166,7 @@ class InsightsPage:
     period: str
     period_basis: str
     definition_version: str
+    bucket_basis: str
     data_as_of: date | None
     ranking_as_of: date | None
     benchmark_id: str
@@ -445,6 +458,22 @@ async def _load_rounds(
                 Round.close_date.is_not(None),
                 Round.close_date >= start,
                 Round.close_date <= end,
+            )
+        )
+    )
+
+
+async def _load_fills(
+    session: AsyncSession, user_id: uuid.UUID, round_ids: Sequence[str]
+) -> list[RoundFill]:
+    """批量读取当前筛选集合的 fill（fill 级波段配对，设计 §3.4）。"""
+    if not round_ids:
+        return []
+    return list(
+        await session.scalars(
+            select(RoundFill).where(
+                RoundFill.user_id == user_id,
+                RoundFill.round_id.in_(list(round_ids)),
             )
         )
     )
@@ -770,6 +799,7 @@ def _summary(
     *,
     total_rounds: int,
     annotated: int,
+    fill_stats: agg.FillSwingStats,
 ) -> InsightsSummary:
     closed = [item for item in items if item.status == "closed"]
     pnls = [item.pnl_units for item in closed]
@@ -786,6 +816,20 @@ def _summary(
         win_rate_pct=(f"{win * 100 / len(pnls):.2f}%" if pnls else None),
         avg_pnl_display=_money(sum(pnls) // len(pnls) if pnls else None),
         total_pnl_display=_money(sum(pnls) if pnls else None),
+    )
+    fill_pnls = fill_stats.pnl_units
+    fill_swing = FillSwingBucket(
+        pairs=fill_stats.pairs,
+        win_rate_pct=(
+            f"{fill_stats.wins * 100 / fill_stats.pairs:.2f}%" if fill_stats.pairs else None
+        ),
+        avg_holding_trading_days=(
+            f"{sum(fill_stats.holding_trading_days) / len(fill_stats.holding_trading_days):.1f}"
+            if fill_stats.holding_trading_days
+            else None
+        ),
+        avg_pnl_display=_money(sum(fill_pnls) // len(fill_pnls) if fill_pnls else None),
+        total_pnl_display=_money(sum(fill_pnls) if fill_pnls else None),
     )
     addon_items = [item for item in items if "addon" in item.flags]
     sell_fly_items = [item for item in items if "profit_take_fly" in item.flags]
@@ -830,6 +874,7 @@ def _summary(
     n_eligible = len(combined_values)
     return InsightsSummary(
         swing=swing,
+        fill_swing=fill_swing,
         addon={
             "rounds": len(addon_items),
             "share_pct": f"{len(addon_items) * 100 / len(closed):.2f}%" if closed else None,
@@ -1031,9 +1076,18 @@ async def get_insights_page(
         if (item.buy_trade and item.buy_trade.reason)
         or (item.sell_trade and item.sell_trade.reason)
     )
-    summary = (
-        _summary(items, total_rounds=len(items), annotated=annotated) if include_summary else None
-    )
+    summary = None
+    if include_summary:
+        fills = await _load_fills(session, user_id, [item.round_id for item in items])
+        summary = _summary(
+            items,
+            total_rounds=len(items),
+            annotated=annotated,
+            fill_stats=agg.swing_fill_pairs(
+                [(row.open_date, row.close_date, row.pnl_units) for row in fills],
+                market.calendar,
+            ),
+        )
 
     total = len(items)
     offset = _decode_cursor(cursor) if cursor else 0
@@ -1050,6 +1104,7 @@ async def get_insights_page(
         period=resolved.label,
         period_basis="close_date",
         definition_version=DEFINITION_VERSION,
+        bucket_basis="round",
         data_as_of=market.data_as_of,
         ranking_as_of=market.data_as_of,
         benchmark_id=market.benchmark_id,
@@ -1131,6 +1186,7 @@ async def get_round_insight(
     ):
         buy_trade = by_id.get(fill.buy_trade_id)
         sell_trade = by_id.get(fill.sell_trade_id)
+        held = cal.holding_trading_days(market.calendar, fill.open_date, fill.close_date)
         fills.append(
             {
                 "fill_id": fill.id,
@@ -1155,6 +1211,8 @@ async def get_round_insight(
                 "pnl_display": _money(fill.pnl_units),
                 "open_date": fill.open_date,
                 "close_date": fill.close_date,
+                "holding_trading_days": held,
+                "bucket": classify.bucket_of(held, status="closed"),
             }
         )
     return RoundInsightDetail(

@@ -412,6 +412,11 @@ export function RoundInsights() {
               <span>合计盈亏</span>
               <strong>{text(summary.swing.total_pnl_display)}</strong>
             </div>
+            <p className="muted" data-testid="fill-swing">
+              配对（fill 级）{summary.fill_swing.pairs} 笔 · 胜率{" "}
+              {text(summary.fill_swing.win_rate_pct)} · 平均持有{" "}
+              {text(summary.fill_swing.avg_holding_trading_days)} 个交易日；统计单位为 fill，不与上方回合相加
+            </p>
           </div>
 
           <div className="card">

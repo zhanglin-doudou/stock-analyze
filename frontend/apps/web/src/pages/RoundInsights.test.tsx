@@ -32,6 +32,7 @@ function makePage(overrides: Partial<RoundInsightsPage> = {}): RoundInsightsPage
     period: "2026-06",
     period_basis: "close_date",
     definition_version: "v1",
+    bucket_basis: "round",
     data_as_of: "2026-06-30",
     ranking_as_of: "2026-06-30",
     benchmark_id: "hs300_tr",
@@ -75,6 +76,14 @@ function makePage(overrides: Partial<RoundInsightsPage> = {}): RoundInsightsPage
         avg_holding_trading_days: "14.00",
         win_rate_pct: "0.00%",
         avg_pnl_display: "-650.00",
+        total_pnl_display: "-650.00",
+      },
+      fill_swing: {
+        bucket_basis: "fill",
+        pairs: 2,
+        win_rate_pct: "50.00%",
+        avg_holding_trading_days: "9.5",
+        avg_pnl_display: "-325.00",
         total_pnl_display: "-650.00",
       },
       addon: { count: 1, declined_after_addon: 1, declined_pct: "100.00%", avg_dip_pct: "-4.20%" },
@@ -152,6 +161,9 @@ describe("RoundInsights 回合洞察页", () => {
     expect(screen.queryByText(/B0|B1|B2|B3/)).toBeNull();
     // 口径假设原样展示（后端产出）。
     expect(screen.getByText(/多账户合并统计/)).toBeTruthy();
+    // AC-S3：fill 级配对单列展示，并明示不与回合级相加（前端不做任何加法）。
+    expect(screen.getByTestId("fill-swing").textContent).toContain("配对（fill 级）2 笔");
+    expect(screen.getByTestId("fill-swing").textContent).toContain("不与上方回合相加");
   });
 
   it("空态：无回合时提示下一步，不显示排名/伪造数据", async () => {

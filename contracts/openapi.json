@@ -3075,6 +3075,69 @@
         "title": "InsightBucketSummaryOut",
         "type": "object"
       },
+      "InsightFillSwingOut": {
+        "description": "fill 级波段配对（统计单位 fill，与回合级 swing 不可相加，AC-S3）。",
+        "properties": {
+          "avg_holding_trading_days": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Holding Trading Days"
+          },
+          "avg_pnl_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Pnl Display"
+          },
+          "bucket_basis": {
+            "default": "fill",
+            "title": "Bucket Basis",
+            "type": "string"
+          },
+          "pairs": {
+            "title": "Pairs",
+            "type": "integer"
+          },
+          "total_pnl_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Pnl Display"
+          },
+          "win_rate_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Win Rate Pct"
+          }
+        },
+        "required": [
+          "pairs"
+        ],
+        "title": "InsightFillSwingOut",
+        "type": "object"
+      },
       "InsightRankingOut": {
         "properties": {
           "basis": {
@@ -3221,6 +3284,9 @@
             "title": "Addon",
             "type": "object"
           },
+          "fill_swing": {
+            "$ref": "#/components/schemas/InsightFillSwingOut"
+          },
           "pending": {
             "additionalProperties": {
               "type": "integer"
@@ -3245,6 +3311,7 @@
         },
         "required": [
           "swing",
+          "fill_swing",
           "addon",
           "sell_fly",
           "reason_coverage",
@@ -6145,6 +6212,11 @@
           },
           "benchmark_id": {
             "title": "Benchmark Id",
+            "type": "string"
+          },
+          "bucket_basis": {
+            "default": "round",
+            "title": "Bucket Basis",
             "type": "string"
           },
           "data_as_of": {
@@ -16442,6 +16514,7 @@
                   ],
                   "basis": "benchmark_excess_20d",
                   "benchmark_id": "hs300_tr",
+                  "bucket_basis": "round",
                   "data_as_of": "2026-09-30",
                   "definition_version": "1.0",
                   "disclaimer": "以下为事后统计，仅用于个人复盘，不构成投资建议；不评价个人能力，不预测收益；相对基准为 hs300_tr ETF 代理；缺失/公司行动显示 —，不显示 0%。",
@@ -16602,6 +16675,14 @@
                       "count": 1,
                       "declined_after_addon": 0,
                       "declined_pct": "0.0%"
+                    },
+                    "fill_swing": {
+                      "avg_holding_trading_days": "12.0",
+                      "avg_pnl_display": "1234.56",
+                      "bucket_basis": "fill",
+                      "pairs": 1,
+                      "total_pnl_display": "1234.56",
+                      "win_rate_pct": "100.0%"
                     },
                     "pending": {
                       "forward_recompute": 0,
@@ -17447,9 +17528,11 @@
                   "disclaimer": "以下为事后统计，仅用于个人复盘，不构成投资建议；不评价个人能力，不预测收益；相对基准为 hs300_tr ETF 代理；缺失/公司行动显示 —，不显示 0%。",
                   "fills": [
                     {
+                      "bucket": "swing",
                       "buy": null,
                       "close_date": "2026-11-18",
                       "fill_id": "fil_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                      "holding_trading_days": 12,
                       "open_date": "2026-11-02",
                       "pnl_display": "1234.56",
                       "quantity_display": "100.0000",

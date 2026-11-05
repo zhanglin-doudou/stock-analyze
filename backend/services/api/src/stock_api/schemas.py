@@ -1626,8 +1626,20 @@ class InsightRankingOut(BaseModel):
     definition_version: str
 
 
+class InsightFillSwingOut(BaseModel):
+    """fill 级波段配对（统计单位 fill，与回合级 swing 不可相加，AC-S3）。"""
+
+    bucket_basis: str = "fill"
+    pairs: int
+    win_rate_pct: str | None = None
+    avg_holding_trading_days: str | None = None
+    avg_pnl_display: str | None = None
+    total_pnl_display: str | None = None
+
+
 class InsightsSummaryOut(BaseModel):
     swing: InsightBucketSummaryOut
+    fill_swing: InsightFillSwingOut
     addon: dict[str, Any]
     sell_fly: dict[str, Any]
     reason_coverage: InsightReasonCoverageOut
@@ -1639,6 +1651,7 @@ class RoundInsightsPageOut(BaseModel):
     period: str
     period_basis: str
     definition_version: str
+    bucket_basis: str = "round"
     data_as_of: date | None = None
     ranking_as_of: date | None = None
     benchmark_id: str

@@ -33,6 +33,7 @@ from stock_api.routing import StrictQueryRoute
 from stock_api.schemas import (
     ForwardReturnOut,
     InsightBucketSummaryOut,
+    InsightFillSwingOut,
     InsightRankingOut,
     InsightReasonCoverageOut,
     InsightReasonShareOut,
@@ -242,6 +243,13 @@ def _summary_out(summary: Any) -> InsightsSummaryOut:
         ),
         addon=summary.addon,
         sell_fly=summary.sell_fly,
+        fill_swing=InsightFillSwingOut(
+            pairs=summary.fill_swing.pairs,
+            win_rate_pct=summary.fill_swing.win_rate_pct,
+            avg_holding_trading_days=summary.fill_swing.avg_holding_trading_days,
+            avg_pnl_display=summary.fill_swing.avg_pnl_display,
+            total_pnl_display=summary.fill_swing.total_pnl_display,
+        ),
         reason_coverage=InsightReasonCoverageOut(
             annotated=summary.reason_coverage.annotated,
             total_rounds=summary.reason_coverage.total_rounds,
@@ -322,6 +330,7 @@ async def list_round_insights_endpoint(
         period=page.period,
         period_basis=page.period_basis,
         definition_version=page.definition_version,
+        bucket_basis=page.bucket_basis,
         data_as_of=page.data_as_of,
         ranking_as_of=page.ranking_as_of,
         benchmark_id=page.benchmark_id,

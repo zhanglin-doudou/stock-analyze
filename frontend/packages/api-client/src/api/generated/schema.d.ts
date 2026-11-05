@@ -2176,6 +2176,27 @@ export interface components {
             /** Win Rate Pct */
             win_rate_pct?: string | null;
         };
+        /**
+         * InsightFillSwingOut
+         * @description fill 级波段配对（统计单位 fill，与回合级 swing 不可相加，AC-S3）。
+         */
+        InsightFillSwingOut: {
+            /** Avg Holding Trading Days */
+            avg_holding_trading_days?: string | null;
+            /** Avg Pnl Display */
+            avg_pnl_display?: string | null;
+            /**
+             * Bucket Basis
+             * @default fill
+             */
+            bucket_basis: string;
+            /** Pairs */
+            pairs: number;
+            /** Total Pnl Display */
+            total_pnl_display?: string | null;
+            /** Win Rate Pct */
+            win_rate_pct?: string | null;
+        };
         /** InsightRankingOut */
         InsightRankingOut: {
             /** Basis */
@@ -2232,6 +2253,7 @@ export interface components {
             addon: {
                 [key: string]: unknown;
             };
+            fill_swing: components["schemas"]["InsightFillSwingOut"];
             /** Pending */
             pending: {
                 [key: string]: number;
@@ -3326,6 +3348,11 @@ export interface components {
             basis: string;
             /** Benchmark Id */
             benchmark_id: string;
+            /**
+             * Bucket Basis
+             * @default round
+             */
+            bucket_basis: string;
             /** Data As Of */
             data_as_of?: string | null;
             /** Definition Version */

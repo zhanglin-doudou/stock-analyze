@@ -91,6 +91,12 @@ async def test_api_092_list_zero_caliber_and_period_basis(client, api_prefix, us
     summary = body["summary"]
     assert summary is not None
     assert _RATIO_PCT_RE.match(summary["swing"]["win_rate_pct"])
+    # AC-S3：页面级 `bucket_basis=round`；fill 级配对单列，统计单位是 fill。
+    assert body["bucket_basis"] == "round"
+    fill_swing = summary["fill_swing"]
+    assert fill_swing["bucket_basis"] == "fill"
+    assert fill_swing["pairs"] == 1
+    assert summary["swing"]["closed"] == body["item_total"]
 
     # 周期口径：回合 06-20 平仓，落在 2026-06；2026-07 应为空
     july = await _list(client, api_prefix, user.headers, "?period=2026-07")
@@ -132,6 +138,49 @@ async def test_api_092_filters_and_include_summary(client, api_prefix, user, sce
         client, api_prefix, user.headers, "?period=2026-06&include_summary=false"
     )
     assert no_summary.json()["summary"] is None
+
+
+async def test_api_092_ac_s3_fill_pairs_not_added_to_rounds(
+    client, api_prefix, user, owner_engine, settings
+):
+    """AC-S3：同一回合两笔部分卖出 → fill 配对 2，回合级波段仍 1，两者不相加。"""
+    await _seed_trade(
+        owner_engine,
+        user_id=user.user_id,
+        trade_date=date(2026, 6, 2),
+        side="buy",
+        quantity_units=1_000_000,
+        price_units=100_000_000,
+        amount_units=-1_000_000,
+    )
+    await _seed_trade(
+        owner_engine,
+        user_id=user.user_id,
+        trade_date=date(2026, 6, 8),
+        side="sell",
+        quantity_units=400_000,
+        price_units=110_000_000,
+        amount_units=440_000,
+    )
+    await _seed_trade(
+        owner_engine,
+        user_id=user.user_id,
+        trade_date=date(2026, 6, 20),
+        side="sell",
+        quantity_units=600_000,
+        price_units=120_000_000,
+        amount_units=720_000,
+    )
+    await _rebuild_and_drain(client, api_prefix, user, settings)
+
+    body = (await _list(client, api_prefix, user.headers, "?period=2026-06")).json()
+    summary = body["summary"]
+    assert body["item_total"] == 1
+    assert summary["swing"]["closed"] == 1
+    assert summary["swing"]["swing"] == 1
+    assert summary["fill_swing"]["pairs"] == 2
+    # fill 与回合是两种统计单位：2 ≠ 1，汇总不得相加（AC-S3）。
+    assert summary["swing"]["closed"] != summary["fill_swing"]["pairs"]
 
 
 async def test_api_092_reason_filters_follow_annotation(client, api_prefix, user, scenario):
@@ -178,6 +227,9 @@ async def test_api_093_detail_and_cross_user_404(client, api_prefix, user, scena
     assert body["round_id"] == scenario["round"]["round_id"]
     assert body["fills"]
     assert body["fills"][0]["pnl_display"] is not None
+    # AC-S3：fill 明细用真实交易日（不是 round.holding_days 的 weekday 近似）。
+    assert isinstance(body["fills"][0]["holding_trading_days"], int)
+    assert body["fills"][0]["bucket"] == "swing"
     assert isinstance(body["flags"], list)
     assert isinstance(body["quality"], list)
     assert body["ranking"]["basis"] == "benchmark_excess_20d"
