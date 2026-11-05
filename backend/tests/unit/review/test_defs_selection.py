@@ -53,8 +53,7 @@ def test_b3_equals_bhar20_per_event_and_mean() -> None:
     """F7 对账：同一批买入、同一区间，回合洞察 B3 与 selection.bhar_20 逐笔/均值一致。"""
     days = JUNE_DAYS
     bars = tuple(
-        make_bar(day, close_units=10_000_000 + index * 100_000)
-        for index, day in enumerate(days)
+        make_bar(day, close_units=10_000_000 + index * 100_000) for index, day in enumerate(days)
     )
     # 只取 d0+20 个交易日仍落在 6 月内的两个买入日（其余会 pending）。
     trades = tuple(make_trade(index + 1, days[index]) for index in range(2))

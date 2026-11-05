@@ -56,7 +56,9 @@ def benchmark_adjusted_excess_units(
     个股腿满值 = `div_round(CN, C0)`（含 1）；基准腿满值 = `1 + 基准累计收益`。
     回合洞察 B3 与 `selection.bhar_*` 共用本函数，保证两处口径只有一份实现。
     """
-    return stock_leg_units - (10**scale + benchmark_cum_units)
+    unit_leg: int = 10 ** int(scale)
+    diff: int = stock_leg_units - (unit_leg + benchmark_cum_units)
+    return diff
 
 
 def compound_index(
