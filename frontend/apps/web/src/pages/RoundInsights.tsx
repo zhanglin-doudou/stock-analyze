@@ -8,6 +8,7 @@ import {
   type RoundInsightsRefreshOut,
 } from "@sa/api-client";
 import { api } from "../client";
+import { signedClass } from "../lib/signed";
 import { Cursor } from "../ui/Cursor";
 import { FilterBar, FilterField } from "../ui/FilterBar";
 import { PeriodInput } from "../ui/PeriodInput";
@@ -116,13 +117,6 @@ const SAMPLE_STATUS_LABELS: Record<string, string> = {
 
 function text(value: string | null | undefined): string {
   return value ?? "—";
-}
-
-function pnlClass(value: string | null | undefined): string {
-  if (value === null || value === undefined) return "money";
-  if (value.startsWith("-")) return "money money-neg";
-  if (value.startsWith("0")) return "money";
-  return "money money-pos";
 }
 
 function flagLabel(flag: string): string {
@@ -239,22 +233,36 @@ export function RoundInsights() {
       header: "盈亏",
       priority: 1,
       align: "right",
-      render: (row) => <span className={pnlClass(row.pnl)}>{text(row.pnl)}</span>,
+      render: (row) => <span className={signedClass(row.pnl)}>{text(row.pnl)}</span>,
     },
-    { key: "return", header: "收益率", priority: 1, align: "right", render: (row) => text(row.return_rate_pct) },
+    {
+      key: "return",
+      header: "收益率",
+      priority: 1,
+      align: "right",
+      render: (row) => <span className={signedClass(row.return_rate_pct)}>{text(row.return_rate_pct)}</span>,
+    },
     {
       key: "buy_b3",
       header: "买入后相对基准（20 日）",
       priority: 2,
       align: "right",
-      render: (row) => text(row.buy_trade?.forward?.["20"]?.b3_pct),
+      render: (row) => (
+        <span className={signedClass(row.buy_trade?.forward?.["20"]?.b3_pct)}>
+          {text(row.buy_trade?.forward?.["20"]?.b3_pct)}
+        </span>
+      ),
     },
     {
       key: "sell_b3",
       header: "卖出后相对基准（20 日）",
       priority: 2,
       align: "right",
-      render: (row) => text(row.sell_trade?.forward?.["20"]?.b3_pct),
+      render: (row) => (
+        <span className={signedClass(row.sell_trade?.forward?.["20"]?.b3_pct)}>
+          {text(row.sell_trade?.forward?.["20"]?.b3_pct)}
+        </span>
+      ),
     },
     { key: "buy_reason", header: "买入理由", priority: 2, render: (row) => text(row.buy_trade?.reason_label) },
     { key: "sell_reason", header: "卖出理由", priority: 2, render: (row) => text(row.sell_trade?.reason_label) },
@@ -426,9 +434,13 @@ export function RoundInsights() {
             </div>
             <div className="kv">
               <span>平均盈亏</span>
-              <strong>{text(summary.swing.avg_pnl_display)}</strong>
+              <strong className={signedClass(summary.swing.avg_pnl_display)}>
+                {text(summary.swing.avg_pnl_display)}
+              </strong>
               <span>合计盈亏</span>
-              <strong>{text(summary.swing.total_pnl_display)}</strong>
+              <strong className={signedClass(summary.swing.total_pnl_display)}>
+                {text(summary.swing.total_pnl_display)}
+              </strong>
             </div>
             <p className="muted" data-testid="fill-swing">
               配对（fill 级）{summary.fill_swing.pairs} 笔 · 胜率{" "}
@@ -453,8 +465,15 @@ export function RoundInsights() {
               <p className="muted">
                 卖出 {sellFly.sell_count} 次；卖飞 {sellFly.profit_take_fly}（止盈）/{" "}
                 {sellFly.stop_loss_rebound}（止损后反弹）；占比 {text(sellFly.fly_pct)}；
-                最差少赚 {text(sellFly.missed_profit_worst_display)}，期末少赚{" "}
-                {text(sellFly.missed_profit_end_display)}。
+                最差少赚{" "}
+                <span className={signedClass(sellFly.missed_profit_worst_display)}>
+                  {text(sellFly.missed_profit_worst_display)}
+                </span>
+                ，期末少赚{" "}
+                <span className={signedClass(sellFly.missed_profit_end_display)}>
+                  {text(sellFly.missed_profit_end_display)}
+                </span>
+                。
               </p>
             ) : (
               <p className="muted">—</p>
@@ -487,9 +506,13 @@ export function RoundInsights() {
                 </p>
                 <div className="kv">
                   <span>中位数</span>
-                  <strong>{text(ranking.combined_median_pct)}</strong>
+                  <strong className={signedClass(ranking.combined_median_pct)}>
+                    {text(ranking.combined_median_pct)}
+                  </strong>
                   <span>均值</span>
-                  <strong>{text(ranking.combined_avg_pct)}</strong>
+                  <strong className={signedClass(ranking.combined_avg_pct)}>
+                    {text(ranking.combined_avg_pct)}
+                  </strong>
                 </div>
               </>
             ) : (

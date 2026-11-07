@@ -37,7 +37,8 @@ export type IconName =
   | "chevron"
   | "focus"
   | "theme"
-  | "dot";
+  | "dot"
+  | "copy";
 
 const PATHS: Record<IconName, ReactNode> = {
   /* ── 一级分组 ─────────────────────────────── */
@@ -196,6 +197,13 @@ const PATHS: Record<IconName, ReactNode> = {
     </>
   ),
   dot: <circle cx="12" cy="12" r="3" fill="currentColor" stroke="none" />,
+  // 复制：两张错位的圆角纸（后页缺右上角，表达「叠一份」）
+  copy: (
+    <>
+      <rect x="9" y="9" width="11.5" height="11.5" rx="2" />
+      <path d="M15 6.5V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h1.5" />
+    </>
+  ),
 };
 
 /** 全部图标名（由 PATHS 派生，供唯一性测试遍历；勿手写第二份清单）。 */

@@ -376,16 +376,40 @@
   gap: var(--s1);
 }
 
+/* 复制：纯图标按钮（无边框），hover/focus 只靠颜色与焦点环表达；反馈文案保持可见 */
 .trade-id-copy-btn {
-  padding: 0 var(--s2);
-  font-size: var(--fs-micro);
-  line-height: 1.6;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.trade-id-copy-btn:hover {
+  color: var(--accent);
+  background: var(--surface-2);
+}
+
+.trade-id-copy-btn:focus-visible {
+  color: var(--accent);
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .trade-id-feedback {
   font-size: var(--fs-micro);
   color: var(--muted);
   white-space: nowrap;
+}
+
+.trade-id-feedback:not(:empty) {
+  color: var(--accent);
 }
 
 /* 展开后的子表嵌在单元格里，收掉内层滚动容器的边框，避免双重描边 */

@@ -10,17 +10,13 @@ import type {
   TradeSideInsightOut,
 } from "@sa/api-client";
 import { api } from "../client";
+import { signedClass } from "../lib/signed";
 import { ProblemView } from "../ui/Problem";
 import { DataTable, type DataTableColumn, type DataTableExpansion } from "../ui/DataTable";
 import { TradeReasonForm } from "../ui/TradeReasonForm";
+import { Icon } from "../ui/icons";
 import "./detail.css";
 import { roundStatusLabel } from "./Rounds";
-
-function signedClass(value: string): string {
-  if (value.startsWith("-")) return "money money-neg";
-  if (value === "0.00" || value === "0.0000") return "money";
-  return "money money-pos";
-}
 
 const BUCKET_LABELS: Record<string, string> = {
   short: "短线（≤1 日）",
@@ -153,7 +149,8 @@ function forwardTable(side: TradeSideInsightOut | null | undefined, caption: str
           align: "right" as const,
           render: (row: { cells: Record<string, ForwardCell> }) => {
             const cell = row.cells[horizon];
-            if (cell.value !== null) return cell.value;
+            if (cell.value !== null)
+              return <span className={signedClass(cell.value)}>{cell.value}</span>;
             // 缺失一律 `—（原因）`（不显示 0%），原因来自后端 status；tooltip 保留完整说明。
             const reason = emptyCellReason(cell.status, horizon);
             return <span title={statusLabel(cell.status)}>{reason ? `—（${reason}）` : "—"}</span>;
@@ -182,6 +179,12 @@ interface InsightFill {
 
 /** 短 id 不做截断（按字符长度判断，避免把短 id 截坏）。 */
 const SHORT_ID_MAX = 12;
+
+/**
+ * 5/10/20 子表默认展开的流水笔数上限：每笔子表 4 行（表头 + 3 条口径）且紧跟主行，
+ * 10 笔以内约两屏；超过则默认折叠，避免首屏被 40+ 行附加内容淹没（可逐笔点开）。
+ */
+const DEFAULT_EXPAND_MAX_ROWS = 10;
 
 function shortTradeId(tradeId: string): string {
   if (tradeId.length <= SHORT_ID_MAX) return tradeId;
@@ -236,11 +239,12 @@ function CopyTradeId({ tradeId }: { tradeId: string }): ReactElement {
     <span className="trade-id-copy">
       <button
         type="button"
-        className="btn btn-ghost trade-id-copy-btn"
+        className="trade-id-copy-btn"
         aria-label={`复制流水 ${tradeId} 的完整 ID`}
+        title="复制完整 ID"
         onClick={() => void copy()}
       >
-        复制
+        <Icon name="copy" size={14} />
       </button>
       <span className="trade-id-feedback" role="status" aria-live="polite">
         {feedback === "copied" ? "已复制" : feedback === "failed" ? "复制失败" : ""}
@@ -348,7 +352,10 @@ export function RoundDetail() {
         key: "gap",
         header: "执行价差（相对当日收盘）",
         align: "right",
-        render: (trade) => text(executionGap(trade)),
+        render: (trade) => {
+          const gap = executionGap(trade);
+          return gap == null ? "—" : <span className={signedClass(gap)}>{gap}</span>;
+        },
       },
       {
         key: "reason",
@@ -370,18 +377,20 @@ export function RoundDetail() {
     ];
   }
 
+  const buyRows: TradeSideInsightOut[] = insight ? uniqueTrades(insight, "buy") : [];
+  const sellRows: TradeSideInsightOut[] = insight ? uniqueTrades(insight, "sell") : [];
+  const defaultExpanded = buyRows.length + sellRows.length <= DEFAULT_EXPAND_MAX_ROWS;
+
   const expansion: DataTableExpansion<TradeSideInsightOut> = {
-    isExpanded: (trade) => expanded[trade.trade_id] ?? false,
+    // 5/10/20 子表默认展开；流水笔数超过阈值（11 笔以上）才默认折叠，避免首屏过长。
+    isExpanded: (trade) => expanded[trade.trade_id] ?? defaultExpanded,
     onToggle: (trade) =>
-      setExpanded((prev) => ({ ...prev, [trade.trade_id]: !prev[trade.trade_id] })),
+      setExpanded((prev) => ({ ...prev, [trade.trade_id]: !(prev[trade.trade_id] ?? defaultExpanded) })),
     toggleLabel: (trade, isOpen) =>
       `${isOpen ? "收起" : "展开"}流水 ${trade.trade_id} 的 5/10/20 行情日`,
     panelTestId: (trade) => `trade-forward-${trade.trade_id}`,
     render: (trade) => forwardTable(trade, `流水 ${shortTradeId(trade.trade_id)} 的 5/10/20 行情日`),
   };
-
-  const buyRows: TradeSideInsightOut[] = insight ? uniqueTrades(insight, "buy") : [];
-  const sellRows: TradeSideInsightOut[] = insight ? uniqueTrades(insight, "sell") : [];
 
   return (
     <div className="detail-page">
@@ -443,7 +452,7 @@ export function RoundDetail() {
                   <th>回合盈亏</th>
                   <td className={signedClass(round.pnl)}>{round.pnl}</td>
                   <th>收益率（小数）</th>
-                  <td>{round.return_rate}</td>
+                  <td className={signedClass(round.return_rate)}>{round.return_rate}</td>
                 </tr>
                 <tr>
                   <th>开仓流水</th>
@@ -541,13 +550,19 @@ export function RoundDetail() {
                   <tbody>
                     <tr>
                       <th>买入后相对基准（20 日）</th>
-                      <td>{text(ranking.buy_excess_pct)}</td>
+                      <td className={signedClass(ranking.buy_excess_pct)}>
+                        {text(ranking.buy_excess_pct)}
+                      </td>
                       <th>卖出后相对基准（20 日）</th>
-                      <td>{text(ranking.sell_avoid_pct)}</td>
+                      <td className={signedClass(ranking.sell_avoid_pct)}>
+                        {text(ranking.sell_avoid_pct)}
+                      </td>
                     </tr>
                     <tr>
                       <th>综合（买卖两侧）</th>
-                      <td>{text(ranking.combined_pct)}</td>
+                      <td className={signedClass(ranking.combined_pct)}>
+                        {text(ranking.combined_pct)}
+                      </td>
                       <th>排序名次</th>
                       <td>{ranking.rank == null ? "未参与排名" : String(ranking.rank)}</td>
                     </tr>

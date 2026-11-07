@@ -155,6 +155,25 @@ beforeEach(() => {
 afterEach(cleanup);
 
 describe("RoundInsights 回合洞察页", () => {
+  it("带符号数值统一着色：负为跌色、正为涨色、零与缺失保持中性", async () => {
+    renderPage();
+
+    await screen.findByText("-3.25%");
+    // pnl：列表列 + 摘要平均/合计，全部为负 → 跌色。
+    for (const node of screen.getAllByText("-650.00")) {
+      expect(node.className).toBe("money money-neg");
+    }
+    expect(screen.getByText("-3.25%").className).toBe("money money-neg");
+    // 收益率、b3（正）→ 涨色（b3 列 + 排名中位数/均值）。
+    for (const node of screen.getAllByText("0.40%")) {
+      expect(node.className).toBe("money money-pos");
+    }
+    // 零值（胜率 0.00%）中性，不染涨跌色。
+    expect(screen.getByText("0.00%").className).not.toMatch(/money-(pos|neg)/);
+    // 缺失值（卖飞少赚 null → —）同样中性。
+    expect(screen.getAllByText("—").some((node) => node.className === "money")).toBe(true);
+  });
+
   it("零口径：直接渲染后端字符串，缺失为 — 且不出现裸码", async () => {
     renderPage();
 

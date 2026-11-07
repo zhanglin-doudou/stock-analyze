@@ -192,6 +192,11 @@ function toggle(rowLabel: string): HTMLButtonElement {
   return screen.getByRole("button", { name: new RegExp(`(展开|收起)流水 ${rowLabel} 的 5/10/20 行情日`) });
 }
 
+/** DataTable 主数据行（排除展开的子表面板行）。 */
+function mainRows(table: HTMLElement): HTMLTableRowElement[] {
+  return [...table.querySelectorAll<HTMLTableRowElement>(":scope > tbody > tr:not(.dt-expando)")];
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   getRound.mockResolvedValue(makeRound());
@@ -238,7 +243,8 @@ describe("RoundDetail 回合详情页", () => {
     expect(await screen.findByText("买入（1 笔）")).toBeTruthy();
     expect(screen.getByText("卖出（1 笔）")).toBeTruthy();
     const buyTable = screen.getByRole("table", { name: "买入流水与事后表现" });
-    expect(within(buyTable).getAllByRole("columnheader").map((th) => th.textContent)).toEqual([
+    const headCells = [...buyTable.querySelectorAll(":scope > thead > tr > th")];
+    expect(headCells.map((th) => th.textContent)).toEqual([
       "流水id",
       "日期",
       "数量",
@@ -249,13 +255,18 @@ describe("RoundDetail 回合详情页", () => {
     ]);
 
     // 逐笔字段全部来自后端定点字符串：数量不补零、金额保留负号、执行价差用 b0。
-    const buyRow = within(buyTable).getAllByRole("row")[1];
+    const buyRow = mainRows(buyTable)[0];
+    const buyCells = [...buyRow.querySelectorAll(":scope > td")].map((td) => td.textContent);
     expect(buyRow.textContent).toContain("trd_buy_1");
     expect(buyRow.textContent).toContain("2026-06-02");
-    expect(buyRow.textContent).toContain("100.0000");
-    expect(buyRow.textContent).toContain("100.000000");
+    // 数量列：整数份额不带尾零（"100"）；价格列仍守 6 位小数。
+    expect(buyCells[2]).toBe("100");
+    expect(buyCells[3]).toBe("100.000000");
     expect(buyRow.textContent).toContain("-10000.00");
     expect(buyRow.textContent).toContain("0.50%");
+    // 金额负 → 跌色；执行价差正 → 涨色（与回合洞察页同一 `signedClass`）。
+    expect(within(buyRow).getByText("-10000.00").className).toBe("money money-neg");
+    expect(within(buyRow).getByText("0.50%").className).toBe("money money-pos");
 
     // 「操作理由」与「执行价差」是以列为单位（买卖各一张表），不再整段重复。
     expect(screen.getAllByText("操作理由")).toHaveLength(2);
@@ -265,7 +276,7 @@ describe("RoundDetail 回合详情页", () => {
     expect(screen.getAllByText("0.50%")).toHaveLength(2);
 
     const sellTable = screen.getByRole("table", { name: "卖出流水与事后表现" });
-    const sellRow = within(sellTable).getAllByRole("row")[1];
+    const sellRow = mainRows(sellTable)[0];
     expect(sellRow.textContent).toContain("18000.00");
   });
 
@@ -301,29 +312,23 @@ describe("RoundDetail 回合详情页", () => {
     expect(await screen.findByText("买入（2 笔）")).toBeTruthy();
     expect(screen.getByText("卖出（2 笔）")).toBeTruthy();
     const buyTable = screen.getByRole("table", { name: "买入流水与事后表现" });
-    const buyRows = within(buyTable).getAllByRole("row");
-    expect(buyRows).toHaveLength(3); // 表头 + 2 笔
+    const buyRows = mainRows(buyTable);
+    expect(buyRows).toHaveLength(2); // 2 笔流水（展开面板行不计）
     // 日期升序：06-02 在 06-10 之前。
-    expect(buyRows[1].textContent).toContain("2026-06-02");
-    expect(buyRows[2].textContent).toContain("2026-06-10");
+    expect(buyRows[0].textContent).toContain("2026-06-02");
+    expect(buyRows[1].textContent).toContain("2026-06-10");
     const sellTable = screen.getByRole("table", { name: "卖出流水与事后表现" });
-    expect(within(sellTable).getAllByRole("row")).toHaveLength(3);
+    expect(mainRows(sellTable)).toHaveLength(2);
   });
 
-  it("逐笔展开看 5/10/20 子表：aria-expanded/aria-controls 与键盘可用", async () => {
+  it("5/10/20 子表默认展开：aria-expanded/aria-controls 与键盘可用", async () => {
     renderDetail();
 
     const button = await screen.findByRole("button", {
-      name: "展开流水 trd_buy_1 的 5/10/20 行情日",
+      name: "收起流水 trd_buy_1 的 5/10/20 行情日",
     });
-    expect(button.getAttribute("aria-expanded")).toBe("false");
-    expect(button.getAttribute("aria-controls")).toBeNull();
-    // 原生 button：Enter/Space 由浏览器触发 click，这里直接触发同样走 onClick。
-    fireEvent.click(button);
-
-    const opened = screen.getByRole("button", { name: "收起流水 trd_buy_1 的 5/10/20 行情日" });
-    expect(opened.getAttribute("aria-expanded")).toBe("true");
-    const panelId = opened.getAttribute("aria-controls");
+    expect(button.getAttribute("aria-expanded")).toBe("true");
+    const panelId = button.getAttribute("aria-controls");
     expect(panelId).toBeTruthy();
     const panel = document.getElementById(panelId as string);
     expect(panel).toBeTruthy();
@@ -332,10 +337,48 @@ describe("RoundDetail 回合详情页", () => {
     expect(within(subTable).getByRole("columnheader", { name: "5 日" })).toBeTruthy();
     expect(within(subTable).getByRole("columnheader", { name: "10 日" })).toBeTruthy();
     expect(within(subTable).getByRole("columnheader", { name: "20 日" })).toBeTruthy();
+    // 子表里的百分比同样走统一符号着色（b3 为负）。
     expect(within(subTable).getAllByText("2.00%")).toHaveLength(3);
 
-    fireEvent.click(opened);
+    // 原生 button：Enter/Space 由浏览器触发 click，这里直接触发同样走 onClick。
+    fireEvent.click(button);
+    const collapsed = screen.getByRole("button", {
+      name: "展开流水 trd_buy_1 的 5/10/20 行情日",
+    });
+    expect(collapsed.getAttribute("aria-expanded")).toBe("false");
+    expect(collapsed.getAttribute("aria-controls")).toBeNull();
     expect(screen.queryByTestId("trade-forward-trd_buy_1")).toBeNull();
+  });
+
+  it("流水超过 10 笔时子表默认折叠（首屏过长）", async () => {
+    const base = makeInsight();
+    const buys = Array.from({ length: 6 }, (_, i) =>
+      makeSide({ trade_id: `trd_buy_${i + 1}`, date: `2026-06-0${i + 1}`, forward: {} }),
+    );
+    const sells = Array.from({ length: 6 }, (_, i) =>
+      makeSide({ trade_id: `trd_sell_${i + 1}`, date: `2026-06-2${i + 1}`, forward: {} }),
+    );
+    getInsight.mockResolvedValue({
+      ...base,
+      buy_trade: buys[0],
+      sell_trade: sells[0],
+      fills: [
+        ...buys.map((buy) => ({ buy, sell: sells[0] })),
+        ...sells.map((sell) => ({ buy: buys[0], sell })),
+      ],
+    });
+    renderDetail();
+
+    expect(await screen.findByText("买入（6 笔）")).toBeTruthy();
+    expect(screen.getByText("卖出（6 笔）")).toBeTruthy();
+    // 12 笔 > 阈值 10 → 默认全部折叠。
+    expect(screen.getAllByRole("button", { name: /^展开流水 / })).toHaveLength(12);
+    expect(document.querySelectorAll(".dt-expando")).toHaveLength(0);
+
+    fireEvent.click(toggle("trd_buy_2"));
+    expect(
+      screen.getByRole("button", { name: "收起流水 trd_buy_2 的 5/10/20 行情日" }),
+    ).toBeTruthy();
   });
 
   it("展示标签/排序与中文术语", async () => {
@@ -349,12 +392,10 @@ describe("RoundDetail 回合详情页", () => {
     expect(screen.getAllByText("-1.10%").length).toBeGreaterThan(0);
   });
 
-  it("子表默认折叠；展开卖出流水后内联「待满 20 个交易日」", async () => {
+  it("卖出流水子表默认展开，直接内联「待满 20 个交易日」", async () => {
     renderDetail();
 
     expect(await screen.findByText("卖出（1 笔）")).toBeTruthy();
-    expect(screen.queryByText("—（待满 20 个交易日）")).toBeNull();
-    fireEvent.click(toggle("trd_sell_1"));
     expect(screen.getAllByText("—（待满 20 个交易日）")).toHaveLength(3);
   });
 
@@ -377,8 +418,6 @@ describe("RoundDetail 回合详情页", () => {
     renderDetail();
 
     expect(await screen.findByText("买入（1 笔）")).toBeTruthy();
-    fireEvent.click(toggle("trd_buy_1"));
-    fireEvent.click(toggle("trd_sell_1"));
 
     // 每档 3 行（事件后走势/成交后收益/相对基准）都带原因，不再是裸「—」。
     expect(screen.getAllByText("—（窗口含分红等公司行动）")).toHaveLength(3);
