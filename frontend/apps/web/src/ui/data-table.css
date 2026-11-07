@@ -103,6 +103,60 @@
   white-space: normal;
 }
 
+/* ── 行内展开（可选 expansion） ──────────────────────────────
+ * 切换按钮落在首列，原生 button 保证 Enter/Space 可用；:focus-visible 与行焦点一致。 */
+.dt .dt-expander {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin-right: var(--s2);
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  vertical-align: middle;
+}
+
+.dt .dt-expander:hover {
+  color: var(--text);
+  background: var(--table-hover-bg);
+}
+
+.dt .dt-expander:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.dt .dt-expander-icon {
+  transition: transform 120ms ease;
+}
+
+.dt .dt-expander[aria-expanded="true"] .dt-expander-icon {
+  transform: rotate(90deg);
+}
+
+/* 展开面板：占满整行、允许换行，内部可再嵌表格 */
+.dt .dt-expando-cell {
+  height: auto;
+  padding: var(--s3) var(--table-cell-px);
+  background: var(--surface);
+  white-space: normal;
+}
+
+.dt .dt-expando-cell:hover {
+  background: var(--surface);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dt .dt-expander-icon {
+    transition: none;
+  }
+}
+
 /* ── 静态表：嵌在面板内、不自带滚动容器的 token 化表格 ──────────
  * 供 SectorTable 等“页面自有容器”使用，与 .dt 共享同一组 --table-*，
  * 但去掉外层边框与最小宽度（面板已提供留白，避免双重卡片感）。 */

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
 import { Link, useParams } from "react-router-dom";
 import type {
   ForwardReturnOut,
@@ -6,11 +6,12 @@ import type {
   RoundFill,
   RoundFillPage,
   RoundInsightDetail,
+  TradeReason,
   TradeSideInsightOut,
 } from "@sa/api-client";
 import { api } from "../client";
 import { ProblemView } from "../ui/Problem";
-import { DataTable, type DataTableColumn } from "../ui/DataTable";
+import { DataTable, type DataTableColumn, type DataTableExpansion } from "../ui/DataTable";
 import { TradeReasonForm } from "../ui/TradeReasonForm";
 import "./detail.css";
 import { roundStatusLabel } from "./Rounds";
@@ -171,6 +172,83 @@ function forwardTable(side: TradeSideInsightOut | null | undefined, caption: str
   );
 }
 
+/** 洞察详情里 fills 的元素（后端只保证 buy/sell 为笔次视图，生成类型未细化）。 */
+interface InsightFill {
+  fill_id?: number;
+  sequence?: number;
+  buy?: TradeSideInsightOut | null;
+  sell?: TradeSideInsightOut | null;
+}
+
+/** 短 id 不做截断（按字符长度判断，避免把短 id 截坏）。 */
+const SHORT_ID_MAX = 12;
+
+function shortTradeId(tradeId: string): string {
+  if (tradeId.length <= SHORT_ID_MAX) return tradeId;
+  return `${tradeId.slice(0, 6)}…${tradeId.slice(-4)}`;
+}
+
+/**
+ * 回合流水 = 配对明细里的 buy/sell 按 `trade_id` 去重后合并（同一笔卖出可能参与多个
+ * 配对，只能出现一次），再补回合级开仓/平仓流水；按日期升序、同日按 id 升序稳定排序。
+ */
+function uniqueTrades(
+  insight: RoundInsightDetail,
+  side: "buy" | "sell",
+): TradeSideInsightOut[] {
+  const byId = new Map<string, TradeSideInsightOut>();
+  const add = (trade: TradeSideInsightOut | null | undefined): void => {
+    if (trade && !byId.has(trade.trade_id)) byId.set(trade.trade_id, trade);
+  };
+  add(side === "buy" ? insight.buy_trade : insight.sell_trade);
+  for (const fill of (insight.fills ?? []) as unknown as InsightFill[]) {
+    add(side === "buy" ? fill.buy : fill.sell);
+  }
+  return [...byId.values()].sort((a, b) =>
+    a.date === b.date ? a.trade_id.localeCompare(b.trade_id) : a.date.localeCompare(b.date),
+  );
+}
+
+/** 复制完整流水 id（展示的是省略后的，复制的是完整值）；成功/失败都给可见反馈。 */
+function CopyTradeId({ tradeId }: { tradeId: string }): ReactElement {
+  const [feedback, setFeedback] = useState<"idle" | "copied" | "failed">("idle");
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (timer.current) clearTimeout(timer.current);
+    },
+    [],
+  );
+
+  async function copy(): Promise<void> {
+    if (timer.current) clearTimeout(timer.current);
+    try {
+      await navigator.clipboard.writeText(tradeId);
+      setFeedback("copied");
+    } catch {
+      setFeedback("failed");
+    }
+    timer.current = setTimeout(() => setFeedback("idle"), 2000);
+  }
+
+  return (
+    <span className="trade-id-copy">
+      <button
+        type="button"
+        className="btn btn-ghost trade-id-copy-btn"
+        aria-label={`复制流水 ${tradeId} 的完整 ID`}
+        onClick={() => void copy()}
+      >
+        复制
+      </button>
+      <span className="trade-id-feedback" role="status" aria-live="polite">
+        {feedback === "copied" ? "已复制" : feedback === "failed" ? "复制失败" : ""}
+      </span>
+    </span>
+  );
+}
+
 /** 回合详情（/rounds/:roundId）：回合级口径 + FIFO 配对明细 + 回合洞察（API-093）。 */
 export function RoundDetail() {
   const { roundId } = useParams<{ roundId: string }>();
@@ -179,6 +257,9 @@ export function RoundDetail() {
   const [insight, setInsight] = useState<RoundInsightDetail | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown>(null);
+  // 展开态与理由的局部回填：保存/删除后只改这一笔，不整页重取，避免丢展开态。
+  const [expanded, setExpanded] = useState<Record<string, boolean>>({});
+  const [reasonOverrides, setReasonOverrides] = useState<Record<string, TradeReason | null>>({});
 
   const load = useCallback(async () => {
     if (!roundId) return;
@@ -219,6 +300,88 @@ export function RoundDetail() {
     { key: "close", header: "卖出日", render: (row) => row.close_date },
     { key: "days", header: "持有交易日", render: (row) => row.holding_days },
   ];
+
+  /** 行内理由：优先用本次保存/删除后的局部值，否则用洞察返回的当前理由。 */
+  function reasonOf(trade: TradeSideInsightOut): TradeReason | null {
+    const override = reasonOverrides[trade.trade_id];
+    return override !== undefined ? override : (trade.reason ?? null);
+  }
+
+  function tradeColumns(side: "buy" | "sell"): Array<DataTableColumn<TradeSideInsightOut>> {
+    return [
+      {
+        key: "trade_id",
+        header: "流水id",
+        render: (trade) => (
+          <span className="trade-id">
+            <code title={trade.trade_id}>{shortTradeId(trade.trade_id)}</code>
+            <CopyTradeId tradeId={trade.trade_id} />
+          </span>
+        ),
+      },
+      { key: "date", header: "日期", render: (trade) => trade.date },
+      {
+        key: "quantity",
+        header: "数量",
+        align: "right",
+        render: (trade) => text(trade.quantity_display),
+      },
+      {
+        key: "price",
+        header: "价格",
+        align: "right",
+        render: (trade) => text(trade.price_display),
+      },
+      {
+        key: "amount",
+        header: "金额",
+        align: "right",
+        // 金额保留后端符号（买入为负），只展示字符串，不做 abs 或符号翻转。
+        render: (trade) =>
+          trade.amount_display == null ? (
+            "—"
+          ) : (
+            <span className={signedClass(trade.amount_display)}>{trade.amount_display}</span>
+          ),
+      },
+      {
+        key: "gap",
+        header: "执行价差（相对当日收盘）",
+        align: "right",
+        render: (trade) => text(executionGap(trade)),
+      },
+      {
+        key: "reason",
+        header: "操作理由",
+        render: (trade) => (
+          <div className="trade-reason">
+            <TradeReasonForm
+              tradeId={trade.trade_id}
+              side={side}
+              initial={reasonOf(trade)}
+              onSaved={(reason) =>
+                setReasonOverrides((prev) => ({ ...prev, [trade.trade_id]: reason }))
+              }
+              onDeleted={() => setReasonOverrides((prev) => ({ ...prev, [trade.trade_id]: null }))}
+            />
+          </div>
+        ),
+      },
+    ];
+  }
+
+  const expansion: DataTableExpansion<TradeSideInsightOut> = {
+    isExpanded: (trade) => expanded[trade.trade_id] ?? false,
+    onToggle: (trade) =>
+      setExpanded((prev) => ({ ...prev, [trade.trade_id]: !prev[trade.trade_id] })),
+    toggleLabel: (trade, isOpen) =>
+      `${isOpen ? "收起" : "展开"}流水 ${trade.trade_id} 的 5/10/20 行情日`,
+    panelTestId: (trade) => `trade-forward-${trade.trade_id}`,
+    render: (trade) => forwardTable(trade, `流水 ${shortTradeId(trade.trade_id)} 的 5/10/20 行情日`),
+  };
+
+  const buyRows: TradeSideInsightOut[] = insight ? uniqueTrades(insight, "buy") : [];
+  const sellRows: TradeSideInsightOut[] = insight ? uniqueTrades(insight, "sell") : [];
 
   return (
     <div className="detail-page">
@@ -318,91 +481,43 @@ export function RoundDetail() {
 
           {insight ? (
             <>
-              <h2 className="detail-section-title">操作理由</h2>
-              <div className="detail-card">
-                <h3>买入侧</h3>
-                {insight.buy_trade ? (
-                  <>
-                    <p className="muted">
-                      流水 <code>{insight.buy_trade.trade_id}</code> · {insight.buy_trade.date} · 净价{" "}
-                      {text(insight.buy_trade.price_display)} · 金额 {text(insight.buy_trade.amount_display)}
-                    </p>
-                    <TradeReasonForm
-                      tradeId={insight.buy_trade.trade_id}
-                      side="buy"
-                      initial={insight.buy_trade.reason ?? null}
-                      onSaved={() => void load()}
-                      onDeleted={() => void load()}
-                    />
-                  </>
-                ) : (
-                  <p className="muted">该回合没有可标注的买入流水。</p>
-                )}
-                <h3>卖出侧</h3>
-                {insight.sell_trade ? (
-                  <>
-                    <p className="muted">
-                      流水 <code>{insight.sell_trade.trade_id}</code> · {insight.sell_trade.date} · 净价{" "}
-                      {text(insight.sell_trade.price_display)} · 金额 {text(insight.sell_trade.amount_display)}
-                    </p>
-                    <TradeReasonForm
-                      tradeId={insight.sell_trade.trade_id}
-                      side="sell"
-                      initial={insight.sell_trade.reason ?? null}
-                      onSaved={() => void load()}
-                      onDeleted={() => void load()}
-                    />
-                  </>
-                ) : (
-                  <p className="muted">持仓中回合尚无卖出流水；卖出后可标注卖出理由。</p>
-                )}
-              </div>
-
-              <h2 className="detail-section-title">执行价差（相对当日收盘）</h2>
-              <div className="detail-card">
-                <table className="detail-stats">
-                  <tbody>
-                    {insight.buy_trade ? (
-                      <tr>
-                        <th>买入侧（毛）</th>
-                        <td>{text(executionGap(insight.buy_trade))}</td>
-                        <th>成交日</th>
-                        <td>{insight.buy_trade.date}</td>
-                      </tr>
-                    ) : null}
-                    {insight.sell_trade ? (
-                      <tr>
-                        <th>卖出侧（毛）</th>
-                        <td>{text(executionGap(insight.sell_trade))}</td>
-                        <th>成交日</th>
-                        <td>{insight.sell_trade.date}</td>
-                      </tr>
-                    ) : null}
-                  </tbody>
-                </table>
-                <p className="muted">
-                  执行价差 = 成交价与<strong>成交当日收盘价</strong>的对比（买入：收盘−成交价；卖出：成交价−收盘；
-                  正 = 买得低 / 卖得高）。
-                </p>
-              </div>
-
-              <h2 className="detail-section-title">5 / 10 / 20 行情日</h2>
+              <h2 className="detail-section-title">买卖流水与事后表现</h2>
               <div className="detail-card">
                 <p className="muted">
                   持有交易日（按基准日历）：{text(insight.holding_trading_days?.toString())}
-                  {` · 持有期：${BUCKET_LABELS[insight.bucket] ?? insight.bucket}`}
+                  {` · 持有期：${BUCKET_LABELS[insight.bucket] ?? insight.bucket}`} · 表格按流水
+                  （trade）去重：同一笔卖出参与多个配对时只出现一次。
                 </p>
-                <h3>买入后</h3>
-                {forwardTable(insight.buy_trade, "买入侧前瞻收益")}
-                <h3>卖出后</h3>
-                {insight.sell_trade ? (
-                  forwardTable(insight.sell_trade, "卖出侧前瞻收益")
-                ) : (
-                  <p className="muted">尚未卖出，卖出后才有卖后 5/10/20 数据。</p>
-                )}
+                <h3>买入（{buyRows.length} 笔）</h3>
+                <DataTable
+                  caption="买入流水与事后表现"
+                  columns={tradeColumns("buy")}
+                  rows={buyRows}
+                  rowKey={(row) => row.trade_id}
+                  expansion={expansion}
+                  emptyText="该回合没有可标注的买入流水。"
+                />
+                <h3>卖出（{sellRows.length} 笔）</h3>
+                <DataTable
+                  caption="卖出流水与事后表现"
+                  columns={tradeColumns("sell")}
+                  rows={sellRows}
+                  rowKey={(row) => row.trade_id}
+                  expansion={expansion}
+                  emptyText="持仓中回合尚无卖出流水；卖出后可标注卖出理由。"
+                />
                 <p className="muted">
-                  缺失或公司行动显示「—」并给出原因，不显示 0%；公司行动（分红/送转/配股）本期不复权，
-                  价格收益一律留空，避免“假跌”。
+                  执行价差 = 成交价与<strong>成交当日收盘价</strong>的对比（买入：收盘−成交价；卖出：成交价−收盘；
+                  正 = 买得低 / 卖得高）。它是该笔成交的固有属性，取首个有值的 5 / 10 / 20 档（三档同值，
+                  仅在窗口未到或降级时缺值）。
+                </p>
+                <p className="muted">
+                  展开任一行可看该笔的 5 / 10 / 20 行情日。缺失或公司行动显示「—」并给出原因，不显示 0%；
+                  公司行动（分红/送转/配股）本期不复权，价格收益一律留空，避免“假跌”。
+                </p>
+                <p className="muted">
+                  金额保留后端符号（买入为负）；数量/价格/金额/百分比均为后端返回的定点字符串，
+                  前端不做算术或格式改写。
                 </p>
               </div>
 

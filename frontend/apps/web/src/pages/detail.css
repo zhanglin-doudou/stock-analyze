@@ -357,3 +357,48 @@
     transform: scale(1);
   }
 }
+
+/* ── 回合详情：逐笔流水 id 的省略展示与复制反馈（tokens-only） ── */
+.trade-id {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+}
+
+.trade-id code {
+  font-size: var(--fs-xs);
+  color: var(--text-2);
+}
+
+.trade-id-copy {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s1);
+}
+
+.trade-id-copy-btn {
+  padding: 0 var(--s2);
+  font-size: var(--fs-micro);
+  line-height: 1.6;
+}
+
+.trade-id-feedback {
+  font-size: var(--fs-micro);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+/* 展开后的子表嵌在单元格里，收掉内层滚动容器的边框，避免双重描边 */
+.dt-expando-cell .dt-wrap {
+  border: 0;
+}
+
+/* 明细卡内的逐笔表：表头与理由列允许换行，窄屏（1024）不撑出横向滚动；日期等保持单行 */
+.detail-card .dt th {
+  white-space: normal;
+}
+
+.detail-card .dt td .trade-reason {
+  white-space: normal;
+}
+

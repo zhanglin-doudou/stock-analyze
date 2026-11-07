@@ -170,6 +170,8 @@ async def test_api_092_summary_addon_serialized(client, api_prefix, user, addon_
     item = body["items"][0]
     assert {"addon", "continued_decline", "stop_loss_rebound"} <= set(item["flags"])
     assert item["buy_trade"]["trade_id"] == "trd_addon000002"
+    # 逐笔数量取 trade.quantity_units 的定点字符串（此前该字段硬编码为 None）。
+    assert item["buy_trade"]["quantity_display"] == "50.0000"
 
     addon = body["summary"]["addon"]
     assert addon["count"] == 1
@@ -465,8 +467,10 @@ async def test_api_092_093_display_scale_6dp_and_2dp(
             Decimal(abs(amount_units)) * Decimal(10**8) / Decimal(quantity_units) / Decimal(10**6)
         )
         assert Decimal(view["price_display"]) == expected_price
+        # 数量透出与种子值一致（此前该字段恒为 null）。
+        assert view["quantity_display"] == "100.0000"
         # 数量 × 价格 与成交额自洽（买入含费、卖出扣费两个方向）。
-        assert Decimal(view["price_display"]) * Decimal(quantity_units).scaleb(-4) == abs(
+        assert Decimal(view["price_display"]) * Decimal(view["quantity_display"]) == abs(
             Decimal(view["amount_display"])
         )
 

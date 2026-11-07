@@ -1,4 +1,5 @@
-import type { KeyboardEvent, ReactElement, ReactNode } from "react";
+import { Fragment, useId, type KeyboardEvent, type ReactElement, type ReactNode } from "react";
+import { Icon } from "./icons";
 import "./data-table.css";
 
 export type ColumnAlign = "left" | "right" | "center";
@@ -29,6 +30,18 @@ export interface DataTableProps<T> {
   loadingText?: string;
   onRowClick?: (row: T) => void;
   rowTestId?: (row: T) => string | undefined;
+  /** 行内展开区：切换按钮落在首列，展开内容占满整行。 */
+  expansion?: DataTableExpansion<T>;
+}
+
+export interface DataTableExpansion<T> {
+  isExpanded: (row: T) => boolean;
+  onToggle: (row: T) => void;
+  /** 展开后渲染在整行下方的面板内容。 */
+  render: (row: T) => ReactNode;
+  /** 切换按钮的无障碍名称（需说明展开/收起的是哪一行）。 */
+  toggleLabel: (row: T, expanded: boolean) => string;
+  panelTestId?: (row: T) => string | undefined;
 }
 
 function cellClass(column: DataTableColumn<unknown>): string {
@@ -50,8 +63,10 @@ export function DataTable<T>({
   loadingText = "加载中…",
   onRowClick,
   rowTestId,
+  expansion,
 }: DataTableProps<T>): ReactElement {
   const interactive = onRowClick != null;
+  const baseId = useId();
 
   function handleRowKeyDown(event: KeyboardEvent<HTMLTableRowElement>, row: T): void {
     if (!interactive) return;
@@ -107,22 +122,53 @@ export function DataTable<T>({
               </td>
             </tr>
           ) : (
-            rows.map((row) => (
-              <tr
-                key={rowKey(row)}
-                tabIndex={interactive ? 0 : undefined}
-                onClick={interactive ? () => onRowClick(row) : undefined}
-                onKeyDown={interactive ? (event) => handleRowKeyDown(event, row) : undefined}
-                data-testid={rowTestId?.(row)}
-                className={interactive ? "dt-row is-interactive" : "dt-row"}
-              >
-                {columns.map((column) => (
-                  <td key={column.key} className={cellClass(column as DataTableColumn<unknown>)}>
-                    {column.render(row)}
-                  </td>
-                ))}
-              </tr>
-            ))
+            rows.map((row, index) => {
+              const expanded = expansion?.isExpanded(row) ?? false;
+              const panelId = `${baseId}-panel-${index}`;
+              return (
+                <Fragment key={rowKey(row)}>
+                  <tr
+                    tabIndex={interactive ? 0 : undefined}
+                    onClick={interactive ? () => onRowClick(row) : undefined}
+                    onKeyDown={interactive ? (event) => handleRowKeyDown(event, row) : undefined}
+                    data-testid={rowTestId?.(row)}
+                    className={interactive ? "dt-row is-interactive" : "dt-row"}
+                  >
+                    {columns.map((column, columnIndex) => (
+                      <td key={column.key} className={cellClass(column as DataTableColumn<unknown>)}>
+                        {expansion && columnIndex === 0 ? (
+                          <button
+                            type="button"
+                            className="dt-expander"
+                            aria-expanded={expanded}
+                            aria-controls={expanded ? panelId : undefined}
+                            aria-label={expansion.toggleLabel(row, expanded)}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              expansion.onToggle(row);
+                            }}
+                          >
+                            <Icon name="chevron" size={12} className="dt-expander-icon" />
+                          </button>
+                        ) : null}
+                        {column.render(row)}
+                      </td>
+                    ))}
+                  </tr>
+                  {expansion && expanded ? (
+                    <tr
+                      className="dt-expando"
+                      id={panelId}
+                      data-testid={expansion.panelTestId?.(row)}
+                    >
+                      <td className="dt-cell dt-expando-cell" colSpan={columns.length}>
+                        {expansion.render(row)}
+                      </td>
+                    </tr>
+                  ) : null}
+                </Fragment>
+              );
+            })
           )}
         </tbody>
       </table>

@@ -668,7 +668,7 @@ def _side_view(
         trade_id=trade.id,
         date=trade.trade_date,
         price_display=_price_6dp(net_price),
-        quantity_display=None,
+        quantity_display=str(Qty(trade.quantity_units)),
         amount_display=_money(trade.amount_units),
         reason=dto,
         reason_label=(REASON_LABELS.get(dto.reason_code) if dto else None),
