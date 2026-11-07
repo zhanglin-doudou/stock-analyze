@@ -901,7 +901,9 @@ async def test_api_080_detail_happy_path(client, api_prefix, user, owner_engine)
     resp = await client.get(f"{api_prefix}/trades/{trade_id}", headers=user.headers)
     assert resp.status_code == 200
     assert resp.json()["trade_id"] == trade_id
-    assert resp.headers["ETag"] == '"1"'
+    # 详情 ETag = "<trade.version>:<reason_version>"（流水版本 : 交易理由版本，无理由记 0）。
+    # 初始流水 version=1、尚未写理由 → "1:0"；冒号后是第二个版本号，不是冗余后缀。
+    assert resp.headers["ETag"] == '"1:0"'
 
 
 async def test_api_080_detail_cross_user_404(

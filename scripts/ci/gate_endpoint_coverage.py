@@ -26,7 +26,7 @@ API_PREFIX = "/api/v1"
 ROOT_MARK = "（根）"
 EXPECTED_PERIOD1 = 30
 EXPECTED_ALL_ENDPOINTS = 93  # 88 已排期 + API-090~094 设计登记；API-089 预留不计数
-EXPECTED_PERIOD2 = 34
+EXPECTED_PERIOD2 = 39
 
 # 07 指标端点所属任务（DEV-PLAN A.1 第 3/6 列）：Period2-06 = 指标端点，
 # Period2-07 = 三域指标实现。这些端点必须实现且每端点 ≥3 条用例（C-27）。

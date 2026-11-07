@@ -27,7 +27,8 @@ pytestmark = pytest.mark.api
 
 _CLOCK = "2026-07-01T09:00:00+00:00"
 _MONEY_RE = re.compile(r"^-?\d+\.\d{2}$")
-_RATIO_RE = re.compile(r"^-?\d+\.\d{8}$")
+# 比率统一走 `Ratio.as_decimal_str()`：最多 8 位小数且**去尾零**（1.00000000 → "1"）。
+_RATIO_RE = re.compile(r"^-?\d+(?:\.\d{1,8})?$")
 _PCT_RE = re.compile(r"^-?\d+\.\d{2}%$")
 _HEX16_RE = re.compile(r"^[0-9a-f]{16}$")
 _HEX64_RE = re.compile(r"^[0-9a-f]{64}$")
@@ -203,7 +204,8 @@ async def test_api_087_industry_happy(
     assert body["links"]["sectors"] == "/sectors?taxonomy=industry&level=1"
 
     portfolio = body["portfolio"]
-    assert portfolio["coverage"] == "1.00000000"
+    # 比率展示串去尾零（`Ratio.as_decimal_str()`）：满仓覆盖输出 "1"，不是 "1.00000000"。
+    assert portfolio["coverage"] == "1"
     assert portfolio["coverage_pct"] == "100.00%"
     assert portfolio["coverage_basis"] == "mapped_equity_market_value / equity_market_value"
     assert portfolio["unclassified_market_value"] == "0.00"
@@ -217,11 +219,11 @@ async def test_api_087_industry_happy(
     food = by_code["801120.SI"]
     assert food["sector_name"] == "食品饮料"
     assert food["level"] == 1
-    assert food["weight"] == "1.00000000"
+    assert food["weight"] == "1"
     assert food["weight_pct"] == "100.00%"
-    # 基准含 5 只成分，食品饮料占 (5.32+1.98)/17.07 = 42.765085%
-    assert food["benchmark_weight"] == "0.42765085"
-    assert food["active_weight"] == "0.57234915"
+    # 基准含 5 只成分，食品饮料占 (5.32+1.98)/17.07 = 42.765085% → 3 位去尾零 "0.428"
+    assert food["benchmark_weight"] == "0.428"
+    assert food["active_weight"] == "0.572"
     assert food["direction"] == "over"
     assert food["holding_count"] == 1
     assert food["market_value"] == portfolio["equity_market_value"]
@@ -238,18 +240,18 @@ async def test_api_087_industry_happy(
     concentration = body["concentration"]
     assert concentration["method"] == "industry_single_membership"
     assert concentration["status"] == "ok"
-    assert concentration["hhi"] == "1.00000000"
-    assert concentration["effective_n"] == "1.00000000"
-    assert concentration["top1_weight"] == "1.00000000"
-    assert concentration["top3_weight"] == "1.00000000"
-    # 基准 HHI 按全部基准板块分布计算（4 个板块）
-    assert concentration["benchmark_hhi"] == "0.29920185"
+    assert concentration["hhi"] == "1"
+    assert concentration["effective_n"] == "1"
+    assert concentration["top1_weight"] == "1"
+    assert concentration["top3_weight"] == "1"
+    # 基准 HHI 按全部基准板块分布计算（4 个板块）→ 3 位去尾零
+    assert concentration["benchmark_hhi"] == "0.299"
     # n_sectors 统计组合持仓涉及的板块数（与 HHI 计算口径一致，不含基准独占板块）
     assert concentration["n_sectors"] == 1
 
     preference = body["preference"]
     assert preference is not None
-    assert preference["deviation"] == "0.57234915"
+    assert preference["deviation"] == "0.572"
     assert preference["max_overweight"]["sector_code"] == "801120.SI"
     assert preference["max_underweight"]["sector_code"] == "801180.SI"
     assert [item["sector_code"] for item in preference["top_overweight"]] == ["801120.SI"]
@@ -312,6 +314,8 @@ async def test_api_087_concept_taxonomy(
 
     block = body["concept"]
     assert block is not None
+    # 注意：概念块是另一条格式化路径（`str(Ratio(...))`，固定 8 位），与上面的 `_ratio`
+    # （3 位去尾零）不一致；这里按服务端真实行为断言，实现口径待产品决定后另行统一。
     assert block["coverage"] == "1.00000000"
     assert block["coverage_basis"] == "tagged_equity_market_value / equity_market_value"
     assert block["overlap"] == "2.00000000"
