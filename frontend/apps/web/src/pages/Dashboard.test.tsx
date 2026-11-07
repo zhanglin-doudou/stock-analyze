@@ -380,7 +380,7 @@ function makeIndustryOverview(overrides: Partial<SectorsOverview> = {}): Sectors
       max_overweight: {
         sector_code: "801120.SI",
         sector_name: "食品饮料",
-        active_weight: "0.70000000",
+        active_weight: "0.7",
         active_weight_pct: "70.00%",
         direction: "over",
       },
@@ -389,7 +389,7 @@ function makeIndustryOverview(overrides: Partial<SectorsOverview> = {}): Sectors
         {
           sector_code: "801120.SI",
           sector_name: "食品饮料",
-          active_weight: "0.70000000",
+          active_weight: "0.7",
           active_weight_pct: "70.00%",
           direction: "over",
         },
@@ -475,25 +475,25 @@ function makeConceptOverview(overrides: Partial<SectorsOverview> = {}): SectorsO
     },
     preference: null,
     concept: {
-      coverage: "1.00000000",
+      coverage: "1",
       coverage_pct: "100.00%",
       coverage_basis: "tagged_equity_market_value / equity_market_value",
       tagged_market_value: "170620.00",
       multi_tag_market_value: "0.00",
       multi_tag_pct: "0.00%",
-      overlap: "1.00000000",
+      overlap: "1",
       hhi_tag: null,
       top1_concept: {
         sector_code: "BK0999",
         sector_name: "白酒",
-        exposure: "1.00000000",
+        exposure: "1",
         exposure_pct: "100.00%",
       },
       top5_concepts: [
         {
           sector_code: "BK0999",
           sector_name: "白酒",
-          exposure: "1.00000000",
+          exposure: "1",
           exposure_pct: "100.00%",
         },
       ],

@@ -314,11 +314,10 @@ async def test_api_087_concept_taxonomy(
 
     block = body["concept"]
     assert block is not None
-    # 注意：概念块是另一条格式化路径（`str(Ratio(...))`，固定 8 位），与上面的 `_ratio`
-    # （3 位去尾零）不一致；这里按服务端真实行为断言，实现口径待产品决定后另行统一。
-    assert block["coverage"] == "1.00000000"
+    # 概念块与偏好项同口径：`Ratio.as_decimal_str()`（3 位 HALF_UP + 去尾零）。
+    assert block["coverage"] == "1"
     assert block["coverage_basis"] == "tagged_equity_market_value / equity_market_value"
-    assert block["overlap"] == "2.00000000"
+    assert block["overlap"] == "2"
     assert block["caveat"]
     codes = {item["code"] for item in body["missing"]}
     assert "SECTOR_CONCEPT_MULTI_MEMBERSHIP" in codes

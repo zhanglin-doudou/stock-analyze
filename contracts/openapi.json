@@ -18264,23 +18264,23 @@
                   },
                   "concept": {
                     "caveat": "概念为多归属标签：暴露可重叠、不可加总。",
-                    "coverage": "0.1234",
+                    "coverage": "0.123",
                     "coverage_basis": "mapped_equity_market_value / equity_market_value",
                     "coverage_pct": "96.00%",
                     "hhi_tag": "0.1234",
                     "multi_tag_market_value": "示例",
                     "multi_tag_pct": "36.00%",
-                    "overlap": "示例",
+                    "overlap": "0.123",
                     "tagged_market_value": "示例",
                     "top1_concept": {
-                      "exposure": "0.1234",
+                      "exposure": "0.123",
                       "exposure_pct": "80.00%",
                       "sector_code": "801030.SI",
                       "sector_name": "基础化工"
                     },
                     "top5_concepts": [
                       {
-                        "exposure": "0.1234",
+                        "exposure": "0.123",
                         "exposure_pct": "80.00%",
                         "sector_code": "801030.SI",
                         "sector_name": "基础化工"
@@ -18305,7 +18305,7 @@
                     }
                   ],
                   "others": {
-                    "exposure": "0.1234",
+                    "exposure": "0.123",
                     "exposure_pct": "80.00%",
                     "holding_count": 1,
                     "market_value": "示例",
@@ -18314,7 +18314,7 @@
                   },
                   "portfolio": {
                     "classified_holding_count": 1,
-                    "coverage": "0.1234",
+                    "coverage": "0.123",
                     "coverage_basis": "mapped_equity_market_value / equity_market_value",
                     "coverage_pct": "96.00%",
                     "equity_market_value": "示例",
@@ -18331,14 +18331,14 @@
                   "preference": {
                     "deviation": "0.1234",
                     "max_overweight": {
-                      "active_weight": "0.1234",
+                      "active_weight": "0.123",
                       "active_weight_pct": "53.33%",
                       "direction": "over",
                       "sector_code": "801030.SI",
                       "sector_name": "基础化工"
                     },
                     "max_underweight": {
-                      "active_weight": "0.1234",
+                      "active_weight": "0.123",
                       "active_weight_pct": "53.33%",
                       "direction": "over",
                       "sector_code": "801030.SI",
@@ -18346,7 +18346,7 @@
                     },
                     "top_overweight": [
                       {
-                        "active_weight": "0.1234",
+                        "active_weight": "0.123",
                         "active_weight_pct": "53.33%",
                         "direction": "over",
                         "sector_code": "801030.SI",
@@ -18355,7 +18355,7 @@
                     ],
                     "top_underweight": [
                       {
-                        "active_weight": "0.1234",
+                        "active_weight": "0.123",
                         "active_weight_pct": "53.33%",
                         "direction": "over",
                         "sector_code": "801030.SI",
@@ -18368,12 +18368,12 @@
                   "sector_dataset_version": "sw2021@2026-09-30",
                   "sectors": [
                     {
-                      "active_weight": "0.1234",
+                      "active_weight": "0.123",
                       "active_weight_pct": "53.33%",
                       "benchmark_weight": "0.1234",
                       "benchmark_weight_pct": "30.00%",
                       "direction": "over",
-                      "exposure": "0.1234",
+                      "exposure": "0.123",
                       "exposure_pct": "80.00%",
                       "holding_count": 1,
                       "level": 1,

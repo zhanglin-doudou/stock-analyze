@@ -164,7 +164,7 @@ def _preference_item(item: Any) -> SectorPreferenceItemOut:
     return SectorPreferenceItemOut(
         sector_code=item.sector_code,
         sector_name=item.sector_name,
-        active_weight=str(Ratio(item.active_weight_units)),
+        active_weight=Ratio(item.active_weight_units).as_decimal_str(),
         active_weight_pct=_pct(item.active_weight_units) or "0.00%",
         direction=_direction(item.active_weight_units),
     )
@@ -172,13 +172,13 @@ def _preference_item(item: Any) -> SectorPreferenceItemOut:
 
 def _concept_out(block: ConceptBlock) -> SectorConceptBlockOut:
     return SectorConceptBlockOut(
-        coverage=str(Ratio(block.coverage_units)),
+        coverage=Ratio(block.coverage_units).as_decimal_str(),
         coverage_pct=_pct(block.coverage_units) or "0.00%",
         coverage_basis=_COVERAGE_BASIS_CONCEPT,
         tagged_market_value=str(Money(block.tagged_market_value_units)),
         multi_tag_market_value=str(Money(block.multi_tag_market_value_units)),
         multi_tag_pct=_pct(block.multi_tag_units) or "0.00%",
-        overlap=str(Ratio(block.overlap_units)),
+        overlap=Ratio(block.overlap_units).as_decimal_str(),
         hhi_tag=_ratio(block.hhi_tag_units),
         top1_concept=(
             None
@@ -186,7 +186,7 @@ def _concept_out(block: ConceptBlock) -> SectorConceptBlockOut:
             else SectorConceptTopOut(
                 sector_code=block.top1_concept.sector_code,
                 sector_name=block.top1_concept.sector_name,
-                exposure=str(Ratio(block.top1_concept.exposure_units or 0)),
+                exposure=Ratio(block.top1_concept.exposure_units or 0).as_decimal_str(),
                 exposure_pct=_pct(block.top1_concept.exposure_units) or "0.00%",
             )
         ),
@@ -194,7 +194,7 @@ def _concept_out(block: ConceptBlock) -> SectorConceptBlockOut:
             SectorConceptTopOut(
                 sector_code=row.sector_code,
                 sector_name=row.sector_name,
-                exposure=str(Ratio(row.exposure_units or 0)),
+                exposure=Ratio(row.exposure_units or 0).as_decimal_str(),
                 exposure_pct=_pct(row.exposure_units) or "0.00%",
             )
             for row in block.top5_concepts

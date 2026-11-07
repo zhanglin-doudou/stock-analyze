@@ -143,10 +143,14 @@ RATIO_FIELDS = frozenset(
         "share",
     }
 )
+# 2026-11-07（API-087）：偏好项 active_weight 与概念块 coverage/overlap/exposure 已改用
+# `Ratio.as_decimal_str()`（3 位 HALF_UP + 去尾零），示例串同步收敛到 3 位。
+RATIO_TRIM3_FIELDS = frozenset({"active_weight", "coverage", "overlap", "exposure"})
 _MONEY_VALUE = "1234.56"
 _PRICE_VALUE = "12.340000"
 _QUANTITY_VALUE = "100"
 _RATIO_VALUE = "0.1234"
+_RATIO_TRIM3_VALUE = "0.123"
 _RATIO_NUMBER = 0.1234
 
 _DATE_FIELDS = frozenset(
@@ -2218,6 +2222,8 @@ def _string_example(field: str | None, fmt: str | None) -> str:
             return _PRICE_VALUE
         if field in QUANTITY_FIELDS:
             return _QUANTITY_VALUE
+        if field in RATIO_TRIM3_FIELDS:
+            return _RATIO_TRIM3_VALUE
         if field in RATIO_FIELDS:
             return _RATIO_VALUE
         if field.endswith("_id") or field == "id":
