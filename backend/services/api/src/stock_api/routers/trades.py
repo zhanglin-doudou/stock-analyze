@@ -14,7 +14,7 @@ from typing import Annotated, Any, Literal
 from fastapi import APIRouter, Depends, Header, Query, Request, Response
 from fastapi.responses import JSONResponse
 from stock_contracts.errors import ApiError, ErrorCode
-from stock_core.values import Money, Price, Qty
+from stock_core.values import Money, Price, Qty, format_quantity
 from stock_ledger.application.trades import (
     TradeDTO,
     TradeFilters,
@@ -85,7 +85,7 @@ def _trade_out(dto: TradeDTO, reason: ReasonDTO | None = None) -> TradeOut:
         security_code=dto.security_code,
         security_name=dto.security_name,
         side=dto.side,
-        quantity=str(Qty(dto.quantity_units)),
+        quantity=format_quantity(dto.quantity_units),
         price=str(Price(dto.price_units)),
         amount=str(Money(dto.amount_units)),
         commission=str(Money(dto.commission_units)),

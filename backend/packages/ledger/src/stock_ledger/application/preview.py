@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from stock_contracts.clock import Clock
 from stock_contracts.constants import IMPORT_PREVIEW_TTL_HOURS
 from stock_contracts.enums import WarningCode
-from stock_core.values import Money, Price, Qty
+from stock_core.values import Money, Price, format_quantity
 from stock_platform.config import Settings, get_settings
 from stock_platform.ports import ObjectStore
 
@@ -134,7 +134,7 @@ def row_to_sample(row: ParsedRow) -> dict[str, Any]:
         "security_code": row.security_code,
         "security_name": row.security_name,
         "side": row.side,
-        "quantity": str(Qty(row.quantity_units)),
+        "quantity": format_quantity(row.quantity_units),
         "price": str(Price(row.price_units)),
         "amount": str(Money(row.amount_units)),
         "fees": str(Money(row.commission_units + row.stamp_tax_units + row.other_fee_units)),

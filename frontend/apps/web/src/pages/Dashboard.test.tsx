@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import {
@@ -60,7 +60,7 @@ function makeDashboard(overrides: Partial<DashboardOut> = {}): DashboardOut {
         {
           security_code: "600519",
           security_name: "贵州茅台",
-          quantity: "100.0000",
+          quantity: "100",
           cost: "170000.00",
           market_value: "170620.00",
           weight_pct: "1.00000000",
@@ -579,7 +579,8 @@ describe("Dashboard 看板", () => {
     expect(screen.getByTestId("kpi-max-drawdown").textContent).toContain("92");
 
     expect(screen.getByTestId("holding-row-600519").textContent).toContain("贵州茅台");
-    expect(screen.getByTestId("holding-row-600519").textContent).toContain("100.0000");
+    // 数量沿用后端展示串：整数份额不带尾零（"100"）。
+    expect(within(screen.getByTestId("holding-row-600519")).getByText("100")).toBeTruthy();
     expect(screen.getByTestId("top-round-rnd_600519")).toBeTruthy();
     expect(screen.getByTestId("bottom-round-rnd_000858")).toBeTruthy();
 

@@ -145,7 +145,7 @@ RATIO_FIELDS = frozenset(
 )
 _MONEY_VALUE = "1234.56"
 _PRICE_VALUE = "12.340000"
-_QUANTITY_VALUE = "100.0000"
+_QUANTITY_VALUE = "100"
 _RATIO_VALUE = "0.1234"
 _RATIO_NUMBER = 0.1234
 
@@ -1569,7 +1569,7 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
                     {
                         "security_code": "600519",
                         "security_name": "贵州茅台",
-                        "quantity": "100.0000",
+                        "quantity": "100",
                         "cost": "150000.00",
                         "market_value": "160000.00",
                         "weight_pct": "1.00000000",
@@ -2068,7 +2068,7 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
                 {
                     "fill_id": "fil_" + _ID_SUFFIX,
                     "sequence": 1,
-                    "quantity_display": "100.0000",
+                    "quantity_display": "100",
                     "pnl_display": "1234.56",
                     "open_date": "2026-11-02",
                     "close_date": "2026-11-18",

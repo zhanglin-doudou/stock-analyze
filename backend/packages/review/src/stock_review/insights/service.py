@@ -30,7 +30,7 @@ from stock_core.insights import DEFINITION_VERSION, classify
 from stock_core.insights import aggregate as agg
 from stock_core.insights import calendar as cal
 from stock_core.insights.forward import ForwardResult, ForwardTrade, compute_forward, price_net
-from stock_core.values import Money, Price, Qty, Ratio
+from stock_core.values import Money, Price, Ratio, format_quantity
 from stock_ledger.corporate_actions import is_corporate_action
 from stock_ledger.models import Trade
 from stock_platform.ids import new_id
@@ -668,7 +668,7 @@ def _side_view(
         trade_id=trade.id,
         date=trade.trade_date,
         price_display=_price_6dp(net_price),
-        quantity_display=str(Qty(trade.quantity_units)),
+        quantity_display=format_quantity(trade.quantity_units),
         amount_display=_money(trade.amount_units),
         reason=dto,
         reason_label=(REASON_LABELS.get(dto.reason_code) if dto else None),
@@ -1338,7 +1338,7 @@ async def get_round_insight(
                     corporate=corporate,
                     fingerprint=fingerprint,
                 ),
-                "quantity_display": str(Qty(fill.quantity_units)),
+                "quantity_display": format_quantity(fill.quantity_units),
                 "pnl_display": _money(fill.pnl_units),
                 "open_date": fill.open_date,
                 "close_date": fill.close_date,

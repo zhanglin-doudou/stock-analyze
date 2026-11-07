@@ -23,7 +23,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from stock_contracts.enums import Role
 from stock_contracts.errors import ApiError, ErrorCode, FieldError
-from stock_core.values import Money, Qty, Ratio
+from stock_core.values import Money, Ratio, format_quantity
 from stock_platform.audit import record as audit_record
 from stock_platform.idempotency import IdempotencyStore
 from stock_platform.tenant import TenantContext
@@ -84,7 +84,7 @@ def _round_out(dto: Any) -> RoundOut:
         status=dto.status,
         open_date=dto.open_date,
         close_date=dto.close_date,
-        quantity=str(Qty(dto.quantity_units)),
+        quantity=format_quantity(dto.quantity_units),
         cost=str(Money(dto.cost_units)),
         proceeds=str(Money(dto.proceeds_units)),
         dividend=str(Money(dto.dividend_units)),
@@ -94,7 +94,7 @@ def _round_out(dto: Any) -> RoundOut:
         open_trade_id=dto.open_trade_id,
         close_trade_id=dto.close_trade_id,
         data_error=dto.data_error,
-        oversell_quantity=str(Qty(dto.oversell_units)),
+        oversell_quantity=format_quantity(dto.oversell_units),
         fills_count=dto.fills_count,
         rebuilt_at=dto.rebuilt_at,
     )
@@ -106,7 +106,7 @@ def _fill_out(dto: Any) -> RoundFillOut:
         sequence=dto.sequence,
         buy_trade_id=dto.buy_trade_id,
         sell_trade_id=dto.sell_trade_id,
-        quantity=str(Qty(dto.quantity_units)),
+        quantity=format_quantity(dto.quantity_units),
         open_date=dto.open_date,
         close_date=dto.close_date,
         holding_days=dto.holding_days,

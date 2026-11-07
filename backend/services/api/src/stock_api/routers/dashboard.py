@@ -14,7 +14,7 @@ from __future__ import annotations
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Request
-from stock_core.values import Money, Qty, Ratio
+from stock_core.values import Money, Ratio, format_quantity
 from stock_platform.tenant import TenantContext
 
 from stock_api.deps import get_market_data, get_state, get_tenant
@@ -104,7 +104,7 @@ def _to_out(result: Any) -> DashboardOut:
                 DashboardHoldingOut(
                     security_code=item.security_code,
                     security_name=item.security_name,
-                    quantity=str(Qty(item.quantity_units)),
+                    quantity=format_quantity(item.quantity_units),
                     cost=_money(item.cost_units) or "0.00",
                     market_value=_money(item.market_value_units),
                     weight_pct=_ratio(item.weight_ratio_units),

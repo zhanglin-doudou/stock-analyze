@@ -85,7 +85,7 @@ async def test_import_auto_builds_rounds_and_web_can_query(
     round_ = opened[0]
     assert round_["security_code"] == "600519"
     # open round 聚合已消耗 lot 部分：sell 150 股 FIFO 消耗 buy1 全量 + buy2 50 股
-    assert round_["quantity"] == "150.0000"  # 已 FIFO 配对的股数
+    assert round_["quantity"] == "150"  # 已 FIFO 配对的股数（整数份额不带尾零）
     assert round_["cost"] == "1600.00"  # 已消耗 lot 成本（1000 + 600）
     assert round_["proceeds"] == "2250.00"
     assert round_["pnl"] == "650.00"

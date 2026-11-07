@@ -33,7 +33,7 @@ from stock_worker.runner import WorkerRunner
 pytestmark = pytest.mark.api
 
 _MONEY_RE = re.compile(r"^-?\d+\.\d{2}$")
-_QTY_RE = re.compile(r"^-?\d+\.\d{4}$")
+_QTY_RE = re.compile(r"^-?\d+(?:\.\d{2})?$")  # 整数份额 或 2 位小数（见 format_quantity）
 _RATIO_RE = re.compile(r"^-?\d+\.\d{8}$")
 
 
@@ -374,7 +374,7 @@ async def test_api_029_rounds_visible_after_rebuild(
     assert abs(Decimal(round_["pnl"]) - Decimal("1200.00")) <= Decimal("0.01")
     assert round_["cost"] == "6000.00"  # buy1 前 60 股成本
     assert round_["proceeds"] == "7200.00"
-    assert round_["quantity"] == "60.0000"  # 已 FIFO 配对的股数
+    assert round_["quantity"] == "60"  # 已 FIFO 配对的股数（整数份额不带尾零）
     assert round_["return_rate"] == "0.20000000"
     assert _MONEY_RE.match(round_["pnl"])
     assert _MONEY_RE.match(round_["cost"])
@@ -467,7 +467,7 @@ async def test_api_031_fills_fifo_pairing(
     assert fill["sequence"] == 1
     assert fill["buy_trade_id"] == ids["buy1"], "FIFO 应消耗最早买入的 lot"
     assert fill["sell_trade_id"] == ids["sell"]
-    assert fill["quantity"] == "60.0000"
+    assert fill["quantity"] == "60"
     # 分摊成本/收益/pnl 不再在 fills 明细中返回（回合级 Round 字段保留）
     assert "buy_cost" not in fill
     assert "sell_proceeds" not in fill

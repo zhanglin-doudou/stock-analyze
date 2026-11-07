@@ -23,7 +23,8 @@ from stock_api.openapi_meta import (
 _METHODS = frozenset({"get", "post", "put", "patch", "delete", "head", "options"})
 _MONEY_RE = re.compile(r"^-?\d+\.\d{2}$")
 _PRICE_RE = re.compile(r"^-?\d+\.\d{6}$")
-_QUANTITY_RE = re.compile(r"^-?\d+\.\d{4}$")
+# 数量展示串：整数份额不带小数点/尾零（如 "100"），非整数份额固定 2 位（如 "1414.19"）。
+_QUANTITY_RE = re.compile(r"^-?\d+(?:\.\d{2})?$")
 
 
 def _operations(spec: dict[str, Any]) -> list[tuple[str, str, dict[str, Any]]]:

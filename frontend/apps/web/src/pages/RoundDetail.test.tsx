@@ -38,7 +38,7 @@ function makeRound(overrides: Partial<Round> = {}): Round {
     status: "closed",
     open_date: "2026-06-02",
     close_date: "2026-06-20",
-    quantity: "150.0000",
+    quantity: "150",
     cost: "1600.00",
     proceeds: "2250.00",
     dividend: "0.00",
@@ -48,7 +48,7 @@ function makeRound(overrides: Partial<Round> = {}): Round {
     open_trade_id: "trd_buy_1",
     close_trade_id: "trd_sell_1",
     data_error: false,
-    oversell_quantity: "0.0000",
+    oversell_quantity: "0",
     fills_count: 2,
     rebuilt_at: "2026-06-20T08:00:00Z",
     ...overrides,
@@ -63,7 +63,7 @@ function makeFillPage(): RoundFillPage {
         sequence: 1,
         buy_trade_id: "trd_buy_1",
         sell_trade_id: "trd_sell_1",
-        quantity: "100.0000",
+        quantity: "100",
         open_date: "2026-06-02",
         close_date: "2026-06-20",
         holding_days: 14,
@@ -73,7 +73,7 @@ function makeFillPage(): RoundFillPage {
         sequence: 2,
         buy_trade_id: "trd_buy_2",
         sell_trade_id: "trd_sell_1",
-        quantity: "50.0000",
+        quantity: "50",
         open_date: "2026-06-10",
         close_date: "2026-06-20",
         holding_days: 8,
@@ -105,7 +105,7 @@ function makeSide(overrides: Partial<TradeSideInsightOut> = {}): TradeSideInsigh
     trade_id: "trd_buy_1",
     date: "2026-06-02",
     price_display: "100.000000",
-    quantity_display: "100.0000",
+    quantity_display: "100",
     amount_display: "-10000.00",
     reason_label: null,
     reason: null,
@@ -144,7 +144,7 @@ function makeInsight(overrides: Partial<RoundInsightDetail> = {}): RoundInsightD
       trade_id: "trd_buy_1",
       date: "2026-06-02",
       price_display: "100.000000",
-      quantity_display: "100.0000",
+      quantity_display: "100",
       amount_display: "-10000.00",
       reason_label: "计划建仓",
       reason: makeReason(),
@@ -154,7 +154,7 @@ function makeInsight(overrides: Partial<RoundInsightDetail> = {}): RoundInsightD
       trade_id: "trd_sell_1",
       date: "2026-06-20",
       price_display: "120.000000",
-      quantity_display: "150.0000",
+      quantity_display: "150",
       amount_display: "18000.00",
       reason_label: "止盈",
       reason: null,
@@ -210,8 +210,8 @@ describe("RoundDetail 回合详情页", () => {
 
     expect(await screen.findByText(/600519 贵州茅台/)).toBeTruthy();
     expect(screen.getByText("650.00")).toBeTruthy();
-    // 数量「150.0000」：回合口径 + 卖出流水各一次（买入是 100.0000）。
-    expect(screen.getAllByText("150.0000")).toHaveLength(2);
+    // 数量「150」：回合口径 + 卖出流水各一次（买入是 100）；整数份额不带小数点/尾零。
+    expect(screen.getAllByText("150")).toHaveLength(2);
     expect(screen.getByText("1600.00")).toBeTruthy();
     expect(screen.getByText("0.40625000")).toBeTruthy();
     expect(screen.getByText(/共 2 笔配对/)).toBeTruthy();
@@ -223,7 +223,7 @@ describe("RoundDetail 回合详情页", () => {
 
   it("持仓中回合给出「暂无配对明细」说明，不展示负数/伪造数据", async () => {
     getRound.mockResolvedValue(
-      makeRound({ status: "open", close_date: null, close_trade_id: null, fills_count: 0, quantity: "50.0000" }),
+      makeRound({ status: "open", close_date: null, close_trade_id: null, fills_count: 0, quantity: "50" }),
     );
     getFills.mockResolvedValue({ items: [], total: 0 });
     renderDetail();
@@ -276,13 +276,13 @@ describe("RoundDetail 回合详情页", () => {
     const buy2 = makeSide({
       trade_id: "trd_buy_2",
       date: "2026-06-10",
-      quantity_display: "50.0000",
+      quantity_display: "50",
       amount_display: "-5000.00",
     });
     const sell2 = makeSide({
       trade_id: "trd_sell_2",
       date: "2026-06-21",
-      quantity_display: "50.0000",
+      quantity_display: "50",
       amount_display: "6000.00",
       reason: null,
       forward: {},
@@ -400,12 +400,12 @@ describe("RoundDetail 回合详情页", () => {
 
   it("数据异常回合展示超卖提示", async () => {
     getRound.mockResolvedValue(
-      makeRound({ status: "data_error", data_error: true, oversell_quantity: "100.0000" }),
+      makeRound({ status: "data_error", data_error: true, oversell_quantity: "100" }),
     );
     renderDetail();
 
     expect(await screen.findByText(/超出可用持仓/)).toBeTruthy();
-    expect(screen.getAllByText(/100.0000/).length).toBeGreaterThan(0);
+    expect(screen.getAllByText("100").length).toBeGreaterThan(0);
   });
 
   it("长流水 id 头尾保留，短 id 不截断；复制按钮复制完整 id", async () => {

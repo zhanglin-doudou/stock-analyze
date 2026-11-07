@@ -170,8 +170,8 @@ async def test_api_092_summary_addon_serialized(client, api_prefix, user, addon_
     item = body["items"][0]
     assert {"addon", "continued_decline", "stop_loss_rebound"} <= set(item["flags"])
     assert item["buy_trade"]["trade_id"] == "trd_addon000002"
-    # 逐笔数量取 trade.quantity_units 的定点字符串（此前该字段硬编码为 None）。
-    assert item["buy_trade"]["quantity_display"] == "50.0000"
+    # 逐笔数量取 trade.quantity_units 的展示串（整数份额，不带尾零；此前该字段硬编码为 None）。
+    assert item["buy_trade"]["quantity_display"] == "50"
 
     addon = body["summary"]["addon"]
     assert addon["count"] == 1
@@ -468,7 +468,7 @@ async def test_api_092_093_display_scale_6dp_and_2dp(
         )
         assert Decimal(view["price_display"]) == expected_price
         # 数量透出与种子值一致（此前该字段恒为 null）。
-        assert view["quantity_display"] == "100.0000"
+        assert view["quantity_display"] == "100"
         # 数量 × 价格 与成交额自洽（买入含费、卖出扣费两个方向）。
         assert Decimal(view["price_display"]) * Decimal(view["quantity_display"]) == abs(
             Decimal(view["amount_display"])
@@ -495,6 +495,54 @@ async def test_api_092_093_display_scale_6dp_and_2dp(
     assert detail["sell_trade"]["price_display"] == "48.630000"
     assert detail["buy_trade"]["forward"]["20"]["max_close_display"] == "1706.20"
     assert detail["sell_trade"]["forward"]["20"]["min_close_display"] == "1704.76"
+
+
+async def test_api_092_093_fractional_quantity_two_decimals(
+    client, api_prefix, user, owner_engine, settings
+):
+    """货币基金（940018）按 0.01 份计份额 → `quantity_display` 输出 2 位小数。
+
+    真实库里 940018 的 `quantity_units` 末两位非 0（如 14141900 = 1414.19 份）；
+    展示层不得四舍五入成整数，也不得退化成 `"1414.1900"` 的尾零噪音。列表与详情
+    共用 `stock_core.values.format_quantity`，这里同时校验「数量 × 价格 == 金额」。
+    """
+    await _seed_trade(
+        owner_engine,
+        user_id=user.user_id,
+        trade_date=date(2026, 6, 2),
+        side="buy",
+        quantity_units=14_141_900,  # 1414.19 份
+        price_units=1_000_000,  # 1.000000
+        amount_units=-141_419,  # −1414.19 元
+        security_code="940018",
+    )
+    await _seed_trade(
+        owner_engine,
+        user_id=user.user_id,
+        trade_date=date(2026, 6, 20),
+        side="sell",
+        quantity_units=14_141_900,
+        price_units=1_000_000,
+        amount_units=141_419,  # +1414.19 元
+        security_code="940018",
+    )
+    await _rebuild_and_drain(client, api_prefix, user, settings)
+
+    body = (await _list(client, api_prefix, user.headers, "?period=2026-06")).json()
+    item = next(row for row in body["items"] if row["security_code"] == "940018")
+    for side, sign in (("buy_trade", -1), ("sell_trade", 1)):
+        view = item[side]
+        assert view["quantity_display"] == "1414.19"
+        assert view["price_display"] == "1.000000"
+        assert view["amount_display"] == ("-1414.19" if sign < 0 else "1414.19")
+        assert Decimal(view["quantity_display"]) * Decimal(view["price_display"]) == abs(
+            Decimal(view["amount_display"])
+        )
+
+    # 详情与列表同源。
+    detail = (await _detail(client, api_prefix, user.headers, item["round_id"])).json()
+    assert detail["buy_trade"]["quantity_display"] == "1414.19"
+    assert detail["sell_trade"]["quantity_display"] == "1414.19"
 
 
 async def test_api_092_093_cross_user_sees_nothing(

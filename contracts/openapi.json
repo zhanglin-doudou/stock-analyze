@@ -10925,7 +10925,7 @@
                         "cost_display": "150,000.00",
                         "market_value": "160000.00",
                         "market_value_display": "160,000.00",
-                        "quantity": "100.0000",
+                        "quantity": "100",
                         "security_code": "600519",
                         "security_name": "贵州茅台",
                         "weight_display": "100.00%",
@@ -12289,7 +12289,7 @@
                         "cash_balance": "1234.56",
                         "date": "2026-09-30",
                         "price": "12.340000",
-                        "quantity": "100.0000",
+                        "quantity": "100",
                         "security_code": "600519",
                         "summary": "证券买入"
                       },
@@ -16308,10 +16308,10 @@
                       "holding_days": 18,
                       "open_date": "2026-09-30",
                       "open_trade_id": "trd_01J9Z6ABCDEFGHJKMNPQRSTVWX",
-                      "oversell_quantity": "100.0000",
+                      "oversell_quantity": "100",
                       "pnl": "1234.56",
                       "proceeds": "1234.56",
-                      "quantity": "100.0000",
+                      "quantity": "100",
                       "rebuilt_at": "2026-09-30T09:30:00Z",
                       "return_rate": "0.1234",
                       "round_id": "obj_01J9Z6ABCDEFGHJKMNPQRSTVWX",
@@ -17282,10 +17282,10 @@
                   "holding_days": 18,
                   "open_date": "2026-09-30",
                   "open_trade_id": "trd_01J9Z6ABCDEFGHJKMNPQRSTVWX",
-                  "oversell_quantity": "100.0000",
+                  "oversell_quantity": "100",
                   "pnl": "1234.56",
                   "proceeds": "1234.56",
-                  "quantity": "100.0000",
+                  "quantity": "100",
                   "rebuilt_at": "2026-09-30T09:30:00Z",
                   "return_rate": "0.1234",
                   "round_id": "obj_01J9Z6ABCDEFGHJKMNPQRSTVWX",
@@ -17473,7 +17473,7 @@
                       "fill_id": 1,
                       "holding_days": 18,
                       "open_date": "2026-09-30",
-                      "quantity": "100.0000",
+                      "quantity": "100",
                       "sell_trade_id": "trd_01J9Z6ABCDEFGHJKMNPQRSTVWX",
                       "sequence": 1
                     }
@@ -17666,7 +17666,7 @@
                       "holding_trading_days": 12,
                       "open_date": "2026-11-02",
                       "pnl_display": "1234.56",
-                      "quantity_display": "100.0000",
+                      "quantity_display": "100",
                       "sell": null,
                       "sequence": 1
                     }
@@ -20019,7 +20019,7 @@
                       "provenance": {
                         "row": 7
                       },
-                      "quantity": "100.0000",
+                      "quantity": "100",
                       "security_code": "600519",
                       "security_name": "贵州茅台",
                       "side": "buy",
@@ -20401,7 +20401,7 @@
                   "provenance": {
                     "row": 7
                   },
-                  "quantity": "100.0000",
+                  "quantity": "100",
                   "security_code": "600519",
                   "security_name": "贵州茅台",
                   "side": "buy",
@@ -20633,7 +20633,7 @@
                     "other_fee": "1234.56",
                     "price": "12.340000",
                     "provenance": {},
-                    "quantity": "100.0000",
+                    "quantity": "100",
                     "reason": {
                       "annotated_at": "2026-09-30T09:30:00Z",
                       "emotion_code": "示例",
@@ -21503,7 +21503,7 @@
                     "other_fee": "1234.56",
                     "price": "12.340000",
                     "provenance": {},
-                    "quantity": "100.0000",
+                    "quantity": "100",
                     "reason": {
                       "annotated_at": "2026-09-30T09:30:00Z",
                       "emotion_code": "示例",

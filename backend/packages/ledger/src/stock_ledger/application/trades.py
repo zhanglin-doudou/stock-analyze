@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from stock_contracts.clock import Clock
 from stock_contracts.constants import CURSOR_DEFAULT_LIMIT
 from stock_contracts.errors import NotFoundError
-from stock_core.values import Money, Price, Qty
+from stock_core.values import Money, Price, format_quantity
 from stock_platform.audit import record
 from stock_platform.outbox import publish
 
@@ -86,7 +86,7 @@ class TradeDTO:
             "summary_code": self.summary_code,
             "side": self.side,
             "category": self.category,
-            "quantity": str(Qty(self.quantity_units)),
+            "quantity": format_quantity(self.quantity_units),
             "price": str(Price(self.price_units)),
             "amount": str(Money(self.amount_units)),
             "commission": str(Money(self.commission_units)),
