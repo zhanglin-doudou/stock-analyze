@@ -382,8 +382,7 @@ export function RoundDetail() {
                 </table>
                 <p className="muted">
                   执行价差 = 成交价与<strong>成交当日收盘价</strong>的对比（买入：收盘−成交价；卖出：成交价−收盘；
-                  正 = 买得低 / 卖得高）。它只是该笔成交的固有属性，与当日收盘对比、<strong>不随持有期变化</strong>，
-                  因此不放在 5 / 10 / 20 日维度里重复展示。
+                  正 = 买得低 / 卖得高）。
                 </p>
               </div>
 

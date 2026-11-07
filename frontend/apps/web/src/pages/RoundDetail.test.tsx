@@ -205,7 +205,6 @@ describe("RoundDetail 回合详情页", () => {
     expect(screen.getByText("执行价差（相对当日收盘）")).toBeTruthy();
     expect(screen.queryByText("执行价差（毛，相对当日收盘）")).toBeNull();
     expect(screen.getAllByText("0.50%")).toHaveLength(2);
-    expect(screen.getByText(/不随持有期变化/)).toBeTruthy();
     expect(screen.getByText("事后标注")).toBeTruthy();
     expect(screen.getByText("业绩超预期")).toBeTruthy();
     // 卖后未到 20 日：pending → 内联「待满 20 个交易日」（不补 0%），tooltip 保留完整说明。
