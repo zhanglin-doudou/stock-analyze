@@ -67,3 +67,25 @@ export function periodToDateRange(value: string): { from: string; to: string } {
   const day = String(monthEnd.getDate()).padStart(2, "0");
   return { from: `${value}-01`, to: `${value}-${day}` };
 }
+
+function isIsoDate(value: string): boolean {
+  return /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(value);
+}
+
+/**
+ * 期间 token 是否合法（`YYYY` / `YYYY-MM` / `YYYY-MM-DD..YYYY-MM-DD`，闭区间需 from ≤ to）。
+ *
+ * 用于 URL 等外部来源的 token：不合法时调用方按「无筛选」处理，
+ * 避免把 `abc` 之类拼成日期后发给后端（`periodToDateRange` 只假定 token 合法）。
+ */
+export function isValidPeriod(value: string): boolean {
+  if (value === "") return false;
+  if (value.includes("..")) {
+    const parts = value.split("..");
+    if (parts.length !== 2) return false;
+    const [from = "", to = ""] = parts;
+    return isIsoDate(from) && isIsoDate(to) && from <= to;
+  }
+  if (/^\d{4}$/.test(value)) return true;
+  return /^\d{4}-(0[1-9]|1[0-2])$/.test(value);
+}

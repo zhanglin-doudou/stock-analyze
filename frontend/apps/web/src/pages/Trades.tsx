@@ -1,7 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { newIdempotencyKey, type Trade, type TradePage } from "@sa/api-client";
 import { api } from "../client";
+import { isValidPeriod, periodToDateRange } from "../lib/date";
 import { Cursor } from "../ui/Cursor";
+import { FilterBar, FilterField } from "../ui/FilterBar";
+import { PeriodInput } from "../ui/PeriodInput";
 import { ProblemView } from "../ui/Problem";
 import { DataTable, type DataTableColumn } from "../ui/DataTable";
 
@@ -13,6 +17,11 @@ interface EditState {
 }
 
 export function Trades() {
+  const [search, setSearch] = useSearchParams();
+  // period 以 URL 为唯一真源；非法 token 按「无期间筛选」降级，不向接口发脏参数。
+  const periodParam = search.get("period") ?? "";
+  const period = isValidPeriod(periodParam) ? periodParam : "";
+
   const [page, setPage] = useState<TradePage | null>(null);
   const [error, setError] = useState<unknown>(null);
   const [loading, setLoading] = useState(false);
@@ -20,15 +29,30 @@ export function Trades() {
   const [edit, setEdit] = useState<EditState | null>(null);
   const [notice, setNotice] = useState("");
 
+  const setPeriod = useCallback(
+    (value: string) => {
+      const next = new URLSearchParams(search);
+      if (isValidPeriod(value)) next.set("period", value);
+      else next.delete("period");
+      setSearch(next);
+    },
+    [search, setSearch],
+  );
+
   const load = useCallback(
     async (cursor?: string) => {
       setLoading(true);
       setError(null);
       try {
+        // /trades 只接受日期范围（trade_date_from/to），期间 token 在客户端做日历换算；
+        // 过滤仍发生在服务端，游标分页与总数语义不受影响。
+        const range = periodToDateRange(period);
         setPage(
           await api.trades.list({
             limit: 50,
             cursor,
+            from: range.from || undefined,
+            to: range.to || undefined,
             include_deleted: includeDeleted ? true : undefined,
           }),
         );
@@ -38,7 +62,7 @@ export function Trades() {
         setLoading(false);
       }
     },
-    [includeDeleted],
+    [includeDeleted, period],
   );
 
   useEffect(() => {
@@ -161,10 +185,29 @@ export function Trades() {
     <div>
       <h1>交易流水</h1>
       <p className="muted">数据截止（data_as_of）：{page?.meta.data_as_of || "—"}</p>
-      <label className="check">
-        <input type="checkbox" checked={includeDeleted} onChange={(e) => setIncludeDeleted(e.target.checked)} />
-        包含已删除
-      </label>
+
+      <FilterBar
+        ariaLabel="交易流水筛选"
+        onReset={() => {
+          setPeriod("");
+          setIncludeDeleted(false);
+        }}
+      >
+        <FilterField label="期间">
+          <PeriodInput value={period} onChange={setPeriod} />
+        </FilterField>
+        <FilterField label="删除项">
+          <label className="check">
+            <input
+              type="checkbox"
+              aria-label="包含已删除"
+              checked={includeDeleted}
+              onChange={(e) => setIncludeDeleted(e.target.checked)}
+            />
+            包含已删除
+          </label>
+        </FilterField>
+      </FilterBar>
 
       {notice ? <p className="notice">{notice}</p> : null}
       <ProblemView error={error} onRetry={() => void load()} />
