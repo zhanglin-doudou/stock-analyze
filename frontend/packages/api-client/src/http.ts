@@ -397,6 +397,17 @@ export function createClient(options: ClientOptions) {
     return refreshInFlight;
   }
 
+  /**
+   * 在途 GET 合并：同一 URL + 同一身份（Authorization/Accept/If-Match）的读请求
+   * 只发一次网络请求，其余调用方复用同一个 Promise。
+   *
+   * 只合并「并发在途」，请求一结束即出表，不做任何结果缓存 —— 因此刷新/翻页
+   * 等后续调用仍会真实发请求。React 18 StrictMode 开发态会把 effect 挂载执行两次
+   * （commitDoubleInvokeEffectsInDEV），页面用 useEffect 拉数据时这里负责把两次
+   * 合并成一次，而不是在组件里加 ref 守卫去绕开 effect 语义。
+   */
+  const inflightGets = new Map<string, Promise<{ data: unknown; headers: Headers }>>();
+
   async function send<T>(req: RequestOptions, retried = false): Promise<{ data: T; headers: Headers }> {
     const url = buildUrl(req.root ? rootBase() : baseUrl, req.path, req.query);
     const headers = new Headers(req.headers);
@@ -414,6 +425,38 @@ export function createClient(options: ClientOptions) {
       body = JSON.stringify(req.body);
     }
 
+    const method = req.method ?? "GET";
+    // 只合并无 body 的 GET；401 刷新后的重放（retried）不再进入合并表，避免复用自己。
+    const coalescable = method === "GET" && body === undefined && !retried;
+    if (!coalescable) return perform<T>(req, url, headers, body, retried);
+
+    const key = [
+      url,
+      headers.get("Authorization") ?? "",
+      headers.get("Accept") ?? "",
+      headers.get("If-Match") ?? "",
+    ].join("\u0000");
+    const pending = inflightGets.get(key);
+    if (pending) return pending as Promise<{ data: T; headers: Headers }>;
+
+    const task = perform<T>(req, url, headers, body, retried);
+    inflightGets.set(key, task as Promise<{ data: unknown; headers: Headers }>);
+    try {
+      return await task;
+    } finally {
+      if (inflightGets.get(key) === (task as Promise<{ data: unknown; headers: Headers }>)) {
+        inflightGets.delete(key);
+      }
+    }
+  }
+
+  async function perform<T>(
+    req: RequestOptions,
+    url: string,
+    headers: Headers,
+    body: BodyInit | undefined,
+    retried: boolean,
+  ): Promise<{ data: T; headers: Headers }> {
     let res: Response;
     try {
       res = await fetchImpl(url, { method: req.method ?? "GET", headers, body });
