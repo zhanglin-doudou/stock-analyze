@@ -1637,11 +1637,40 @@ class InsightFillSwingOut(BaseModel):
     total_pnl_display: str | None = None
 
 
+class InsightAddonSummaryOut(BaseModel):
+    """加仓统计（设计 §6.3）：`count` 与兼容字段 `rounds` 同值。
+
+    `avg_dip_pct` 是加仓笔次 20 日 B2 均值，仅对 `status=ok` 样本取均值；
+    `avg_dip_coverage` 形如 `"3/9"`，0 个有效样本时 `avg_dip_pct=null`。
+    """
+
+    count: int
+    declined_after_addon: int
+    declined_pct: str | None = None
+    avg_dip_pct: str | None = None
+    avg_dip_coverage: str
+    rounds: int
+    share_pct: str | None = None
+
+
+class InsightSellFlySummaryOut(BaseModel):
+    """卖飞统计：只算止盈型卖飞，止损后反弹单列不并入。"""
+
+    sell_count: int
+    profit_take_fly: int
+    stop_loss_rebound: int
+    fly_pct: str | None = None
+    missed_profit_worst_display: str | None = None
+    missed_profit_end_display: str | None = None
+    rounds: int
+    share_pct: str | None = None
+
+
 class InsightsSummaryOut(BaseModel):
     swing: InsightBucketSummaryOut
     fill_swing: InsightFillSwingOut
-    addon: dict[str, Any]
-    sell_fly: dict[str, Any]
+    addon: InsightAddonSummaryOut
+    sell_fly: InsightSellFlySummaryOut
     reason_coverage: InsightReasonCoverageOut
     ranking: InsightRankingOut
     pending: dict[str, int]

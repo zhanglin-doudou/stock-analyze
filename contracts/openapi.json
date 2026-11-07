@@ -3003,6 +3003,68 @@
         "title": "ImportRange",
         "type": "object"
       },
+      "InsightAddonSummaryOut": {
+        "description": "加仓统计（设计 §6.3）：`count` 与兼容字段 `rounds` 同值。\n\n`avg_dip_pct` 是加仓笔次 20 日 B2 均值，仅对 `status=ok` 样本取均值；\n`avg_dip_coverage` 形如 `\"3/9\"`，0 个有效样本时 `avg_dip_pct=null`。",
+        "properties": {
+          "avg_dip_coverage": {
+            "title": "Avg Dip Coverage",
+            "type": "string"
+          },
+          "avg_dip_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Dip Pct"
+          },
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "declined_after_addon": {
+            "title": "Declined After Addon",
+            "type": "integer"
+          },
+          "declined_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Declined Pct"
+          },
+          "rounds": {
+            "title": "Rounds",
+            "type": "integer"
+          },
+          "share_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Share Pct"
+          }
+        },
+        "required": [
+          "count",
+          "declined_after_addon",
+          "avg_dip_coverage",
+          "rounds"
+        ],
+        "title": "InsightAddonSummaryOut",
+        "type": "object"
+      },
       "InsightBucketSummaryOut": {
         "properties": {
           "avg_holding_trading_days": {
@@ -3277,12 +3339,83 @@
         "title": "InsightReasonShareOut",
         "type": "object"
       },
+      "InsightSellFlySummaryOut": {
+        "description": "卖飞统计：只算止盈型卖飞，止损后反弹单列不并入。",
+        "properties": {
+          "fly_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fly Pct"
+          },
+          "missed_profit_end_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Missed Profit End Display"
+          },
+          "missed_profit_worst_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Missed Profit Worst Display"
+          },
+          "profit_take_fly": {
+            "title": "Profit Take Fly",
+            "type": "integer"
+          },
+          "rounds": {
+            "title": "Rounds",
+            "type": "integer"
+          },
+          "sell_count": {
+            "title": "Sell Count",
+            "type": "integer"
+          },
+          "share_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Share Pct"
+          },
+          "stop_loss_rebound": {
+            "title": "Stop Loss Rebound",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sell_count",
+          "profit_take_fly",
+          "stop_loss_rebound",
+          "rounds"
+        ],
+        "title": "InsightSellFlySummaryOut",
+        "type": "object"
+      },
       "InsightsSummaryOut": {
         "properties": {
           "addon": {
-            "additionalProperties": true,
-            "title": "Addon",
-            "type": "object"
+            "$ref": "#/components/schemas/InsightAddonSummaryOut"
           },
           "fill_swing": {
             "$ref": "#/components/schemas/InsightFillSwingOut"
@@ -3301,9 +3434,7 @@
             "$ref": "#/components/schemas/InsightReasonCoverageOut"
           },
           "sell_fly": {
-            "additionalProperties": true,
-            "title": "Sell Fly",
-            "type": "object"
+            "$ref": "#/components/schemas/InsightSellFlySummaryOut"
           },
           "swing": {
             "$ref": "#/components/schemas/InsightBucketSummaryOut"

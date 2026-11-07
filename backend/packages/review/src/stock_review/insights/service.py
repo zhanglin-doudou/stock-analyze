@@ -58,6 +58,7 @@ class ForwardView:
     min_close_display: str | None
     price_jump_review: bool
     ret_b3_units: int | None = None
+    ret_b2_units: int | None = None
 
 
 @dataclass(slots=True)
@@ -151,11 +152,42 @@ class ReasonCoverage:
 
 
 @dataclass(slots=True)
+class AddonSummary:
+    """加仓（含补仓/抄底）统计（设计 §6.3）。
+
+    `count` 与兼容字段 `rounds` 同值；`avg_dip_pct` 是加仓笔次 20 日 B2 的均值，
+    只对有 `status=ok` 的样本取均值，`avg_dip_coverage` 显式给出「有效/总数」。
+    """
+
+    count: int
+    declined_after_addon: int
+    declined_pct: str | None
+    avg_dip_pct: str | None
+    avg_dip_coverage: str
+    rounds: int
+    share_pct: str | None
+
+
+@dataclass(slots=True)
+class SellFlySummary:
+    """卖飞统计：只算止盈型卖飞（`profit_take_fly`），止损后反弹单列不并入。"""
+
+    sell_count: int
+    profit_take_fly: int
+    stop_loss_rebound: int
+    fly_pct: str | None
+    missed_profit_worst_display: str | None
+    missed_profit_end_display: str | None
+    rounds: int
+    share_pct: str | None
+
+
+@dataclass(slots=True)
 class InsightsSummary:
     swing: SummaryBucket
     fill_swing: FillSwingBucket
-    addon: dict[str, Any]
-    sell_fly: dict[str, Any]
+    addon: AddonSummary
+    sell_fly: SellFlySummary
     reason_coverage: ReasonCoverage
     ranking: RankingSummary
     pending: dict[str, Any]
@@ -297,6 +329,7 @@ def _to_view(result: ForwardResult) -> ForwardView:
         min_close_display=_money(result.min_close_units),
         price_jump_review=result.price_jump_review,
         ret_b3_units=result.ret_b3_units,
+        ret_b2_units=result.ret_b2_units,
     )
 
 
@@ -879,6 +912,44 @@ def _summary(
     )
     addon_items = [item for item in items if "addon" in item.flags]
     sell_fly_items = [item for item in items if "profit_take_fly" in item.flags]
+    rebound_items = [item for item in items if "stop_loss_rebound" in item.flags]
+    sell_items = [item for item in items if item.sell_trade is not None]
+    declined_addon = sum(1 for item in addon_items if "continued_decline" in item.flags)
+    # avg_dip：只取 status=ok 的 20 日 B2 样本；缺样本时显式 null + 覆盖度。
+    dip_samples = [
+        item.buy_trade.forward[20].ret_b2_units
+        for item in addon_items
+        if item.buy_trade is not None
+        and item.buy_trade.forward[20].status == ForwardReturnStatus.OK
+        and item.buy_trade.forward[20].ret_b2_units is not None
+    ]
+    addon_summary = AddonSummary(
+        count=len(addon_items),
+        declined_after_addon=declined_addon,
+        declined_pct=(f"{declined_addon * 100 / len(addon_items):.2f}%" if addon_items else None),
+        avg_dip_pct=_pct(agg.weighted_mean([(value, 1) for value in dip_samples])),
+        avg_dip_coverage=f"{len(dip_samples)}/{len(addon_items)}",
+        rounds=len(addon_items),
+        share_pct=f"{len(addon_items) * 100 / len(closed):.2f}%" if closed else None,
+    )
+    sell_fly_summary = SellFlySummary(
+        sell_count=len(sell_items),
+        profit_take_fly=len(sell_fly_items),
+        stop_loss_rebound=len(rebound_items),
+        fly_pct=f"{len(sell_fly_items) * 100 / len(sell_items):.2f}%" if sell_items else None,
+        missed_profit_worst_display=_money(
+            sum(item.missed_profit_worst_units or 0 for item in sell_fly_items)
+            if sell_fly_items
+            else None
+        ),
+        missed_profit_end_display=_money(
+            sum(item.missed_profit_end_units or 0 for item in sell_fly_items)
+            if sell_fly_items
+            else None
+        ),
+        rounds=len(sell_fly_items),
+        share_pct=f"{len(sell_fly_items) * 100 / len(closed):.2f}%" if closed else None,
+    )
     combined_values = [item.combined_units for item in items if item.combined_units is not None]
     ranked = sorted(combined_values)
     quadrant_counts: dict[str, int] = defaultdict(int)
@@ -921,14 +992,8 @@ def _summary(
     return InsightsSummary(
         swing=swing,
         fill_swing=fill_swing,
-        addon={
-            "rounds": len(addon_items),
-            "share_pct": f"{len(addon_items) * 100 / len(closed):.2f}%" if closed else None,
-        },
-        sell_fly={
-            "rounds": len(sell_fly_items),
-            "share_pct": f"{len(sell_fly_items) * 100 / len(closed):.2f}%" if closed else None,
-        },
+        addon=addon_summary,
+        sell_fly=sell_fly_summary,
         reason_coverage=ReasonCoverage(
             annotated=annotated,
             total_rounds=total_rounds,

@@ -84,6 +84,8 @@ interface AddonSummary {
   declined_after_addon: number;
   declined_pct?: string | null;
   avg_dip_pct?: string | null;
+  /** 形如 "3/9"：avg_dip_pct 的有效样本占全部加仓笔次，避免只看到百分比而误读样本量。 */
+  avg_dip_coverage?: string | null;
 }
 interface SellFlySummary {
   sell_count: number;
@@ -440,7 +442,8 @@ export function RoundInsights() {
             {addon ? (
               <p className="muted">
                 加仓 {addon.count} 次，后续下跌 {addon.declined_after_addon} 次；
-                下跌占比 {text(addon.declined_pct)}；平均回撤 {text(addon.avg_dip_pct)}。
+                下跌占比 {text(addon.declined_pct)}；平均回撤 {text(addon.avg_dip_pct)}
+                {addon.avg_dip_coverage ? `（${addon.avg_dip_coverage}）` : ""}。
               </p>
             ) : (
               <p className="muted">—</p>

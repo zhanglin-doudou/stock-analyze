@@ -2157,6 +2157,29 @@ export interface components {
              */
             to: string;
         };
+        /**
+         * InsightAddonSummaryOut
+         * @description 加仓统计（设计 §6.3）：`count` 与兼容字段 `rounds` 同值。
+         *
+         *     `avg_dip_pct` 是加仓笔次 20 日 B2 均值，仅对 `status=ok` 样本取均值；
+         *     `avg_dip_coverage` 形如 `"3/9"`，0 个有效样本时 `avg_dip_pct=null`。
+         */
+        InsightAddonSummaryOut: {
+            /** Avg Dip Coverage */
+            avg_dip_coverage: string;
+            /** Avg Dip Pct */
+            avg_dip_pct?: string | null;
+            /** Count */
+            count: number;
+            /** Declined After Addon */
+            declined_after_addon: number;
+            /** Declined Pct */
+            declined_pct?: string | null;
+            /** Rounds */
+            rounds: number;
+            /** Share Pct */
+            share_pct?: string | null;
+        };
         /** InsightBucketSummaryOut */
         InsightBucketSummaryOut: {
             /** Avg Holding Trading Days */
@@ -2247,12 +2270,31 @@ export interface components {
             /** Share Pct */
             share_pct: string;
         };
+        /**
+         * InsightSellFlySummaryOut
+         * @description 卖飞统计：只算止盈型卖飞，止损后反弹单列不并入。
+         */
+        InsightSellFlySummaryOut: {
+            /** Fly Pct */
+            fly_pct?: string | null;
+            /** Missed Profit End Display */
+            missed_profit_end_display?: string | null;
+            /** Missed Profit Worst Display */
+            missed_profit_worst_display?: string | null;
+            /** Profit Take Fly */
+            profit_take_fly: number;
+            /** Rounds */
+            rounds: number;
+            /** Sell Count */
+            sell_count: number;
+            /** Share Pct */
+            share_pct?: string | null;
+            /** Stop Loss Rebound */
+            stop_loss_rebound: number;
+        };
         /** InsightsSummaryOut */
         InsightsSummaryOut: {
-            /** Addon */
-            addon: {
-                [key: string]: unknown;
-            };
+            addon: components["schemas"]["InsightAddonSummaryOut"];
             fill_swing: components["schemas"]["InsightFillSwingOut"];
             /** Pending */
             pending: {
@@ -2260,10 +2302,7 @@ export interface components {
             };
             ranking: components["schemas"]["InsightRankingOut"];
             reason_coverage: components["schemas"]["InsightReasonCoverageOut"];
-            /** Sell Fly */
-            sell_fly: {
-                [key: string]: unknown;
-            };
+            sell_fly: components["schemas"]["InsightSellFlySummaryOut"];
             swing: components["schemas"]["InsightBucketSummaryOut"];
         };
         /** JobAcceptedOut */

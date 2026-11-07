@@ -65,6 +65,177 @@ async def scenario(client, api_prefix, user, owner_engine, settings):
     return {"trades": {"buy1": buy, "sell": sell}, "round": closed}
 
 
+@pytest.fixture
+async def addon_scenario(client, api_prefix, user, owner_engine, settings):
+    """加仓场景（replay 夹具 600519 逐日缓涨，确定性）：
+
+    * 06-01 同日两笔买入：100 股 @50.00（id 较小）与 50 股 @1800.00（id 较大）；
+    * FIFO 稳定序是 `(交易日, 行号, 摘要, 数量, …)`，同日同摘要下 50 股排在前 → 该回合的
+      `open_trade_id` 是 50 股那笔；持仓推演按 `(交易日, id)` 排序，100 股那笔在前 →
+      开仓笔买入前已有持仓 → `addon`（与真实数据 `addon` 同源口径）；
+    * 06-19 卖 150 股 @100.00（均价 633.33 高于卖价 → 非止盈 → `stop_loss_rebound`）。
+    """
+    await _seed_trade(
+        owner_engine,
+        user_id=user.user_id,
+        trade_date=date(2026, 6, 1),
+        side="buy",
+        quantity_units=1_000_000,
+        price_units=50_000_000,
+        amount_units=-500_000,
+        trade_id="trd_addon000001",
+    )
+    await _seed_trade(
+        owner_engine,
+        user_id=user.user_id,
+        trade_date=date(2026, 6, 1),
+        side="buy",
+        quantity_units=500_000,
+        price_units=1_800_000_000,
+        amount_units=-9_000_000,
+        trade_id="trd_addon000002",
+    )
+    await _seed_trade(
+        owner_engine,
+        user_id=user.user_id,
+        trade_date=date(2026, 6, 19),
+        side="sell",
+        quantity_units=1_500_000,
+        price_units=100_000_000,
+        amount_units=1_500_000,
+    )
+    await _rebuild_and_drain(client, api_prefix, user, settings)
+
+
+@pytest.fixture
+async def sell_fly_scenario(client, api_prefix, user, owner_engine, settings):
+    """两回合对照（replay 夹具 600519 逐日缓涨，确定性）：
+
+    * 回合 1：07-01 买 100 股 @10.00 → 07-10 卖 100 股 @100.00（止盈且 20 日内最高收盘
+      1712.75 > 103.00 → `profit_take_fly`）；
+    * 回合 2：07-13 买 100 股 @2000.00 → 07-14 卖 100 股 @1500.00（亏损但同样卖早 →
+      `stop_loss_rebound`）。
+    """
+    await _seed_trade(
+        owner_engine,
+        user_id=user.user_id,
+        trade_date=date(2026, 7, 1),
+        side="buy",
+        quantity_units=1_000_000,
+        price_units=10_000_000,
+        amount_units=-100_000,
+    )
+    await _seed_trade(
+        owner_engine,
+        user_id=user.user_id,
+        trade_date=date(2026, 7, 10),
+        side="sell",
+        quantity_units=1_000_000,
+        price_units=100_000_000,
+        amount_units=1_000_000,
+    )
+    await _seed_trade(
+        owner_engine,
+        user_id=user.user_id,
+        trade_date=date(2026, 7, 13),
+        side="buy",
+        quantity_units=1_000_000,
+        price_units=2_000_000_000,
+        amount_units=-20_000_000,
+    )
+    await _seed_trade(
+        owner_engine,
+        user_id=user.user_id,
+        trade_date=date(2026, 7, 14),
+        side="sell",
+        quantity_units=1_000_000,
+        price_units=1_500_000_000,
+        amount_units=15_000_000,
+    )
+    await _rebuild_and_drain(client, api_prefix, user, settings)
+
+
+async def test_api_092_summary_addon_serialized(client, api_prefix, user, addon_scenario):
+    """`summary.addon` 从聚合到序列化的完整路径（AC-D*）。
+
+    `avg_dip_pct` 只取 status=ok 的 20 日 B2 样本，并显式给出覆盖度；
+    `missed_profit_*` 只统计 `profit_take_fly`，本场景是止损反弹 → 必须为 null。
+    """
+    resp = await _list(client, api_prefix, user.headers, "?period=2026-06")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    item = body["items"][0]
+    assert {"addon", "continued_decline", "stop_loss_rebound"} <= set(item["flags"])
+    assert item["buy_trade"]["trade_id"] == "trd_addon000002"
+
+    addon = body["summary"]["addon"]
+    assert addon["count"] == 1
+    assert addon["rounds"] == 1  # 兼容字段，与 count 同值
+    assert addon["declined_after_addon"] == 1
+    assert addon["declined_pct"] == "100.00%"
+    # B2 = (1705.96 − 1800.00) / 1800.00 = −5.22%
+    assert addon["avg_dip_pct"] == "-5.22%"
+    assert addon["avg_dip_coverage"] == "1/1"
+    assert addon["share_pct"] == "100.00%"  # 1/1 个平仓回合
+
+    sell_fly = body["summary"]["sell_fly"]
+    assert sell_fly["sell_count"] == 1
+    assert sell_fly["profit_take_fly"] == 0
+    assert sell_fly["stop_loss_rebound"] == 1
+    assert sell_fly["fly_pct"] == "0.00%"  # 只算止盈卖飞
+    assert sell_fly["rounds"] == 0
+    assert sell_fly["share_pct"] == "0.00%"
+    # 止损反弹不并入 missed_profit（只有止盈卖飞才统计）
+    assert sell_fly["missed_profit_worst_display"] is None
+    assert sell_fly["missed_profit_end_display"] is None
+
+
+async def test_api_092_summary_sell_fly_serialized(client, api_prefix, user, sell_fly_scenario):
+    """`summary.sell_fly`：分母是全部卖出回合，分子只算止盈卖飞；金额只并止盈卖飞。"""
+    resp = await _list(client, api_prefix, user.headers, "?period=2026-07")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    all_flags = [flag for item in body["items"] for flag in item["flags"]]
+    assert body["summary"]["swing"]["closed"] == 2
+    assert "profit_take_fly" in all_flags
+    assert "stop_loss_rebound" in all_flags
+
+    sell_fly = body["summary"]["sell_fly"]
+    assert sell_fly["sell_count"] == 2
+    assert sell_fly["profit_take_fly"] == 1
+    assert sell_fly["stop_loss_rebound"] == 1
+    assert sell_fly["fly_pct"] == "50.00%"  # 1/2，只算止盈卖飞
+    assert sell_fly["rounds"] == 1
+    assert sell_fly["share_pct"] == "50.00%"
+    # 只统计止盈卖飞那 1 笔：100 股 ×(1712.75 − 100.00) = 161275.00
+    assert sell_fly["missed_profit_worst_display"] == "161275.00"
+    assert sell_fly["missed_profit_end_display"] == "161275.00"
+
+    addon = body["summary"]["addon"]
+    assert addon["count"] == 0
+    assert addon["avg_dip_pct"] is None
+    assert addon["avg_dip_coverage"] == "0/0"
+
+
+async def test_api_092_summary_addon_empty_when_no_addon(client, api_prefix, user, scenario):
+    """无加仓时 `count=0`、百分比为 null、覆盖度 `0/0`（不伪造 0%）。"""
+    resp = await _list(client, api_prefix, user.headers, "?period=2026-06")
+    assert resp.status_code == 200, resp.text
+    summary = resp.json()["summary"]
+
+    assert summary["addon"] == {
+        "count": 0,
+        "declined_after_addon": 0,
+        "declined_pct": None,
+        "avg_dip_pct": None,
+        "avg_dip_coverage": "0/0",
+        "rounds": 0,
+        "share_pct": "0.00%",
+    }
+    assert summary["sell_fly"]["sell_count"] == 1
+    assert summary["sell_fly"]["stop_loss_rebound"] == 0
+
+
 async def test_api_092_list_zero_caliber_and_period_basis(client, api_prefix, user, scenario):
     resp = await _list(client, api_prefix, user.headers, "?period=2026-06")
     assert resp.status_code == 200, resp.text

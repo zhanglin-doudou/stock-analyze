@@ -101,8 +101,9 @@ async def _seed_trade(
     amount_units: int,
     security_code: str = "600519",
     batch_id: str | None = None,
+    trade_id: str | None = None,
 ) -> str:
-    trade_id = f"trd_{uuid.uuid4().hex[:12]}"
+    trade_id = trade_id or f"trd_{uuid.uuid4().hex[:12]}"
     async with AsyncSession(engine) as session:
         row = Trade(
             id=trade_id,
