@@ -16,14 +16,17 @@ export interface NavGroup {
 }
 
 /**
- * 两级导航信息架构：一级分组（概览/分析/数据）+ 二级页面。
+ * 两级导航信息架构：一级分组（核心/分析/数据）+ 二级页面。
  * 顺序即侧栏顺序；设置固定在底部单独渲染。
+ *
+ * 图标约定：分组图标与任何二级图标**不得同名、不得同形**
+ * （例如分组「核心」不能复用「看板」的 grid）；唯一性由 navigation.test.ts 兜底。
  */
 export const NAV_GROUPS: NavGroup[] = [
   {
-    id: "overview",
-    label: "概览",
-    icon: "grid",
+    id: "core",
+    label: "核心",
+    icon: "core",
     items: [
       { to: "/dashboard", label: "看板", icon: "grid" },
       { to: "/rounds/insights", label: "回合洞察", icon: "insights" },
@@ -33,7 +36,7 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     id: "analysis",
     label: "分析",
-    icon: "metrics",
+    icon: "pulse",
     items: [
       { to: "/rounds", label: "回合", icon: "rounds" },
       { to: "/nav", label: "净值与收益", icon: "nav" },
@@ -44,7 +47,7 @@ export const NAV_GROUPS: NavGroup[] = [
   {
     id: "data",
     label: "数据",
-    icon: "assets",
+    icon: "database",
     items: [
       { to: "/assets", label: "资产", icon: "assets" },
       { to: "/trades", label: "交易流水", icon: "trades" },
@@ -88,15 +91,15 @@ export interface PageMeta {
 }
 
 const STATIC_PAGES: Record<string, PageMeta> = {
-  "/dashboard": { title: "看板", breadcrumb: ["概览", "看板"] },
+  "/dashboard": { title: "看板", breadcrumb: ["核心", "看板"] },
   "/trades": { title: "交易流水", breadcrumb: ["数据", "交易流水"] },
   "/rounds": { title: "回合", breadcrumb: ["分析", "回合"] },
   // 静态路由必须能被精确命中：否则会被 `/rounds/` 前缀规则误判为“回合详情”。
-  "/rounds/insights": { title: "回合洞察", breadcrumb: ["概览", "回合洞察"] },
+  "/rounds/insights": { title: "回合洞察", breadcrumb: ["核心", "回合洞察"] },
   "/nav": { title: "净值与收益", breadcrumb: ["分析", "净值与收益"] },
   "/metrics": { title: "指标", breadcrumb: ["分析", "指标"] },
   "/sectors": { title: "板块分析", breadcrumb: ["分析", "板块分析"] },
-  "/attribution": { title: "归因", breadcrumb: ["概览", "归因"] },
+  "/attribution": { title: "归因", breadcrumb: ["核心", "归因"] },
   "/assets": { title: "资产", breadcrumb: ["数据", "资产"] },
   "/import": { title: "导入账单", breadcrumb: ["数据", "导入账单"] },
   "/imports": { title: "导入记录", breadcrumb: ["数据", "导入记录"] },

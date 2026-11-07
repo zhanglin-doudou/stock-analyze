@@ -66,11 +66,11 @@ describe("AppShell 两级菜单", () => {
     expect(document.querySelector(".shell-rail-spacer")).toBeNull();
     expect(screen.getByRole("navigation", { name: "主导航" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "跳到主要内容" })).toBeTruthy();
-    for (const group of ["概览", "分析", "数据"]) {
+    for (const group of ["核心", "分析", "数据"]) {
       expect(screen.getByRole("group", { name: group })).toBeTruthy();
     }
     expect(screen.getByRole("button", { name: "分析" }).getAttribute("aria-expanded")).toBe("true");
-    expect(screen.getByRole("button", { name: "概览" }).getAttribute("aria-expanded")).toBe("false");
+    expect(screen.getByRole("button", { name: "核心" }).getAttribute("aria-expanded")).toBe("false");
     // 收起的抽屉不进入可访问树
     expect(screen.queryByRole("link", { name: "看板" })).toBeNull();
     expect(screen.getByRole("link", { name: "指标" }).getAttribute("aria-current")).toBe("page");
@@ -84,8 +84,8 @@ describe("AppShell 两级菜单", () => {
     expect(screen.getByRole("link", { name: "资产" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "月报（占位）" })).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "概览" }));
-    expect(screen.getByRole("button", { name: "概览" }).getAttribute("aria-expanded")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "核心" }));
+    expect(screen.getByRole("button", { name: "核心" }).getAttribute("aria-expanded")).toBe("true");
     expect(screen.queryByRole("link", { name: "资产" })).toBeNull();
   });
 
@@ -109,16 +109,16 @@ describe("AppShell 两级菜单", () => {
   it("中屏只显示图标：hover 是 CSS，点击一级图标弹出二级 flyout", () => {
     mockMedia(false);
     renderShell("/metrics");
-    const overview = screen.getByRole("button", { name: "概览" });
-    expect(overview.getAttribute("data-tooltip")).toBe("概览");
+    const core = screen.getByRole("button", { name: "核心" });
+    expect(core.getAttribute("data-tooltip")).toBe("核心");
     expect(screen.queryByRole("link", { name: "看板" })).toBeNull();
 
-    fireEvent.click(overview);
-    expect(screen.getByRole("region", { name: "概览菜单" })).toBeTruthy();
+    fireEvent.click(core);
+    expect(screen.getByRole("region", { name: "核心菜单" })).toBeTruthy();
     expect(screen.getByRole("link", { name: "看板" })).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "分析" }));
-    expect(screen.queryByRole("region", { name: "概览菜单" })).toBeNull();
+    expect(screen.queryByRole("region", { name: "核心菜单" })).toBeNull();
     expect(screen.getByRole("region", { name: "分析菜单" })).toBeTruthy();
   });
 

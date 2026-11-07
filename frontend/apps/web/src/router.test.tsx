@@ -28,7 +28,7 @@ describe("router / Layout（FT-09 导航与登录保护）", () => {
     expect(screen.getByText("资产页占位")).toBeTruthy();
     expect(within(screen.getByRole("navigation", { name: "主导航" })).getByRole("group", { name: "数据" })).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: "概览" }));
+    fireEvent.click(screen.getByRole("button", { name: "核心" }));
     expect(screen.getByRole("link", { name: "看板" }).getAttribute("href")).toBe("/dashboard");
   });
 

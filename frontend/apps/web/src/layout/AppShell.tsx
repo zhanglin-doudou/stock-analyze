@@ -172,7 +172,7 @@ export function AppShell() {
   const [focusMode, setFocusMode] = useState(false);
   const [theme, setTheme] = useState<Theme>(() => loadPreferences().theme);
   const [openGroupId, setOpenGroupId] = useState<string>(
-    () => activeGroupId(location.pathname) ?? NAV_GROUPS[0]?.id ?? "overview",
+    () => activeGroupId(location.pathname) ?? NAV_GROUPS[0]?.id ?? "core",
   );
   const [flyoutGroupId, setFlyoutGroupId] = useState<string | null>(null);
   const railRef = useRef<HTMLElement>(null);
