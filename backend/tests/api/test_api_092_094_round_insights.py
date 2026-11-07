@@ -14,6 +14,7 @@ from __future__ import annotations
 import re
 import uuid
 from datetime import date
+from decimal import Decimal
 
 import pytest
 from sqlalchemy import text
@@ -29,6 +30,8 @@ pytestmark = pytest.mark.api
 
 _RATIO_PCT_RE = re.compile(r"^-?\d+\.\d{2}%$")
 _MONEY_RE = re.compile(r"^-?\d+\.\d{2}$")
+_PRICE6_RE = re.compile(r"^-?\d+\.\d{6}$")
+_PRICE2_RE = re.compile(r"^-?\d+\.\d{2}$")
 
 
 async def _list(client, api_prefix, headers, query: str = ""):
@@ -409,6 +412,85 @@ async def test_api_093_detail_and_cross_user_404(client, api_prefix, user, scena
     missing = await _detail(client, api_prefix, user.headers, "rnd_missing")
     assert missing.status_code == 404
     assert missing.json()["code"] == ErrorCode.NOT_FOUND
+
+
+async def test_api_092_093_display_scale_6dp_and_2dp(
+    client, api_prefix, user, owner_engine, settings
+):
+    """`price_display` 守 6 位小数、收盘价守 2 位小数；买卖两向、列表与详情都覆盖。
+
+    回归：此前 `_money`（`Money` scale=2）被用于 1e-6 的价格标度整数，展示值被放大 10⁴
+    （真实净价 `50.725500` 输出成 `"507255.00"`）。本场景的成交额含费，可同时验证净价方向：
+    买入 100 股 @50.717000、费用 5.30 → 净价 `50.770000`（高于毛价）；
+    卖出 100 股 @48.640000、费用 1.00 → 净价 `48.630000`（低于毛价）。
+    收盘价取 replay 夹具 600519 的 `(d0, target]` 窗口（与 `compute_forward` 同口径）。
+    """
+    await _seed_trade(
+        owner_engine,
+        user_id=user.user_id,
+        trade_date=date(2026, 6, 2),
+        side="buy",
+        quantity_units=1_000_000,  # 100.0000 股
+        price_units=50_717_000,  # 毛价 50.717000
+        amount_units=-507_700,  # 成交额 −5077.00（含 5.30 费用）
+    )
+    await _seed_trade(
+        owner_engine,
+        user_id=user.user_id,
+        trade_date=date(2026, 6, 20),
+        side="sell",
+        quantity_units=1_000_000,
+        price_units=48_640_000,  # 毛价 48.640000
+        amount_units=486_300,  # 成交额 4863.00（扣 1.00 费用）
+    )
+    await _rebuild_and_drain(client, api_prefix, user, settings)
+
+    body = (await _list(client, api_prefix, user.headers, "?period=2026-06")).json()
+    item = body["items"][0]
+    buy = item["buy_trade"]
+    sell = item["sell_trade"]
+
+    # 净价 = |成交额| × 10⁸ ÷ 数量（scale=6）；买入含费更高、卖出扣费更低。
+    assert buy["price_display"] == "50.770000"
+    assert sell["price_display"] == "48.630000"
+    assert buy["amount_display"] == "-5077.00"
+    assert sell["amount_display"] == "4863.00"
+    for view, quantity_units, amount_units in (
+        (buy, 1_000_000, -507_700),
+        (sell, 1_000_000, 486_300),
+    ):
+        # 标度关系：6 位小数，且严格等于 `price_net` 的标度整数换算值（不允许 10⁴ 级偏差）。
+        assert _PRICE6_RE.match(view["price_display"])
+        expected_price = (
+            Decimal(abs(amount_units)) * Decimal(10**8) / Decimal(quantity_units) / Decimal(10**6)
+        )
+        assert Decimal(view["price_display"]) == expected_price
+        # 数量 × 价格 与成交额自洽（买入含费、卖出扣费两个方向）。
+        assert Decimal(view["price_display"]) * Decimal(quantity_units).scaleb(-4) == abs(
+            Decimal(view["amount_display"])
+        )
+
+    # 收盘价：2 位小数 + 精确值（replay 夹具 600519 的 (d0, target] 窗口最高/最低收盘）。
+    expected_close = {
+        ("buy_trade", "5"): ("1702.61", "1701.65"),
+        ("buy_trade", "20"): ("1706.20", "1701.65"),
+        ("sell_trade", "5"): ("1705.72", "1704.76"),
+        ("sell_trade", "20"): ("1709.19", "1704.76"),
+    }
+    for (key, horizon), (high, low) in expected_close.items():
+        forward = item[key]["forward"][horizon]
+        assert forward["status"] == "ok"
+        assert _PRICE2_RE.match(forward["max_close_display"])
+        assert _PRICE2_RE.match(forward["min_close_display"])
+        assert forward["max_close_display"] == high
+        assert forward["min_close_display"] == low
+
+    # 详情接口同源（`_side_view` / `_to_view` 与列表共用）。
+    detail = (await _detail(client, api_prefix, user.headers, item["round_id"])).json()
+    assert detail["buy_trade"]["price_display"] == "50.770000"
+    assert detail["sell_trade"]["price_display"] == "48.630000"
+    assert detail["buy_trade"]["forward"]["20"]["max_close_display"] == "1706.20"
+    assert detail["sell_trade"]["forward"]["20"]["min_close_display"] == "1704.76"
 
 
 async def test_api_092_093_cross_user_sees_nothing(

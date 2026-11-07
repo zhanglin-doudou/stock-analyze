@@ -17,6 +17,7 @@ from collections import defaultdict
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
 from datetime import date
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
 from sqlalchemy import select
@@ -29,7 +30,7 @@ from stock_core.insights import DEFINITION_VERSION, classify
 from stock_core.insights import aggregate as agg
 from stock_core.insights import calendar as cal
 from stock_core.insights.forward import ForwardResult, ForwardTrade, compute_forward, price_net
-from stock_core.values import Money, Qty, Ratio
+from stock_core.values import Money, Price, Qty, Ratio
 from stock_ledger.corporate_actions import is_corporate_action
 from stock_ledger.models import Trade
 from stock_platform.ids import new_id
@@ -271,6 +272,25 @@ def _money(units: int | None) -> str | None:
     return None if units is None else str(Money(units))
 
 
+def _price_6dp(units: int | None) -> str | None:
+    """1e-6 价格标度整数 → 6 位小数展示串（成交价口径）。"""
+    return None if units is None else str(Price(units))
+
+
+_CLOSE_DISPLAY_QUANT = Decimal("0.01")
+
+
+def _price_2dp(units: int | None) -> str | None:
+    """1e-6 收盘价标度整数 → 元、2 位小数展示串（收盘价口径）。
+
+    不能用 `_money`：`Money` 的 scale=2 会把 1e-6 单位当成「分」，数值放大 10⁴。
+    """
+    if units is None:
+        return None
+    value = Price(units).to_decimal().quantize(_CLOSE_DISPLAY_QUANT, rounding=ROUND_HALF_UP)
+    return f"{value:f}"
+
+
 def _encode_cursor(offset: int) -> str:
     raw = json.dumps({"o": str(offset)}, separators=(",", ":"), sort_keys=True).encode("utf-8")
     return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
@@ -325,8 +345,8 @@ def _to_view(result: ForwardResult) -> ForwardView:
         b1_pct=_pct(result.ret_b1_units),
         b2_pct=_pct(result.ret_b2_units),
         b3_pct=_pct(result.ret_b3_units),
-        max_close_display=_money(result.max_close_units),
-        min_close_display=_money(result.min_close_units),
+        max_close_display=_price_2dp(result.max_close_units),
+        min_close_display=_price_2dp(result.min_close_units),
         price_jump_review=result.price_jump_review,
         ret_b3_units=result.ret_b3_units,
         ret_b2_units=result.ret_b2_units,
@@ -647,7 +667,7 @@ def _side_view(
     return TradeSideView(
         trade_id=trade.id,
         date=trade.trade_date,
-        price_display=_money(net_price),
+        price_display=_price_6dp(net_price),
         quantity_display=None,
         amount_display=_money(trade.amount_units),
         reason=dto,
