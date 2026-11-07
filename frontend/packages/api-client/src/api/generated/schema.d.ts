@@ -674,6 +674,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/rounds/insights": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Round Insights Endpoint
+         * @description API-092：回合洞察列表（静态路由必须先于 `/rounds/{round_id}`）。
+         */
+        get: operations["listRoundInsights"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/rounds/insights/refresh": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Refresh Round Insights Endpoint
+         * @description API-094：重算前瞻收益缓存；>5000 笔转 202 作业。
+         */
+        post: operations["refreshRoundInsights"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/rounds/{round_id}": {
         parameters: {
             query?: never;
@@ -706,6 +746,26 @@ export interface paths {
          * @description API-031：FIFO 配对明细（一回合内 sequence 从 1 开始）。
          */
         get: operations["listRoundFills"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/rounds/{round_id}/insights": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Round Insights Endpoint
+         * @description API-093：单回合洞察详情（回合基础 + 配对明细 + 每笔理由/前瞻）。
+         */
+        get: operations["getRoundInsight"];
         put?: never;
         post?: never;
         delete?: never;
@@ -906,6 +966,30 @@ export interface paths {
         put?: never;
         post?: never;
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/trades/{trade_id}/reason": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Put Trade Reason
+         * @description API-090：新增/更新逐笔理由（新建 201、更新 200；版本冲突 409）。
+         */
+        put: operations["upsertTradeReason"];
+        post?: never;
+        /**
+         * Delete Trade Reason
+         * @description API-091：软删理由（204 幂等）；不存在同账号返回 204，跨账号 404。
+         */
+        delete: operations["deleteTradeReason"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1990,6 +2074,40 @@ export interface components {
                 [key: string]: unknown;
             }[];
         };
+        /**
+         * ForwardReturnOut
+         * @description 前瞻收益（B0~B3）；`*_pct`/`*_display` 均为后端格式化字符串。
+         */
+        ForwardReturnOut: {
+            /** B0 Net Pct */
+            b0_net_pct?: string | null;
+            /** B0 Pct */
+            b0_pct?: string | null;
+            /** B1 Pct */
+            b1_pct?: string | null;
+            /** B2 Pct */
+            b2_pct?: string | null;
+            /** B3 Pct */
+            b3_pct?: string | null;
+            /** Base Shifted */
+            base_shifted: boolean;
+            /** Horizon */
+            horizon: number;
+            /** Max Close Display */
+            max_close_display?: string | null;
+            /** Min Close Display */
+            min_close_display?: string | null;
+            /**
+             * Price Jump Review
+             * @default false
+             */
+            price_jump_review: boolean;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "ok" | "pending" | "no_calendar" | "no_bar" | "stale_price" | "corporate_action" | "divisor_missing";
+        };
         /** HTTPValidationError */
         HTTPValidationError: {
             /** Detail */
@@ -2038,6 +2156,154 @@ export interface components {
              * Format: date
              */
             to: string;
+        };
+        /**
+         * InsightAddonSummaryOut
+         * @description 加仓统计（设计 §6.3）：`count` 与兼容字段 `rounds` 同值。
+         *
+         *     `avg_dip_pct` 是加仓笔次 20 日 B2 均值，仅对 `status=ok` 样本取均值；
+         *     `avg_dip_coverage` 形如 `"3/9"`，0 个有效样本时 `avg_dip_pct=null`。
+         */
+        InsightAddonSummaryOut: {
+            /** Avg Dip Coverage */
+            avg_dip_coverage: string;
+            /** Avg Dip Pct */
+            avg_dip_pct?: string | null;
+            /** Count */
+            count: number;
+            /** Declined After Addon */
+            declined_after_addon: number;
+            /** Declined Pct */
+            declined_pct?: string | null;
+            /** Rounds */
+            rounds: number;
+            /** Share Pct */
+            share_pct?: string | null;
+        };
+        /** InsightBucketSummaryOut */
+        InsightBucketSummaryOut: {
+            /** Avg Holding Trading Days */
+            avg_holding_trading_days?: string | null;
+            /** Avg Pnl Display */
+            avg_pnl_display?: string | null;
+            /** Closed */
+            closed: number;
+            /** Short */
+            short: number;
+            /** Swing */
+            swing: number;
+            /** Total Pnl Display */
+            total_pnl_display?: string | null;
+            /** Trend */
+            trend: number;
+            /** Win Rate Pct */
+            win_rate_pct?: string | null;
+        };
+        /**
+         * InsightFillSwingOut
+         * @description fill 级波段配对（统计单位 fill，与回合级 swing 不可相加，AC-S3）。
+         */
+        InsightFillSwingOut: {
+            /** Avg Holding Trading Days */
+            avg_holding_trading_days?: string | null;
+            /** Avg Pnl Display */
+            avg_pnl_display?: string | null;
+            /**
+             * Bucket Basis
+             * @default fill
+             */
+            bucket_basis: string;
+            /** Pairs */
+            pairs: number;
+            /** Total Pnl Display */
+            total_pnl_display?: string | null;
+            /** Win Rate Pct */
+            win_rate_pct?: string | null;
+        };
+        /** InsightRankingOut */
+        InsightRankingOut: {
+            /** Basis */
+            basis: string;
+            /** Combined Avg Pct */
+            combined_avg_pct?: string | null;
+            /** Combined Median Pct */
+            combined_median_pct?: string | null;
+            /** Definition Version */
+            definition_version: string;
+            /** N Eligible */
+            n_eligible: number;
+            /** N Sample */
+            n_sample: number;
+            /** Per Stock */
+            per_stock?: {
+                [key: string]: unknown;
+            }[];
+            /** Quadrant Counts */
+            quadrant_counts?: {
+                [key: string]: number;
+            };
+            /**
+             * Sample Status
+             * @enum {string}
+             */
+            sample_status: "ok" | "insufficient" | "no_conclusion";
+        };
+        /** InsightReasonCoverageOut */
+        InsightReasonCoverageOut: {
+            /** Annotated */
+            annotated: number;
+            /** By Code */
+            by_code?: components["schemas"]["InsightReasonShareOut"][];
+            /** Coverage Pct */
+            coverage_pct?: string | null;
+            /** Total Rounds */
+            total_rounds: number;
+        };
+        /** InsightReasonShareOut */
+        InsightReasonShareOut: {
+            /** Code */
+            code: string;
+            /** Count */
+            count: number;
+            /** Label */
+            label: string;
+            /** Share Pct */
+            share_pct: string;
+        };
+        /**
+         * InsightSellFlySummaryOut
+         * @description 卖飞统计：只算止盈型卖飞，止损后反弹单列不并入。
+         */
+        InsightSellFlySummaryOut: {
+            /** Fly Pct */
+            fly_pct?: string | null;
+            /** Missed Profit End Display */
+            missed_profit_end_display?: string | null;
+            /** Missed Profit Worst Display */
+            missed_profit_worst_display?: string | null;
+            /** Profit Take Fly */
+            profit_take_fly: number;
+            /** Rounds */
+            rounds: number;
+            /** Sell Count */
+            sell_count: number;
+            /** Share Pct */
+            share_pct?: string | null;
+            /** Stop Loss Rebound */
+            stop_loss_rebound: number;
+        };
+        /** InsightsSummaryOut */
+        InsightsSummaryOut: {
+            addon: components["schemas"]["InsightAddonSummaryOut"];
+            fill_swing: components["schemas"]["InsightFillSwingOut"];
+            /** Pending */
+            pending: {
+                [key: string]: number;
+            };
+            ranking: components["schemas"]["InsightRankingOut"];
+            reason_coverage: components["schemas"]["InsightReasonCoverageOut"];
+            sell_fly: components["schemas"]["InsightSellFlySummaryOut"];
+            swing: components["schemas"]["InsightBucketSummaryOut"];
         };
         /** JobAcceptedOut */
         JobAcceptedOut: {
@@ -3015,6 +3281,173 @@ export interface components {
             /** Total */
             total: number;
         };
+        /** RoundInsightDetailOut */
+        RoundInsightDetailOut: {
+            /**
+             * Bucket
+             * @enum {string}
+             */
+            bucket: "short" | "swing" | "trend" | "unknown";
+            buy_trade?: components["schemas"]["TradeSideInsightOut"] | null;
+            /** Close Date */
+            close_date?: string | null;
+            /** Disclaimer */
+            disclaimer: string;
+            /** Fills */
+            fills?: {
+                [key: string]: unknown;
+            }[];
+            /** Flags */
+            flags?: string[];
+            /** Holding Days Legacy */
+            holding_days_legacy: number;
+            /** Holding Trading Days */
+            holding_trading_days?: number | null;
+            /**
+             * Open Date
+             * Format: date
+             */
+            open_date: string;
+            /** Pnl */
+            pnl: string;
+            /** Quality */
+            quality?: string[];
+            /** Ranking */
+            ranking?: {
+                [key: string]: unknown;
+            };
+            /** Return Rate Pct */
+            return_rate_pct: string;
+            /** Round Id */
+            round_id: string;
+            /** Security Code */
+            security_code: string;
+            /** Security Name */
+            security_name: string;
+            sell_trade?: components["schemas"]["TradeSideInsightOut"] | null;
+            /** Status */
+            status: string;
+        };
+        /** RoundInsightItemOut */
+        RoundInsightItemOut: {
+            /**
+             * Bucket
+             * @enum {string}
+             */
+            bucket: "short" | "swing" | "trend" | "unknown";
+            /** Buy Excess Pct */
+            buy_excess_pct?: string | null;
+            buy_trade?: components["schemas"]["TradeSideInsightOut"] | null;
+            /** Close Date */
+            close_date?: string | null;
+            /** Combined Pct */
+            combined_pct?: string | null;
+            /** Flags */
+            flags?: string[];
+            /** Holding Days Legacy */
+            holding_days_legacy: number;
+            /** Holding Trading Days */
+            holding_trading_days?: number | null;
+            /** Missed Profit End Display */
+            missed_profit_end_display?: string | null;
+            /** Missed Profit Worst Display */
+            missed_profit_worst_display?: string | null;
+            /**
+             * Open Date
+             * Format: date
+             */
+            open_date: string;
+            /** Pnl */
+            pnl: string;
+            /** Quadrant */
+            quadrant?: string | null;
+            /** Quality */
+            quality?: string[];
+            /** Rank */
+            rank?: number | null;
+            /** Return Rate Pct */
+            return_rate_pct: string;
+            /** Round Id */
+            round_id: string;
+            /** Security Code */
+            security_code: string;
+            /** Security Name */
+            security_name: string;
+            /** Sell Avoid Pct */
+            sell_avoid_pct?: string | null;
+            sell_trade?: components["schemas"]["TradeSideInsightOut"] | null;
+            /** Status */
+            status: string;
+        };
+        /** RoundInsightsPageOut */
+        RoundInsightsPageOut: {
+            /** Assumptions */
+            assumptions?: string[];
+            /** Basis */
+            basis: string;
+            /** Benchmark Id */
+            benchmark_id: string;
+            /**
+             * Bucket Basis
+             * @default round
+             */
+            bucket_basis: string;
+            /** Data As Of */
+            data_as_of?: string | null;
+            /** Definition Version */
+            definition_version: string;
+            /** Disclaimer */
+            disclaimer: string;
+            /** Has More */
+            has_more: boolean;
+            /** Item Total */
+            item_total: number;
+            /** Items */
+            items: components["schemas"]["RoundInsightItemOut"][];
+            /** Missing */
+            missing?: string[];
+            /** Next Cursor */
+            next_cursor?: string | null;
+            /** Period */
+            period: string;
+            /** Period Basis */
+            period_basis: string;
+            /** Ranking As Of */
+            ranking_as_of?: string | null;
+            summary?: components["schemas"]["InsightsSummaryOut"] | null;
+        };
+        /** RoundInsightsRefreshIn */
+        RoundInsightsRefreshIn: {
+            /** Period */
+            period?: string | null;
+            /**
+             * Scope
+             * @default missing
+             * @enum {string}
+             */
+            scope: "missing" | "all";
+        };
+        /** RoundInsightsRefreshOut */
+        RoundInsightsRefreshOut: {
+            /** Computed */
+            computed: number;
+            /** Corporate Action */
+            corporate_action: number;
+            /** Data As Of */
+            data_as_of?: string | null;
+            /** Divisor Missing */
+            divisor_missing: number;
+            /** No Bar */
+            no_bar: number;
+            /** No Calendar */
+            no_calendar: number;
+            /** Pending */
+            pending: number;
+            /** Skipped */
+            skipped: number;
+            /** Stale Price */
+            stale_price: number;
+        };
         /**
          * RoundOut
          * @description API-029/030：回合（金额/数量/比率全部定点字符串）。
@@ -3608,6 +4041,7 @@ export interface components {
             } | null;
             /** Quantity */
             quantity: string;
+            reason?: components["schemas"]["TradeReasonOut"] | null;
             /** Security Code */
             security_code: string;
             /** Security Name */
@@ -3683,6 +4117,51 @@ export interface components {
             /** Version */
             version?: number | null;
         };
+        /**
+         * TradeReasonIn
+         * @description PUT 理由入参；`reason_text` 上限 500、tags<=8。
+         */
+        TradeReasonIn: {
+            /** Emotion Code */
+            emotion_code?: string | null;
+            /** Reason Code */
+            reason_code: string;
+            /** Reason Text */
+            reason_text?: string | null;
+            /** Tags */
+            tags?: string[];
+        };
+        /**
+         * TradeReasonOut
+         * @description 逐笔理由（API-090/091；`/trades` 内嵌同一结构）。
+         */
+        TradeReasonOut: {
+            /**
+             * Annotated At
+             * Format: date-time
+             */
+            annotated_at: string;
+            /** Emotion Code */
+            emotion_code?: string | null;
+            /** Emotion Label */
+            emotion_label?: string | null;
+            /** Late Annotated */
+            late_annotated: boolean;
+            /** Reason Code */
+            reason_code: string;
+            /** Reason Label */
+            reason_label: string;
+            /** Reason Text */
+            reason_text?: string | null;
+            /** Side */
+            side: string;
+            /** Tags */
+            tags?: string[];
+            /** Trade Id */
+            trade_id: string;
+            /** Version */
+            version: number;
+        };
         /** TradeRestoreOut */
         TradeRestoreOut: {
             /** Recompute Job Id */
@@ -3694,6 +4173,29 @@ export interface components {
              */
             status: "restored";
             trade: components["schemas"]["TradeOut"];
+        };
+        /** TradeSideInsightOut */
+        TradeSideInsightOut: {
+            /** Amount Display */
+            amount_display?: string | null;
+            /**
+             * Date
+             * Format: date
+             */
+            date: string;
+            /** Forward */
+            forward?: {
+                [key: string]: components["schemas"]["ForwardReturnOut"];
+            };
+            /** Price Display */
+            price_display?: string | null;
+            /** Quantity Display */
+            quantity_display?: string | null;
+            reason?: components["schemas"]["TradeReasonOut"] | null;
+            /** Reason Label */
+            reason_label?: string | null;
+            /** Trade Id */
+            trade_id: string;
         };
         /** UserBrief */
         UserBrief: {
@@ -5938,6 +6440,161 @@ export interface operations {
             };
         };
     };
+    listRoundInsights: {
+        parameters: {
+            query?: {
+                period?: string | null;
+                bucket?: string | null;
+                flag?: string[] | null;
+                has_reason?: boolean | null;
+                reason_code?: string | null;
+                security_code?: string | null;
+                sort?: string;
+                sort_dir?: string;
+                include_summary?: boolean;
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoundInsightsPageOut"];
+                };
+            };
+            /** @description 请求参数错误 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    refreshRoundInsights: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RoundInsightsRefreshIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoundInsightsRefreshOut"];
+                };
+            };
+            /** @description 预计处理超过 5000 笔，转后台作业（Location: /jobs/{id}） */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["JobAcceptedOut"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 资源状态冲突 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 请求过于频繁 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     getRound: {
         parameters: {
             query?: never;
@@ -6021,6 +6678,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RoundFillPage"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getRoundInsight: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path: {
+                round_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RoundInsightDetailOut"];
                 };
             };
             /** @description 未认证或凭证无效 */
@@ -6635,6 +7354,8 @@ export interface operations {
                 include_deleted?: boolean;
                 fields?: string | null;
                 include_total?: boolean;
+                has_reason?: boolean | null;
+                reason_code?: string | null;
             };
             header?: {
                 authorization?: string | null;
@@ -6936,6 +7657,152 @@ export interface operations {
             };
             /** @description 资源不存在 */
             404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    upsertTradeReason: {
+        parameters: {
+            query?: never;
+            header?: {
+                "If-Match"?: string | null;
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path: {
+                trade_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TradeReasonIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TradeReasonOut"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 资源状态冲突 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    deleteTradeReason: {
+        parameters: {
+            query?: never;
+            header?: {
+                "If-Match"?: string | null;
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path: {
+                trade_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 资源状态冲突 */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

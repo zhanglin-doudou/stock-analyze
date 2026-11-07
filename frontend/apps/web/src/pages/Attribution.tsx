@@ -13,6 +13,7 @@ import { displayValue, signTone } from '../ui/format';
 import { SAMPLE_STATUS_LABELS, dataStatusLabel } from '../ui/status';
 import './dashboard.css';
 import './attribution.css';
+import '../ui/filter-bar.css';
 import { PeriodInput } from '../ui/PeriodInput';
 
 const TOTAL_PNL_BASIS_LABELS: Record<string, string> = {
@@ -216,18 +217,6 @@ function lookaheadActive(data: Attribution | undefined): boolean {
   return data?.assumptions?.['classification_lookahead'] === true;
 }
 
-/** 只读展示用：容差金额与分母（assumptions.residual_tolerance，金额为后端定点字符串）。 */
-function residualToleranceText(data: Attribution): string | undefined {
-  const value = data.assumptions?.['residual_tolerance'];
-  if (value == null || typeof value !== 'object') return undefined;
-  const tolerance = value as Record<string, unknown>;
-  const amount =
-    typeof tolerance.amount === 'string' ? tolerance.amount : undefined;
-  const base = typeof tolerance.base === 'string' ? tolerance.base : undefined;
-  if (amount == null || base == null) return undefined;
-  // 比例口径只在后端（`assumptions.residual_tolerance.pct`），前端零口径不解析/换算。
-  return `容差 ${formatMoney(amount)}（期末总资产 ${formatMoney(base)}）`;
-}
 
 function StatusBadge({ status }: { status: string }): ReactElement {
   return (
@@ -411,6 +400,20 @@ function SummaryCard({ data }: { data: Attribution }): ReactElement {
   );
 }
 
+interface ResidualTolerance {
+  amount?: string | null;
+  pct?: string | null;
+  base?: string | null;
+}
+
+/** 容差信息来自后端 `assumptions.residual_tolerance`；前端只窄化读取，不改数值。 */
+function readResidualTolerance(
+  assumptions: Attribution["assumptions"],
+): ResidualTolerance | null {
+  const value = assumptions?.residual_tolerance;
+  return typeof value === 'object' && value !== null ? (value as ResidualTolerance) : null;
+}
+
 function ResidualCard({ data }: { data: Attribution }): ReactElement {
   // 桶按金额从大到小排序（只做展示排序，不解析数值；U-08）。
   const buckets = Object.entries(data.residual_breakdown ?? {}).sort(
@@ -418,10 +421,10 @@ function ResidualCard({ data }: { data: Attribution }): ReactElement {
   );
   // 展示条数与「其余 N 只」均由后端切分（`display_limit` 单一来源），前端不截断。
   const unattributed = data.coverage?.unattributed ?? [];
-  const toleranceText = residualToleranceText(data);
-  const withinTolerance = (data.missing ?? []).some(
-    (item) => item.code === 'RESIDUAL_WITHIN_TOLERANCE',
-  );
+  const tolerance = readResidualTolerance(data.assumptions);
+  // 是否容差内由后端 missing[] 码决定，前端不做数值比较。
+  const withinTolerance =
+    data.missing?.some((item) => item.code === 'RESIDUAL_WITHIN_TOLERANCE') ?? false;
   return (
     <section className="dash-panel attr-panel" data-testid="attr-residual">
       <div className="attr-panel-head">
@@ -432,27 +435,27 @@ function ResidualCard({ data }: { data: Attribution }): ReactElement {
           {pctExceeds100(data.residual_ratio_pct) ? (
             <span className="attr-ratio-warn">（残差大于本期总损益）</span>
           ) : null}
-          {toleranceText ? (
-            <span data-testid="attr-residual-tolerance">
-              {' '}
-              · {toleranceText}
-            </span>
-          ) : null}
-          {withinTolerance ? (
-            <span
-              className="muted"
-              data-testid="attr-residual-tolerance-status"
-            >
-              {' '}
-              · 容差内（不降级）
-            </span>
-          ) : null}
         </span>
       </div>
       <p className="attr-residual-note">
         残差是五因子未能解释的损益。正数=未归因收益（抬高本期损益），
         负数=估值差/账面与市值口径差异（拉低本期损益）。
       </p>
+      {/* 容差行：金额/期末总资产/比例均直接展示后端串；不比较数值、不取整。 */}
+      {tolerance ? (
+        <p className="attr-residual-tolerance" data-testid="attr-residual-tolerance">
+          {tolerance.amount != null || tolerance.base != null
+            ? `容差 ${formatMoney(tolerance.amount)}（期末总资产 ${formatMoney(tolerance.base)}）`
+            : `容差比例 ${formatPct(tolerance.pct)}（期末资产未知，数据阻断时不判定）`}
+          <span className="muted" data-testid="attr-residual-tolerance-status">
+            {withinTolerance
+              ? '容差内（不降级）'
+              : data.status === 'blocked'
+                ? '—（数据阻断，无法判定）'
+                : '超出容差（已降级）'}
+          </span>
+        </p>
+      ) : null}
       <div className="dash-kpi-grid attr-kpis">
         <div
           className="dash-kpi"
@@ -635,7 +638,8 @@ function QualityCard({ data }: { data: Attribution }): ReactElement {
 export function AttributionPage(): ReactElement {
   const [params, setParams] = useSearchParams();
   const period = params.get('period') ?? yearToDateRange();
-  const allowLookahead = (params.get('lookahead') ?? 'allow') === 'allow';
+  // 与归因设计 §4.3 一致：lookahead 必须显式请求，默认 deny（不得默认回溯未来信息）。
+  const allowLookahead = (params.get('lookahead') ?? 'deny') === 'allow';
 
   const query = useQuery({
     queryKey: ['attribution', period, allowLookahead],
@@ -701,37 +705,43 @@ export function AttributionPage(): ReactElement {
           </p>
         ) : null}
         <div className="dash-head-meta">
-          <PeriodInput
-            value={period}
-            disabled={query.isLoading}
-            defaultEnd={data?.data_as_of ?? undefined}
-            onChange={updatePeriod}
-          />
-          <nav className="attr-quick" aria-label="快捷区间">
-            {QUICK_RANGES.map((item) => (
-              <button
-                key={item.label}
-                type="button"
-                className="attr-quick-button"
-                disabled={query.isLoading}
-                onClick={() => updatePeriod(item.build())}
-              >
-                {item.label}
-              </button>
-            ))}
-          </nav>
-          <label
-            className="attr-lookahead-toggle"
-            title="行业归属取最新快照回溯历史区间，可能与当时实际归属不符（未来信息风险）"
+          <div
+            className="filter-bar filter-bar-embed"
+            role="group"
+            aria-label="归因期间筛选"
           >
-            <input
-              type="checkbox"
-              checked={allowLookahead}
+            <PeriodInput
+              value={period}
               disabled={query.isLoading}
-              onChange={(event) => updateLookahead(event.target.checked)}
+              defaultEnd={data?.data_as_of ?? undefined}
+              onChange={updatePeriod}
             />
-            使用最新行业成分回溯历史
-          </label>
+            <nav className="attr-quick" aria-label="快捷区间">
+              {QUICK_RANGES.map((item) => (
+                <button
+                  key={item.label}
+                  type="button"
+                  className="attr-quick-button"
+                  disabled={query.isLoading}
+                  onClick={() => updatePeriod(item.build())}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </nav>
+            <label
+              className="attr-lookahead-toggle"
+              title="行业归属取最新快照回溯历史区间，可能与当时实际归属不符（未来信息风险）"
+            >
+              <input
+                type="checkbox"
+                checked={allowLookahead}
+                disabled={query.isLoading}
+                onChange={(event) => updateLookahead(event.target.checked)}
+              />
+              使用最新行业成分回溯历史
+            </label>
+          </div>
           <span>
             页面状态 <StatusBadge status={data?.status ?? 'missing'} />
           </span>

@@ -16,6 +16,7 @@ from stock_core.values import (
     Qty,
     Ratio,
     Scaled,
+    format_quantity,
     money_mul,
     money_of,
     mul_ratio,
@@ -227,3 +228,20 @@ def test_sum_money() -> None:
     assert sum_money([]).units == 0
     with pytest.raises(TypeError):
         sum_money([Money(1), "x"])  # type: ignore[list-item]
+
+
+def test_format_quantity_integer_shares() -> None:
+    # 整数份额：不带小数点与尾零（600 股而不是 "600.0000"）。
+    assert format_quantity(6_000_000) == "600"
+    assert format_quantity(1_000_000) == "100"
+    assert format_quantity(0) == "0"
+    assert format_quantity(-1_500_000) == "-150"
+
+
+def test_format_quantity_fractional_shares() -> None:
+    # 货币基金按 0.01 份计份额：输出 2 位小数，不取整。
+    assert format_quantity(14_141_900) == "1414.19"
+    assert format_quantity(116_295_3800) == "116295.38"
+    assert format_quantity(-47_106_900) == "-4710.69"
+    # 4 位精度落入 2 位（当前数据不存在，防御性按 HALF_UP 收口）。
+    assert format_quantity(10_050) == "1.01"

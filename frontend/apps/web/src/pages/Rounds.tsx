@@ -9,7 +9,10 @@ import {
   type RoundStatus,
 } from "@sa/api-client";
 import { api } from "../client";
+import { periodToDateRange } from "../lib/date";
 import { Cursor } from "../ui/Cursor";
+import { FilterBar, FilterField } from "../ui/FilterBar";
+import { PeriodInput } from "../ui/PeriodInput";
 import { ProblemView } from "../ui/Problem";
 import { DataTable, type DataTableColumn } from "../ui/DataTable";
 
@@ -34,11 +37,11 @@ function signedClass(value: string): string {
 interface RoundFilters {
   security_code: string;
   status: string;
-  from: string;
-  to: string;
+  /** 期间 token（`YYYY` / `YYYY-MM` / `YYYY-MM-DD..YYYY-MM-DD`），空串表示不过滤。 */
+  period: string;
 }
 
-const EMPTY_FILTERS: RoundFilters = { security_code: "", status: "", from: "", to: "" };
+const EMPTY_FILTERS: RoundFilters = { security_code: "", status: "", period: "" };
 
 const TERMINAL: ReadonlySet<JobStatus> = new Set<JobStatus>(["succeeded", "failed", "cancelled"]);
 
@@ -59,6 +62,7 @@ export function Rounds() {
     async (cursor?: string) => {
       setLoading(true);
       setError(null);
+      const range = periodToDateRange(filters.period);
       try {
         setPage(
           await api.rounds.list({
@@ -66,8 +70,8 @@ export function Rounds() {
             cursor,
             security_code: filters.security_code || undefined,
             status: filters.status || undefined,
-            from: filters.from || undefined,
-            to: filters.to || undefined,
+            from: range.from || undefined,
+            to: range.to || undefined,
           }),
         );
       } catch (err) {
@@ -210,55 +214,62 @@ export function Rounds() {
         一个回合 = 一次卖出及其消耗的买入批次；尚未卖出的持仓显示为「持仓中」。
       </p>
 
-      <div className="card filters">
-        <label>
-          证券代码
+      <FilterBar
+        ariaLabel="回合筛选"
+        count={page ? `本页 ${page.items.length} 条` : undefined}
+        actions={
+          <>
+            <button className="btn" type="button" onClick={() => setFilters(draft)}>
+              查询
+            </button>
+            <button className="btn btn-ghost" type="button" disabled={loading} onClick={() => void load()}>
+              刷新
+            </button>
+            <button
+              className="btn btn-ghost"
+              type="button"
+              disabled={rebuilding || building}
+              onClick={() => void rebuild()}
+            >
+              {building ? `重建中… ${jobProgress}%` : "重建回合"}
+            </button>
+          </>
+        }
+        onReset={() => {
+          setDraft(EMPTY_FILTERS);
+          setFilters(EMPTY_FILTERS);
+        }}
+        resetLabel="清空筛选"
+      >
+        <FilterField label="证券代码">
           <input
             type="text"
+            aria-label="证券代码"
             value={draft.security_code}
             placeholder="如 600519"
             onChange={(e) => setDraft({ ...draft, security_code: e.target.value })}
           />
-        </label>
-        <label>
-          状态
-          <select value={draft.status} onChange={(e) => setDraft({ ...draft, status: e.target.value })}>
+        </FilterField>
+        <FilterField label="状态">
+          <select
+            aria-label="状态"
+            value={draft.status}
+            onChange={(e) => setDraft({ ...draft, status: e.target.value })}
+          >
             <option value="">全部</option>
             <option value="closed">已平仓</option>
             <option value="open">持仓中</option>
             <option value="data_error">数据异常</option>
           </select>
-        </label>
-        <label>
-          起始日
-          <input type="date" value={draft.from} onChange={(e) => setDraft({ ...draft, from: e.target.value })} />
-        </label>
-        <label>
-          截止日
-          <input type="date" value={draft.to} onChange={(e) => setDraft({ ...draft, to: e.target.value })} />
-        </label>
-        <div className="row-actions">
-          <button className="btn" type="button" onClick={() => setFilters(draft)}>
-            查询
-          </button>
-          <button
-            className="btn btn-ghost"
-            type="button"
-            onClick={() => {
-              setDraft(EMPTY_FILTERS);
-              setFilters(EMPTY_FILTERS);
-            }}
-          >
-            清空筛选
-          </button>
-          <button className="btn btn-ghost" type="button" disabled={loading} onClick={() => void load()}>
-            刷新
-          </button>
-          <button className="btn btn-ghost" type="button" disabled={rebuilding || building} onClick={() => void rebuild()}>
-            {building ? `重建中… ${jobProgress}%` : "重建回合"}
-          </button>
-        </div>
-      </div>
+        </FilterField>
+        <FilterField label="起始日 / 截止日">
+          <PeriodInput
+            value={draft.period}
+            aria-label="起始日 / 截止日"
+            onChange={(value) => setDraft({ ...draft, period: value })}
+          />
+        </FilterField>
+      </FilterBar>
 
       {notice ? <p className="notice">{notice}</p> : null}
       <ProblemView error={error} onRetry={() => void load()} />

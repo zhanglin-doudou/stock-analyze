@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import {
@@ -60,7 +60,7 @@ function makeDashboard(overrides: Partial<DashboardOut> = {}): DashboardOut {
         {
           security_code: "600519",
           security_name: "贵州茅台",
-          quantity: "100.0000",
+          quantity: "100",
           cost: "170000.00",
           market_value: "170620.00",
           weight_pct: "1.00000000",
@@ -380,7 +380,7 @@ function makeIndustryOverview(overrides: Partial<SectorsOverview> = {}): Sectors
       max_overweight: {
         sector_code: "801120.SI",
         sector_name: "食品饮料",
-        active_weight: "0.70000000",
+        active_weight: "0.7",
         active_weight_pct: "70.00%",
         direction: "over",
       },
@@ -389,7 +389,7 @@ function makeIndustryOverview(overrides: Partial<SectorsOverview> = {}): Sectors
         {
           sector_code: "801120.SI",
           sector_name: "食品饮料",
-          active_weight: "0.70000000",
+          active_weight: "0.7",
           active_weight_pct: "70.00%",
           direction: "over",
         },
@@ -475,25 +475,25 @@ function makeConceptOverview(overrides: Partial<SectorsOverview> = {}): SectorsO
     },
     preference: null,
     concept: {
-      coverage: "1.00000000",
+      coverage: "1",
       coverage_pct: "100.00%",
       coverage_basis: "tagged_equity_market_value / equity_market_value",
       tagged_market_value: "170620.00",
       multi_tag_market_value: "0.00",
       multi_tag_pct: "0.00%",
-      overlap: "1.00000000",
+      overlap: "1",
       hhi_tag: null,
       top1_concept: {
         sector_code: "BK0999",
         sector_name: "白酒",
-        exposure: "1.00000000",
+        exposure: "1",
         exposure_pct: "100.00%",
       },
       top5_concepts: [
         {
           sector_code: "BK0999",
           sector_name: "白酒",
-          exposure: "1.00000000",
+          exposure: "1",
           exposure_pct: "100.00%",
         },
       ],
@@ -579,7 +579,8 @@ describe("Dashboard 看板", () => {
     expect(screen.getByTestId("kpi-max-drawdown").textContent).toContain("92");
 
     expect(screen.getByTestId("holding-row-600519").textContent).toContain("贵州茅台");
-    expect(screen.getByTestId("holding-row-600519").textContent).toContain("100.0000");
+    // 数量沿用后端展示串：整数份额不带尾零（"100"）。
+    expect(within(screen.getByTestId("holding-row-600519")).getByText("100")).toBeTruthy();
     expect(screen.getByTestId("top-round-rnd_600519")).toBeTruthy();
     expect(screen.getByTestId("bottom-round-rnd_000858")).toBeTruthy();
 

@@ -40,6 +40,7 @@ beforeEach(() => {
 
 afterEach(() => {
   cleanup();
+  vi.unstubAllGlobals();
   window.localStorage.clear();
   document.documentElement.removeAttribute("data-theme");
   document.documentElement.removeAttribute("data-density");
@@ -65,6 +66,24 @@ describe("Settings（Phase 3）", () => {
     fireEvent.click(screen.getByRole("button", { name: "深色" }));
     expect(document.documentElement.dataset.theme).toBe("dark");
     expect(window.localStorage.getItem("sa.theme")).toBe("dark");
+  });
+
+  it("支持跟随系统：持久化 system，根属性写系统解析后的主题", () => {
+    vi.stubGlobal("matchMedia", (query: string) => ({
+      matches: true,
+      media: query,
+      onchange: null,
+      addListener: () => undefined,
+      removeListener: () => undefined,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      dispatchEvent: () => false,
+    }));
+    render(<Settings />);
+
+    fireEvent.click(screen.getByRole("button", { name: "跟随系统" }));
+    expect(window.localStorage.getItem("sa.theme")).toBe("system");
+    expect(document.documentElement.dataset.theme).toBe("dark");
   });
 
   it("渲染 PAT 列表并保留撤销入口", async () => {

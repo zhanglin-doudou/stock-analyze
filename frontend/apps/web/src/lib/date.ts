@@ -48,3 +48,44 @@ export function toRangeToken(from: string, to: string): string {
 export function periodYear(value: string): string {
   return value.slice(0, 4);
 }
+
+/**
+ * 期间 token → 闭区间日期串（`from`/`to`），用于只接受日期范围的旧筛选接口。
+ *
+ * 仅做日历换算（年初/年末、当月首末日），不解析或格式化任何业务数值；
+ * 空 token 表示「不按日期过滤」。
+ */
+export function periodToDateRange(value: string): { from: string; to: string } {
+  if (value === "") return { from: "", to: "" };
+  if (value.includes("..")) {
+    const [from = "", to = ""] = value.split("..");
+    return { from, to };
+  }
+  if (value.length === 4) return { from: `${value}-01-01`, to: `${value}-12-31` };
+  const monthEnd = new Date(`${value}-01T00:00:00`);
+  monthEnd.setMonth(monthEnd.getMonth() + 1, 0);
+  const day = String(monthEnd.getDate()).padStart(2, "0");
+  return { from: `${value}-01`, to: `${value}-${day}` };
+}
+
+function isIsoDate(value: string): boolean {
+  return /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/.test(value);
+}
+
+/**
+ * 期间 token 是否合法（`YYYY` / `YYYY-MM` / `YYYY-MM-DD..YYYY-MM-DD`，闭区间需 from ≤ to）。
+ *
+ * 用于 URL 等外部来源的 token：不合法时调用方按「无筛选」处理，
+ * 避免把 `abc` 之类拼成日期后发给后端（`periodToDateRange` 只假定 token 合法）。
+ */
+export function isValidPeriod(value: string): boolean {
+  if (value === "") return false;
+  if (value.includes("..")) {
+    const parts = value.split("..");
+    if (parts.length !== 2) return false;
+    const [from = "", to = ""] = parts;
+    return isIsoDate(from) && isIsoDate(to) && from <= to;
+  }
+  if (/^\d{4}$/.test(value)) return true;
+  return /^\d{4}-(0[1-9]|1[0-2])$/.test(value);
+}

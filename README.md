@@ -2,15 +2,16 @@
 
 面向个人投资者的交易复盘系统：导入券商对账单，自动落库/分类/对账，建立 FIFO 回合、净值/资产序列与三域指标，并在 Dashboard 中聚合展示。
 
-> **当前阶段（2026-11-02）**
+> **当前阶段（2026-11-05）**
 >
 > - **一期**：已完成（认证/多租户/RLS、导入、任务队列、流水维护、契约链路）。
 > - **二期核心**：已完成验收或已落地——FIFO 回合、`GET /nav`、资产表、18 指标引擎与 `/metrics`、**Dashboard 两板块（API-084）**、`POST /jobs/rebuild-period`（API-083）、**板块数据底座（API-087/088 + `/sectors`）**。
-> - **Period2-08 归因**：**设计已人工批准（2026-11-02）**——[设计 v1.0](docs/architecture/2026-11-02-five-factor-attribution.md) / [交叉评审](docs/reviews/2026-11-02-DevDesign-Review-five-factor-attribution.md)；实现未开始，前置 08a（板块指数日线 + replay 日线）。
+> - **Period2-08 五因子归因**：**08a~08g 已交付并验收（2026-11-02）**，2026-11-04 完成口径收口——[设计 v1.0](docs/architecture/2026-11-02-five-factor-attribution.md) / [交叉评审](docs/reviews/2026-11-02-DevDesign-Review-five-factor-attribution.md)；含 `GET /attribution`（API-036）与 [`/attribution` 页](http://127.0.0.1:5173/attribution)。月报同源接入仍属 Period2-09（09b），未开始。
+> - **Period2-18 FIFO 回合洞察增强**：**已交付并验收（2026-11-05）**——迁移 `0012_review_round_insights`、真实交易日历 B0~B3 前瞻收益、持有期分桶/旗标、`/rounds/insights` 页、回合详情洞察区块、逐笔理由编辑；含 `PUT/DELETE /trades/{trade_id}/reason`（API-090/091）、`GET /rounds/insights`（API-092）、`GET /rounds/{round_id}/insights`（API-093）、`POST /rounds/insights/refresh`（API-094）。设计见 [2026-11-04-fifo-round-insights.md](docs/architecture/2026-11-04-fifo-round-insights.md)。未覆盖：>5000 笔转后台 202 分支（构造方式见验收记录）。
 > - **二期剩余**：月报、导出、设置增强、报告/导出前端页按计划**暂停**；前端已预留 `/reports`、`/exports` 占位入口，验收中按缺失清单 SKIP，不伪造数据。
 > - **三期**：未开始。
 >
-> 设计与验收记录见 [Dashboard 设计](docs/architecture/2026-10-28-dashboard.md)、[月度报告设计](docs/architecture/2026-10-28-monthly-report.md)、[S10 验收记录](docs/reviews/2026-10-27-p207-S10-acceptance.md)。
+> 设计与验收记录见 [Dashboard 设计](docs/architecture/2026-10-28-dashboard.md)、[月度报告设计](docs/architecture/2026-10-28-monthly-report.md)、[S10 验收记录](docs/reviews/2026-10-27-p207-S10-acceptance.md)、[回合洞察设计](docs/architecture/2026-11-04-fifo-round-insights.md)。
 
 ## 架构一览
 
@@ -26,9 +27,11 @@
 - **对账单导入**：华泰账单解析、列映射预检、预览不落库 → 提交异步任务 → 批次撤销、隔离区、bag 去重、断链补差。
 - **流水维护**：游标分页 / ETag / If-Match 并发控制 / 修正 / 软删恢复 / 历史。
 - **FIFO 回合**：稳定配对、分批减仓、股息归属、送转/配股、桥接恒等式；回合列表与配对明细。
+- **回合洞察**：`/rounds/insights` + 详情洞察区块——持有期分桶（scalp/swing/position）、买卖 5/10/20 日 B0~B3 前瞻收益（真实交易日历、缺失显式 null）、加仓/卖飞/止损反弹旗标、逐笔买/卖理由与覆盖率；全部数字由后端格式化，前端只展示。
 - **净值与收益**：份额法 TWR、XIRR/MWR、日资产/现金流、`GET /nav`。
 - **资产快照**：`review.asset_daily` 逐日现金/市值/成本/浮盈；`GET /assets`、`POST /assets/build`。
 - **三域指标**：18 个指标（核心 10 + 探索 8）、DAG/`definition_version`/CI/门禁状态机、`/metrics` 与三段式解释/下钻；月度一键构建（API-083）rounds→assets→nav→metrics。
+- **五因子归因**：`GET /attribution`（API-036）+ `/attribution` 页——选股/板块/买点/卖点/费用五因子，`Σ因子 + 残差 = 区间损益`；残差七桶（公司行动/未归因价格/无持仓股息/利息/打新收益/其他/估值差）。`new_stock` 按本期窗口判定，打新损益进账户级 `ipo_pnl`；降级只由「未归因标的损益」超容差（期末总资产 0.2%）触发，其余桶与 `VALUATION_GAP_ABOVE_TOLERANCE`（info）只披露；期初缺板块指数 bar 可回退节后首根并标 `SECTOR_BAR_FALLBACK`（info）；lookahead 仅在 `SECTOR_LOOKAHEAD_ENABLED=true` + 请求 `classification_lookahead=allow` 时启用（info 披露）。
 - **Dashboard 看板**：`/dashboard` 两个板块——资产概览（持仓/现金/仓位/总收益/峰值成本/费用 + 板块配置子块）与历史概览（平仓统计/盈亏占比/最大收益/最大回撤）；旧五卡以子块合并；未完成功能有占位入口。
 - **板块数据**：同花顺 THS 行业（扁平一级，互斥，Σ权重=1，分母 `E_map`）+ 概念板块（THS，多归属，不可加总）；`GET /sectors/overview`（集中度 HHI/TopK/主动权重/概念暴露 + `caveat`）、`GET /sectors`（公共目录树）；Dashboard 子块 + `/sectors` 详情页（行业一级、概念警示）；公共缓存落 `market.sector*`，replay 夹具 `fixtures/market/sectors.json`。
 - **质量与契约**：OpenAPI 快照 → `api-check` → 前端 SDK；标度整数零 float；RLS/越权/端点/租户/金标门禁；pytest/vitest。
@@ -110,10 +113,23 @@ make dev
 | 入口 | 地址 |
 |---|---|
 | **Dashboard** | http://127.0.0.1:5173/dashboard |
+| **归因** | http://127.0.0.1:5173/attribution |
 | Web | http://127.0.0.1:5173 |
 | API | http://127.0.0.1:8000/api/v1 |
 | OpenAPI | http://127.0.0.1:8000/api/v1/openapi.json |
 | 健康检查 | `/healthz` · `/readyz` · `/version` · `/metrics` |
+
+#### 启动前的数据库版本检查
+
+`make dev` 会在起进程前自动校验 `.env` 中 `STOCK_DB_*` 指向的数据库（不是硬编码 5433）的 Alembic 版本是否等于代码 head（复用 `make migrate-check`）。检查失败会**立即中止**，避免 API 启动后才因 `SCHEMA_VERSION 不匹配` 崩溃：
+
+- **版本落后**：提示「库 0011 / 代码 0012」→ 执行 `make migrate` 后重试 `make dev`。
+- **连不上库**：提示目标 `host:port/name` 与底层错误 → 确认 PostgreSQL 已启动（`make db-up`）或修正 `.env` 的端口/账号；不会打印裸 traceback。
+- **跳过检查**：只开发前端/API 时用 `SKIP_MIGRATE_CHECK=1 make dev`；默认严格检查，不默认放行。
+
+`make api` / `make worker` / `make web` 是局部启动入口，不触发该检查。
+
+启动链路未变化：`/attribution` 页随 web 一起启动；归因读的是已构建的资产/净值序列，首次使用仍需按下方「首次看板数据」构建（API-083）。live 板块同步不随 `make dev` 自动执行，首次需注入 THS 登录态后手动跑 `make sync-sector-*`。
 
 ### 固定本地测试 / 体验账号
 
@@ -153,6 +169,17 @@ make sync-sector-bars ARGS='--start 2026-04-01'  # 只回填行业指数日线�
 make sync-sectors ARGS='--dry-run'      # 只做配置/DB 检查，不联网不写库
 ```
 
+- **同花顺登录态**：THS 板块详情页需要登录态，通过环境变量注入（下面的 cookie 是**占位符**，勿提交真实值）：
+
+  ```bash
+  export SECTOR_MODE=live
+  export SECTOR_THS_COOKIE='<从浏览器复制的完整 cookie 串>'   # 占位符
+  export SECTOR_THS_UA='Mozilla/5.0 ...'                      # 可选，覆盖 User-Agent
+  make sync-sector-industry
+  ```
+  cookie 缺失或失效时 **fail-closed**：整批同步放弃、不写 `market.*`（旧快照与 `sector_sync_state` 保留），CLI 给出明确修复提示。
+- **命令前提**：`sync-sector-*` 仅在 `SECTOR_MODE=live` 下执行；`sync-sector-bars` 需先有行业目录缓存（先跑 `make sync-sector-industry`），缺省从 `bar_as_of` 次日续传；这些是运维命令，直接写 `market.*` 公共缓存（无 RLS）。
+- **完整性闸门与重试**：成分按 `page_info` 页数逐页抓取，行数/去重不一致即整批失败（不落库）；传输层失败按 `SECTOR_SYNC_RETRY_ATTEMPTS` 退避重试，403/429 连续触发 WAF 熔断整批快速失败；板级并发 `SECTOR_LIVE_MAX_CONCURRENCY`（默认 6）、全局限速 `SECTOR_THS_RATE_LIMIT_PER_SECOND`（默认 8 req/s）。
 - 行业与概念可**分开同步**（`sync-sector-industry` / `sync-sector-concept`），互不依赖：各自只抓自己的目录与成分，一个失败不影响另一个。
 - 板块指数日线可**单独回填**（`sync-sector-bars`）：只 upsert `market.sector_bar` + `sector_pull_range` 并推进 `bar_as_of`，不重抓目录/成分；缺省从 `bar_as_of` 次日续传。
 
@@ -186,7 +213,7 @@ make help              # 全部目标
 
 # 环境/运行
 make env / db-up / db-bootstrap / migrate
-make dev               # api(热重载) + worker + web
+make dev               # api(热重载) + worker + web（启动前校验库版本）
 make api / worker / web
 
 # 数据
@@ -194,6 +221,8 @@ make seed-tenants      # 固定体验账号 + A/B/admin + 账单
 make seed-demo         # 演示数据 + 行情/板块回放（推荐首次使用）
 make sync-market       # live：收盘后补行情缓存
 make sync-sectors      # live：同步板块公共数据（ARGS='--dry-run' 只检查）
+make sync-sector-industry  # live：只同步行业板块（THS）
+make sync-sector-concept   # live：只同步概念板块（THS）
 make sync-sector-bars  # live：只回填行业指数日线（ARGS='--start 2026-04-01'）
 
 # 质量
@@ -243,7 +272,7 @@ pnpm -r test                 # vitest
 ```
 
 - API client：`packages/api-client/src/http.ts`（手写传输层）+ `src/api/generated/schema.d.ts`（契约生成，勿手改）；改接口后 `make api-snapshot && make sdk`。
-- 页面：登录/注册、**Dashboard**、交易流水、回合/详情、净值、资产、指标/详情、**板块（`/sectors`）**、导入/导入记录、设置；`/reports`、`/exports`、`/attribution` 为未完成功能占位页（可见、不返回假数据）。
+- 页面：登录/注册、**Dashboard**、交易流水、回合/详情、净值、资产、指标/详情、**板块（`/sectors`）**、**归因（`/attribution`）**、导入/导入记录、设置；`/reports`、`/exports` 为未完成功能占位页（可见、不返回假数据）。
 
 ## 测试说明
 
@@ -274,8 +303,7 @@ STOCK_DB_PORT=5433 make test-p2     # 显式指向 Docker 库（不改 .env 的 
 
 ## 已知未完成（二期暂停项）
 
-- Period2-08 归因：设计已人工批准（2026-11-02），**实现未开始**（08a 前置：THS 行业指数日线 + replay 日线）。
-- Period2-09 月报、Period2-10 导出、Period2-11 设置增强、Period2-13 报告/导出页、Period2-14 `verify-p2`、Period2-15 零口径 ESLint 门禁。
+- Period2-09 月报（含归因同源接入 09b）、Period2-10 导出、Period2-11 设置增强、Period2-13 报告/导出页、Period2-14 `verify-p2`、Period2-15 零口径 ESLint 门禁。
 - G8 金标审批仍有 22 个 COVERAGE 骨架 + `perf.fee_breakeven` 口径待收尾；`make gate-golden` 可能红。
 - 具体缺失/占位/验收 SKIP 见 [Dashboard 设计 §7](docs/architecture/2026-10-28-dashboard.md)。
 
@@ -290,6 +318,7 @@ STOCK_DB_PORT=5433 make test-p2     # 显式指向 Docker 库（不改 .env 的 
 
 - 架构图：[运行时架构（交互版）](docs/architecture/diagrams/stock-analyze-runtime.html) · [SVG](docs/architecture/diagrams/stock-analyze-runtime.svg) · [图规格 JSON](docs/architecture/diagrams/stock-analyze-runtime.spec.json)
 - [Dashboard 设计（Period2-12）](docs/architecture/2026-10-28-dashboard.md)
+- [五因子归因设计（Period2-08，已交付）](docs/architecture/2026-11-02-five-factor-attribution.md) · [交叉评审](docs/reviews/2026-11-02-DevDesign-Review-five-factor-attribution.md)
 - [板块数据接入设计（2026-10-31，API-087/088）](docs/architecture/2026-10-31-sector-data.md)
 - [月度报告设计（Period2-09，暂停）](docs/architecture/2026-10-28-monthly-report.md)
 - [S10 验收记录](docs/reviews/2026-10-27-p207-S10-acceptance.md)

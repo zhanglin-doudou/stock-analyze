@@ -48,7 +48,7 @@
 - ETag `W/"<version>"`（列表含查询指纹），写响应返新 ETag；`If-Match` 不匹配 → 409 `VERSION_CONFLICT`（遵循 PRD FR-L4，不采用 412）。
 - 格式：金额**定点字符串 2 位** `"1234.56"`；价格 6 位、数量 4 位；比率十进制小数；时间 ISO 8601 UTC；业务日 `YYYY-MM-DD`（Asia/Shanghai）；`blocked` 时 `value` **字段缺省**。软删默认过滤 `deleted_at NULL`，`include_deleted=true` 仅本人；注销物理级联删除，审计留事件元数据。
 
-## §1 端点总表（88 个；Path 省略公共前缀 `/api/v1`，标注「根」者不在前缀下）
+## §1 端点总表（93 个；API-089 预留不计数，API-090~094 已实现（2026-11-05）；Path 省略公共前缀 `/api/v1`，标注「根」者不在前缀下）
 | API-ID | Method | Path | 用途 | FR | 认证/scope | 幂等 | 同步/异步 | 优先级 | 主要成功码 |
 |---|---|---|---|---|---|---|---|---|---|
 | API-001 | POST | `/auth/register` | 注册账号 | L2 | 公开 | 支持 | 同步 | P0 | 201 |
@@ -139,9 +139,18 @@
 | API-086 | GET | `/metrics/catalog` | 18 个指标口径说明书（定义/方向/窗口/经验区间/版本） | D3/R8 | read | — | 同步 | P0 | 200 |
 | API-087 | GET | `/sectors/overview` | 板块概览（行业三级/概念暴露+集中度+偏好） | D1 | read | — | 同步 | P0 | 200 |
 | API-088 | GET | `/sectors` | 板块目录树（行业多级/概念列表，供筛选与钻取） | D1 | read | — | 同步 | P1 | 200 |
+| API-090 | PUT | `/trades/{trade_id}/reason` | 新增/更新买入/卖出理由（服务端按 dedupe_key 归并） | D4 | write | 支持 | 同步 | P0 | 201/200 |
+| API-091 | DELETE | `/trades/{trade_id}/reason` | 删除理由（软删，幂等） | D4 | write | 幂等 | 同步 | P0 | 204 |
+| API-092 | GET | `/rounds/insights` | 回合洞察列表（理由/前瞻/波段/抄底卖飞/20D 表现排序） | R1/R8 | read | — | 同步 | P0 | 200 |
+| API-093 | GET | `/rounds/{round_id}/insights` | 单回合洞察详情（逐笔理由/5/10/20 日四口径） | R8 | read | — | 同步 | P1 | 200 |
+| API-094 | POST | `/rounds/insights/refresh` | 补算/失效重算前瞻收益（手动/后续自动化同函数） | R8 | write | 必需 | 同步/异步 | P1 | 200/202 |
+
+
+
+> **编号说明（2026-11-05）**：**API-089 预留、暂不实现**，不进入 §1 计数；本任务（FIFO 回合分析增强）从 **API-090** 起编号。API-090~094 已于 2026-11-05 **实现并验收**：详细契约见 §2.6，OpenAPI 快照 / SDK / API 测试 / 隔离矩阵 / DEV-PLAN 已同步（commit `8a958d8`）。
 
 ## §2 分域详细契约
-> 下列 34 个端点为**详细契约**；其余 54 个的请求/响应字段以 `openapi/openapi.json` 为准（§1 已登记、§6 已配验收用例）。断言均为可脚本执行：状态码 + 字段值 + 状态迁移 + 副作用。
+> 下列 39 个端点为**详细契约**（34 个既有 + 5 个已实现 API-090~094）；其余端点的请求/响应字段以 `openapi/openapi.json` 为准（§1 已登记、§6 已配验收用例）。断言均为可脚本执行：状态码 + 字段值 + 状态迁移 + 副作用。
 ### 2.1 认证、导入与流水
 #### API-001 POST /auth/register
 - 用途：注册账号；FR-L2；认证：公开；幂等：支持；同步。
@@ -344,10 +353,12 @@
 #### API-036 GET /attribution
 - 用途：归因拆解（P0 五因子，P1 行业 Brinson）；FR-R7；认证：read；同步。
 - 请求：query `period`(必填，月/年/自定义 ≤366 天) / `model`(five_factor|brinson_industry,默认 five_factor) / `benchmark`(可选) / `classification_lookahead`(deny|allow,默认 deny；allow 需部署 `SECTOR_LOOKAHEAD_ENABLED=true`)；头 `Accept-Language`（只换文案不换数字，§5.5）。
-- 响应 200：`model` / `ratio_basis` / `period` / `period_start` / `period_end` / `status`(ok|degraded|blocked) / `definition_version` / `total_pnl_basis` / `total_pnl` / `ratio_na_reason` / `base_capital` / `factors[]{code,name,amount,ratio,share,rank,conclusion,presentation{bar_pct,ratio_pct,tone}}`（固定 5 项、固定顺序，含 `sector`）/ `summary`(string|null) / `residual` / `residual_ratio` / `residual_breakdown{corporate_action_pnl,unattributed_price_pnl,dividend_without_position,interest,other_cashflow,valuation_gap}` / `sample{n_segments,n_attributed_segments,n_rounds,n_symbols,min_n,sample_status}` / `coverage{capital_total,capital_attributed,capital_ratio,base_basis,segments_total,segments_attributed,symbols_total,symbols_attributed,unattributed[]}` / `missing[]{field,code,reason,what_to_do}` / `assumptions`（18 键，见设计 §6.2）/ `data_as_of` / `inputs_hash` / `links{dashboard,sectors,rounds,reports}`。金额/占比均为定点字符串（`^-?\d+\.\d{2}$` / `^-?\d+\.\d{8}$`）。
-- blocked 缺省（冻结）：`total_pnl`/`base_capital`/`summary`/`residual`/`residual_ratio`/`residual_breakdown`/`coverage` 与 `factors[].amount/ratio/share` 整个键缺省；`factors[].code/name/rank` 保留、`conclusion=null`、`presentation=(null,null,"flat")`。`missing[]` 是响应字段（不是 `ErrorCode`）。
+- 响应 200：`model` / `ratio_basis` / `period` / `period_start` / `period_end` / `status`(ok|degraded|blocked) / `definition_version` / `total_pnl_basis` / `total_pnl` / `ratio_na_reason` / `base_capital` / `factors[]{code,name,amount,ratio,share,rank,conclusion,presentation{bar_pct,ratio_pct,share_pct,tone,sector_bar_fallback}}`（固定 5 项、固定顺序，含 `sector`）/ `summary`(string|null) / `summary_na_reason` / `residual` / `residual_ratio` / `residual_ratio_pct` / `residual_breakdown{corporate_action_pnl,unattributed_price_pnl,dividend_without_position,interest,ipo_pnl,other_cashflow,valuation_gap}` / `residual_breakdown_labels` / `residual_reconciliation{unattributed_symbols_total,listed_total,others_count,others_total,display_limit,account_level_total,residual}` / `sample{n_segments,n_attributed_segments,n_rounds,n_symbols,min_n,sample_status}` / `coverage{capital_total,capital_attributed,capital_excluded,capital_ratio,capital_ratio_pct,base_basis,segments_total,segments_attributed,symbols_total,symbols_attributed,symbols_participating,unattributed[]{security_code,security_name,symbol_class,reason_code,amount}}` / `missing[]{field,field_label,code,severity(blocker|warning|info),reason,what_to_do}` / `assumptions`（18 键，见设计 §6.2）/ `data_as_of` / `inputs_hash` / `links{dashboard,sectors,rounds,reports}`。金额/占比均为定点字符串（`^-?\d+\.\d{2}$` / `^-?\d+\.\d{8}$`）。
+- blocked 缺省（冻结）：`total_pnl`/`base_capital`/`summary`/`residual`/`residual_ratio`/`residual_breakdown`/`residual_reconciliation`/`coverage` 与 `factors[].amount/ratio/share` 整个键缺省；`factors[].code/name/rank` 保留、`conclusion=null`、`presentation=(null,null,"flat")`。`missing[]` 是响应字段（不是 `ErrorCode`）。
+- 当前口径（2026-11-04）：`new_stock` 按本期窗口判定，其损益只进账户级 `ipo_pnl`（不落 `per_symbol`/`unattributed[]`）；降级判定基数只取未归因标的损益（`corporate_action_pnl + unattributed_price_pnl`），账户级桶（利息/分红/其他/打新/估值差）超容差不改变 `status`；`VALUATION_GAP_ABOVE_TOLERANCE`（估值差超容差）、`SECTOR_BAR_FALLBACK`（期初缺行业指数 bar 回退节后首根）、`SECTOR_CLASSIFICATION_LOOKAHEAD`（lookahead）均为 `severity=info`，只披露不改 `status`。
 - 错误码：INVALID_PERIOD(422)、MODEL_NOT_AVAILABLE(422，含 lookahead 未开)、UNKNOWN_BENCHMARK(422)、VALIDATION_ERROR(422)、UNKNOWN_QUERY_PARAM(400)、ADMIN_CANNOT_READ_TRADES(403)、401 认证族。
 - 验收断言：① Σfactors.amount+residual==total_pnl（≤0.01）；② rank 1..5 连续无重复；③ Σfactors.ratio+residual_ratio==1（≤1bp）；④ `factors[]` 恰 5 项且含 `sector`；⑤ blocked → 200、金额键缺省、`missing[]` 带 reason/what_to_do；⑥ degraded → 200、五因子照给且 coverage/missing 披露；⑦ 空账户/无可归因 A 股 → 后端固定 `summary` 句（金额 0 照给）；⑧ `sample_status=insufficient` → `summary` 只给事实句、不生成结论（金额照给）；⑨ `Accept-Language=en-US` 只换文案不换数值；⑩ 确定性：同输入两跑（含 `inputs_hash`）一致；⑪ 跨账号隔离（A/B 各自 200 且互不泄漏）；⑫ admin → 403、未认证 → 401；⑬ 参数校验 5 组 → 422/422/422/422/400；⑭ `data_as_of=min(资产/行情/板块)`、`assumptions` 18 键齐全；⑮ 边界：周末月末不误判 stale、`V_begin` blocked → blocked；⑯ bridge 对账 `|MTM−桥接式|≤1 分` 或 degraded+`BRIDGE_MISMATCH`。
+- 当前口径验收（2026-11-04）：⑰ `new_stock` 按本期窗口判定；其损益只进 `ipo_pnl`，`unattributed[]` 不含 `new_stock`，`unattributed_symbols_total + account_level_total == residual`；⑱ 账户级桶（利息/分红/其他/打新/估值差）超容差不改变 status，`RESIDUAL_LARGE`/`RESIDUAL_WITHIN_TOLERANCE` 文案以「未归因标的损益」为主语；⑲ `VALUATION_GAP_ABOVE_TOLERANCE`/`SECTOR_BAR_FALLBACK`/`SECTOR_CLASSIFICATION_LOOKAHEAD` 均 `severity=info` 且 status 不变；⑳ 明细展示前 `display_limit`（5）条 + `others_count`/`others_total`。
 #### API-037 GET /trends
 - 用途：季度/月趋势（口径断点必须断开）；FR-D5；认证：read；同步。
 - 请求：query `metric`(必填) / `granularity`(month|quarter) / `from`/`to` / `benchmark`(可选)。
@@ -430,6 +441,49 @@
 - 响应 200：`as_of` / `taxonomy` / `catalog_version`(16 hex) / `sector_data_state` / `items[]{sector_code,sector_name,taxonomy,level,parent_code,path[],member_count,source(sw|em),classification_version,is_active}` / `next_cursor` / `has_more` / `missing[]`。
 - 错误码：401、ADMIN_CANNOT_READ_TRADES(403)、UNKNOWN_QUERY_PARAM(400)、VALIDATION_ERROR(422)、INVALID_CURSOR(400)。
 - 验收断言：① 目录未同步 → 200 + `items=[]` + `catalog_version=null` + `SECTOR_DATA_MISSING`；② `items` 按 `(level, sector_code)` 升序，L3 的 `path` 恰 3 层；③ L1/L2 `member_count` 为后代 L3 成分去重求和；④ `is_active=false` 默认不返回；⑤ 损坏 cursor → 400 INVALID_CURSOR；⑥ admin 403、无 token 401。
+
+### 2.6 回合洞察与人工理由（2026-11-05 设计登记，未实现）
+
+> 设计依据：[FIFO 回合分析增强设计 v1.0](../2026-11-04-fifo-round-insights.md)（§4 数据模型、§6 API、§8 验收）。
+> 状态：**设计登记，暂未实现**；实现前 `make api-check` 将其列为“后续期次未实现”。实现时必须同步 OpenAPI 快照、SDK、§6 用例、隔离矩阵与 DEV-PLAN 排期。
+> **路由顺序**：`GET /rounds/insights` 必须注册在 `GET /rounds/{round_id}` 之前（FastAPI 按注册序匹配），否则会被动态路由吞掉；前端静态路由同理。
+
+#### API-090 PUT /trades/{trade_id}/reason
+- 用途：新增/更新一笔买入/卖出理由；FR-D4；认证：write；幂等：支持（按 `trade_dedupe_key`）；同步；operationId `upsertTradeReason`。
+- 请求：header `If-Match` 更新时必填（理由 version）；body `reason_code`(必填,枚举) / `reason_text`(≤500) / `emotion_code`(可选) / `tags`(≤8,每个≤16字)；**不接收 `annotated_at`**（服务端 Clock）。
+- 响应 201/200：`{trade_id, trade_dedupe_key, side, reason_code, reason_label, reason_text, emotion_code, tags, annotated_at, late_annotated, version, updated_at, etag}`；`late_annotated` 服务端计算。
+- 错误码：NOT_FOUND(404)、VALIDATION_ERROR(422)、VERSION_CONFLICT(409)、ADMIN_CANNOT_READ_TRADES(403)。
+- 验收：201/200；If-Match 旧值 409；跨用户 404；理由写入后 `/trades` ETag 变化（理由 version 纳入）；审计无 reason_text 明文；重导入后按 dedupe_key 仍关联。
+
+#### API-091 DELETE /trades/{trade_id}/reason
+- 用途：软删理由；FR-D4；认证：write；幂等：幂等；同步；operationId `deleteTradeReason`。
+- 请求：path only；可选 `If-Match`。
+- 响应 204（无 body）；重复删除 204。
+- 错误码：NOT_FOUND(404)、ADMIN_CANNOT_READ_TRADES(403)。
+- 验收：204；列表/详情不再返回；跨用户 404；审计存在。
+
+#### API-092 GET /rounds/insights
+- 用途：回合洞察列表 + 汇总；FR-R1/R8；认证 read；同步；operationId `listRoundInsights`。
+- 请求 query：`period`（默认 close_date 归属）/`bucket=all|short|swing|trend`/`flag`（addon_decline、sold_too_early、reason_missing、horizon_pending、corporate_action）/`has_reason`/`reason_code`/`security_code`/`sort`（combined_20、buy_excess_20、sell_avoid_20、close_date 及负向）/`limit`/`cursor`/`include_summary`。
+- 响应 200：`period`、`period_basis`、`definition_version`、`bucket_basis="round"`、`data_as_of`、`ranking_as_of`、`benchmark_id`、`basis="benchmark_excess_20d"`、`item_total`、`summary{swing,fill_swing,addon,sell_fly,reason_coverage,ranking,pending}`、`items[]`、`next_cursor`、`has_more`、`missing[]`、`assumptions`、`disclaimer`。
+- 统计单位（AC-S3）：`bucket_basis="round"` 表示 `summary.swing` 的 `closed/short/swing/trend` 以**回合**为单位；`summary.fill_swing` 是**fill 级**波段配对（`bucket_basis="fill"`），字段 `pairs/win_rate_pct/avg_holding_trading_days/avg_pnl_display/total_pnl_display`，两种单位**不可相加**（页面必须标注）。
+- `items[]` 关键字段（实现口径，详见设计 §6.3/附录 C）：`round_id/security_code/status/open_date/close_date/holding_days_legacy/holding_trading_days/bucket/pnl/return_rate_pct/buy_trade/sell_trade/buy_excess_pct/sell_avoid_pct/combined_pct/rank/quadrant/flags[]/quality[]/missed_profit_worst_display/missed_profit_end_display`；`buy_trade`/`sell_trade` = `trade_id/date/price_display/quantity_display/amount_display/reason/reason_label/forward{"5","10","20"}`，其中每档前瞻含 `horizon/status/base_shifted/b0_pct/b0_net_pct/b1_pct/b2_pct/b3_pct/max_close_display/min_close_display/price_jump_review`。
+- 错误码：INVALID_PERIOD(422)、UNKNOWN_QUERY_PARAM(400)、INVALID_SORT_FIELD(400)、INVALID_CURSOR(400)、ADMIN_CANNOT_READ_TRADES(403)。
+- 验收：`/rounds/insights` 返回 200（非动态路由 404）；所有数值有 `_pct/_display/label`；缺失 null 不 0；n<30 不排名；`sort` 白名单；summary 不随 cursor 变化；跨用户仅本人。
+
+#### API-093 GET /rounds/{round_id}/insights
+- 用途：单回合逐笔理由/前瞻/标签/排序详情；FR-R8；认证 read；同步；operationId `getRoundInsight`。
+- 响应 200：回合基础 + `holding_trading_days` + `fills[]{fill_id,sequence,buy,sell,quantity_display,pnl_display,open_date,close_date,holding_trading_days,bucket}` + 每笔 buy/sell `reason` + `forward{5,10,20}` + `flags` + `ranking` + `quality[]` + `data_as_of`。`fills[].holding_trading_days/bucket` 用真实交易日历，与回合级 `bucket` 同一口径。
+- 错误码：NOT_FOUND(404)、ADMIN_CANNOT_READ_TRADES(403)。
+- 验收：字段齐全；跨用户 404；理由/前瞻逐笔可追溯；不混旧 `holding_days` 与真实 TD。
+
+#### API-094 POST /rounds/insights/refresh
+- 用途：手动补算/失效重算前瞻收益；FR-R8；认证 write；幂等：**必需**（Idempotency-Key）；同步/异步；operationId `refreshRoundInsights`。
+- 请求：header `Idempotency-Key`；body `period`(可选)/`scope="missing"`（默认；`all` 仅内部维护）。
+- 响应 200：`{computed,skipped,pending,no_calendar,no_bar,corporate_action,divisor_missing,data_as_of}`；预估 >5000 trade → 202 + `{job_id,type,status,links}` + `Location: /api/v1/jobs/{job_id}`。
+- 错误码：VALIDATION_ERROR(422)、IDEMPOTENCY_KEY_REUSED(422)、IDEMPOTENCY_IN_PROGRESS(409)、JOB_ALREADY_RUNNING(409)、QUOTA_EXCEEDED(429)、ADMIN_CANNOT_READ_TRADES(403)。
+- 验收：同 key 重放同一结果；并发单飞；只读行情缓存不联网；`data_as_of` 用 daily_bar 最大日；202 时 job 可查。
+
 
 ## §3 错误码总表
 
@@ -592,7 +646,7 @@ data: {"job_id":"job_01J9Z6","status":"succeeded","result_ref":"/api/v1/reports/
 | API-033 | metrics_batch_contract | n==12、sample_status=ok、value 小数、版本匹配 | fx_round30 | P0 |
 | API-034 | metrics_explain_trace | 无裸术语；status!=ok 时 conclusion=null+what_to_do | fx_n5 | P0 |
 | API-035 | metrics_drilldown_money | items 非空且金额定点；source_endpoints 可调 | fx_round30 | P0 |
-| API-036 | attribution_identity | Σfactor+residual==total_pnl（≤0.01）；rank 1..5 连续；blocked 金额缺省；insufficient 结论降级 | fx_attr_mixed / fx_attr_p0_blocked（内联向量：`tests/unit/core/test_attribution.py`、`tests/unit/review/test_attribution_assembly.py`；API 协议层用 `account_factory`） | P0 |
+| API-036 | attribution_identity | Σfactor+residual==total_pnl（≤0.01）；rank 1..5 连续；blocked 金额缺省；insufficient 结论降级；降级只看未归因标的损益、`ipo_pnl` 独立桶、gap/bar fallback/lookahead 为 info（2026-11-04） | fx_attr_mixed / fx_attr_p0_blocked（内联向量：`tests/unit/core/test_attribution.py`、`tests/unit/review/test_attribution_assembly.py`；API 协议层用 `account_factory`） | P0 |
 | API-037 | trends_version_breaks | breaks 非空且跨断点 segment 不同、不连线 | fx_version_break | P1 |
 | API-038 | selection_as_of | 202→succeeded；含 BHAR n/CI；as_of 无未来财报 | fx_round30 | P0 |
 | API-039 | reports_create_reuse | 202；同 (period,spec_hash) 复用同一 report_id | fx_base | P0 |
@@ -644,6 +698,14 @@ data: {"job_id":"job_01J9Z6","status":"succeeded","result_ref":"/api/v1/reports/
 | API-085 | assets_chart_view | 200 且 points 按日期升序、v∈[0,1] 字符串、amount_label 为后端定点串；blocked 行不进入序列；未构建 n_points=0；跨用户空序列、admin 403、无 token 401；limit 0/501→422；只读无副作用 | fx_round30 | P0 |
 | API-087 | sectors_overview | 200 且行业 `Σ market_value + unclassified == equity_market_value`、`Σ weight ≈ 1`；hhi/effective_n/top1/top3 与 golden 一致；概念 `Σ exposure>1` 时 caveat 非空 + weight_mode=overlapping；未同步 200+missing 全 null；coverage<0.90→insufficient+hhi=null；未来 as_of/level/taxonomy→422；benchmark=nope→422 UNKNOWN_BENCHMARK；limit=501→422；admin 403、无 token 401、B 账号隔离；If-None-Match→304 空 body；只读无副作用 | fx_sector | P0 |
 | API-088 | sectors_catalog | 200 且 items 按 (level,sector_code) 升序、L3 path 恰 3 层、L1/L2 member_count 为后代去重求和；未同步 200+items=[]+catalog_version=null+SECTOR_DATA_MISSING；is_active=false 默认不返回；损坏 cursor→400 INVALID_CURSOR；taxonomy/level 非法→422；admin 403、无 token 401 | fx_sector | P1 |
+| API-090 | trade_reason_upsert（已实现） | 201/200；If-Match 旧值 409；跨用户 404；理由写入后 ETag 变化；审计无明文 | fx_round_insights | P0 |
+| API-091 | trade_reason_delete（已实现） | 204；重复删除 204；跨用户 404 | fx_round_insights | P0 |
+| API-092 | round_insights_list（已实现） | 200；路由不被 `/{round_id}` 吞；筛选/排序白名单；`_pct/_display/label`；缺失 null 不 0；n<30 不排名；`bucket_basis` 透出且 fill/回合不相加 | fx_round_insights | P0 |
+| API-093 | round_insights_detail（已实现） | 200；逐笔理由/5/10/20 四口径；fill 级 `holding_trading_days/bucket`；跨用户 404；不混旧/新持有天 | fx_round_insights | P1 |
+| API-094 | round_insights_refresh（已实现） | 200/202+Location；Idempotency-Key 重放；单飞；data_as_of=DB max；GET 不写 | fx_round_insights | P1 |
+
+
+> **实现说明（API-090~094，2026-11-05）**：上述 5 行已实现并通过 `test_api_090_091_trade_reasons.py`、`test_api_092_094_round_insights.py`、`test_api_028_031_rounds.py`、契约与隔离矩阵；OpenAPI 示例与 SDK 已同步。既有 88 个端点的验收矩阵不变。
 
 ### 6.1 端到端脚本（5 条，覆盖「注册登录 → PAT → preview → commit → 取指标 → 下载月报」）
 ```bash
@@ -714,7 +776,7 @@ grep -c '2026-09' report.html
 | R4 选股诊断 | API-038、API-033 | 202→succeeded；domain=selection 含 BHAR/t/n/CI；as_of 无未来数据 |
 | R5 择时与绩效 | API-033、API-056、API-079 | timing 全字段含 n/CI/sample_status/data_as_of；默认基准显式标注 |
 | R6 行为偏差 | API-033 | de 含 value/CI；处置效应 fixture de>0 且 CI 不含 0；无效应 fixture CI 含 0 |
-| R7 归因 | API-036 | Σfactor+residual==total_pnl（≤0.01）；rank 1..5 连续；blocked 不输出金额；degraded/insufficient 以 `missing[]`/`sample_status` 披露（2026-11-02 08g 更新） |
+| R7 归因 | API-036 | Σfactor+residual==total_pnl（≤0.01）；rank 1..5 连续；blocked 不输出金额；degraded/insufficient 以 `missing[]`/`sample_status` 披露（2026-11-02 08g 更新；2026-11-04 口径：降级只看未归因标的损益，`ipo_pnl` 独立桶，gap/bar fallback/lookahead 为 info） |
 | R8 统计可信度 | API-033、API-034、API-052、API-079 | n<10 → insufficient 且无结论；n≥30 有 CI；exploratory 不进行动建议 |
 | D1 Web SPA | API-005、API-029、API-032、API-033、API-036、API-040、API-047、API-055 等全部读端点 | 页面数据端点 100% 登记并过验收；`GET /` 200 |
 | D2 月报 | API-039~042、API-062 | 202→succeeded；下载 200 且 Content-Disposition 正确；数字与 metrics 一致；同 spec 复用 |

@@ -1,4 +1,4 @@
-"""归因装配层：残差拆桶（设计 §3.6，六桶互斥、Σ桶 == residual）。
+"""归因装配层：残差拆桶（设计 §3.6，桶互斥、Σ桶 == residual）。
 
 桶代数（已由独立整数原型 + 手算 golden 验证）：
 
@@ -13,11 +13,14 @@
 - **F_u** = Σ bucketed 三费列（fee 因子承接，桶内已还原毛额）；**F_indep** =
   −Σ 非 bucketed 标的 `category=fee` 行 amount（CASH 费用行与归因标的红利税行）；
   `extra_fee_units = F_u + F_indep`。
+- **ipo_pnl（打新收益，账户级）**：`symbol_class=new_stock` 的标的按上述标的级公式
+  计算的本期盯市损益（可为负＝破发）；与 interest 同级，不再混入
+  `unattributed_price_pnl`。
 - **dividend_without_position / interest / other_cashflow**：非 bucket 非归因标的的
   对应行（bucketed 标的的这些行已在其桶内）。
 - **无法估值的 bucketed 标的**（无行情且无成本兜底）：不进桶 → 行金额由
   `valuation_gap`（plug）吸收（设计 §3.6 明示）。
-- `valuation_gap = residual − Σ前五桶`（plug）在应用层收口。
+- `valuation_gap = residual − Σ其余桶`（plug）在应用层收口。
 
 transfer 行不进任何桶（`CF_period` 已从 total_pnl 扣除）。
 """
@@ -34,11 +37,12 @@ from stock_ledger.models import Trade
 from stock_review.application.valuation import category, is_money_fund_row
 from stock_review.attribution.segments import SymbolPlan
 
-# 桶键（§3.6 固定六桶；valuation_gap 为 plug 由应用层计算）。
+# 桶键（§3.6；valuation_gap 为 plug 由应用层计算）。
 BUCKET_CORPORATE = "corporate_action_pnl"
 BUCKET_UNATTRIBUTED = "unattributed_price_pnl"
 BUCKET_DIVIDEND = "dividend_without_position"
 BUCKET_INTEREST = "interest"
+BUCKET_IPO = "ipo_pnl"  # 打新收益（账户级；被 new_stock 分类排除标的的本期盯市损益）
 BUCKET_OTHER = "other_cashflow"
 BUCKET_GAP = "valuation_gap"
 BUCKET_KEYS: tuple[str, ...] = (
@@ -46,6 +50,7 @@ BUCKET_KEYS: tuple[str, ...] = (
     BUCKET_UNATTRIBUTED,
     BUCKET_DIVIDEND,
     BUCKET_INTEREST,
+    BUCKET_IPO,
     BUCKET_OTHER,
     BUCKET_GAP,
 )
@@ -72,10 +77,10 @@ _CASH_CODE = "CASH"
 class ResidualSplit:
     """残差拆桶结果（application 层消费；valuation_gap 由调用方 plug）。"""
 
-    buckets: dict[str, int]  # 前五桶（不含 valuation_gap）
+    buckets: dict[str, int]  # 除 valuation_gap 外的全部桶（含 ipo_pnl）
     fee_bucketed_units: int  # F_u：bucketed 标的三费列合计（fee 因子承接）
     fee_indep_units: int  # F_indep：非 bucketed 独立 fee 行（正数）
-    per_symbol: dict[str, int] = field(default_factory=dict)  # excluded 标的桶值
+    per_symbol: dict[str, int] = field(default_factory=dict)  # 非 ipo 的 excluded 标的桶值
     unvalued_symbols: list[str] = field(default_factory=list)  # 无法估值的 bucketed 标的
 
 
@@ -95,6 +100,9 @@ def split_residual(
 ) -> ResidualSplit:
     """按 §3.6 桶公式拆分（纯内存；`residual` 本身由 decompose 给出）。"""
     attributed_codes = {plan.security_code for plan in plans if plan.attributed}
+    # `new_stock` 分类排除的标的单列「打新收益」桶（账户级，与 interest 同级）；
+    # 其余非归因标的仍进 `unattributed_price_pnl`。
+    ipo_codes = {plan.security_code for plan in plans if plan.symbol_class == "new_stock"}
     money_fund_codes = {
         canonical(trade.security_code) for trade in trades if is_money_fund_row(trade)
     }
@@ -149,9 +157,14 @@ def split_residual(
             # 无法估值（无行情且无成本兜底）：不进桶，由 valuation_gap 吸收。
             split.unvalued_symbols.append(code)
             value = amounts + fees
-        key = BUCKET_CORPORATE if code in corporate else BUCKET_UNATTRIBUTED
-        buckets[key] += value
-        split.per_symbol[code] = value
+        if code in ipo_codes:
+            # 打新收益是账户级桶（与 interest 同级）：不落 `per_symbol`，
+            # 避免与 `account_level_total` 对账双计。
+            buckets[BUCKET_IPO] += value
+        else:
+            key = BUCKET_CORPORATE if code in corporate else BUCKET_UNATTRIBUTED
+            buckets[key] += value
+            split.per_symbol[code] = value
         split.fee_bucketed_units += fees
     return split
 
@@ -193,6 +206,7 @@ __all__ = [
     "BUCKET_DIVIDEND",
     "BUCKET_GAP",
     "BUCKET_INTEREST",
+    "BUCKET_IPO",
     "BUCKET_KEYS",
     "BUCKET_OTHER",
     "BUCKET_UNATTRIBUTED",

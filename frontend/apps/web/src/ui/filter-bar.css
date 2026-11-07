@@ -1,0 +1,159 @@
+/*
+ * P1 · 统一筛选区（标签 + 控件 + 应用/重置 + 结果计数）
+ *
+ * 全部消费 styles/tokens.css 的语义变量；不写裸 hex。
+ * 控件高度统一 `--control-h`，焦点样式与全局 `:focus-visible` 一致。
+ */
+
+.filter-bar {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s3);
+  min-width: 0;
+  margin: var(--s3) 0;
+  padding: var(--s4);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+}
+
+/* 字段网格：窄屏自动降列；min() 兜底避免单列比容器还宽。 */
+.filter-bar-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
+  gap: var(--s3) var(--s4);
+  align-items: end;
+  min-width: 0;
+}
+
+.filter-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s1);
+  min-width: 0;
+  margin: 0;
+}
+
+.filter-field-label {
+  font-size: var(--fs-xs);
+  color: var(--muted);
+  letter-spacing: 0.02em;
+}
+
+/* 单控件统一外观：高度/内边距/边框一致，后端字符串照原样渲染。 */
+.filter-bar-fields input:not([type="checkbox"]),
+.filter-bar-fields select {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  height: var(--control-h);
+  margin: 0;
+  padding: 0 var(--s2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface-raised);
+  color: var(--text);
+  font: inherit;
+}
+
+/* 期间/月份复合控件内部：控件按需换行，不各自占满一行、不横向溢出。 */
+.filter-bar-fields .period-input,
+.filter-bar-fields .period-range,
+.filter-bar-fields .month-fallback {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+  min-width: 0;
+  width: 100%;
+}
+
+.filter-bar-fields .period-input input:not([type="checkbox"]),
+.filter-bar-fields .period-input select,
+.filter-bar-fields .month-fallback select {
+  width: auto;
+  flex: 1 1 96px;
+  max-width: 100%;
+}
+
+/* 操作行：与控件同高、可折行。 */
+.filter-bar-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+  min-width: 0;
+}
+
+.filter-bar-actions > .btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--control-h);
+  padding: 0 var(--s3);
+}
+
+.filter-bar-count {
+  margin: 0;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+
+.filter-bar-note {
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-normal);
+}
+
+.filter-bar-note > p {
+  margin: 0;
+}
+
+/* 焦点环：与全局 `:focus-visible` 同一视觉。 */
+.filter-bar :is(input, select, button):focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/*
+ * 嵌入形态：归因页头部沿用同一容器间距，但不加卡片底板
+ * （只改外层容器与间距，不改其内部期间快捷区间/数据起点逻辑）。
+ */
+.filter-bar-embed {
+  flex-direction: row;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s3);
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+/*
+ * 嵌入形态内部保持既有紧凑尺寸：全局 `width: 100%` 会把期间控件拉成整行，
+ * 这里只回到自然宽度，不改其类型切换/快捷区间逻辑。
+ */
+.filter-bar-embed :is(input, select) {
+  width: auto;
+  max-width: 100%;
+  height: var(--control-h);
+  margin: 0;
+  padding: 0 var(--s2);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.filter-bar-embed .period-input,
+.filter-bar-embed .period-range,
+.filter-bar-embed .month-fallback {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s2);
+  width: auto;
+  min-width: 0;
+}

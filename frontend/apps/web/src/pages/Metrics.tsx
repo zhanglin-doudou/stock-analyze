@@ -9,6 +9,7 @@ import {
 } from "@sa/api-client";
 import { api } from "../client";
 import { currentYearToken } from "../lib/date";
+import { FilterBar, FilterField } from "../ui/FilterBar";
 import { PeriodInput } from "../ui/PeriodInput";
 import { JobProgress } from "../ui/JobProgress";
 import { ProblemView } from "../ui/Problem";
@@ -301,50 +302,56 @@ export function Metrics() {
         行情来自本地缓存（仅收盘后同步，盘中不拉取实时行情）；当前数据截至 {batch?.data_as_of ?? "—"}。
       </p>
 
-      <div className="card filters">
-        <div className="row-actions">
-          <label>
-            期间{" "}
-            <PeriodInput
-              value={period}
-              disabled={executing}
-              onChange={(value) => setSearchParams({ period: value })}
-            />
-          </label>
-          <button
-            className="btn"
-            type="button"
-            disabled={executing || !period}
-            aria-busy={executing}
-            onClick={() => void startBuild()}
-          >
-            {executing ? "构建中…" : "构建复盘数据"}
-          </button>
-          <button
-            className="btn btn-ghost"
-            type="button"
-            disabled={loading}
-            onClick={() => void load(period, includeExploratory)}
-          >
-            刷新
-          </button>
-          <Link className="btn btn-ghost" to="/metrics/catalog">
-            口径说明
-          </Link>
-          <label className="muted">
-            <input
-              type="checkbox"
-              checked={includeExploratory}
-              onChange={(event) => setIncludeExploratory(event.target.checked)}
-            />{" "}
-            含探索指标（HHI / 换手 / 摊平等，按需计算）
-          </label>
-        </div>
-        <p className="muted">
-          「构建复盘数据」在后台按所选期间顺序执行：回合重建 → 资产表 → 净值 → 指标（默认核心 10
-          个；探索指标勾选后按需计算）。年度/月度结果落库缓存，自定义区间按需计算不落库。
-        </p>
-      </div>
+      <FilterBar
+        ariaLabel="指标筛选"
+        count={batch ? `共 ${batch.items.length} 个指标` : undefined}
+        actions={
+          <>
+            <button
+              className="btn"
+              type="button"
+              disabled={executing || !period}
+              aria-busy={executing}
+              onClick={() => void startBuild()}
+            >
+              {executing ? "构建中…" : "构建复盘数据"}
+            </button>
+            <button
+              className="btn btn-ghost"
+              type="button"
+              disabled={loading}
+              onClick={() => void load(period, includeExploratory)}
+            >
+              刷新
+            </button>
+            <Link className="btn btn-ghost" to="/metrics/catalog">
+              口径说明
+            </Link>
+            <label className="muted">
+              <input
+                type="checkbox"
+                checked={includeExploratory}
+                onChange={(event) => setIncludeExploratory(event.target.checked)}
+              />{" "}
+              含探索指标（HHI / 换手 / 摊平等，按需计算）
+            </label>
+          </>
+        }
+        note={
+          <p className="muted">
+            「构建复盘数据」在后台按所选期间顺序执行：回合重建 → 资产表 → 净值 → 指标（默认核心 10
+            个；探索指标勾选后按需计算）。年度/月度结果落库缓存，自定义区间按需计算不落库。
+          </p>
+        }
+      >
+        <FilterField label="期间">
+          <PeriodInput
+            value={period}
+            disabled={executing}
+            onChange={(value) => setSearchParams({ period: value })}
+          />
+        </FilterField>
+      </FilterBar>
 
       {notice ? (
         <p className="notice" data-testid="metrics-notice">

@@ -5,6 +5,7 @@ import {
   currentYearToken,
   latestCompletedMonth,
   periodKind,
+  periodToDateRange,
   periodYear,
   toRangeToken,
 } from "./date";
@@ -59,5 +60,24 @@ describe("periodKind / periodYear / toRangeToken", () => {
 
   it("闭区间 token 由起止日期拼接", () => {
     expect(toRangeToken("2026-01-01", "2026-06-30")).toBe("2026-01-01..2026-06-30");
+  });
+});
+
+describe("periodToDateRange", () => {
+  it("空 token 不按日期过滤", () => {
+    expect(periodToDateRange("")).toEqual({ from: "", to: "" });
+  });
+
+  it("年度 → 年初到年末；月度 → 当月首末日（含闰年二月）", () => {
+    expect(periodToDateRange("2026")).toEqual({ from: "2026-01-01", to: "2026-12-31" });
+    expect(periodToDateRange("2026-06")).toEqual({ from: "2026-06-01", to: "2026-06-30" });
+    expect(periodToDateRange("2024-02")).toEqual({ from: "2024-02-01", to: "2024-02-29" });
+  });
+
+  it("自定义区间按原串拆分", () => {
+    expect(periodToDateRange("2026-01-01..2026-06-30")).toEqual({
+      from: "2026-01-01",
+      to: "2026-06-30",
+    });
   });
 });

@@ -33,7 +33,7 @@ function makeRound(overrides: Partial<Round> = {}): Round {
     status: "closed",
     open_date: "2026-06-02",
     close_date: "2026-06-20",
-    quantity: "150.0000",
+    quantity: "150",
     cost: "1600.00",
     proceeds: "2250.00",
     dividend: "0.00",
@@ -43,7 +43,7 @@ function makeRound(overrides: Partial<Round> = {}): Round {
     open_trade_id: "trd_buy_1",
     close_trade_id: "trd_sell_1",
     data_error: false,
-    oversell_quantity: "0.0000",
+    oversell_quantity: "0",
     fills_count: 2,
     rebuilt_at: "2026-06-20T08:00:00Z",
     ...overrides,
@@ -110,7 +110,7 @@ describe("Rounds 回合列表页", () => {
     // 状态既出现在筛选下拉，也出现在行内徽标。
     expect(screen.getAllByText("已平仓").length).toBeGreaterThanOrEqual(2);
     expect(screen.getByText("650.00")).toBeTruthy();
-    expect(screen.getByText("150.0000")).toBeTruthy();
+    expect(screen.getByText("150")).toBeTruthy();
     expect(screen.getByText("1600.00")).toBeTruthy();
     expect(screen.getByText("2")).toBeTruthy();
 

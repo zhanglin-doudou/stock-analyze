@@ -173,6 +173,146 @@ def test_board_bar_records_rejects_bad_date(bad: Any) -> None:
         _board_bar_records("industry_sw", "850811.SI", [{"日期": bad, "收盘价": 10.0}])
 
 
+# ── THS 当日 K 线（today.js）────────────────────────────────────
+
+
+def test_parse_today_bar_parses_date_and_close() -> None:
+    text = (
+        'quotebridge_v6_line_bk_881101_01_today({"bk_881101":'
+        '{"1":"20261105","7":"3933.232","8":"4029.843","9":"3930.548",'
+        '"11":"4009.863","13":1067106880,"19":"6951505200.000"}})'
+    )
+    assert sector_live._parse_today_bar(text, "881101") == {
+        "日期": date(2026, 11, 5),
+        "收盘价": "4009.863",
+    }
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "",
+        "not-jsonp",
+        'quotebridge_v6_line_bk_881101_01_today({"bk_881101":{"1":"20261105"}})',
+        'quotebridge_v6_line_bk_881101_01_today({"bk_881101":{"11":"4009.863"}})',
+        'quotebridge_v6_line_bk_881101_01_today({"bk_881101":{"1":"20261105","11":"0"}})',
+        'quotebridge_v6_line_bk_881101_01_today({"bk_999999":{"1":"20261105","11":"1.0"}})',
+    ],
+    ids=["empty", "not-jsonp", "no-close", "no-date", "zero-close", "other-board"],
+)
+def test_parse_today_bar_returns_none_when_unavailable(text: str) -> None:
+    assert sector_live._parse_today_bar(text, "881101") is None
+
+
+def test_parse_today_bar_rejects_malformed_jsonp() -> None:
+    with pytest.raises(SectorValidationError):
+        sector_live._parse_today_bar(
+            'quotebridge_v6_line_bk_881101_01_today({"bk_881101":,})', "881101"
+        )
+
+
+def test_ths_board_bars_appends_today_bar_after_close(
+    live_source: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """年度文件止于昨日时，收盘后额外用 today.js 补当日行（11-05 缺失的根因修复）。"""
+    monkeypatch.setattr(live_source, "_require_cookie", lambda: "stub-cookie")
+    calls: list[str] = []
+
+    class _Resp:
+        def __init__(self, text: str) -> None:
+            self.text = text
+
+    def fake_get(url: str, *, cookie: str, referer: str) -> Any:
+        calls.append(url)
+        if url.endswith("/today.js"):
+            return _Resp(
+                'quotebridge_v6_line_bk_881101_01_today({"bk_881101":'
+                '{"1":"20260701","11":"4080.0"}})'
+            )
+        return _Resp('quotebridge_v4_line_bk_881101_01_2026({"data":"20260630,0,0,0,4040.000;"})')
+
+    monkeypatch.setattr(live_source, "_ths_get", fake_get)
+    bars = live_source._ths_board_bars("881101", date(2026, 6, 30), _TODAY)
+    assert [bar.trade_date for bar in bars] == [date(2026, 6, 30), date(2026, 7, 1)]
+    assert bars[-1].close_units == Price.from_str("4080.000").units
+    assert (
+        bars[-1].return_units
+        == Ratio.from_decimal(Decimal("4080.0") / Decimal("4040.000") - Decimal("1")).units
+    )
+    assert calls == [
+        "https://d.10jqka.com.cn/v4/line/bk_881101/01/2026.js",
+        "https://d.10jqka.com.cn/v6/line/bk_881101/01/today.js",
+    ]
+
+
+def test_ths_board_bars_keeps_year_row_on_same_date(
+    live_source: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """年度文件已含当日行时不做重复追加（与 today.js 同日去重）。"""
+    monkeypatch.setattr(live_source, "_require_cookie", lambda: "stub-cookie")
+
+    class _Resp:
+        def __init__(self, text: str) -> None:
+            self.text = text
+
+    def fake_get(url: str, *, cookie: str, referer: str) -> Any:
+        if url.endswith("/today.js"):
+            return _Resp(
+                'quotebridge_v6_line_bk_881101_01_today({"bk_881101":'
+                '{"1":"20260701","11":"4080.0"}})'
+            )
+        return _Resp(
+            'quotebridge_v4_line_bk_881101_01_2026({"data":'
+            '"20260630,0,0,0,4040.000;20260701,0,0,0,4090.000;"})'
+        )
+
+    monkeypatch.setattr(live_source, "_ths_get", fake_get)
+    bars = live_source._ths_board_bars("881101", date(2026, 6, 30), _TODAY)
+    assert len(bars) == 2
+    assert bars[-1].close_units == Price.from_str("4090.000").units  # 年度文件为准
+
+
+def test_ths_board_bars_keeps_year_rows_when_today_fetch_fails(
+    live_source: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """today.js 单板失败只丢当日行，不影响已拉到的年度数据。"""
+    monkeypatch.setattr(live_source, "_require_cookie", lambda: "stub-cookie")
+
+    class _Resp:
+        def __init__(self, text: str) -> None:
+            self.text = text
+
+    def fake_get(url: str, *, cookie: str, referer: str) -> Any:
+        if url.endswith("/today.js"):
+            raise SectorValidationError("HTTP 404")
+        return _Resp('quotebridge_v4_line_bk_881101_01_2026({"data":"20260630,0,0,0,4040.000;"})')
+
+    monkeypatch.setattr(live_source, "_ths_get", fake_get)
+    bars = live_source._ths_board_bars("881101", date(2026, 6, 30), _TODAY)
+    assert [bar.trade_date for bar in bars] == [date(2026, 6, 30)]
+
+
+def test_ths_board_bars_skips_today_bar_before_close(
+    live_source: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """盘中（东八区 16:30 前）不拉 today.js，避免把未定型收盘写进 bar_as_of。"""
+    monkeypatch.setattr(live_source, "_require_cookie", lambda: "stub-cookie")
+    monkeypatch.setattr(live_source, "_clock", FrozenClock("2026-07-01T01:00:00+00:00"))
+    calls: list[str] = []
+
+    class _Resp:
+        def __init__(self, text: str) -> None:
+            self.text = text
+
+    def fake_get(url: str, *, cookie: str, referer: str) -> Any:
+        calls.append(url)
+        return _Resp('quotebridge_v4_line_bk_881101_01_2026({"data":""})')
+
+    monkeypatch.setattr(live_source, "_ths_get", fake_get)
+    assert live_source._ths_board_bars("881101", date(2026, 6, 1), _TODAY) == []
+    assert calls == ["https://d.10jqka.com.cn/v4/line/bk_881101/01/2026.js"]
+
+
 # ── replay 板块夹具 series ──────────────────────────────────────
 
 
@@ -397,3 +537,42 @@ async def test_sync_bars_requires_cached_catalog(live_source: Any) -> None:
     report = await live_source.sync_bars_to_cache(today=_TODAY, start=date(2026, 6, 1))
     assert report.status == "failed"
     assert "make sync-sector-industry" in report.message
+
+
+async def test_sync_bars_skips_only_when_watermark_ahead(
+    owner_engine: AsyncEngine, live_source: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """bar_as_of 已到目标日 → 真正的水位跳过，且不联网。"""
+    await _seed_sector(owner_engine)
+    await _seed_state(owner_engine, bar_as_of=_TODAY)
+
+    async def boom(*args: Any, **kwargs: Any) -> Any:
+        raise AssertionError("水位已最新不应联网")
+
+    monkeypatch.setattr(live_source, "_fetch_board_bars", boom)
+    report = await live_source.sync_bars_to_cache(today=_TODAY)
+    assert report.status == "skipped"
+    assert "bar_as_of 已是最新" in report.message
+
+
+async def test_sync_bars_empty_result_reports_upstream_gap(
+    owner_engine: AsyncEngine, live_source: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """上游无新增数据时不得声称「bar_as_of 已是最新」（原 CLI 误导根因）。"""
+    await _seed_sector(owner_engine)
+    await _seed_state(owner_engine, bar_as_of=date(2026, 6, 30))
+
+    async def empty_fetch(boards: Any, *, start: date, end: date) -> tuple[Any, list[Any]]:
+        return (), []
+
+    monkeypatch.setattr(live_source, "_fetch_board_bars", empty_fetch)
+    report = await live_source.sync_bars_to_cache(today=_TODAY)
+    assert report.status == "skipped"
+    assert "上游 2026-07-01~2026-07-01 无新增板块日线" in report.message
+    assert "已是最新" not in report.message
+    assert "bar_as_of 保持 2026-06-30" in report.message
+
+    async with AsyncSession(owner_engine) as session:
+        state = await session.get(SectorSyncState, DATASET_KEY)
+        assert state is not None
+        assert state.bar_as_of == date(2026, 6, 30)

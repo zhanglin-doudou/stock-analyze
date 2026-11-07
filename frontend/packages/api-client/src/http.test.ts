@@ -341,3 +341,83 @@ describe("createClient", () => {
     expect(JSON.parse(String(init?.body))).toEqual({ mode: "auto" });
   });
 });
+
+describe("在途 GET 合并", () => {
+  /** 手动控制何时返回，用于制造「两次请求并发在途」。 */
+  function deferredFetch(): { fetchImpl: ReturnType<typeof vi.fn>; release: () => void } {
+    let release: () => void = () => undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const fetchImpl = vi.fn(async (): Promise<Response> => {
+      await gate;
+      return jsonResponse(200, { items: [{ round_id: "rnd_1" }], next_cursor: null, has_more: false });
+    });
+    return { fetchImpl, release };
+  }
+
+  it("同一参数的并发 GET 只发一次网络请求，两个调用方拿到同一结果", async () => {
+    const { fetchImpl, release } = deferredFetch();
+    const client = createClient({
+      baseUrl: "/api/v1",
+      getToken: () => ({ access: "token", refresh: null }),
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+
+    const query = { period: "2026", sort: "combined", limit: 50 };
+    const first = client.rounds.insights(query);
+    const second = client.rounds.insights({ ...query });
+    release();
+    const [a, b] = await Promise.all([first, second]);
+
+    expect(fetchImpl).toHaveBeenCalledTimes(1);
+    expect(a).toBe(b);
+    expect(a.items).toHaveLength(1);
+  });
+
+  it("参数不同的并发 GET 各自请求，不互相复用", async () => {
+    const { fetchImpl, release } = deferredFetch();
+    const client = createClient({
+      baseUrl: "/api/v1",
+      getToken: () => ({ access: "token", refresh: null }),
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+
+    const first = client.rounds.insights({ period: "2026" });
+    const second = client.rounds.insights({ period: "2025" });
+    release();
+    await Promise.all([first, second]);
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("请求结束后不缓存：再次调用同一参数会重新请求", async () => {
+    const fetchImpl = vi.fn(async (): Promise<Response> => jsonResponse(200, { items: [], next_cursor: null }));
+    const client = createClient({
+      baseUrl: "/api/v1",
+      getToken: () => ({ access: "token", refresh: null }),
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+
+    await client.rounds.insights({ period: "2026" });
+    await client.rounds.insights({ period: "2026" });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
+  it("写请求（POST）不参与合并", async () => {
+    const { fetchImpl, release } = deferredFetch();
+    const client = createClient({
+      baseUrl: "/api/v1",
+      getToken: () => ({ access: "token", refresh: null }),
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+
+    const first = client.auth.login({ email: "a@b.c", password: "x" });
+    const second = client.auth.login({ email: "a@b.c", password: "x" });
+    release();
+    await Promise.all([first, second]);
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+});

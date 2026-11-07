@@ -3,9 +3,9 @@
 > **命名约定**：期次写全称 `Period1/Period2/Period3`，期次任务 ID 为 `Period1-01`；优先级仍可简写 `P0/P1/P2/P3`。
 
 
-> 依据：[PRD-v2.md](prd/PRD-v2.md)（28 FR + 15 NFR）｜[Architecture-v2.md](Architecture-v2.md)｜[API-Catalog.md](architecture/v2/API-Catalog.md)（88 端点）
+> 依据：[PRD-v2.md](prd/PRD-v2.md)（28 FR + 15 NFR）｜[Architecture-v2.md](Architecture-v2.md)｜[API-Catalog.md](architecture/v2/API-Catalog.md)（93 端点：88 已排期 + 5 个设计登记待排期）
 > 编排原则：**本地可验证优先，部署与交付最后做**。
-> 估时口径：1 名资深全栈 + AI 编码辅助；1 人日 = 6 小时有效开发。总计 **≈ 102.0–105.5 人日**（Period2-08 设计批准后由 2 调整为 8.0~11.5；单线程约 20 周；并行轨道可压到 ≈ 13–15 周）。
+> 估时口径：1 名资深全栈 + AI 编码辅助；1 人日 = 6 小时有效开发。总计 **≈ 102.0–105.5 人日**（Period2-08 已交付，按 8.0~11.5 计；单线程约 20 周；并行轨道可压到 ≈ 13–15 周）。
 
 ---
 
@@ -173,7 +173,7 @@ open http://localhost:5173/dashboard
 | **Period2-05** | 指标注册表与执行引擎 | `MetricDef` 13 字段、注册发现、框架代算 `n/CI/inputs_hash/sample_status/status`、DAG 拓扑与环检测、`definition_version` 失效、`metric_result` 物化、门禁状态机 | Period2-03/Period2-04 | `make test-engine`：N<10 → `insufficient` 且 `conclusion=null`；口径 bump → 新版本行 + 旧行保留 + `is_stale` 单测 | 6.5 |
 | **Period2-06** | 指标端点 + 三段式 | `GET /metrics`（批量/过滤）、`/{id}`、`/explain`、`/drilldown`、`ETag`、`data_as_of` 透出 | Period2-05 | API-033~035、079 验收；`blocked` 时无 `value`；`conclusion` 无裸术语（词表断言） | 3 |
 | **Period2-07** | 三域指标实现 | 绩效（胜率含全样本、盈亏比、持仓天数、集中度 CR1/Gini、费用占比/回本门槛）、择时（追涨分位、卖飞率 z、β/α/IR、回撤族）、行为（PGR/PLR DE + bootstrap、换手、摊平、HHI）、选股（PIT cohort BHAR 20/60） | Period2-05 | 每个指标 1 份 golden（期望值来自手算表/独立实现）+ mutation ≥80% | 3.5 |
-| **Period2-08** | 五因子归因（**设计已人工批准 2026-11-02；08a~08g 已落地 2026-11-02**） | [设计 v1.0](architecture/2026-11-02-five-factor-attribution.md)：`core/attribution` 选股/板块/买点/卖点/费用+残差、`GET /attribution`、排序结论生成；**08a 数据前置**：THS 行业指数日线落 `market.sector_bar` + `sync-sectors --start` + replay 日线夹具；[交叉评审](reviews/2026-11-02-DevDesign-Review-five-factor-attribution.md) 17 P0/33 P1 已处置、A-01~A-11 已批准 | Period2-07/17 | API-036 **19 条验收**（Σ+残差=区间损益、单因子主导 `rank==1`、`factors[]` 含 sector、blocked/degraded/coverage/词表/负 total_pnl/bridge 对账）；`make test-p2/test-isolation/api-check` 全绿；08a 未完成时 blocked+SKIP 记录；月报同源接入按 09b 另行验收 | 8.0~11.5 |
+| **Period2-08** | 五因子归因（**已交付并验收 2026-11-02；口径收口 2026-11-04**） | [设计 v1.0](architecture/2026-11-02-five-factor-attribution.md)：`core/attribution` 选股/板块/买点/卖点/费用+残差、`GET /attribution`（API-036）、`/attribution` 页、排序结论生成；08a 板块指数日线落 `market.sector_bar`；当前口径：`new_stock` 按本期窗口判定、打新损益进账户级 `ipo_pnl`、降级只看未归因标的损益超容差（期末总资产 0.2%）、`VALUATION_GAP_ABOVE_TOLERANCE`/`SECTOR_BAR_FALLBACK`/`SECTOR_CLASSIFICATION_LOOKAHEAD` 为 info；[交叉评审](reviews/2026-11-02-DevDesign-Review-five-factor-attribution.md) 已处置 | Period2-07/17 | API-036 验收 + `make test-p2/test-isolation/api-check` 全绿；前端 `/attribution` 已交付；月报同源接入按 Period2-09（09b）另行验收 | 8.0~11.5 |
 | **Period2-09** | 月度报告 | `report` 表、`ReportSpec`、区块组装（概览/归因/最赚最亏/行为/重复错误/一条行动/口径脚注）、异步生成、HTML 自包含、`ETag`/下载、`blocked` 降级为说明单 | Period2-06/Period2-08 | API-039~042 验收；离线打开 HTML；报告数字与 `/metrics` 逐一相等（脚本比对）；同 `spec_hash` 复用 | 2.5 |
 | **Period2-10** | 数据导出 | `POST /exports`（异步）、Excel+JSON 打包、签名下载与 410 过期 | Period2-09 | API-059/060 验收；导出→清库→导入后行数/回合/净值一致 | 1 |
 | **Period2-11** | 设置 | `GET /settings`、`PUT /settings/benchmark`、`PUT /settings/privacy`、默认基准沪深300全收益、切换即触发失效重算 | Period2-03 | API-055~057 验收；切基准后历史趋势分段 | 1 |
@@ -183,6 +183,7 @@ open http://localhost:5173/dashboard
 | **Period2-15** | 前端零口径门禁 | ESLint 自定义规则（禁算术/禁结论拼接/禁裸 fetch/禁裸术语）+ AST 断言 | Period2-12 | 故意在页面算一次 `a-b` → `make lint` 失败 | 1 |
 | **Period2-16** | 资产表（每日资产快照） | `review.asset_daily/asset_build_state` + 迁移 0006、共享估值原语（`valuation.py`）、增量构建（变更指纹 + 水位线 + 45 天安全窗）、`GET /assets`、`POST /assets/build`、worker 行情装配、`docs/DATABASE.md` | Period2-03 | API-081/082 验收；增量结果与全量逐行相等；`GET /assets` 分页/过滤/blocked 显式 null、`build` 摘要齐全；门禁 82/82 | 2.5 |
 | **Period2-17** | 板块数据底座与看板 | 迁移 `0011_market_sectors` + `market` 6 表、`SectorDataSource` 端口 + akshare/replay 源 + `make sync-sectors`、`stock_core/sector/*` 纯函数（`E_map` 分母 / HHI / 概念暴露）、`GET /sectors/overview`（API-087）+ `GET /sectors`（API-088）、Dashboard 板块子块 + `/sectors` 页面（三级下钻/概念警示） | Period2-07/16 | `make sync-sectors ARGS='--dry-run'` 通过；API-087/088 验收（happy/越权/错误码）；行业 Σweight≈1、Σactive≈0，概念 `Σexposure>1` 带 `caveat`；Dashboard `[data-board]` 恰 2 个 + `links.sectors` | 2.5 |
+| **Period2-18** | FIFO 回合洞察增强（已交付 2026-11-05） | 迁移 `0012_review_round_insights`（理由/前瞻缓存）、`stock_core/insights/*`（真实日历、B0~B3、分类、聚合）、`stock_review/insights/*`、API-090~094、`/rounds/insights` 页与详情洞察区块、归因容差行 | Period2-02 | core 单测 41；API/契约/隔离 166；`pnpm -r test` 146；`api-check` 通过；未覆盖：202 >5000 笔分支（构造方式见验收记录） | 3 |
 
 ### 3.3 二期不做
 
@@ -310,7 +311,7 @@ make verify-p3
 
 ## 附录 A：端点与需求覆盖
 
-### A.1 端点 → 期次/任务（88/88）
+### A.1 端点 → 期次/任务（88/88 已排期；另有 5 个设计登记待排期）
 
 | 端点 | 期次 | 任务 | 端点 | 期次 | 任务 |
 |---|---|---|---|---|---|
@@ -358,8 +359,12 @@ make verify-p3
 | API-083 | 二 | Period2-07 | API-084 | 二 | Period2-12 |
 | API-085 | 二 | Period2-16 | API-086 | 二 | Period2-06 |
 | API-087 | 二 | Period2-17 | API-088 | 二 | Period2-17 |
+| API-090 | 二 | Period2-18 | API-091 | 二 | Period2-18 |
+| API-092 | 二 | Period2-18 | API-093 | 二 | Period2-18 |
+| API-094 | 二 | Period2-18 | | | |
 
-> 校验：`make api-coverage` 读取本表与 [API-Catalog §1](architecture/v2/API-Catalog.md) 比对，断言 `已映射 / 总数 == 1.0`。
+> **实现状态（2026-11-05）**：API-090~094（回合洞察/理由/前瞻/刷新）已实现并验收，归属 **Period2-18**；API-089 预留不实现。
+> 校验：`make api-coverage` 当前输出 L1 3/4、L2 6/6、L3 5/5、L4 5/5、L5 6/6、其他 36/67；本表与 [API-Catalog §1](architecture/v2/API-Catalog.md) 的 API-090~094 已对齐。
 
 ### A.2 FR → 期次/主任务（28/28）
 
@@ -419,4 +424,4 @@ make verify-p3
 | 二期 | 36.0 | 口径全链 + 四问 + 归因 + 月报 + 导出 + 板块 + ~37 个端点 |
 | 三期 | 23.0 | 闭环 + 趋势 + 提醒 + 分享 + 对话 + 审计 + 限流 + 性能 + 审计 |
 | 交付 | 8.0 | 镜像 + nginx + 迁移 + 备份恢复 + 安全 + CI/CD + 文档 |
-| **合计** | **96.0** | 88/88 端点 + 28/28 FR + 本地可验证 → 上云可交付 |
+| **合计** | **96.0** | 88/88 已排期端点 + 5 个设计登记（API-090~094，待排期）+ 28/28 FR + 本地可验证 → 上云可交付 |

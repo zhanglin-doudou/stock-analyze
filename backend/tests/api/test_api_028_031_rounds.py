@@ -27,12 +27,13 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from stock_contracts.errors import ErrorCode
 from stock_ledger.models import ImportBatch, Trade
+from stock_ledger.parsers.dedupe import dedupe_key as logical_dedupe_key
 from stock_worker.runner import WorkerRunner
 
 pytestmark = pytest.mark.api
 
 _MONEY_RE = re.compile(r"^-?\d+\.\d{2}$")
-_QTY_RE = re.compile(r"^-?\d+\.\d{4}$")
+_QTY_RE = re.compile(r"^-?\d+(?:\.\d{2})?$")  # 整数份额 或 2 位小数（见 format_quantity）
 _RATIO_RE = re.compile(r"^-?\d+\.\d{8}$")
 
 
@@ -100,34 +101,36 @@ async def _seed_trade(
     amount_units: int,
     security_code: str = "600519",
     batch_id: str | None = None,
+    trade_id: str | None = None,
 ) -> str:
-    trade_id = f"trd_{uuid.uuid4().hex[:12]}"
+    trade_id = trade_id or f"trd_{uuid.uuid4().hex[:12]}"
     async with AsyncSession(engine) as session:
-        session.add(
-            Trade(
-                id=trade_id,
-                user_id=user_id,
-                batch_id=batch_id,
-                trade_date=trade_date,
-                security_code=security_code,
-                security_name=security_code,
-                side=side,
-                quantity_units=quantity_units,
-                price_units=price_units,
-                amount_units=amount_units,
-                commission_units=0,
-                stamp_tax_units=0,
-                other_fee_units=0,
-                cash_balance_units=None,
-                cash_balance_available=False,
-                category=side,
-                occurrence_idx=0,
-                source="import",
-                version=1,
-                summary="证券买入" if side == "buy" else "证券卖出",
-                dedupe_key=f"{security_code}:{uuid.uuid4().hex[:10]}",
-            )
+        row = Trade(
+            id=trade_id,
+            user_id=user_id,
+            batch_id=batch_id,
+            trade_date=trade_date,
+            security_code=security_code,
+            security_name=security_code,
+            side=side,
+            quantity_units=quantity_units,
+            price_units=price_units,
+            amount_units=amount_units,
+            commission_units=0,
+            stamp_tax_units=0,
+            other_fee_units=0,
+            cash_balance_units=None,
+            cash_balance_available=False,
+            category=side,
+            occurrence_idx=0,
+            source="import",
+            version=1,
+            summary="证券买入" if side == "buy" else "证券卖出",
+            dedupe_key="",
         )
+        # 与真实导入路径一致：去重键按业务要素计算（理由/筛选依赖它做逻辑键）。
+        row.dedupe_key = logical_dedupe_key(row)
+        session.add(row)
         await session.commit()
     return trade_id
 
@@ -371,7 +374,7 @@ async def test_api_029_rounds_visible_after_rebuild(
     assert abs(Decimal(round_["pnl"]) - Decimal("1200.00")) <= Decimal("0.01")
     assert round_["cost"] == "6000.00"  # buy1 前 60 股成本
     assert round_["proceeds"] == "7200.00"
-    assert round_["quantity"] == "60.0000"  # 已 FIFO 配对的股数
+    assert round_["quantity"] == "60"  # 已 FIFO 配对的股数（整数份额不带尾零）
     assert round_["return_rate"] == "0.20000000"
     assert _MONEY_RE.match(round_["pnl"])
     assert _MONEY_RE.match(round_["cost"])
@@ -464,7 +467,7 @@ async def test_api_031_fills_fifo_pairing(
     assert fill["sequence"] == 1
     assert fill["buy_trade_id"] == ids["buy1"], "FIFO 应消耗最早买入的 lot"
     assert fill["sell_trade_id"] == ids["sell"]
-    assert fill["quantity"] == "60.0000"
+    assert fill["quantity"] == "60"
     # 分摊成本/收益/pnl 不再在 fills 明细中返回（回合级 Round 字段保留）
     assert "buy_cost" not in fill
     assert "sell_proceeds" not in fill

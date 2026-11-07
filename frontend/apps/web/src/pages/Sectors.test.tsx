@@ -84,7 +84,7 @@ function industry(overrides: Partial<SectorsOverview> = {}): SectorsOverview {
       max_overweight: {
         sector_code: "801120.SI",
         sector_name: "食品饮料",
-        active_weight: "0.70000000",
+        active_weight: "0.7",
         active_weight_pct: "70.00%",
         direction: "over",
       },
@@ -93,7 +93,7 @@ function industry(overrides: Partial<SectorsOverview> = {}): SectorsOverview {
         {
           sector_code: "801120.SI",
           sector_name: "食品饮料",
-          active_weight: "0.70000000",
+          active_weight: "0.7",
           active_weight_pct: "70.00%",
           direction: "over",
         },
@@ -154,18 +154,18 @@ function concept(overrides: Partial<SectorsOverview> = {}): SectorsOverview {
   return {
     ...base,
     concept: {
-      coverage: "1.00000000",
+      coverage: "1",
       coverage_pct: "100.00%",
       coverage_basis: "tagged_equity_market_value / equity_market_value",
       tagged_market_value: "170620.00",
       multi_tag_market_value: "0.00",
       multi_tag_pct: "0.00%",
-      overlap: "1.00000000",
+      overlap: "1",
       hhi_tag: null,
       top1_concept: {
         sector_code: "BK0999",
         sector_name: "白酒",
-        exposure: "1.00000000",
+        exposure: "1",
         exposure_pct: "100.00%",
       },
       top5_concepts: [],
@@ -215,7 +215,7 @@ describe("Sectors 板块分析页", () => {
 
     expect(await screen.findByTestId("sector-concept-view")).toBeTruthy();
     expect(screen.getByTestId("concept-caveat").textContent).toContain("不可加总");
-    expect(screen.getByTestId("sector-kpi-overlap").textContent).toContain("1.00000000");
+    expect(screen.getByTestId("sector-kpi-overlap").textContent).toBe("重叠合计1");
     expect(screen.getByTestId("sector-row-BK0999").textContent).toContain("100.00%");
     expect(screen.queryByText("基准权重")).toBeNull();
     expect(screen.queryByText("主动权重")).toBeNull();

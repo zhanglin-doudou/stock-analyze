@@ -120,6 +120,8 @@ export default defineConfig({
 - **状态语义**：`build_state` 与 `data_status` 两轴共用一组 status token；禁止只用颜色表达状态（WCAG 2.2 1.4.1），必须带文案与形状。
 - **图表**：Phase 1 先自研 SVG，几何投影收敛到 `src/charts/geometry.ts`（唯一允许 `Number()` 的模块，配 golden `path d` 测试）；Phase 2 起后端 `GET /views/*` 返回归一化序列为主路径。
 - **键盘**：`⌘K`/`Ctrl+K` 命令面板；`F` 专注模式（输入框内不触发）；`Esc` 关闭面板。
+- **菜单**：一级分组为「核心 / 分析 / 数据」（2026-11-07 由「概览」改名「核心」，分组 id `core`）；手风琴互斥展开（默认当前路由组，根路径默认第一组）；大屏显示图标+中文，中屏仅图标（hover 文字、点击二级 flyout）；`/rounds/insights` 不得被 `/rounds` 前缀误命中。大屏右边界中点提供手动收起/展开按钮（持久化 `sa.nav.collapsed`）；底部设置区用 `margin-top:auto`，不再使用空 flex 占位节点；高度不足时导航区滚动并把当前项滚入可视区。
+- **菜单图标**：`ui/icons.tsx` 自研线性图标，18 个图标**形状必须两两不同**（分组图标不得复用任一二级项图标；历史上「概览」=「看板」都是 grid、「数据」=「资产」都是 assets，已修）。新增/改图标后 `layout/navigation.test.tsx` 会做同名去重 + 渲染形状去重双重校验，撞形即失败。
 
 ### 9. 板块页面（`/sectors` + Dashboard 子块）：零口径与容器约定
 
@@ -136,7 +138,9 @@ export default defineConfig({
 | `packages/api-client/src/http.ts` | 手写传输层：fetch + Bearer + 7807 + 401 刷新 + SSE |
 | `packages/api-client/src/api/generated/schema.d.ts` | openapi-typescript 自动生成的 TS 类型（勿手改） |
 | `apps/web/src/pages/` | 页面（Import.tsx 上传预览、Trades.tsx 流水、Settings.tsx PAT） |
-| `apps/web/src/layout/` | Phase 1b AppShell（76/64px 图标栏、面包屑、5 组导航）、navigation 配置、页面标题映射 |
+| `apps/web/src/layout/` | 两级侧栏 AppShell（大屏 220px 展开 / 中屏 68px 图标+flyout）、navigation 配置与激活匹配、页面标题映射 |
+| `apps/web/src/layout/OnboardingGate.tsx` | 根路径账单门（无导入 → `/import?welcome=1`） |
+| `apps/web/src/layout/useMediaQuery.ts` | 侧栏展开/紧凑的行为断点 hook（视觉仍由 CSS media query 负责） |
 | `apps/web/src/ui/icons.tsx` | Phase 1b 自研线性图标集（不引图标库） |
 | `apps/web/src/ui/` | 通用组件（Cursor 游标、Problem 错误态、DataTable 表格；旧 Table.tsx 已移除） |
 | `apps/web/src/theme/theme.test.ts` | 偏好回落/持久化/根属性测试 |

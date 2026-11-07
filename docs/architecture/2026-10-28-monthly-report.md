@@ -5,9 +5,9 @@
 > 需求来源：`docs/DEV-PLAN-v2.md` §3.2 **Period2-09「月度报告」**；`docs/prd/PRD-v2.md` **FR-D2**；`docs/architecture/v2/API-Catalog.md` **API-039~042、API-062**；`docs/Architecture-v2.md` §6/§9/§10/§14；`docs/architecture/v2/Extensibility.md` EP-7/§11.3；`docs/architecture/v2/Testing.md` §9/§12。
 > 事实基线（2026-10-28）：
 > - **Period2-07 已完成**：18 指标引擎、`/metrics` 端点、`metric_result`、`GET /nav`、`review.asset_daily`、**API-083 `POST /jobs/rebuild-period`（rounds→assets→nav→metrics）** 已落地并验收。
-> - **Period2-08（五因子归因）暂不做**：仓库无 `attribution` 包/表/`GET /attribution`，API-036 未实现。
+> - **Period2-08（五因子归因）已交付并验收**（08a~08g，2026-11-02；2026-11-04 口径收口）；本设计（09a）仍不接入归因，09b 同源接入。
 > - **Period2-09 尚未实现**：无 `review.report` 表/迁移、无 `/reports` 路由、`stock_delivery` 仅空包、无报告模板/区块/仓储；API-039~042 仅在 API-Catalog 登记，OpenAPI 中无操作。
-> - 结论：本设计必须处理 **08 缺失**与 **API-083 已提供上游构建能力** 两个现实约束，不能假设归因已就绪。
+> - 结论：本设计必须处理 **09 未实现**、**API-083 已提供上游构建能力**、**08 已交付但 09b 尚未接入** 三个现实约束。
 
 ---
 
@@ -87,7 +87,7 @@
 
 ### 1.4 非目标（本期不做）
 
-- Period2-08 五因子归因的算法与 `/attribution` 端点。
+- 09a 不接入 Period2-08 五因子归因的算法与 `/attribution` 端点（08 已交付；09b 同源接入）。
 - 原生 PDF（见 A-02）、长图导出、报告分享/匿名访问（Period3-04）、报告 vs 上月并列（P1）。
 - 前端报告页（Period2-13）、数据导出（Period2-10）、日志/趋势/提醒。
 - 报告删除/保留策略、对象存储迁移（OQ-2）、跨设备同步。
@@ -238,7 +238,7 @@ CREATE INDEX ix_report_user_status ON review.report (user_id, status);
 
 - 所有数值为**展示定点字符串**（由 review 层按 `precision` 量化），delivery 不再格式化/计算。
 - 不含个股价格、账号、股东号等敏感字段；`security_name` 仅用于报告正文的最赚最亏；回合数组仅含报告展示所需字段。
-- `attribution` 在 08 未实现时固定 `unavailable`；09b 接入后为结构化因子数组 + residual。
+- `attribution` 在 09a 固定 `unavailable`（08 已交付、09b 尚未接入）；09b 接入后为结构化因子数组 + residual。
 - `top_rounds/bottom_rounds` 只含 closed 回合，最多各 3 条；`data_error` 不进入榜单。
 
 ### 4.4 文件存储
@@ -291,7 +291,7 @@ backend/packages/delivery/src/stock_delivery/
 │   ├── blocks/
 │   │   ├── base.py          # ReportBlock Protocol + BlockResult
 │   │   ├── overview.py
-│   │   ├── attribution.py   # 08 未就绪：unavailable
+│   │   ├── attribution.py   # 09a 未接入：unavailable（08 已交付）
 │   │   ├── top_rounds.py
 │   │   ├── behavior.py
 │   │   ├── repeated_mistakes.py
@@ -353,7 +353,7 @@ class ReportDataPort(Protocol):
 | NAV 汇总 | `fetch_nav_for_period` / 构建结果 | TWR/MWR/期末资产/benchmark 对比；blocked 判定 |
 | 回合榜 | `list_rounds`/RoundRepository | 按 pnl 取前 3/后 3；只取 closed/data_error 可解释字段 |
 | 历史信号 | `metric_result` 最近 12 个月 | 重复错误连续月判定（A-03 规则批准后） |
-| 归因 | `attribution` 应用（08 后） | 09a 固定 unavailable |
+| 归因 | `attribution` 应用（08 已交付） | 09a 固定 unavailable |
 
 > **构建前置（A-04）**：`report_generate` 先调用抽取后的 `build_period_data`（API-083 同源），确保 rounds/assets/nav/metrics 同事务更新；然后 `batch_metrics` 再取一次快照（同一事务内已算，可直接复用 `build_period_data` 返回的 `BatchResult`，避免二次计算）。
 
@@ -550,7 +550,7 @@ pending ──job lease──► running ──success──► succeeded(blocke
 | # | block_id | order | 输入 | 状态降级 |
 |---|---|---|---|---|
 | 1 | `overview` | 10 | nav 汇总 + `perf/timing` 指标 | blocked → 说明；缺 nav → `insufficient` |
-| 2 | `attribution` | 20 | attribution 结果 | 08 未实现 → `unavailable(PERIOD2_08_NOT_IMPLEMENTED)` |
+| 2 | `attribution` | 20 | attribution 结果 | 09a 未接入（08 已交付）→ `unavailable(PERIOD2_08_NOT_IMPLEMENTED)` |
 | 3 | `top_rounds` | 30 | 回合榜 | 无 closed 回合 → `insufficient` |
 | 4 | `behavior` | 40 | behavior/perf 指标（de/turnover/averaging_down/hhi/fee） | 非 ok 区块内逐项降级 |
 | 5 | `repeated_mistakes` | 50 | 历史 `metric_result` + 规则 | 规则未批准 → `unavailable(RULES_PENDING)`；历史不足 → `insufficient` |
@@ -809,7 +809,7 @@ make verify-p2           # 最终全量
 
 | 风险 | 影响 | 缓解 |
 |---|---|---|
-| 08 缺失/归因占位 | FR-D2 不完整 | 09a/09b 分段；人工确认；09b 只接 08 输出 |
+| 08 已交付/09b 未接入 | FR-D2 不完整 | 09a/09b 分段；人工确认；09b 只接 08 输出 |
 | 报告数字与 metrics 漂移 | 验收失败/信任崩塌 | 同源 `build_period_data` + snapshot + parity 脚本；禁止渲染层重算 |
 | 报告构建过重 | 生成慢/阻塞 | 单飞/配额；Pf-6 20s；可后续改为后台预热 |
 | HTML 外部依赖/注入 | 离线失败/安全 | Jinja2 autoescape、无 script/外链、词表/快照/安全测试 |
@@ -827,7 +827,7 @@ make verify-p2           # 最终全量
 
 | # | 问题 | 推荐 | 备选 | 不确认的后果 |
 |---|---|---|---|---|
-| A-01 | 08 未做，报告是否可先交 09a（归因占位） | 是，09a/09b 分段 | 等 08 / 自实现归因 | 范围/验收无法定稿 |
+| A-01 | 08 已交付，报告是否可先交 09a（归因占位） | 是，09a/09b 分段 | 等 09b / 直接接 08 | 范围/验收无法定稿 |
 | A-02 | 原生 PDF 是否本期做 | 否，HTML+打印；pdf 请求 422 | WeasyPrint +1.5d | API/PRD 字段冲突 |
 | A-03 | "重复错误/一条行动"阈值与文案谁定 | 人工批准规则表；未批准前 unavailable | 不做/LLM/硬编码 | 报告不能下结论或不可审计 |
 | A-04 | 报告是否触发上游重算 | 是，复用 `build_period_data` | 先 API-083/只算 metrics | 数字新鲜度/验收风险 |

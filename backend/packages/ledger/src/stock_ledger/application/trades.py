@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from stock_contracts.clock import Clock
 from stock_contracts.constants import CURSOR_DEFAULT_LIMIT
 from stock_contracts.errors import NotFoundError
-from stock_core.values import Money, Price, Qty
+from stock_core.values import Money, Price, format_quantity
 from stock_platform.audit import record
 from stock_platform.outbox import publish
 
@@ -38,6 +38,9 @@ class TradeFilters:
     date_to: date | None = None
     category: str | None = None
     include_deleted: bool = False
+    # 理由过滤（API-017 additive）：逻辑键在 / 不在集合内；由上层（review）计算。
+    dedupe_keys: tuple[str, ...] | None = None
+    exclude_dedupe_keys: tuple[str, ...] | None = None
 
 
 @dataclass(slots=True)
@@ -83,7 +86,7 @@ class TradeDTO:
             "summary_code": self.summary_code,
             "side": self.side,
             "category": self.category,
-            "quantity": str(Qty(self.quantity_units)),
+            "quantity": format_quantity(self.quantity_units),
             "price": str(Price(self.price_units)),
             "amount": str(Money(self.amount_units)),
             "commission": str(Money(self.commission_units)),
@@ -204,6 +207,8 @@ async def list_trades(
         date_to=spec.date_to,
         category=spec.category,
         include_deleted=spec.include_deleted,
+        dedupe_keys=spec.dedupe_keys,
+        exclude_dedupe_keys=spec.exclude_dedupe_keys,
     )
     return [trade_to_dto(row) for row in rows], next_cursor, _etag(rows)
 

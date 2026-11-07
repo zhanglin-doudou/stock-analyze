@@ -46,6 +46,10 @@ import type {
   RevokeResult,
   Round,
   RoundFillPage,
+  RoundInsightDetail,
+  RoundInsightsPage,
+  RoundInsightsRefreshIn,
+  RoundInsightsRefreshOut,
   RoundPage,
   SectorCatalogPage,
   SectorsOverview,
@@ -56,6 +60,8 @@ import type {
   TradePage,
   TradePageDocument,
   TradePatchIn,
+  TradeReason,
+  TradeReasonIn,
   VersionOut,
 } from "./contract";
 
@@ -228,6 +234,21 @@ export interface GetAttributionQuery {
   classification_lookahead?: "deny" | "allow";
 }
 
+/** API-092 回合洞察列表查询（`flag` 词表见设计 §6.3；period 省略 = 当前月）。 */
+export interface ListRoundInsightsQuery {
+  period?: string;
+  bucket?: string;
+  flag?: string[];
+  has_reason?: boolean;
+  reason_code?: string;
+  security_code?: string;
+  sort?: string;
+  sort_dir?: "asc" | "desc";
+  include_summary?: boolean;
+  limit?: number;
+  cursor?: string;
+}
+
 /** API-088 板块目录查询（公共数据；level/parent/q 过滤 + 游标分页）。 */
 export interface ListSectorsQuery {
   taxonomy?: "industry" | "concept";
@@ -376,6 +397,17 @@ export function createClient(options: ClientOptions) {
     return refreshInFlight;
   }
 
+  /**
+   * 在途 GET 合并：同一 URL + 同一身份（Authorization/Accept/If-Match）的读请求
+   * 只发一次网络请求，其余调用方复用同一个 Promise。
+   *
+   * 只合并「并发在途」，请求一结束即出表，不做任何结果缓存 —— 因此刷新/翻页
+   * 等后续调用仍会真实发请求。React 18 StrictMode 开发态会把 effect 挂载执行两次
+   * （commitDoubleInvokeEffectsInDEV），页面用 useEffect 拉数据时这里负责把两次
+   * 合并成一次，而不是在组件里加 ref 守卫去绕开 effect 语义。
+   */
+  const inflightGets = new Map<string, Promise<{ data: unknown; headers: Headers }>>();
+
   async function send<T>(req: RequestOptions, retried = false): Promise<{ data: T; headers: Headers }> {
     const url = buildUrl(req.root ? rootBase() : baseUrl, req.path, req.query);
     const headers = new Headers(req.headers);
@@ -393,6 +425,38 @@ export function createClient(options: ClientOptions) {
       body = JSON.stringify(req.body);
     }
 
+    const method = req.method ?? "GET";
+    // 只合并无 body 的 GET；401 刷新后的重放（retried）不再进入合并表，避免复用自己。
+    const coalescable = method === "GET" && body === undefined && !retried;
+    if (!coalescable) return perform<T>(req, url, headers, body, retried);
+
+    const key = [
+      url,
+      headers.get("Authorization") ?? "",
+      headers.get("Accept") ?? "",
+      headers.get("If-Match") ?? "",
+    ].join("\u0000");
+    const pending = inflightGets.get(key);
+    if (pending) return pending as Promise<{ data: T; headers: Headers }>;
+
+    const task = perform<T>(req, url, headers, body, retried);
+    inflightGets.set(key, task as Promise<{ data: unknown; headers: Headers }>);
+    try {
+      return await task;
+    } finally {
+      if (inflightGets.get(key) === (task as Promise<{ data: unknown; headers: Headers }>)) {
+        inflightGets.delete(key);
+      }
+    }
+  }
+
+  async function perform<T>(
+    req: RequestOptions,
+    url: string,
+    headers: Headers,
+    body: BodyInit | undefined,
+    retried: boolean,
+  ): Promise<{ data: T; headers: Headers }> {
     let res: Response;
     try {
       res = await fetchImpl(url, { method: req.method ?? "GET", headers, body });
@@ -605,6 +669,27 @@ export function createClient(options: ClientOptions) {
     history(tradeId: string, query: CursorQuery = {}) {
       return send<TradeHistoryPage>({ path: `/trades/${tradeId}/history`, query }).then((r) => r.data);
     },
+    /** API-090：读取单笔理由（随 TradeOut.reason 内嵌；此处单独读便于表单初始化）。 */
+    reason(tradeId: string) {
+      return send<TradeReason | null>({ path: `/trades/${tradeId}/reason` }).then((r) => r.data);
+    },
+    /** API-090：upsert 理由（更新时必须带 If-Match/version）。 */
+    putReason(tradeId: string, body: TradeReasonIn, version?: number) {
+      return send<TradeReason>({
+        path: `/trades/${tradeId}/reason`,
+        method: "PUT",
+        body,
+        ifMatch: version === undefined ? undefined : `"${version}"`,
+      }).then((r) => ({ reason: r.data, etag: r.headers.get("ETag") }));
+    },
+    /** API-091：软删理由（幂等 204；带 version 做并发保护）。 */
+    deleteReason(tradeId: string, version?: number) {
+      return send<void>({
+        path: `/trades/${tradeId}/reason`,
+        method: "DELETE",
+        ifMatch: version === undefined ? undefined : `"${version}"`,
+      }).then(() => undefined);
+    },
   };
 
   const rounds = {
@@ -634,6 +719,38 @@ export function createClient(options: ClientOptions) {
     rebuild(body: RebuildRoundsBody, idempotencyKey: string) {
       return send<JobAccepted>({
         path: "/jobs/rebuild-rounds",
+        method: "POST",
+        body,
+        idempotencyKey,
+      }).then((r) => r.data);
+    },
+    /** API-092：回合洞察列表（后端产出全部数值/百分比，前端零口径渲染）。 */
+    insights(query: ListRoundInsightsQuery = {}) {
+      return send<RoundInsightsPage>({
+        path: "/rounds/insights",
+        query: {
+          period: query.period,
+          bucket: query.bucket,
+          flag: query.flag?.join(","),
+          has_reason: query.has_reason,
+          reason_code: query.reason_code,
+          security_code: query.security_code,
+          sort: query.sort,
+          sort_dir: query.sort_dir,
+          include_summary: query.include_summary,
+          limit: query.limit,
+          cursor: query.cursor,
+        },
+      }).then((r) => r.data);
+    },
+    /** API-093：单回合洞察详情（含逐笔理由/前瞻/旗标/排序）。 */
+    insight(roundId: string) {
+      return send<RoundInsightDetail>({ path: `/rounds/${roundId}/insights` }).then((r) => r.data);
+    },
+    /** API-094：刷新前瞻（≤5000 笔同步 200；超过转 202 作业）。 */
+    refreshInsights(body: RoundInsightsRefreshIn, idempotencyKey: string) {
+      return send<RoundInsightsRefreshOut | JobAccepted>({
+        path: "/rounds/insights/refresh",
         method: "POST",
         body,
         idempotencyKey,

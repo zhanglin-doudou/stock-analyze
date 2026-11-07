@@ -45,6 +45,22 @@ def daily_portfolio_returns(
         return returns
 
 
+def benchmark_adjusted_excess_units(
+    stock_leg_units: int,
+    benchmark_cum_units: int,
+    *,
+    scale: int = SCALE_RATIO,
+) -> int:
+    """基准调整后超额 = 个股腿满值 − 基准腿满值（scale 整数）。
+
+    个股腿满值 = `div_round(CN, C0)`（含 1）；基准腿满值 = `1 + 基准累计收益`。
+    回合洞察 B3 与 `selection.bhar_*` 共用本函数，保证两处口径只有一份实现。
+    """
+    unit_leg: int = 10 ** int(scale)
+    diff: int = stock_leg_units - (unit_leg + benchmark_cum_units)
+    return diff
+
+
 def compound_index(
     daily_returns_units: list[int],
     *,

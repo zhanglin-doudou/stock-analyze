@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import date
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -838,9 +839,33 @@ async def test_api_017_money_is_fixed_point_string(client, api_prefix, user, own
     await _seed_trade(owner_engine, user_id=user.user_id)
     resp = await client.get(f"{api_prefix}/trades", headers=user.headers)
     item = resp.json()["items"][0]
-    assert item["quantity"] == "100.0000"
+    assert item["quantity"] == "100"
     assert item["price"] == "1.000000"
     assert item["amount"] == "10000.00"
+
+
+async def test_api_017_fractional_quantity_two_decimals(
+    client, api_prefix, user, owner_engine
+) -> None:
+    """货币基金（940018）按 0.01 份计份额 → `quantity` 输出 2 位小数，不取整。
+
+    整数标的仍是不带小数点的整数字符串（见上一条）；两种形态共用
+    `stock_core.values.format_quantity`，这里同时校验「数量 × 价格 == 金额」。
+    """
+    await _seed_trade(
+        owner_engine,
+        user_id=user.user_id,
+        code="940018",
+        quantity_units=14_141_900,  # 1414.19 份
+        price_units=1_000_000,  # 1.000000
+        amount_units=141_419,  # 1414.19 元
+    )
+    resp = await client.get(f"{api_prefix}/trades", headers=user.headers)
+    item = resp.json()["items"][0]
+    assert item["quantity"] == "1414.19"
+    assert item["price"] == "1.000000"
+    assert item["amount"] == "1414.19"
+    assert Decimal(item["quantity"]) * Decimal(item["price"]) == Decimal(item["amount"])
 
 
 async def test_api_017_etag_and_if_none_match(client, api_prefix, user, owner_engine) -> None:
@@ -876,7 +901,9 @@ async def test_api_080_detail_happy_path(client, api_prefix, user, owner_engine)
     resp = await client.get(f"{api_prefix}/trades/{trade_id}", headers=user.headers)
     assert resp.status_code == 200
     assert resp.json()["trade_id"] == trade_id
-    assert resp.headers["ETag"] == '"1"'
+    # 详情 ETag = "<trade.version>:<reason_version>"（流水版本 : 交易理由版本，无理由记 0）。
+    # 初始流水 version=1、尚未写理由 → "1:0"；冒号后是第二个版本号，不是冗余后缀。
+    assert resp.headers["ETag"] == '"1:0"'
 
 
 async def test_api_080_detail_cross_user_404(

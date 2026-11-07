@@ -1,10 +1,14 @@
-/* Phase 2 · DataTable（tokens-only；兼容旧 .table 语义但独立类名） */
+/*
+ * Phase 2 · 统一数据表（tokens-only）。
+ * 表头/行高/分隔线/斑马纹/悬停全部消费 styles/tokens.css 的 --table-* 组，
+ * 浅色与暗色由 token 覆盖自动生效，不在此处重复写 [data-theme="dark"] 分支。
+ */
 
 .dt-wrap {
   width: 100%;
   overflow-x: auto;
   overscroll-behavior-x: contain;
-  border: 1px solid var(--line);
+  border: 1px solid var(--table-line);
   background: var(--surface);
 }
 
@@ -32,11 +36,11 @@
   position: sticky;
   top: 0;
   z-index: 1;
-  height: 36px;
-  padding: 0 var(--s3);
-  background: var(--surface-2);
-  border-bottom: 1px solid var(--line-strong);
-  color: var(--muted);
+  height: var(--table-head-h);
+  padding: 0 var(--table-cell-px);
+  background: var(--table-head-bg);
+  border-bottom: 1px solid var(--table-line-strong);
+  color: var(--table-head-fg);
   font-size: var(--fs-micro);
   font-weight: var(--fw-regular);
   letter-spacing: 0.08em;
@@ -45,9 +49,9 @@
 }
 
 .dt td {
-  height: var(--row-h);
-  padding: 0 var(--s3);
-  border-bottom: 1px solid var(--line);
+  height: var(--table-row-h);
+  padding: 0 var(--table-cell-px);
+  border-bottom: 1px solid var(--table-line);
   font-size: 13px;
   color: var(--text-2);
   white-space: nowrap;
@@ -57,8 +61,10 @@
   text-align: left;
 }
 
+/* 数字列右对齐 + 等宽数字（金额/比率/数量由后端字符串给出，前端不换算） */
 .dt .dt-right {
   text-align: right;
+  font-variant-numeric: tabular-nums;
 }
 
 .dt .dt-center {
@@ -69,8 +75,13 @@
   border-bottom: 0;
 }
 
+/* 斑马纹先于 hover 声明：同等特异性下 hover 覆盖条纹 */
+.dt tbody tr:nth-child(even) td {
+  background: var(--table-stripe-bg);
+}
+
 .dt tbody tr:hover td {
-  background: var(--accent-soft);
+  background: var(--table-hover-bg);
 }
 
 .dt tbody tr.is-interactive {
@@ -82,13 +93,147 @@
   outline-offset: -2px;
 }
 
+/* 空态 / 加载态占位（DataTable 两种状态都渲染这一行） */
 .dt .dt-empty {
-  height: var(--row-h);
-  padding: var(--s5) var(--s3);
+  height: var(--table-row-h);
+  padding: var(--s5) var(--table-cell-px);
   color: var(--muted);
   text-align: center;
   font-size: var(--fs-sm);
   white-space: normal;
+}
+
+/* ── 行内展开（可选 expansion） ──────────────────────────────
+ * 切换按钮落在首列，原生 button 保证 Enter/Space 可用；:focus-visible 与行焦点一致。 */
+.dt .dt-expander {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  margin-right: var(--s2);
+  padding: 0;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+  vertical-align: middle;
+}
+
+.dt .dt-expander:hover {
+  color: var(--text);
+  background: var(--table-hover-bg);
+}
+
+.dt .dt-expander:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.dt .dt-expander-icon {
+  transition: transform 120ms ease;
+}
+
+.dt .dt-expander[aria-expanded="true"] .dt-expander-icon {
+  transform: rotate(90deg);
+}
+
+/* 展开面板：占满整行、允许换行，内部可再嵌表格 */
+.dt .dt-expando-cell {
+  height: auto;
+  padding: var(--s3) var(--table-cell-px);
+  background: var(--surface);
+  white-space: normal;
+}
+
+.dt .dt-expando-cell:hover {
+  background: var(--surface);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dt .dt-expander-icon {
+    transition: none;
+  }
+}
+
+/* ── 静态表：嵌在面板内、不自带滚动容器的 token 化表格 ──────────
+ * 供 SectorTable 等“页面自有容器”使用，与 .dt 共享同一组 --table-*，
+ * 但去掉外层边框与最小宽度（面板已提供留白，避免双重卡片感）。 */
+.dt-static {
+  width: 100%;
+  border-collapse: collapse;
+  font-variant-numeric: tabular-nums;
+}
+
+.dt-static th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  height: var(--table-head-h);
+  padding: 0 var(--s2);
+  background: var(--table-head-bg);
+  border-bottom: 1px solid var(--table-line-strong);
+  color: var(--table-head-fg);
+  font-size: var(--fs-micro);
+  font-weight: var(--fw-regular);
+  letter-spacing: 0.08em;
+  text-align: right;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.dt-static td {
+  height: var(--table-row-h);
+  padding: 0 var(--s2);
+  border-bottom: 1px solid var(--table-line);
+  font-size: 13px;
+  color: var(--text-2);
+  text-align: right;
+  white-space: nowrap;
+}
+
+.dt-static th:first-child,
+.dt-static td:first-child {
+  text-align: left;
+  /* 首列允许换行：窄屏下长板块名不把面板撑出横向溢出 */
+  white-space: normal;
+}
+
+.dt-static tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.dt-static tbody tr:nth-child(even) td {
+  background: var(--table-stripe-bg);
+}
+
+.dt-static tbody tr:hover td {
+  background: var(--table-hover-bg);
+}
+
+/* 名称 + 代码的两行式首列（SectorTable 等复用；不依赖 dashboard.css） */
+.dt-label {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--s2);
+  color: var(--text);
+}
+
+.dt-label-code {
+  font-size: var(--fs-micro);
+  color: var(--faint);
+  letter-spacing: 0.04em;
+}
+
+/* 涨跌语义（红涨绿跌由 token 决定，符号仍来自后端字符串） */
+.dt-tone-pos {
+  color: var(--up);
+}
+
+.dt-tone-neg {
+  color: var(--down);
 }
 
 /* 列优先级：先隐藏低价值列，保留关键列与横向滚动提示 */

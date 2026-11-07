@@ -37,7 +37,7 @@ pytestmark = pytest.mark.api
 
 _MONEY_RE = re.compile(r"^-?\d+\.\d{2}$")
 _RATIO_RE = re.compile(r"^-?\d+\.\d{8}$")
-_QTY_RE = re.compile(r"^-?\d+\.\d{4}$")
+_QTY_RE = re.compile(r"^-?\d+(?:\.\d{2})?$")  # 整数份额 或 2 位小数（见 format_quantity）
 _PCT_RE = re.compile(r"^-?\d+\.\d{2}%$")
 
 _CLOCK = "2026-07-01T09:00:00+00:00"
@@ -400,7 +400,7 @@ async def test_api_084_happy_path_two_sections(
     assert len(holdings) == 1
     holding = holdings[0]
     assert holding["security_code"] == "600519"
-    assert holding["quantity"] == "100.0000"
+    assert holding["quantity"] == "100"
     assert holding["cost"] == "170000.00"
     assert holding["market_value"] == "170643.00"
     assert holding["weight_pct"] == "1.00000000"

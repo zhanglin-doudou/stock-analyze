@@ -24,7 +24,7 @@
 - **8/18 长期阻断**：7 个与 `bars_daily` 相关（6 个直接 `DATASET_UNAVAILABLE:bars_daily` + 1 个上游阻断）、1 个是 `BENCHMARK_MISSING`；`timing.drawdown` 又因为“月内 60 交易日”这一不可能满足的门槛一直 `pending_window`。
 - **2026-08 起，可下结论的指标只剩 1~3 个**：其余 `insufficient`（n=2~9）或 `blocked/unreliable`；2026-10 是当月，n=2~4 也被默认展示。
 - **解读层形同虚设**：`GET /metrics/{id}/explain` 的 `conclusion` 与 `meaning` **逐字相同**（静态方向句），例如胜率 53% 与 88% 显示同一句“占比越高越好”；`what_to_do` 固定文案，与当前 `reason/value` 无关；`reason` 是 `BAR_DENSITY_LOW` 这类机读码；CI 已算但详情页不展示。
-- **缺少比较与趋势**：没有基准/分位/自身历史/多窗口；`GET /trends`（API-037）仍是 P1 未实现；月度报告、归因是占位页。
+- **缺少比较与趋势**：没有基准/分位/自身历史/多窗口；`GET /trends`（API-037）仍是 P1 未实现；月度报告是占位页，归因已交付（API-036 + `/attribution`）。
 
 **目标**：把“指标列表”升级为**每月一次、能看懂、能行动、可信**的复盘报告：
 

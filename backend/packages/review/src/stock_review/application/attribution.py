@@ -90,6 +90,8 @@ from stock_review.attribution.presentation import (
     build_summary,
     factor_conclusion,
     factor_presentation,
+    gap_ratio_units,
+    pct_str,
     summary_na_reason,
 )
 from stock_review.attribution.residual import (
@@ -97,6 +99,7 @@ from stock_review.attribution.residual import (
     BUCKET_DIVIDEND,
     BUCKET_GAP,
     BUCKET_INTEREST,
+    BUCKET_IPO,
     BUCKET_OTHER,
     BUCKET_UNATTRIBUTED,
     ResidualSplit,
@@ -198,13 +201,14 @@ class ResidualReconciliation:
     """残差对账（§4.4）：标的合计 + 账户级桶合计 == residual（全部为标度整数分）。
 
     - `unattributed_symbols_total`：`split.per_symbol` 合计（= corporate_action_pnl +
-      unattributed_price_pnl 中落到标的的部分，含被 5 条展示上限截断的标的）；
-    - `account_level_total`：不按标的分摊的桶（interest / other_cashflow /
-      dividend_without_position）+ valuation_gap；
+      unattributed_price_pnl 中落到标的的部分，含被展示上限截断的标的；`ipo_pnl`
+      是账户级桶，不落标的）；
+    - `account_level_total`：不按标的分摊的桶（interest / ipo_pnl（打新收益） /
+      other_cashflow / dividend_without_position）+ valuation_gap；
     - `listed_total` / `others_count` / `others_total`：明细展示前 `display_limit`
       条的金额合计、其后标的数与其金额合计；`listed_total + others_total ==
       unattributed_symbols_total`；
-    - 等式由构造保证：residual = Σ五桶 + valuation_gap。
+    - 等式由构造保证：residual = Σ各桶 + valuation_gap。
     """
 
     unattributed_symbols_total_units: int
@@ -657,20 +661,63 @@ def _tolerance_pct_ratio() -> Ratio:
     return Ratio(int(RESIDUAL_TOLERANCE_PCT * RATIO_SCALE))
 
 
+def _valuation_gap_missing(
+    *,
+    gap_units: int,
+    tolerance_units: int,
+    v_end_units: int,
+    total_pnl_units: int,
+    lang: str = "zh",
+) -> MissingEntry | None:
+    """估值差披露（仅 `info`，**不改变 status**）：`|valuation_gap| > 容差` 时给出条目。
+
+    容差与降级判定同源（期末总资产 × `RESIDUAL_TOLERANCE_PCT`）；`|gap| ≤ 容差`
+    或为 0 时不产生条目（与既有 0 值无条目规则一致）。本码是**披露**，与 D-09
+    （`valuation_gap_ratio > 5%` 不出 `summary`）互相独立：门禁只抑制结论、不产生
+    任何码；二者可同时存在，不构成重复告警。`field="residual"`：估值差本身是残差
+    桶（`valuation_gap`），归入残差类披露（与 `RESIDUAL_*` 同组）。
+    """
+    magnitude = abs(gap_units)
+    if magnitude == 0 or magnitude <= tolerance_units:
+        return None
+    gap = Money(magnitude)
+    tolerance = Money(tolerance_units)
+    assets = Money(v_end_units)
+    ratio = pct_str(gap_ratio_units(gap_units, total_pnl_units))
+    if lang == "en":
+        return MissingEntry(
+            field="residual",
+            code="VALUATION_GAP_ABOVE_TOLERANCE",
+            severity="info",
+            reason=f"Valuation gap {gap} CNY (absolute) exceeds tolerance {tolerance} CNY "
+            f"({_tolerance_pct_ratio().as_pct()} of period-end assets {assets} CNY); "
+            f"{ratio} of period P&L, disclosure only",
+            what_to_do="check reconciliation/valuation basis",
+        )
+    return MissingEntry(
+        field="residual",
+        code="VALUATION_GAP_ABOVE_TOLERANCE",
+        severity="info",
+        reason=f"估值差 {gap} 元（绝对值）超过容差 {tolerance} 元"
+        f"（期末总资产 {assets} 元 × {_tolerance_pct_ratio().as_pct()}），"
+        f"占本期损益 {ratio}；仅披露，不影响状态",
+        what_to_do="核对估值/对账口径（仅披露）",
+    )
+
+
 def _aggregate_status(
     missing: Sequence[MissingEntry],
     *,
-    unattributed_units: int,
+    judgement_units: int,
     tolerance_units: int,
 ) -> str:
     """ok/degraded 聚合（§4.4；blocked 由短路路径决定，此处不负责）。
 
     只有 `severity=info` 的提示（如 look-ahead 披露、板块指数期初回退、容差内残差）
-    不影响归因口径，不降级；任一 warning/blocker、或 |未归因金额| 超容差 → degraded。
+    不影响归因口径，不降级；任一 warning/blocker、或 **|未归因标的损益|** 超容差 →
+    degraded。账户级桶（interest/dividend/ipo/other）与 `valuation_gap` 不参与判定。
     """
-    if any(item.severity != "info" for item in missing) or (
-        abs(unattributed_units) > tolerance_units
-    ):
+    if any(item.severity != "info" for item in missing) or (abs(judgement_units) > tolerance_units):
         return "degraded"
     return "ok"
 
@@ -689,10 +736,11 @@ def _residual_reconciliation(
     gap_units: int,
     residual_units: int,
 ) -> ResidualReconciliation:
-    """残差对账（§4.4，标度整数）：Σper_symbol + (dividend+interest+other+gap) == residual。
+    """残差对账（§4.4，标度整数）：Σper_symbol + (dividend+interest+ipo+other+gap) == residual。
 
     `per_symbol` 是 corporate/unattributed 两桶中**落到标的**的部分（含被展示上限
-    截断的标的），因此恒等于两桶之和；等式由 `residual = Σ五桶 + gap` 保证。
+    截断的标的），恒等于这两桶之和；`ipo_pnl` 为账户级桶，不进 `per_symbol`，只在
+    `account_level_total` 中计一次；等式由 `residual = Σ桶 + gap` 保证。
     `listed + others` 由 `coverage` 的已展示/未展示分组给出，同样恒等于 Σper_symbol。
     """
     return ResidualReconciliation(
@@ -700,6 +748,7 @@ def _residual_reconciliation(
         account_level_total_units=(
             split.buckets[BUCKET_DIVIDEND]
             + split.buckets[BUCKET_INTEREST]
+            + split.buckets[BUCKET_IPO]
             + split.buckets[BUCKET_OTHER]
             + gap_units
         ),
@@ -711,28 +760,53 @@ def _residual_reconciliation(
     )
 
 
-def _residual_missing(*, unattributed_units: int, tolerance_units: int) -> MissingEntry | None:
+def _residual_missing(
+    *, judgement_units: int, tolerance_units: int, lang: str = "zh"
+) -> MissingEntry | None:
     """残差披露（§4.4）：超容差 → `RESIDUAL_LARGE`(warning)；容差内非零 → info。
 
-    `unattributed_units` = `decomposition.residual_units`（各桶合计，含估值差），
-    取绝对值与容差比较；为 0 时不产生条目（避免无意义提示）。
+    `judgement_units` = **未归因标的损益合计**（`corporate_action_pnl +
+    unattributed_price_pnl`，即 `per_symbol` 合计 / `residual_reconciliation.
+    unattributed_symbols_total`），取绝对值与容差比较；账户级桶（interest /
+    dividend / ipo / other）与 `valuation_gap` **不参与判定**，金额照常展示。
+    判定基数为 0 时不产生条目（避免无意义提示）。
     """
-    magnitude = abs(unattributed_units)
+    magnitude = abs(judgement_units)
     amount = Money(magnitude)
     tolerance = Money(tolerance_units)
     if magnitude > tolerance_units:
+        if lang == "en":
+            return MissingEntry(
+                field="residual",
+                code="RESIDUAL_LARGE",
+                reason=f"Unattributed symbol P&L {amount} CNY (absolute) exceeds tolerance "
+                f"{tolerance} CNY ({_tolerance_pct_ratio().as_pct()} of period-end assets)",
+                what_to_do="see unattributed[] detail",
+            )
         return MissingEntry(
             field="residual",
             code="RESIDUAL_LARGE",
-            reason=f"未归因金额 {amount} 元（绝对值）超过容差 {tolerance} 元（期末总资产的 {_tolerance_pct_ratio().as_pct()}）",
-            what_to_do="看 residual_breakdown",
+            reason=f"未归因标的损益 {amount} 元（绝对值）超过容差 {tolerance} 元"
+            f"（期末总资产的 {_tolerance_pct_ratio().as_pct()}）",
+            what_to_do="看未归因标的明细（unattributed[]）",
         )
-    if unattributed_units != 0:
+    if judgement_units != 0:
+        if lang == "en":
+            return MissingEntry(
+                field="residual",
+                code="RESIDUAL_WITHIN_TOLERANCE",
+                severity="info",
+                reason=f"Unattributed symbol P&L {amount} CNY, below "
+                f"{_tolerance_pct_ratio().as_pct()} of period-end assets "
+                f"(threshold {tolerance} CNY)",
+                what_to_do="no action needed",
+            )
         return MissingEntry(
             field="residual",
             code="RESIDUAL_WITHIN_TOLERANCE",
             severity="info",
-            reason=f"未归因 {amount} 元，低于期末资产 {_tolerance_pct_ratio().as_pct()}（阈值 {tolerance} 元）",
+            reason=f"未归因标的损益 {amount} 元，低于期末资产 {_tolerance_pct_ratio().as_pct()}"
+            f"（阈值 {tolerance} 元）",
             what_to_do="无需处理",
         )
     return None
@@ -1155,6 +1229,10 @@ async def build_attribution(
     # 容差 = 期末总资产（`asset_daily.total_assets_units`）× `RESIDUAL_TOLERANCE_PCT`
     # （标度整数分，向下取整）。
     residual_tolerance_units = int(Decimal(window.v_end_units) * RESIDUAL_TOLERANCE_PCT)
+    # 降级判定基数（§4.4，2026-11-04 口径）：只取**未归因标的损益**（标的级两桶），
+    # 恒等于 `residual_reconciliation.unattributed_symbols_total`；账户级桶
+    # （interest / dividend / ipo_pnl / other）与 `valuation_gap` 不参与判定，仅照常展示。
+    judgement_units = sum(split.per_symbol.values())
 
     # ── 11. 状态机（§4.4）：存在候选但零可归因段（板块数据全缺）→ blocked
     stock_plans = [plan for plan in bundle.plans if plan.symbol_class == "stock"]
@@ -1252,15 +1330,26 @@ async def build_attribution(
             )
         )
     residual_entry = _residual_missing(
-        unattributed_units=decomposition.residual_units,
+        judgement_units=judgement_units,
         tolerance_units=residual_tolerance_units,
+        lang=lang,
     )
     if residual_entry is not None:
         missing.append(residual_entry)
 
+    gap_entry = _valuation_gap_missing(
+        gap_units=gap_units,
+        tolerance_units=residual_tolerance_units,
+        v_end_units=window.v_end_units,
+        total_pnl_units=window.total_pnl_units,
+        lang=lang,
+    )
+    if gap_entry is not None:
+        missing.append(gap_entry)
+
     status = _aggregate_status(
         missing,
-        unattributed_units=decomposition.residual_units,
+        judgement_units=judgement_units,
         tolerance_units=residual_tolerance_units,
     )
 
@@ -1396,6 +1485,7 @@ async def build_attribution(
         BUCKET_UNATTRIBUTED: split.buckets[BUCKET_UNATTRIBUTED],
         BUCKET_DIVIDEND: split.buckets[BUCKET_DIVIDEND],
         BUCKET_INTEREST: split.buckets[BUCKET_INTEREST],
+        BUCKET_IPO: split.buckets[BUCKET_IPO],
         BUCKET_OTHER: split.buckets[BUCKET_OTHER],
         BUCKET_GAP: gap_units,
     }

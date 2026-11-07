@@ -11,6 +11,7 @@ import {
 } from "@sa/api-client";
 import { api } from "../client";
 import { Cursor } from "../ui/Cursor";
+import { FilterBar } from "../ui/FilterBar";
 import { JobProgress } from "../ui/JobProgress";
 import { ProblemView } from "../ui/Problem";
 import { DataTable, type DataTableColumn } from "../ui/DataTable";
@@ -421,25 +422,31 @@ export function Assets() {
         行情来自本地缓存（仅收盘后同步，盘中不拉取实时行情）；构建前请确认已执行收盘后同步。
       </p>
 
-      <div className="card filters">
-        <div className="row-actions">
-          <button
-            className="btn"
-            type="button"
-            disabled={executing}
-            aria-busy={executing}
-            onClick={() => void startBuild()}
-          >
-            {actionLabel}
-          </button>
-          <button className="btn btn-ghost" type="button" disabled={loading} onClick={() => void load()}>
-            刷新
-          </button>
-        </div>
-        <p className="muted">
-          构建/更新在后台执行（默认 mode=auto：增量优先，必要时全量重算）；完成后会自动刷新列表。
-        </p>
-      </div>
+      <FilterBar
+        ariaLabel="资产表操作"
+        count={build ? `共 ${build.rows_count} 条记录` : undefined}
+        actions={
+          <>
+            <button
+              className="btn"
+              type="button"
+              disabled={executing}
+              aria-busy={executing}
+              onClick={() => void startBuild()}
+            >
+              {actionLabel}
+            </button>
+            <button className="btn btn-ghost" type="button" disabled={loading} onClick={() => void load()}>
+              刷新
+            </button>
+          </>
+        }
+        note={
+          <p className="muted">
+            构建/更新在后台执行（默认 mode=auto：增量优先，必要时全量重算）；完成后会自动刷新列表。
+          </p>
+        }
+      />
 
       {notice ? (
         <div className="row-actions">

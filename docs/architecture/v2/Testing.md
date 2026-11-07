@@ -550,3 +550,16 @@ backend/tests/fixtures/
 | `frontend/tests/architecture/run.mjs` + `frontend/tools/eslint-rules/` | 前端零口径 F1–F5 |
 | `frontend/e2e/*.spec.ts` | Playwright 8 条关键路径（E1–E8） |
 | `tools/ci/` | `gate_{endpoint,tenant,diff}_coverage.py`、`gate_no_security_skip.py`、`check_openapi_breaking.py`、`gen_{msw_handlers,api_client,api_acceptance_index}.sh`（**每个脚本自带元测试**） |
+
+## 11. Period2-18 回合洞察新增用例（2026-11-05）
+
+| 层 | 文件 | 覆盖点 | 结果 |
+|---|---|---|---|
+| core 单元 | `backend/tests/unit/core/test_round_insights.py` | 附录 A.1 向量（B0/B0n/B1/B2/B3）、`pending/no_calendar/no_bar/stale_price/corporate_action/divisor_missing/price_jump`、卖出侧方向、阈值边界、`_execution_gap`/`_price_jump` | 41 passed；`stock_core` 行覆盖 100% |
+| API | `backend/tests/api/test_api_090_091_trade_reasons.py` | 201/200/409/422/404/403、If-Match、`has_reason/reason_code` 过滤、`TradeOut.reason` 内嵌、ETag、审计 meta 无理由明文 | passed |
+| API | `backend/tests/api/test_api_092_094_round_insights.py` | 列表零口径/`period_basis`/`flag=` 词表/错误码（`INVALID_PERIOD` 422、sort/cursor/unknown 400）、详情跨账号 404、admin 403、refresh 200/幂等/审计、缺 `Idempotency-Key` 422、`scope=all` 403 | passed |
+| 契约 | `backend/tests/contract/test_openapi_contract.py` | 操作数 61、2xx JSON 示例 54（refresh 200+202 各一）、`operation_id`/示例/错误码 | passed |
+| 隔离 | `backend/tests/isolation/test_isolation_matrix.py` | 受保护 52/52、跨租户资源 23/23、401 52/52、列表隔离 4/4；新增 5 操作入矩阵 | passed |
+| 前端 | `frontend/apps/web/src/pages/RoundInsights.test.tsx`、`RoundDetail.test.tsx`、`router.test.tsx` | 零口径渲染、空态、`missing[]` 降级、`flag=` 词表、disclaimer、Cursor、refresh 202 提示、静态路由不被 `/{round_id}` 吞 | passed |
+
+> 未覆盖：`POST /rounds/insights/refresh` 的 **202（>5000 笔转后台）**分支缺少真实大数据用例；构造方式见设计 §8 / 验收记录（造 5001 笔卖出的回合后调用 refresh，断言 202 + `Location: /jobs/{id}`）。

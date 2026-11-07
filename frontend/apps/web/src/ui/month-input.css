@@ -55,6 +55,6 @@
 }
 
 .period-range-error {
-  color: var(--down);
+  color: var(--danger);
   font-size: var(--fs-xs);
 }

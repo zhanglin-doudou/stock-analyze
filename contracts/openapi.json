@@ -2769,6 +2769,121 @@
         "title": "ErrorCatalogOut",
         "type": "object"
       },
+      "ForwardReturnOut": {
+        "description": "前瞻收益（B0~B3）；`*_pct`/`*_display` 均为后端格式化字符串。",
+        "properties": {
+          "b0_net_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "B0 Net Pct"
+          },
+          "b0_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "B0 Pct"
+          },
+          "b1_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "B1 Pct"
+          },
+          "b2_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "B2 Pct"
+          },
+          "b3_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "B3 Pct"
+          },
+          "base_shifted": {
+            "title": "Base Shifted",
+            "type": "boolean"
+          },
+          "horizon": {
+            "title": "Horizon",
+            "type": "integer"
+          },
+          "max_close_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Close Display"
+          },
+          "min_close_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Close Display"
+          },
+          "price_jump_review": {
+            "default": false,
+            "title": "Price Jump Review",
+            "type": "boolean"
+          },
+          "status": {
+            "enum": [
+              "ok",
+              "pending",
+              "no_calendar",
+              "no_bar",
+              "stale_price",
+              "corporate_action",
+              "divisor_missing"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "horizon",
+          "status",
+          "base_shifted"
+        ],
+        "title": "ForwardReturnOut",
+        "type": "object"
+      },
       "HTTPValidationError": {
         "properties": {
           "detail": {
@@ -2886,6 +3001,455 @@
           "to"
         ],
         "title": "ImportRange",
+        "type": "object"
+      },
+      "InsightAddonSummaryOut": {
+        "description": "加仓统计（设计 §6.3）：`count` 与兼容字段 `rounds` 同值。\n\n`avg_dip_pct` 是加仓笔次 20 日 B2 均值，仅对 `status=ok` 样本取均值；\n`avg_dip_coverage` 形如 `\"3/9\"`，0 个有效样本时 `avg_dip_pct=null`。",
+        "properties": {
+          "avg_dip_coverage": {
+            "title": "Avg Dip Coverage",
+            "type": "string"
+          },
+          "avg_dip_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Dip Pct"
+          },
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "declined_after_addon": {
+            "title": "Declined After Addon",
+            "type": "integer"
+          },
+          "declined_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Declined Pct"
+          },
+          "rounds": {
+            "title": "Rounds",
+            "type": "integer"
+          },
+          "share_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Share Pct"
+          }
+        },
+        "required": [
+          "count",
+          "declined_after_addon",
+          "avg_dip_coverage",
+          "rounds"
+        ],
+        "title": "InsightAddonSummaryOut",
+        "type": "object"
+      },
+      "InsightBucketSummaryOut": {
+        "properties": {
+          "avg_holding_trading_days": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Holding Trading Days"
+          },
+          "avg_pnl_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Pnl Display"
+          },
+          "closed": {
+            "title": "Closed",
+            "type": "integer"
+          },
+          "short": {
+            "title": "Short",
+            "type": "integer"
+          },
+          "swing": {
+            "title": "Swing",
+            "type": "integer"
+          },
+          "total_pnl_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Pnl Display"
+          },
+          "trend": {
+            "title": "Trend",
+            "type": "integer"
+          },
+          "win_rate_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Win Rate Pct"
+          }
+        },
+        "required": [
+          "closed",
+          "short",
+          "swing",
+          "trend"
+        ],
+        "title": "InsightBucketSummaryOut",
+        "type": "object"
+      },
+      "InsightFillSwingOut": {
+        "description": "fill 级波段配对（统计单位 fill，与回合级 swing 不可相加，AC-S3）。",
+        "properties": {
+          "avg_holding_trading_days": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Holding Trading Days"
+          },
+          "avg_pnl_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Pnl Display"
+          },
+          "bucket_basis": {
+            "default": "fill",
+            "title": "Bucket Basis",
+            "type": "string"
+          },
+          "pairs": {
+            "title": "Pairs",
+            "type": "integer"
+          },
+          "total_pnl_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total Pnl Display"
+          },
+          "win_rate_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Win Rate Pct"
+          }
+        },
+        "required": [
+          "pairs"
+        ],
+        "title": "InsightFillSwingOut",
+        "type": "object"
+      },
+      "InsightRankingOut": {
+        "properties": {
+          "basis": {
+            "title": "Basis",
+            "type": "string"
+          },
+          "combined_avg_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Combined Avg Pct"
+          },
+          "combined_median_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Combined Median Pct"
+          },
+          "definition_version": {
+            "title": "Definition Version",
+            "type": "string"
+          },
+          "n_eligible": {
+            "title": "N Eligible",
+            "type": "integer"
+          },
+          "n_sample": {
+            "title": "N Sample",
+            "type": "integer"
+          },
+          "per_stock": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Per Stock",
+            "type": "array"
+          },
+          "quadrant_counts": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Quadrant Counts",
+            "type": "object"
+          },
+          "sample_status": {
+            "enum": [
+              "ok",
+              "insufficient",
+              "no_conclusion"
+            ],
+            "title": "Sample Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "n_sample",
+          "n_eligible",
+          "sample_status",
+          "basis",
+          "definition_version"
+        ],
+        "title": "InsightRankingOut",
+        "type": "object"
+      },
+      "InsightReasonCoverageOut": {
+        "properties": {
+          "annotated": {
+            "title": "Annotated",
+            "type": "integer"
+          },
+          "by_code": {
+            "items": {
+              "$ref": "#/components/schemas/InsightReasonShareOut"
+            },
+            "title": "By Code",
+            "type": "array"
+          },
+          "coverage_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coverage Pct"
+          },
+          "total_rounds": {
+            "title": "Total Rounds",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "annotated",
+          "total_rounds"
+        ],
+        "title": "InsightReasonCoverageOut",
+        "type": "object"
+      },
+      "InsightReasonShareOut": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "share_pct": {
+            "title": "Share Pct",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "count",
+          "share_pct"
+        ],
+        "title": "InsightReasonShareOut",
+        "type": "object"
+      },
+      "InsightSellFlySummaryOut": {
+        "description": "卖飞统计：只算止盈型卖飞，止损后反弹单列不并入。",
+        "properties": {
+          "fly_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Fly Pct"
+          },
+          "missed_profit_end_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Missed Profit End Display"
+          },
+          "missed_profit_worst_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Missed Profit Worst Display"
+          },
+          "profit_take_fly": {
+            "title": "Profit Take Fly",
+            "type": "integer"
+          },
+          "rounds": {
+            "title": "Rounds",
+            "type": "integer"
+          },
+          "sell_count": {
+            "title": "Sell Count",
+            "type": "integer"
+          },
+          "share_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Share Pct"
+          },
+          "stop_loss_rebound": {
+            "title": "Stop Loss Rebound",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "sell_count",
+          "profit_take_fly",
+          "stop_loss_rebound",
+          "rounds"
+        ],
+        "title": "InsightSellFlySummaryOut",
+        "type": "object"
+      },
+      "InsightsSummaryOut": {
+        "properties": {
+          "addon": {
+            "$ref": "#/components/schemas/InsightAddonSummaryOut"
+          },
+          "fill_swing": {
+            "$ref": "#/components/schemas/InsightFillSwingOut"
+          },
+          "pending": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "title": "Pending",
+            "type": "object"
+          },
+          "ranking": {
+            "$ref": "#/components/schemas/InsightRankingOut"
+          },
+          "reason_coverage": {
+            "$ref": "#/components/schemas/InsightReasonCoverageOut"
+          },
+          "sell_fly": {
+            "$ref": "#/components/schemas/InsightSellFlySummaryOut"
+          },
+          "swing": {
+            "$ref": "#/components/schemas/InsightBucketSummaryOut"
+          }
+        },
+        "required": [
+          "swing",
+          "fill_swing",
+          "addon",
+          "sell_fly",
+          "reason_coverage",
+          "ranking",
+          "pending"
+        ],
+        "title": "InsightsSummaryOut",
         "type": "object"
       },
       "JobAcceptedOut": {
@@ -5435,6 +5999,543 @@
         "title": "RoundFillPage",
         "type": "object"
       },
+      "RoundInsightDetailOut": {
+        "properties": {
+          "bucket": {
+            "enum": [
+              "short",
+              "swing",
+              "trend",
+              "unknown"
+            ],
+            "title": "Bucket",
+            "type": "string"
+          },
+          "buy_trade": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TradeSideInsightOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "close_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Close Date"
+          },
+          "disclaimer": {
+            "title": "Disclaimer",
+            "type": "string"
+          },
+          "fills": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Fills",
+            "type": "array"
+          },
+          "flags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Flags",
+            "type": "array"
+          },
+          "holding_days_legacy": {
+            "title": "Holding Days Legacy",
+            "type": "integer"
+          },
+          "holding_trading_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Holding Trading Days"
+          },
+          "open_date": {
+            "format": "date",
+            "title": "Open Date",
+            "type": "string"
+          },
+          "pnl": {
+            "title": "Pnl",
+            "type": "string"
+          },
+          "quality": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Quality",
+            "type": "array"
+          },
+          "ranking": {
+            "additionalProperties": true,
+            "title": "Ranking",
+            "type": "object"
+          },
+          "return_rate_pct": {
+            "title": "Return Rate Pct",
+            "type": "string"
+          },
+          "round_id": {
+            "title": "Round Id",
+            "type": "string"
+          },
+          "security_code": {
+            "title": "Security Code",
+            "type": "string"
+          },
+          "security_name": {
+            "title": "Security Name",
+            "type": "string"
+          },
+          "sell_trade": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TradeSideInsightOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "round_id",
+          "security_code",
+          "security_name",
+          "status",
+          "open_date",
+          "holding_days_legacy",
+          "bucket",
+          "pnl",
+          "return_rate_pct",
+          "disclaimer"
+        ],
+        "title": "RoundInsightDetailOut",
+        "type": "object"
+      },
+      "RoundInsightItemOut": {
+        "properties": {
+          "bucket": {
+            "enum": [
+              "short",
+              "swing",
+              "trend",
+              "unknown"
+            ],
+            "title": "Bucket",
+            "type": "string"
+          },
+          "buy_excess_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Buy Excess Pct"
+          },
+          "buy_trade": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TradeSideInsightOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "close_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Close Date"
+          },
+          "combined_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Combined Pct"
+          },
+          "flags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Flags",
+            "type": "array"
+          },
+          "holding_days_legacy": {
+            "title": "Holding Days Legacy",
+            "type": "integer"
+          },
+          "holding_trading_days": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Holding Trading Days"
+          },
+          "missed_profit_end_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Missed Profit End Display"
+          },
+          "missed_profit_worst_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Missed Profit Worst Display"
+          },
+          "open_date": {
+            "format": "date",
+            "title": "Open Date",
+            "type": "string"
+          },
+          "pnl": {
+            "title": "Pnl",
+            "type": "string"
+          },
+          "quadrant": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quadrant"
+          },
+          "quality": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Quality",
+            "type": "array"
+          },
+          "rank": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rank"
+          },
+          "return_rate_pct": {
+            "title": "Return Rate Pct",
+            "type": "string"
+          },
+          "round_id": {
+            "title": "Round Id",
+            "type": "string"
+          },
+          "security_code": {
+            "title": "Security Code",
+            "type": "string"
+          },
+          "security_name": {
+            "title": "Security Name",
+            "type": "string"
+          },
+          "sell_avoid_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sell Avoid Pct"
+          },
+          "sell_trade": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TradeSideInsightOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "round_id",
+          "security_code",
+          "security_name",
+          "status",
+          "open_date",
+          "holding_days_legacy",
+          "bucket",
+          "pnl",
+          "return_rate_pct"
+        ],
+        "title": "RoundInsightItemOut",
+        "type": "object"
+      },
+      "RoundInsightsPageOut": {
+        "properties": {
+          "assumptions": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Assumptions",
+            "type": "array"
+          },
+          "basis": {
+            "title": "Basis",
+            "type": "string"
+          },
+          "benchmark_id": {
+            "title": "Benchmark Id",
+            "type": "string"
+          },
+          "bucket_basis": {
+            "default": "round",
+            "title": "Bucket Basis",
+            "type": "string"
+          },
+          "data_as_of": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data As Of"
+          },
+          "definition_version": {
+            "title": "Definition Version",
+            "type": "string"
+          },
+          "disclaimer": {
+            "title": "Disclaimer",
+            "type": "string"
+          },
+          "has_more": {
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "item_total": {
+            "title": "Item Total",
+            "type": "integer"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/RoundInsightItemOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "missing": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          },
+          "period": {
+            "title": "Period",
+            "type": "string"
+          },
+          "period_basis": {
+            "title": "Period Basis",
+            "type": "string"
+          },
+          "ranking_as_of": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ranking As Of"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/InsightsSummaryOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "period",
+          "period_basis",
+          "definition_version",
+          "benchmark_id",
+          "basis",
+          "item_total",
+          "items",
+          "has_more",
+          "disclaimer"
+        ],
+        "title": "RoundInsightsPageOut",
+        "type": "object"
+      },
+      "RoundInsightsRefreshIn": {
+        "additionalProperties": false,
+        "properties": {
+          "period": {
+            "anyOf": [
+              {
+                "maxLength": 40,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Period"
+          },
+          "scope": {
+            "default": "missing",
+            "enum": [
+              "missing",
+              "all"
+            ],
+            "title": "Scope",
+            "type": "string"
+          }
+        },
+        "title": "RoundInsightsRefreshIn",
+        "type": "object"
+      },
+      "RoundInsightsRefreshOut": {
+        "properties": {
+          "computed": {
+            "title": "Computed",
+            "type": "integer"
+          },
+          "corporate_action": {
+            "title": "Corporate Action",
+            "type": "integer"
+          },
+          "data_as_of": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data As Of"
+          },
+          "divisor_missing": {
+            "title": "Divisor Missing",
+            "type": "integer"
+          },
+          "no_bar": {
+            "title": "No Bar",
+            "type": "integer"
+          },
+          "no_calendar": {
+            "title": "No Calendar",
+            "type": "integer"
+          },
+          "pending": {
+            "title": "Pending",
+            "type": "integer"
+          },
+          "skipped": {
+            "title": "Skipped",
+            "type": "integer"
+          },
+          "stale_price": {
+            "title": "Stale Price",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "computed",
+          "skipped",
+          "pending",
+          "no_calendar",
+          "no_bar",
+          "corporate_action",
+          "divisor_missing",
+          "stale_price"
+        ],
+        "title": "RoundInsightsRefreshOut",
+        "type": "object"
+      },
       "RoundOut": {
         "description": "API-029/030：回合（金额/数量/比率全部定点字符串）。",
         "properties": {
@@ -7269,6 +8370,16 @@
             "title": "Quantity",
             "type": "string"
           },
+          "reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TradeReasonOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "security_code": {
             "title": "Security Code",
             "type": "string"
@@ -7538,6 +8649,140 @@
         "title": "TradePatchIn",
         "type": "object"
       },
+      "TradeReasonIn": {
+        "additionalProperties": false,
+        "description": "PUT 理由入参；`reason_text` 上限 500、tags<=8。",
+        "properties": {
+          "emotion_code": {
+            "anyOf": [
+              {
+                "maxLength": 16,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Emotion Code"
+          },
+          "reason_code": {
+            "maxLength": 24,
+            "minLength": 1,
+            "title": "Reason Code",
+            "type": "string"
+          },
+          "reason_text": {
+            "anyOf": [
+              {
+                "maxLength": 500,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Text"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 8,
+            "title": "Tags",
+            "type": "array"
+          }
+        },
+        "required": [
+          "reason_code"
+        ],
+        "title": "TradeReasonIn",
+        "type": "object"
+      },
+      "TradeReasonOut": {
+        "description": "逐笔理由（API-090/091；`/trades` 内嵌同一结构）。",
+        "properties": {
+          "annotated_at": {
+            "format": "date-time",
+            "title": "Annotated At",
+            "type": "string"
+          },
+          "emotion_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Emotion Code"
+          },
+          "emotion_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Emotion Label"
+          },
+          "late_annotated": {
+            "title": "Late Annotated",
+            "type": "boolean"
+          },
+          "reason_code": {
+            "title": "Reason Code",
+            "type": "string"
+          },
+          "reason_label": {
+            "title": "Reason Label",
+            "type": "string"
+          },
+          "reason_text": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Text"
+          },
+          "side": {
+            "title": "Side",
+            "type": "string"
+          },
+          "tags": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Tags",
+            "type": "array"
+          },
+          "trade_id": {
+            "title": "Trade Id",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "trade_id",
+          "side",
+          "reason_code",
+          "reason_label",
+          "annotated_at",
+          "late_annotated",
+          "version"
+        ],
+        "title": "TradeReasonOut",
+        "type": "object"
+      },
       "TradeRestoreOut": {
         "properties": {
           "recompute_job_id": {
@@ -7565,6 +8810,86 @@
           "trade"
         ],
         "title": "TradeRestoreOut",
+        "type": "object"
+      },
+      "TradeSideInsightOut": {
+        "properties": {
+          "amount_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount Display"
+          },
+          "date": {
+            "format": "date",
+            "title": "Date",
+            "type": "string"
+          },
+          "forward": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/ForwardReturnOut"
+            },
+            "title": "Forward",
+            "type": "object"
+          },
+          "price_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price Display"
+          },
+          "quantity_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quantity Display"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TradeReasonOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "reason_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason Label"
+          },
+          "trade_id": {
+            "title": "Trade Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "trade_id",
+          "date"
+        ],
+        "title": "TradeSideInsightOut",
         "type": "object"
       },
       "UserBrief": {
@@ -8796,6 +10121,7 @@
                     "corporate_action_pnl": "0.00",
                     "dividend_without_position": "0.00",
                     "interest": "0.00",
+                    "ipo_pnl": "0.00",
                     "other_cashflow": "0.00",
                     "unattributed_price_pnl": "0.00",
                     "valuation_gap": "0.00"
@@ -9599,7 +10925,7 @@
                         "cost_display": "150,000.00",
                         "market_value": "160000.00",
                         "market_value_display": "160,000.00",
-                        "quantity": "100.0000",
+                        "quantity": "100",
                         "security_code": "600519",
                         "security_name": "贵州茅台",
                         "weight_display": "100.00%",
@@ -10963,7 +12289,7 @@
                         "cash_balance": "1234.56",
                         "date": "2026-09-30",
                         "price": "12.340000",
-                        "quantity": "100.0000",
+                        "quantity": "100",
                         "security_code": "600519",
                         "summary": "证券买入"
                       },
@@ -14982,10 +16308,10 @@
                       "holding_days": 18,
                       "open_date": "2026-09-30",
                       "open_trade_id": "trd_01J9Z6ABCDEFGHJKMNPQRSTVWX",
-                      "oversell_quantity": "100.0000",
+                      "oversell_quantity": "100",
                       "pnl": "1234.56",
                       "proceeds": "1234.56",
-                      "quantity": "100.0000",
+                      "quantity": "100",
                       "rebuilt_at": "2026-09-30T09:30:00Z",
                       "return_rate": "0.1234",
                       "round_id": "obj_01J9Z6ABCDEFGHJKMNPQRSTVWX",
@@ -15112,6 +16438,789 @@
         "x-required-scope": "read"
       }
     },
+    "/api/v1/rounds/insights": {
+      "get": {
+        "description": "API-092：回合洞察列表（静态路由必须先于 `/rounds/{round_id}`）。",
+        "operationId": "listRoundInsights",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "period",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Period"
+            }
+          },
+          {
+            "in": "query",
+            "name": "bucket",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Bucket"
+            }
+          },
+          {
+            "in": "query",
+            "name": "flag",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "items": {
+                    "type": "string"
+                  },
+                  "type": "array"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Flag"
+            }
+          },
+          {
+            "in": "query",
+            "name": "has_reason",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Has Reason"
+            }
+          },
+          {
+            "in": "query",
+            "name": "reason_code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 24,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Reason Code"
+            }
+          },
+          {
+            "in": "query",
+            "name": "security_code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Security Code"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort",
+            "required": false,
+            "schema": {
+              "default": "combined",
+              "title": "Sort",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sort_dir",
+            "required": false,
+            "schema": {
+              "default": "desc",
+              "title": "Sort Dir",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "include_summary",
+            "required": false,
+            "schema": {
+              "default": true,
+              "title": "Include Summary",
+              "type": "boolean"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-api-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "assumptions": [
+                    "period_basis=close_date",
+                    "benchmark=hs300_tr"
+                  ],
+                  "basis": "benchmark_excess_20d",
+                  "benchmark_id": "hs300_tr",
+                  "bucket_basis": "round",
+                  "data_as_of": "2026-09-30",
+                  "definition_version": "1.0",
+                  "disclaimer": "以下为事后统计，仅用于个人复盘，不构成投资建议；不评价个人能力，不预测收益；相对基准为 hs300_tr ETF 代理；缺失/公司行动显示 —，不显示 0%。",
+                  "has_more": false,
+                  "item_total": 1,
+                  "items": [
+                    {
+                      "bucket": "swing",
+                      "buy_excess_pct": "8.00%",
+                      "buy_trade": {
+                        "amount_display": "10005.00",
+                        "date": "2026-11-02",
+                        "forward": {
+                          "10": {
+                            "b0_net_pct": "-0.05%",
+                            "b0_pct": "0.00%",
+                            "b1_pct": "10.00%",
+                            "b2_pct": "9.95%",
+                            "b3_pct": "6.00%",
+                            "base_shifted": false,
+                            "horizon": 10,
+                            "max_close_display": "11.20",
+                            "min_close_display": "9.90",
+                            "price_jump_review": false,
+                            "status": "ok"
+                          },
+                          "20": {
+                            "b0_net_pct": "-0.05%",
+                            "b0_pct": "0.00%",
+                            "b1_pct": "20.00%",
+                            "b2_pct": "19.94%",
+                            "b3_pct": "12.00%",
+                            "base_shifted": false,
+                            "horizon": 20,
+                            "max_close_display": "12.30",
+                            "min_close_display": "9.90",
+                            "price_jump_review": false,
+                            "status": "ok"
+                          },
+                          "5": {
+                            "b0_net_pct": "-0.05%",
+                            "b0_pct": "0.00%",
+                            "b1_pct": "5.00%",
+                            "b2_pct": "4.95%",
+                            "b3_pct": "3.00%",
+                            "base_shifted": false,
+                            "horizon": 5,
+                            "max_close_display": "10.80",
+                            "min_close_display": "9.90",
+                            "price_jump_review": false,
+                            "status": "ok"
+                          }
+                        },
+                        "price_display": "10.005000",
+                        "quantity_display": null,
+                        "reason": {
+                          "annotated_at": "2026-09-30T09:30:00Z",
+                          "emotion_code": "calm",
+                          "emotion_label": "平静",
+                          "late_annotated": false,
+                          "reason_code": "bottom_fish",
+                          "reason_label": "抄底",
+                          "reason_text": "跌到年线附近，按计划分批",
+                          "side": "buy",
+                          "tags": [
+                            "年线"
+                          ],
+                          "trade_id": "trd_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                          "version": 1
+                        },
+                        "reason_label": "抄底",
+                        "trade_id": "trd_01J9Z6ABCDEFGHJKMNPQRSTVWX"
+                      },
+                      "close_date": "2026-11-18",
+                      "combined_pct": null,
+                      "flags": [
+                        "addon",
+                        "profit_taking",
+                        "full_exit"
+                      ],
+                      "holding_days_legacy": 16,
+                      "holding_trading_days": 12,
+                      "missed_profit_end_display": "510.00",
+                      "missed_profit_worst_display": "1010.00",
+                      "open_date": "2026-11-02",
+                      "pnl": "1234.56",
+                      "quadrant": null,
+                      "quality": [
+                        "forward_incomplete"
+                      ],
+                      "rank": null,
+                      "return_rate_pct": "4.56%",
+                      "round_id": "rnd_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                      "security_code": "000422",
+                      "security_name": "湖北宜化",
+                      "sell_avoid_pct": null,
+                      "sell_trade": {
+                        "amount_display": "9990.00",
+                        "date": "2026-11-18",
+                        "forward": {
+                          "10": {
+                            "b0_net_pct": null,
+                            "b0_pct": null,
+                            "b1_pct": null,
+                            "b2_pct": null,
+                            "b3_pct": null,
+                            "base_shifted": false,
+                            "horizon": 10,
+                            "max_close_display": null,
+                            "min_close_display": null,
+                            "price_jump_review": false,
+                            "status": "pending"
+                          },
+                          "20": {
+                            "b0_net_pct": null,
+                            "b0_pct": null,
+                            "b1_pct": null,
+                            "b2_pct": null,
+                            "b3_pct": null,
+                            "base_shifted": false,
+                            "horizon": 20,
+                            "max_close_display": null,
+                            "min_close_display": null,
+                            "price_jump_review": false,
+                            "status": "pending"
+                          },
+                          "5": {
+                            "b0_net_pct": null,
+                            "b0_pct": null,
+                            "b1_pct": null,
+                            "b2_pct": null,
+                            "b3_pct": null,
+                            "base_shifted": false,
+                            "horizon": 5,
+                            "max_close_display": null,
+                            "min_close_display": null,
+                            "price_jump_review": false,
+                            "status": "pending"
+                          }
+                        },
+                        "price_display": "19.980000",
+                        "quantity_display": null,
+                        "reason": null,
+                        "reason_label": null,
+                        "trade_id": "trd_01J9Z6ABCDEFGHJKMNPQRSTVWX"
+                      },
+                      "status": "closed"
+                    }
+                  ],
+                  "missing": [],
+                  "next_cursor": null,
+                  "period": "2026-11",
+                  "period_basis": "close_date",
+                  "ranking_as_of": "2026-09-30",
+                  "summary": {
+                    "addon": {
+                      "avg_dip_pct": "-2.10%",
+                      "count": 1,
+                      "declined_after_addon": 0,
+                      "declined_pct": "0.0%"
+                    },
+                    "fill_swing": {
+                      "avg_holding_trading_days": "12.0",
+                      "avg_pnl_display": "1234.56",
+                      "bucket_basis": "fill",
+                      "pairs": 1,
+                      "total_pnl_display": "1234.56",
+                      "win_rate_pct": "100.0%"
+                    },
+                    "pending": {
+                      "forward_recompute": 0,
+                      "reason_missing": 0
+                    },
+                    "ranking": {
+                      "basis": "benchmark_excess_20d",
+                      "combined_avg_pct": "1.65%",
+                      "combined_median_pct": "1.65%",
+                      "definition_version": "1.0",
+                      "n_eligible": 1,
+                      "n_sample": 1,
+                      "per_stock": [],
+                      "quadrant_counts": {
+                        "double_positive": 1
+                      },
+                      "sample_status": "no_conclusion"
+                    },
+                    "reason_coverage": {
+                      "annotated": 1,
+                      "by_code": [
+                        {
+                          "code": "bottom_fish",
+                          "count": 1,
+                          "label": "抄底",
+                          "share_pct": "100.0%"
+                        }
+                      ],
+                      "coverage_pct": "100.0%",
+                      "total_rounds": 1
+                    },
+                    "sell_fly": {
+                      "fly_pct": "100.0%",
+                      "missed_profit_end_display": "510.00",
+                      "missed_profit_worst_display": "1010.00",
+                      "profit_take_fly": 1,
+                      "sell_count": 1,
+                      "stop_loss_rebound": 0
+                    },
+                    "swing": {
+                      "avg_holding_trading_days": "12.0",
+                      "avg_pnl_display": "1234.56",
+                      "closed": 1,
+                      "short": 0,
+                      "swing": 1,
+                      "total_pnl_display": "1234.56",
+                      "trend": 0,
+                      "win_rate_pct": "100.0%"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/RoundInsightsPageOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "INVALID_SORT_FIELD",
+                  "detail": "不支持这个排序字段。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 400,
+                  "title": "INVALID_SORT_FIELD",
+                  "type": "https://stock-analyze.local/errors/INVALID_SORT_FIELD",
+                  "user_message": "不支持这个排序字段。",
+                  "what_to_do": "使用文档列出的字段。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "请求参数错误"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "TOKEN_EXPIRED",
+                  "detail": "访问凭证已过期。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 401,
+                  "title": "TOKEN_EXPIRED",
+                  "type": "https://stock-analyze.local/errors/TOKEN_EXPIRED",
+                  "user_message": "访问凭证已过期。",
+                  "what_to_do": "用 refresh_token 换新 access，或重建 PAT。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "未认证或凭证无效"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "INSUFFICIENT_SCOPE",
+                  "detail": "当前令牌只有只读权限。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 403,
+                  "title": "INSUFFICIENT_SCOPE",
+                  "type": "https://stock-analyze.local/errors/INSUFFICIENT_SCOPE",
+                  "user_message": "当前令牌只有只读权限。",
+                  "what_to_do": "创建带 write scope 的 PAT。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "权限不足"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "example": {
+                  "code": "INVALID_PERIOD",
+                  "detail": "时间区间不合法。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 422,
+                  "title": "INVALID_PERIOD",
+                  "type": "https://stock-analyze.local/errors/INVALID_PERIOD",
+                  "user_message": "时间区间不合法。",
+                  "what_to_do": "用 YYYY-MM 或 from/to（半开区间）。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Round Insights Endpoint",
+        "tags": [
+          "rounds"
+        ],
+        "x-async": false,
+        "x-error-codes": [
+          "INVALID_PERIOD",
+          "INVALID_SORT_FIELD",
+          "INVALID_CURSOR",
+          "UNKNOWN_QUERY_PARAM",
+          "TOKEN_EXPIRED",
+          "TOKEN_REVOKED",
+          "MULTIPLE_CREDENTIALS",
+          "INSUFFICIENT_SCOPE",
+          "ADMIN_CANNOT_READ_TRADES"
+        ],
+        "x-idempotent": false,
+        "x-required-scope": "read"
+      }
+    },
+    "/api/v1/rounds/insights/refresh": {
+      "post": {
+        "description": "API-094：重算前瞻收益缓存；>5000 笔转 202 作业。",
+        "operationId": "refreshRoundInsights",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-api-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RoundInsightsRefreshIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "computed": 3,
+                  "corporate_action": 0,
+                  "data_as_of": "2026-09-30",
+                  "divisor_missing": 0,
+                  "no_bar": 1,
+                  "no_calendar": 0,
+                  "pending": 2,
+                  "skipped": 12,
+                  "stale_price": 0
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/RoundInsightsRefreshOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "202": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "job_id": "job_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "links": {
+                    "events": "/api/v1/jobs/job_01J9Z6ABCDEFGHJKMNPQRSTVWX/events",
+                    "self": "/api/v1/jobs/job_01J9Z6ABCDEFGHJKMNPQRSTVWX"
+                  },
+                  "status": "pending",
+                  "type": "refresh_round_insights"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/JobAcceptedOut"
+                }
+              }
+            },
+            "description": "预计处理超过 5000 笔，转后台作业（Location: /jobs/{id}）"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "TOKEN_EXPIRED",
+                  "detail": "访问凭证已过期。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 401,
+                  "title": "TOKEN_EXPIRED",
+                  "type": "https://stock-analyze.local/errors/TOKEN_EXPIRED",
+                  "user_message": "访问凭证已过期。",
+                  "what_to_do": "用 refresh_token 换新 access，或重建 PAT。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "未认证或凭证无效"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "FORBIDDEN",
+                  "detail": "没有权限执行该操作。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 403,
+                  "title": "FORBIDDEN",
+                  "type": "https://stock-analyze.local/errors/FORBIDDEN",
+                  "user_message": "没有权限执行该操作。",
+                  "what_to_do": "使用具备权限的账号。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "权限不足"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "IDEMPOTENCY_IN_PROGRESS",
+                  "detail": "这个请求正在处理中。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": true,
+                  "status": 409,
+                  "title": "IDEMPOTENCY_IN_PROGRESS",
+                  "type": "https://stock-analyze.local/errors/IDEMPOTENCY_IN_PROGRESS",
+                  "user_message": "这个请求正在处理中。",
+                  "what_to_do": "用返回的 job_id 轮询结果。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "资源状态冲突"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "example": {
+                  "code": "INVALID_PERIOD",
+                  "detail": "时间区间不合法。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 422,
+                  "title": "INVALID_PERIOD",
+                  "type": "https://stock-analyze.local/errors/INVALID_PERIOD",
+                  "user_message": "时间区间不合法。",
+                  "what_to_do": "用 YYYY-MM 或 from/to（半开区间）。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "QUOTA_EXCEEDED",
+                  "detail": "同时运行的任务已达上限。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": true,
+                  "status": 429,
+                  "title": "QUOTA_EXCEEDED",
+                  "type": "https://stock-analyze.local/errors/QUOTA_EXCEEDED",
+                  "user_message": "同时运行的任务已达上限。",
+                  "what_to_do": "等运行中的任务结束。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "请求过于频繁"
+          }
+        },
+        "summary": "Refresh Round Insights Endpoint",
+        "tags": [
+          "rounds"
+        ],
+        "x-async": true,
+        "x-error-codes": [
+          "INVALID_PERIOD",
+          "VALIDATION_ERROR",
+          "FORBIDDEN",
+          "IDEMPOTENCY_KEY_REUSED",
+          "IDEMPOTENCY_IN_PROGRESS",
+          "JOB_ALREADY_RUNNING",
+          "QUOTA_EXCEEDED",
+          "TOKEN_EXPIRED",
+          "TOKEN_REVOKED",
+          "MULTIPLE_CREDENTIALS",
+          "INSUFFICIENT_SCOPE",
+          "ADMIN_CANNOT_READ_TRADES"
+        ],
+        "x-idempotent": true,
+        "x-required-scope": "write"
+      }
+    },
     "/api/v1/rounds/{round_id}": {
       "get": {
         "description": "API-030：回合详情；跨账号/不存在 → 404，admin → 403。",
@@ -15173,10 +17282,10 @@
                   "holding_days": 18,
                   "open_date": "2026-09-30",
                   "open_trade_id": "trd_01J9Z6ABCDEFGHJKMNPQRSTVWX",
-                  "oversell_quantity": "100.0000",
+                  "oversell_quantity": "100",
                   "pnl": "1234.56",
                   "proceeds": "1234.56",
-                  "quantity": "100.0000",
+                  "quantity": "100",
                   "rebuilt_at": "2026-09-30T09:30:00Z",
                   "return_rate": "0.1234",
                   "round_id": "obj_01J9Z6ABCDEFGHJKMNPQRSTVWX",
@@ -15364,7 +17473,7 @@
                       "fill_id": 1,
                       "holding_days": 18,
                       "open_date": "2026-09-30",
-                      "quantity": "100.0000",
+                      "quantity": "100",
                       "sell_trade_id": "trd_01J9Z6ABCDEFGHJKMNPQRSTVWX",
                       "sequence": 1
                     }
@@ -15487,6 +17596,223 @@
           "TOKEN_REVOKED",
           "MULTIPLE_CREDENTIALS",
           "ADMIN_CANNOT_READ_TRADES"
+        ],
+        "x-idempotent": false,
+        "x-required-scope": "read"
+      }
+    },
+    "/api/v1/rounds/{round_id}/insights": {
+      "get": {
+        "description": "API-093：单回合洞察详情（回合基础 + 配对明细 + 每笔理由/前瞻）。",
+        "operationId": "getRoundInsight",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "round_id",
+            "required": true,
+            "schema": {
+              "title": "Round Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-api-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "bucket": "swing",
+                  "buy_trade": null,
+                  "close_date": "2026-11-18",
+                  "disclaimer": "以下为事后统计，仅用于个人复盘，不构成投资建议；不评价个人能力，不预测收益；相对基准为 hs300_tr ETF 代理；缺失/公司行动显示 —，不显示 0%。",
+                  "fills": [
+                    {
+                      "bucket": "swing",
+                      "buy": null,
+                      "close_date": "2026-11-18",
+                      "fill_id": "fil_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                      "holding_trading_days": 12,
+                      "open_date": "2026-11-02",
+                      "pnl_display": "1234.56",
+                      "quantity_display": "100",
+                      "sell": null,
+                      "sequence": 1
+                    }
+                  ],
+                  "flags": [
+                    "swing",
+                    "profit_taking"
+                  ],
+                  "holding_days_legacy": 16,
+                  "holding_trading_days": 12,
+                  "open_date": "2026-11-02",
+                  "pnl": "1234.56",
+                  "quality": [],
+                  "ranking": {
+                    "basis": "benchmark_excess_20d",
+                    "buy_excess_pct": "8.00%",
+                    "combined_pct": "6.50%",
+                    "definition_version": "1.0",
+                    "quadrant": "double_positive",
+                    "rank": null,
+                    "sell_avoid_pct": "5.00%"
+                  },
+                  "return_rate_pct": "4.56%",
+                  "round_id": "rnd_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "security_code": "000422",
+                  "security_name": "湖北宜化",
+                  "sell_trade": null,
+                  "status": "closed"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/RoundInsightDetailOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "TOKEN_EXPIRED",
+                  "detail": "访问凭证已过期。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 401,
+                  "title": "TOKEN_EXPIRED",
+                  "type": "https://stock-analyze.local/errors/TOKEN_EXPIRED",
+                  "user_message": "访问凭证已过期。",
+                  "what_to_do": "用 refresh_token 换新 access，或重建 PAT。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "未认证或凭证无效"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "INSUFFICIENT_SCOPE",
+                  "detail": "当前令牌只有只读权限。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 403,
+                  "title": "INSUFFICIENT_SCOPE",
+                  "type": "https://stock-analyze.local/errors/INSUFFICIENT_SCOPE",
+                  "user_message": "当前令牌只有只读权限。",
+                  "what_to_do": "创建带 write scope 的 PAT。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "权限不足"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "NOT_FOUND",
+                  "detail": "找不到该资源。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 404,
+                  "title": "NOT_FOUND",
+                  "type": "https://stock-analyze.local/errors/NOT_FOUND",
+                  "user_message": "找不到该资源。",
+                  "what_to_do": "确认 ID；跨账号资源按不存在处理。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "资源不存在"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "example": {
+                  "code": "VALIDATION_ERROR",
+                  "detail": "请求参数有问题。",
+                  "errors": [
+                    {
+                      "code": "invalid",
+                      "field": "body.email",
+                      "message": "邮箱格式不正确。"
+                    }
+                  ],
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 422,
+                  "title": "VALIDATION_ERROR",
+                  "type": "https://stock-analyze.local/errors/VALIDATION_ERROR",
+                  "user_message": "请求参数有问题。",
+                  "what_to_do": "按 errors[] 修正字段后重试。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Round Insights Endpoint",
+        "tags": [
+          "rounds"
+        ],
+        "x-async": false,
+        "x-error-codes": [
+          "NOT_FOUND",
+          "TOKEN_EXPIRED",
+          "TOKEN_REVOKED",
+          "MULTIPLE_CREDENTIALS",
+          "INSUFFICIENT_SCOPE",
+          "ADMIN_CANNOT_READ_TRADES",
+          "VALIDATION_ERROR"
         ],
         "x-idempotent": false,
         "x-required-scope": "read"
@@ -15938,23 +18264,23 @@
                   },
                   "concept": {
                     "caveat": "概念为多归属标签：暴露可重叠、不可加总。",
-                    "coverage": "0.1234",
+                    "coverage": "0.123",
                     "coverage_basis": "mapped_equity_market_value / equity_market_value",
                     "coverage_pct": "96.00%",
                     "hhi_tag": "0.1234",
                     "multi_tag_market_value": "示例",
                     "multi_tag_pct": "36.00%",
-                    "overlap": "示例",
+                    "overlap": "0.123",
                     "tagged_market_value": "示例",
                     "top1_concept": {
-                      "exposure": "0.1234",
+                      "exposure": "0.123",
                       "exposure_pct": "80.00%",
                       "sector_code": "801030.SI",
                       "sector_name": "基础化工"
                     },
                     "top5_concepts": [
                       {
-                        "exposure": "0.1234",
+                        "exposure": "0.123",
                         "exposure_pct": "80.00%",
                         "sector_code": "801030.SI",
                         "sector_name": "基础化工"
@@ -15979,7 +18305,7 @@
                     }
                   ],
                   "others": {
-                    "exposure": "0.1234",
+                    "exposure": "0.123",
                     "exposure_pct": "80.00%",
                     "holding_count": 1,
                     "market_value": "示例",
@@ -15988,7 +18314,7 @@
                   },
                   "portfolio": {
                     "classified_holding_count": 1,
-                    "coverage": "0.1234",
+                    "coverage": "0.123",
                     "coverage_basis": "mapped_equity_market_value / equity_market_value",
                     "coverage_pct": "96.00%",
                     "equity_market_value": "示例",
@@ -16005,14 +18331,14 @@
                   "preference": {
                     "deviation": "0.1234",
                     "max_overweight": {
-                      "active_weight": "0.1234",
+                      "active_weight": "0.123",
                       "active_weight_pct": "53.33%",
                       "direction": "over",
                       "sector_code": "801030.SI",
                       "sector_name": "基础化工"
                     },
                     "max_underweight": {
-                      "active_weight": "0.1234",
+                      "active_weight": "0.123",
                       "active_weight_pct": "53.33%",
                       "direction": "over",
                       "sector_code": "801030.SI",
@@ -16020,7 +18346,7 @@
                     },
                     "top_overweight": [
                       {
-                        "active_weight": "0.1234",
+                        "active_weight": "0.123",
                         "active_weight_pct": "53.33%",
                         "direction": "over",
                         "sector_code": "801030.SI",
@@ -16029,7 +18355,7 @@
                     ],
                     "top_underweight": [
                       {
-                        "active_weight": "0.1234",
+                        "active_weight": "0.123",
                         "active_weight_pct": "53.33%",
                         "direction": "over",
                         "sector_code": "801030.SI",
@@ -16042,12 +18368,12 @@
                   "sector_dataset_version": "sw2021@2026-09-30",
                   "sectors": [
                     {
-                      "active_weight": "0.1234",
+                      "active_weight": "0.123",
                       "active_weight_pct": "53.33%",
                       "benchmark_weight": "0.1234",
                       "benchmark_weight_pct": "30.00%",
                       "direction": "over",
-                      "exposure": "0.1234",
+                      "exposure": "0.123",
                       "exposure_pct": "80.00%",
                       "holding_count": 1,
                       "level": 1,
@@ -17604,6 +19930,39 @@
             }
           },
           {
+            "in": "query",
+            "name": "has_reason",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Has Reason"
+            }
+          },
+          {
+            "in": "query",
+            "name": "reason_code",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 24,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Reason Code"
+            }
+          },
+          {
             "in": "header",
             "name": "authorization",
             "required": false,
@@ -17660,7 +20019,7 @@
                       "provenance": {
                         "row": 7
                       },
-                      "quantity": "100.0000",
+                      "quantity": "100",
                       "security_code": "600519",
                       "security_name": "贵州茅台",
                       "side": "buy",
@@ -18042,7 +20401,7 @@
                   "provenance": {
                     "row": 7
                   },
-                  "quantity": "100.0000",
+                  "quantity": "100",
                   "security_code": "600519",
                   "security_name": "贵州茅台",
                   "side": "buy",
@@ -18274,7 +20633,22 @@
                     "other_fee": "1234.56",
                     "price": "12.340000",
                     "provenance": {},
-                    "quantity": "100.0000",
+                    "quantity": "100",
+                    "reason": {
+                      "annotated_at": "2026-09-30T09:30:00Z",
+                      "emotion_code": "示例",
+                      "emotion_label": "示例",
+                      "late_annotated": false,
+                      "reason_code": "UNKNOWN_SUMMARY",
+                      "reason_label": "示例",
+                      "reason_text": "示例",
+                      "side": "示例",
+                      "tags": [
+                        "示例"
+                      ],
+                      "trade_id": "trd_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                      "version": 2
+                    },
                     "security_code": "600519",
                     "security_name": "贵州茅台",
                     "side": "buy",
@@ -18620,6 +20994,445 @@
         "x-required-scope": "read"
       }
     },
+    "/api/v1/trades/{trade_id}/reason": {
+      "delete": {
+        "description": "API-091：软删理由（204 幂等）；不存在同账号返回 204，跨账号 404。",
+        "operationId": "deleteTradeReason",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "trade_id",
+            "required": true,
+            "schema": {
+              "title": "Trade Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-api-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "TOKEN_EXPIRED",
+                  "detail": "访问凭证已过期。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 401,
+                  "title": "TOKEN_EXPIRED",
+                  "type": "https://stock-analyze.local/errors/TOKEN_EXPIRED",
+                  "user_message": "访问凭证已过期。",
+                  "what_to_do": "用 refresh_token 换新 access，或重建 PAT。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "未认证或凭证无效"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "INSUFFICIENT_SCOPE",
+                  "detail": "当前令牌只有只读权限。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 403,
+                  "title": "INSUFFICIENT_SCOPE",
+                  "type": "https://stock-analyze.local/errors/INSUFFICIENT_SCOPE",
+                  "user_message": "当前令牌只有只读权限。",
+                  "what_to_do": "创建带 write scope 的 PAT。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "权限不足"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "NOT_FOUND",
+                  "detail": "找不到该资源。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 404,
+                  "title": "NOT_FOUND",
+                  "type": "https://stock-analyze.local/errors/NOT_FOUND",
+                  "user_message": "找不到该资源。",
+                  "what_to_do": "确认 ID；跨账号资源按不存在处理。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "资源不存在"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "VERSION_CONFLICT",
+                  "detail": "这条数据刚被改过。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 409,
+                  "title": "VERSION_CONFLICT",
+                  "type": "https://stock-analyze.local/errors/VERSION_CONFLICT",
+                  "user_message": "这条数据刚被改过。",
+                  "what_to_do": "重新获取最新版本后再提交。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "资源状态冲突"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "example": {
+                  "code": "VALIDATION_ERROR",
+                  "detail": "请求参数有问题。",
+                  "errors": [
+                    {
+                      "code": "invalid",
+                      "field": "body.email",
+                      "message": "邮箱格式不正确。"
+                    }
+                  ],
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 422,
+                  "title": "VALIDATION_ERROR",
+                  "type": "https://stock-analyze.local/errors/VALIDATION_ERROR",
+                  "user_message": "请求参数有问题。",
+                  "what_to_do": "按 errors[] 修正字段后重试。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Trade Reason",
+        "tags": [
+          "trades"
+        ],
+        "x-async": false,
+        "x-error-codes": [
+          "NOT_FOUND",
+          "VERSION_CONFLICT",
+          "VALIDATION_ERROR",
+          "TOKEN_EXPIRED",
+          "TOKEN_REVOKED",
+          "MULTIPLE_CREDENTIALS",
+          "INSUFFICIENT_SCOPE",
+          "ADMIN_CANNOT_READ_TRADES"
+        ],
+        "x-idempotent": true,
+        "x-required-scope": "write"
+      },
+      "put": {
+        "description": "API-090：新增/更新逐笔理由（新建 201、更新 200；版本冲突 409）。",
+        "operationId": "upsertTradeReason",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "trade_id",
+            "required": true,
+            "schema": {
+              "title": "Trade Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-api-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TradeReasonIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "annotated_at": "2026-09-30T09:30:00Z",
+                  "emotion_code": "calm",
+                  "emotion_label": "平静",
+                  "late_annotated": false,
+                  "reason_code": "bottom_fish",
+                  "reason_label": "抄底",
+                  "reason_text": "跌到年线附近，按计划分批",
+                  "side": "buy",
+                  "tags": [
+                    "年线",
+                    "分批"
+                  ],
+                  "trade_id": "trd_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "version": 1
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/TradeReasonOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "TOKEN_EXPIRED",
+                  "detail": "访问凭证已过期。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 401,
+                  "title": "TOKEN_EXPIRED",
+                  "type": "https://stock-analyze.local/errors/TOKEN_EXPIRED",
+                  "user_message": "访问凭证已过期。",
+                  "what_to_do": "用 refresh_token 换新 access，或重建 PAT。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "未认证或凭证无效"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "INSUFFICIENT_SCOPE",
+                  "detail": "当前令牌只有只读权限。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 403,
+                  "title": "INSUFFICIENT_SCOPE",
+                  "type": "https://stock-analyze.local/errors/INSUFFICIENT_SCOPE",
+                  "user_message": "当前令牌只有只读权限。",
+                  "what_to_do": "创建带 write scope 的 PAT。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "权限不足"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "NOT_FOUND",
+                  "detail": "找不到该资源。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 404,
+                  "title": "NOT_FOUND",
+                  "type": "https://stock-analyze.local/errors/NOT_FOUND",
+                  "user_message": "找不到该资源。",
+                  "what_to_do": "确认 ID；跨账号资源按不存在处理。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "资源不存在"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "VERSION_CONFLICT",
+                  "detail": "这条数据刚被改过。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 409,
+                  "title": "VERSION_CONFLICT",
+                  "type": "https://stock-analyze.local/errors/VERSION_CONFLICT",
+                  "user_message": "这条数据刚被改过。",
+                  "what_to_do": "重新获取最新版本后再提交。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "资源状态冲突"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "example": {
+                  "code": "VALIDATION_ERROR",
+                  "detail": "请求参数有问题。",
+                  "errors": [
+                    {
+                      "code": "invalid",
+                      "field": "body.email",
+                      "message": "邮箱格式不正确。"
+                    }
+                  ],
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 422,
+                  "title": "VALIDATION_ERROR",
+                  "type": "https://stock-analyze.local/errors/VALIDATION_ERROR",
+                  "user_message": "请求参数有问题。",
+                  "what_to_do": "按 errors[] 修正字段后重试。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Put Trade Reason",
+        "tags": [
+          "trades"
+        ],
+        "x-async": false,
+        "x-error-codes": [
+          "NOT_FOUND",
+          "VERSION_CONFLICT",
+          "VALIDATION_ERROR",
+          "TOKEN_EXPIRED",
+          "TOKEN_REVOKED",
+          "MULTIPLE_CREDENTIALS",
+          "INSUFFICIENT_SCOPE",
+          "ADMIN_CANNOT_READ_TRADES"
+        ],
+        "x-idempotent": true,
+        "x-required-scope": "write"
+      }
+    },
     "/api/v1/trades/{trade_id}/restore": {
       "post": {
         "description": "API-020：恢复软删行；未删除行 → 422，重复恢复 → 200 状态不变。",
@@ -18690,7 +21503,22 @@
                     "other_fee": "1234.56",
                     "price": "12.340000",
                     "provenance": {},
-                    "quantity": "100.0000",
+                    "quantity": "100",
+                    "reason": {
+                      "annotated_at": "2026-09-30T09:30:00Z",
+                      "emotion_code": "示例",
+                      "emotion_label": "示例",
+                      "late_annotated": false,
+                      "reason_code": "UNKNOWN_SUMMARY",
+                      "reason_label": "示例",
+                      "reason_text": "示例",
+                      "side": "示例",
+                      "tags": [
+                        "示例"
+                      ],
+                      "trade_id": "trd_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                      "version": 2
+                    },
                     "security_code": "600519",
                     "security_name": "贵州茅台",
                     "side": "buy",

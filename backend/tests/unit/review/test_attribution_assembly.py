@@ -43,6 +43,7 @@ from stock_review.application.attribution import (
     _residual_missing,
     _residual_reconciliation,
     _sector_start_fallback_missing,
+    _valuation_gap_missing,
 )
 from stock_review.application.rebuild import trades_to_events
 from stock_review.attribution.context import (
@@ -57,14 +58,17 @@ from stock_review.attribution.coverage import (
     build_coverage,
 )
 from stock_review.attribution.presentation import (
+    GAP_RATIO_MAX,
     assert_copy_compliance,
     build_summary,
     factor_conclusion,
+    gap_ratio_units,
 )
 from stock_review.attribution.residual import (
     BUCKET_CORPORATE,
     BUCKET_DIVIDEND,
     BUCKET_INTEREST,
+    BUCKET_IPO,
     BUCKET_OTHER,
     BUCKET_UNATTRIBUTED,
     ResidualSplit,
@@ -394,6 +398,7 @@ def test_golden_residual_buckets_and_coverage() -> None:
     assert split.buckets == {
         BUCKET_DIVIDEND: 0,
         BUCKET_INTEREST: 0,
+        BUCKET_IPO: 0,
         BUCKET_CORPORATE: 0,
         BUCKET_UNATTRIBUTED: 0,
         BUCKET_OTHER: 0,
@@ -428,6 +433,105 @@ def test_golden_residual_buckets_and_coverage() -> None:
         1,
     )
     assert coverage.unattributed == ()
+
+
+def test_split_routes_new_stock_to_ipo_bucket() -> None:
+    """`new_stock` 标的的本期盯市损益进 `ipo_pnl`（账户级），不进 `unattributed_price_pnl`；
+    破发（负值）同样只进 ipo_pnl；其余非归因标的仍留在 unattributed。
+    """
+    plans = [
+        SymbolPlan(
+            security_code="001237",
+            symbol_class="new_stock",
+            attributed=False,
+            reason_code=None,
+            participating=True,
+        ),
+        SymbolPlan(
+            security_code="110059",
+            symbol_class="bond",
+            attributed=False,
+            reason_code=None,
+            participating=True,
+        ),
+    ]
+    trades = [
+        _trade(
+            trade_date=date(2025, 3, 20),
+            security_code="001237",
+            side="sell",
+            category="sell",
+            quantity_units=1_000_000,  # 100 股
+            price_units=40_000_000,  # 40.00
+            amount_units=400_000,  # +4,000.00
+        ),
+        _trade(
+            trade_date=date(2025, 3, 25),
+            security_code="110059",
+            side="sell",
+            category="sell",
+            quantity_units=100_000,
+            price_units=120_000_000,
+            amount_units=1_200_000,  # +12,000.00
+        ),
+    ]
+    split = split_residual(
+        plans=plans,
+        trades=trades,
+        t0=T0,
+        t1=T1,
+        begin_date=P0_DATE,
+        end_date=T1,
+        # 001237：期初 9,000.00 → 期末 0，卖出 +4,000.00 ⇒ −5,000.00（破发）
+        bucket_mv={"001237": (900_000, 0), "110059": (0, 0)},
+        money_fund_balances={},
+        holdings_at={"001237": (100_000, 0), "110059": (100_000, 0)},
+        corporate={},
+        canonical=lambda c: c,
+    )
+    assert split.buckets[BUCKET_IPO] == -500_000
+    assert split.buckets[BUCKET_UNATTRIBUTED] == 1_200_000
+    # 账户级桶不落 `per_symbol`（避免与 `account_level_total` 双计）。
+    assert split.per_symbol == {"110059": 1_200_000}
+
+    # 一致口径：`new_stock` 标的由 `ipo_pnl` 桶披露，不再进 `unattributed[]` 明细。
+    coverage = build_coverage(
+        plans=plans,
+        decomposition=decompose([], 0, extra_fee_units=0),
+        per_symbol=split.per_symbol,
+        base_basis="market",
+    )
+    assert [entry.security_code for entry in coverage.unattributed] == ["110059"]
+    assert coverage.unattributed[0].amount_units == 1_200_000
+
+
+def test_split_ipo_bucket_is_zero_without_new_stock() -> None:
+    """无 `new_stock` 标的时新桶为 0，不产生额外条目/金额（沿用缺省 0）。"""
+    plans = [
+        SymbolPlan(
+            security_code="110059",
+            symbol_class="bond",
+            attributed=False,
+            reason_code=None,
+            participating=True,
+        )
+    ]
+    split = split_residual(
+        plans=plans,
+        trades=[],
+        t0=T0,
+        t1=T1,
+        begin_date=P0_DATE,
+        end_date=T1,
+        bucket_mv={"110059": (0, 0)},
+        money_fund_balances={},
+        holdings_at={"110059": (100_000, 0)},
+        corporate={},
+        canonical=lambda c: c,
+    )
+    assert split.buckets[BUCKET_IPO] == 0
+    # 桶值 0 的标的仍出现在 per_symbol（金额 0），不产生新桶金额。
+    assert split.per_symbol == {"110059": 0}
 
 
 def test_coverage_unattributed_only_participating_with_names() -> None:
@@ -530,6 +634,14 @@ def test_coverage_unattributed_name_falls_back_to_none() -> None:
         ({}, {}, -12_345, -12_345, -12_345),
         # 明细为空但账户级有股息
         ({}, {BUCKET_DIVIDEND: 8_800}, 0, 8_800, 8_800),
+        # 打新收益（破发为负）只进账户级：标的 120.00 + 账户级（-3.00 + 1.43）
+        (
+            {"110059": 120_000},
+            {BUCKET_UNATTRIBUTED: 120_000, BUCKET_IPO: -300, BUCKET_INTEREST: 143},
+            0,
+            119_843,
+            -157,
+        ),
     ],
 )
 def test_residual_reconciliation_identity(
@@ -545,6 +657,7 @@ def test_residual_reconciliation_identity(
         BUCKET_UNATTRIBUTED: 0,
         BUCKET_DIVIDEND: 0,
         BUCKET_INTEREST: 0,
+        BUCKET_IPO: 0,
         BUCKET_OTHER: 0,
         **bucket_values,
     }
@@ -889,7 +1002,7 @@ def test_status_info_only_missing_is_ok() -> None:
     """只剩 info 提示（如 look-ahead 披露）时不降级：整页 ok（§4.4）。"""
     status = _aggregate_status(
         [_info_entry(), _info_entry("SECTOR_MAPPING_MISSING")],
-        unattributed_units=0,
+        judgement_units=0,
         tolerance_units=100,
     )
     assert status == "ok"
@@ -903,54 +1016,205 @@ def test_status_warning_missing_degrades() -> None:
         reason="缺行业指数日线",
         what_to_do="补板块日线",
     )
-    assert _aggregate_status([warn], unattributed_units=0, tolerance_units=100) == "degraded"
+    assert _aggregate_status([warn], judgement_units=0, tolerance_units=100) == "degraded"
 
 
 def test_status_residual_tolerance_boundary() -> None:
-    """|未归因金额| 超容差 → degraded；等于容差或容差内 → ok。"""
+    """|未归因标的损益| 超容差 → degraded；等于容差或容差内 → ok。"""
     assert (
-        _aggregate_status([_info_entry()], unattributed_units=101, tolerance_units=100)
-        == "degraded"
+        _aggregate_status([_info_entry()], judgement_units=101, tolerance_units=100) == "degraded"
     )
-    # 负残差按绝对值比较。
+    # 负值按绝对值比较。
     assert (
-        _aggregate_status([_info_entry()], unattributed_units=-101, tolerance_units=100)
-        == "degraded"
+        _aggregate_status([_info_entry()], judgement_units=-101, tolerance_units=100) == "degraded"
     )
     # 等于容差（含）不降级。
-    assert _aggregate_status([_info_entry()], unattributed_units=100, tolerance_units=100) == "ok"
-    assert (
-        _aggregate_status([_info_entry()], unattributed_units=4_076, tolerance_units=10_000) == "ok"
-    )
+    assert _aggregate_status([_info_entry()], judgement_units=100, tolerance_units=100) == "ok"
+    assert _aggregate_status([_info_entry()], judgement_units=4_076, tolerance_units=10_000) == "ok"
 
 
 def test_residual_missing_within_tolerance_is_info() -> None:
-    """容差内非零残差 → info 提示（不降级），文案带金额/阈值。"""
-    entry = _residual_missing(unattributed_units=4_076, tolerance_units=10_000)
+    """容差内非零 → info 提示（不降级），文案以「未归因标的损益」为主语。"""
+    entry = _residual_missing(judgement_units=4_076, tolerance_units=10_000)
     assert entry is not None
     assert entry.code == "RESIDUAL_WITHIN_TOLERANCE"
     assert entry.severity == "info"
-    assert entry.reason == "未归因 40.76 元，低于期末资产 0.20%（阈值 100.00 元）"
+    assert entry.reason == ("未归因标的损益 40.76 元，低于期末资产 0.20%（阈值 100.00 元）")
     assert entry.what_to_do == "无需处理"
 
 
 def test_residual_missing_over_tolerance_is_warning() -> None:
-    """超容差（负残差取绝对值）→ RESIDUAL_LARGE warning。"""
-    entry = _residual_missing(unattributed_units=-571_057, tolerance_units=10_000)
+    """超容差（负值取绝对值）→ RESIDUAL_LARGE warning。"""
+    entry = _residual_missing(judgement_units=-571_057, tolerance_units=10_000)
     assert entry is not None
     assert entry.code == "RESIDUAL_LARGE"
     assert entry.severity == "warning"
     assert "5710.57" in entry.reason
     assert "100.00" in entry.reason
-    assert entry.what_to_do == "看 residual_breakdown"
+    assert entry.what_to_do == "看未归因标的明细（unattributed[]）"
 
 
 def test_residual_missing_zero_tolerance_edge() -> None:
-    """期末总资产为 0 → 容差 0：零残差不产生条目，非零即超容差。"""
-    assert _residual_missing(unattributed_units=0, tolerance_units=0) is None
-    entry = _residual_missing(unattributed_units=1, tolerance_units=0)
+    """期末总资产为 0 → 容差 0：零值不产生条目，非零即超容差。"""
+    assert _residual_missing(judgement_units=0, tolerance_units=0) is None
+    entry = _residual_missing(judgement_units=1, tolerance_units=0)
     assert entry is not None
     assert entry.code == "RESIDUAL_LARGE"
+
+
+def _judgement_units(split: ResidualSplit) -> int:
+    """降级判定基数（应用层同一表达式）：标的级两部分合计。"""
+    return sum(split.per_symbol.values())
+
+
+def test_judgement_basis_excludes_interest_bucket() -> None:
+    """只有账户级 interest 非零、标的级为 0 → 不降级、不产生条目（§4.4 新口径）。"""
+    split = split_residual(
+        plans=[],
+        trades=[
+            _trade(
+                trade_date=date(2025, 3, 14),
+                security_code="CASH",
+                side="",
+                category="interest",
+                amount_units=500_000,  # +5,000.00 利息
+            )
+        ],
+        t0=T0,
+        t1=T1,
+        begin_date=P0_DATE,
+        end_date=T1,
+        bucket_mv={},
+        money_fund_balances={},
+        holdings_at={},
+        corporate={},
+        canonical=lambda c: c,
+    )
+    assert split.buckets[BUCKET_INTEREST] == 500_000
+    judgement = _judgement_units(split)
+    assert judgement == 0
+    assert _residual_missing(judgement_units=judgement, tolerance_units=100) is None
+    assert (
+        _aggregate_status([_info_entry()], judgement_units=judgement, tolerance_units=100) == "ok"
+    )
+
+
+def test_judgement_basis_excludes_ipo_bucket() -> None:
+    """只有 ipo_pnl（打新收益，破发为负）非零 → 不降级、不产生条目。"""
+    plans = [
+        SymbolPlan(
+            security_code="001237",
+            symbol_class="new_stock",
+            attributed=False,
+            reason_code=None,
+            participating=True,
+        )
+    ]
+    split = split_residual(
+        plans=plans,
+        trades=[
+            _trade(
+                trade_date=date(2025, 3, 20),
+                security_code="001237",
+                side="sell",
+                category="sell",
+                quantity_units=1_000_000,
+                price_units=40_000_000,
+                amount_units=400_000,  # +4,000.00
+            )
+        ],
+        t0=T0,
+        t1=T1,
+        begin_date=P0_DATE,
+        end_date=T1,
+        bucket_mv={"001237": (900_000, 0)},  # 期初 9,000.00 → 期末 0 ⇒ −5,000.00
+        money_fund_balances={},
+        holdings_at={"001237": (100_000, 0)},
+        corporate={},
+        canonical=lambda c: c,
+    )
+    assert split.buckets[BUCKET_IPO] == -500_000
+    judgement = _judgement_units(split)
+    assert judgement == 0
+    assert _residual_missing(judgement_units=judgement, tolerance_units=100) is None
+    assert _aggregate_status([], judgement_units=judgement, tolerance_units=100) == "ok"
+
+
+def test_valuation_gap_info_only_and_status_unchanged() -> None:
+    """|gap| > 容差 → info 披露（不发 warning、不改变 status）。"""
+    entry = _valuation_gap_missing(
+        gap_units=50_000,
+        tolerance_units=10_000,
+        v_end_units=5_000_000,
+        total_pnl_units=-200_000,
+    )
+    assert entry is not None
+    assert entry.code == "VALUATION_GAP_ABOVE_TOLERANCE"
+    assert entry.severity == "info"
+    assert entry.field == "residual"
+    assert "500.00" in entry.reason  # 估值差金额
+    assert "100.00" in entry.reason  # 容差
+    assert "50000.00" in entry.reason  # 期末总资产
+    # info 条目不影响状态（即使标的级为 0）。
+    assert _aggregate_status([entry], judgement_units=0, tolerance_units=10_000) == "ok"
+
+
+def test_valuation_gap_at_or_below_tolerance_is_silent() -> None:
+    """|gap| 等于/低于容差 → 不产生条目；0 → 不产生条目。"""
+    base = {"v_end_units": 5_000_000, "total_pnl_units": -200_000, "tolerance_units": 10_000}
+    assert _valuation_gap_missing(gap_units=10_000, **base) is None
+    assert _valuation_gap_missing(gap_units=-10_000, **base) is None
+    assert _valuation_gap_missing(gap_units=0, **base) is None
+
+
+def test_valuation_gap_negative_uses_absolute() -> None:
+    """负值按绝对值判定与展示（reason 不带负号）。"""
+    entry = _valuation_gap_missing(
+        gap_units=-50_000,
+        tolerance_units=10_000,
+        v_end_units=5_000_000,
+        total_pnl_units=-200_000,
+    )
+    assert entry is not None
+    assert "估值差 500.00 元" in entry.reason
+    assert "-500" not in entry.reason
+
+
+def test_valuation_gap_info_coexists_with_d09_gate() -> None:
+    """D-09（gap 占比 >5% → 不出 summary）触发时，info 披露仍产生、二者不重复告警。"""
+    gap_units, total_pnl_units = 600_000, 100_000
+    assert gap_ratio_units(gap_units, total_pnl_units) > GAP_RATIO_MAX  # summary 被抑制
+    entry = _valuation_gap_missing(
+        gap_units=gap_units,
+        tolerance_units=10_000,
+        v_end_units=5_000_000,
+        total_pnl_units=total_pnl_units,
+    )
+    assert entry is not None  # 门禁不产生码，info 独立披露
+    assert entry.severity == "info"
+    assert entry.code == "VALUATION_GAP_ABOVE_TOLERANCE"
+
+
+def test_judgement_basis_ignores_valuation_gap() -> None:
+    """`valuation_gap` 不参与判定（仅披露）：gap 非零也不产生降级/条目。"""
+    split = split_residual(
+        plans=[],
+        trades=[],
+        t0=T0,
+        t1=T1,
+        begin_date=P0_DATE,
+        end_date=T1,
+        bucket_mv={},
+        money_fund_balances={},
+        holdings_at={},
+        corporate={},
+        canonical=lambda c: c,
+    )
+    judgement = _judgement_units(split)
+    gap_units = -300_000  # valuation_gap 由应用层 plug，不进入判定基数
+    assert judgement == 0 and gap_units != 0
+    assert _residual_missing(judgement_units=judgement, tolerance_units=0) is None
+    assert _aggregate_status([], judgement_units=judgement, tolerance_units=0) == "ok"
 
 
 def _retired_trades() -> list[Trade]:

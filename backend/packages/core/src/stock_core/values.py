@@ -150,6 +150,18 @@ class Qty(Scaled):
     scale = SCALE_QTY
 
 
+def format_quantity(units: int) -> str:
+    """数量展示串：整数份额 → 整数（无小数点/尾零），非整数份额 → 2 位小数。
+
+    货币基金等按 0.01 份计份额（`quantity_units` 末两位为 0）；整数标的输出 `"600"`，
+    不做 `"600.0000"` 的尾零噪音。仅用于 API/展示边界，内部计算一律用 `Qty(units)`。
+    """
+    if units % 10_000 == 0:
+        return str(units // 10_000)
+    value = Qty(units).to_decimal().quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    return f"{value:f}"
+
+
 class Ratio(Scaled):
     """比率（1e-8）。"""
 

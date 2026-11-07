@@ -143,10 +143,14 @@ RATIO_FIELDS = frozenset(
         "share",
     }
 )
+# 2026-11-07（API-087）：偏好项 active_weight 与概念块 coverage/overlap/exposure 已改用
+# `Ratio.as_decimal_str()`（3 位 HALF_UP + 去尾零），示例串同步收敛到 3 位。
+RATIO_TRIM3_FIELDS = frozenset({"active_weight", "coverage", "overlap", "exposure"})
 _MONEY_VALUE = "1234.56"
 _PRICE_VALUE = "12.340000"
-_QUANTITY_VALUE = "100.0000"
+_QUANTITY_VALUE = "100"
 _RATIO_VALUE = "0.1234"
+_RATIO_TRIM3_VALUE = "0.123"
 _RATIO_NUMBER = 0.1234
 
 _DATE_FIELDS = frozenset(
@@ -1148,6 +1152,90 @@ OPERATION_META: dict[str, dict[str, Any]] = {
             "MULTIPLE_CREDENTIALS",
         ],
     },
+    # 2026-11-05（API-090~094，FIFO 回合分析增强，设计 2026-11-04-fifo-round-insights.md）
+    "upsertTradeReason": {
+        "api_id": "API-090",
+        "scope": "write",
+        "idempotent": True,
+        "async": False,
+        "error_codes": [
+            "NOT_FOUND",
+            "VERSION_CONFLICT",
+            "VALIDATION_ERROR",
+            "TOKEN_EXPIRED",
+            "TOKEN_REVOKED",
+            "MULTIPLE_CREDENTIALS",
+            "INSUFFICIENT_SCOPE",
+            "ADMIN_CANNOT_READ_TRADES",
+        ],
+    },
+    "deleteTradeReason": {
+        "api_id": "API-091",
+        "scope": "write",
+        "idempotent": True,
+        "async": False,
+        "error_codes": [
+            "NOT_FOUND",
+            "VERSION_CONFLICT",
+            "VALIDATION_ERROR",
+            "TOKEN_EXPIRED",
+            "TOKEN_REVOKED",
+            "MULTIPLE_CREDENTIALS",
+            "INSUFFICIENT_SCOPE",
+            "ADMIN_CANNOT_READ_TRADES",
+        ],
+    },
+    "listRoundInsights": {
+        "api_id": "API-092",
+        "scope": "read",
+        "idempotent": False,
+        "async": False,
+        "error_codes": [
+            "INVALID_PERIOD",
+            "INVALID_SORT_FIELD",
+            "INVALID_CURSOR",
+            "UNKNOWN_QUERY_PARAM",
+            "TOKEN_EXPIRED",
+            "TOKEN_REVOKED",
+            "MULTIPLE_CREDENTIALS",
+            "INSUFFICIENT_SCOPE",
+            "ADMIN_CANNOT_READ_TRADES",
+        ],
+    },
+    "getRoundInsight": {
+        "api_id": "API-093",
+        "scope": "read",
+        "idempotent": False,
+        "async": False,
+        "error_codes": [
+            "NOT_FOUND",
+            "TOKEN_EXPIRED",
+            "TOKEN_REVOKED",
+            "MULTIPLE_CREDENTIALS",
+            "INSUFFICIENT_SCOPE",
+            "ADMIN_CANNOT_READ_TRADES",
+        ],
+    },
+    "refreshRoundInsights": {
+        "api_id": "API-094",
+        "scope": "write",
+        "idempotent": True,
+        "async": True,
+        "error_codes": [
+            "INVALID_PERIOD",
+            "VALIDATION_ERROR",
+            "FORBIDDEN",
+            "IDEMPOTENCY_KEY_REUSED",
+            "IDEMPOTENCY_IN_PROGRESS",
+            "JOB_ALREADY_RUNNING",
+            "QUOTA_EXCEEDED",
+            "TOKEN_EXPIRED",
+            "TOKEN_REVOKED",
+            "MULTIPLE_CREDENTIALS",
+            "INSUFFICIENT_SCOPE",
+            "ADMIN_CANNOT_READ_TRADES",
+        ],
+    },
 }
 
 # 非 JSON 的 2xx 手工示例：SSE（API-063）与 Prometheus 文本（API-074）。
@@ -1485,7 +1573,7 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
                     {
                         "security_code": "600519",
                         "security_name": "贵州茅台",
-                        "quantity": "100.0000",
+                        "quantity": "100",
                         "cost": "150000.00",
                         "market_value": "160000.00",
                         "weight_pct": "1.00000000",
@@ -1672,6 +1760,7 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
                 "unattributed_price_pnl": "0.00",
                 "dividend_without_position": "0.00",
                 "interest": "0.00",
+                "ipo_pnl": "0.00",
                 "other_cashflow": "0.00",
                 "valuation_gap": "0.00",
             },
@@ -1734,6 +1823,304 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
                 "reports": "/reports",
             },
         }
+    },
+    # 2026-11-05（API-090）：逐笔理由；金额/取整/标签全部后端产出。
+    "upsertTradeReason": {
+        "200": {
+            "trade_id": "trd_" + _ID_SUFFIX,
+            "side": "buy",
+            "reason_code": "bottom_fish",
+            "reason_label": "抄底",
+            "reason_text": "跌到年线附近，按计划分批",
+            "emotion_code": "calm",
+            "emotion_label": "平静",
+            "tags": ["年线", "分批"],
+            "annotated_at": _DATETIME,
+            "late_annotated": False,
+            "version": 1,
+        }
+    },
+    # 2026-11-05（API-092）：回合洞察列表（含汇总结论；缺失为 null 不补 0）。
+    "listRoundInsights": {
+        "200": {
+            "period": "2026-11",
+            "period_basis": "close_date",
+            "definition_version": "1.0",
+            "bucket_basis": "round",
+            "data_as_of": _DATE,
+            "ranking_as_of": _DATE,
+            "benchmark_id": "hs300_tr",
+            "basis": "benchmark_excess_20d",
+            "item_total": 1,
+            "summary": {
+                "swing": {
+                    "closed": 1,
+                    "short": 0,
+                    "swing": 1,
+                    "trend": 0,
+                    "avg_holding_trading_days": "12.0",
+                    "win_rate_pct": "100.0%",
+                    "avg_pnl_display": "1234.56",
+                    "total_pnl_display": "1234.56",
+                },
+                "fill_swing": {
+                    "bucket_basis": "fill",
+                    "pairs": 1,
+                    "win_rate_pct": "100.0%",
+                    "avg_holding_trading_days": "12.0",
+                    "avg_pnl_display": "1234.56",
+                    "total_pnl_display": "1234.56",
+                },
+                "addon": {
+                    "count": 1,
+                    "declined_after_addon": 0,
+                    "declined_pct": "0.0%",
+                    "avg_dip_pct": "-2.10%",
+                },
+                "sell_fly": {
+                    "sell_count": 1,
+                    "profit_take_fly": 1,
+                    "stop_loss_rebound": 0,
+                    "fly_pct": "100.0%",
+                    "missed_profit_worst_display": "1010.00",
+                    "missed_profit_end_display": "510.00",
+                },
+                "reason_coverage": {
+                    "annotated": 1,
+                    "total_rounds": 1,
+                    "coverage_pct": "100.0%",
+                    "by_code": [
+                        {"code": "bottom_fish", "label": "抄底", "count": 1, "share_pct": "100.0%"}
+                    ],
+                },
+                "ranking": {
+                    "n_sample": 1,
+                    "n_eligible": 1,
+                    "sample_status": "no_conclusion",
+                    "combined_median_pct": "1.65%",
+                    "combined_avg_pct": "1.65%",
+                    "quadrant_counts": {"double_positive": 1},
+                    "per_stock": [],
+                    "basis": "benchmark_excess_20d",
+                    "definition_version": "1.0",
+                },
+                "pending": {"forward_recompute": 0, "reason_missing": 0},
+            },
+            "items": [
+                {
+                    "round_id": "rnd_" + _ID_SUFFIX,
+                    "security_code": "000422",
+                    "security_name": "湖北宜化",
+                    "status": "closed",
+                    "open_date": "2026-11-02",
+                    "close_date": "2026-11-18",
+                    "holding_days_legacy": 16,
+                    "holding_trading_days": 12,
+                    "bucket": "swing",
+                    "pnl": "1234.56",
+                    "return_rate_pct": "4.56%",
+                    "buy_trade": {
+                        "trade_id": "trd_" + _ID_SUFFIX,
+                        "date": "2026-11-02",
+                        "price_display": "10.005000",
+                        "quantity_display": None,
+                        "amount_display": "10005.00",
+                        "reason": {
+                            "trade_id": "trd_" + _ID_SUFFIX,
+                            "side": "buy",
+                            "reason_code": "bottom_fish",
+                            "reason_label": "抄底",
+                            "reason_text": "跌到年线附近，按计划分批",
+                            "emotion_code": "calm",
+                            "emotion_label": "平静",
+                            "tags": ["年线"],
+                            "annotated_at": _DATETIME,
+                            "late_annotated": False,
+                            "version": 1,
+                        },
+                        "reason_label": "抄底",
+                        "forward": {
+                            "5": {
+                                "horizon": 5,
+                                "status": "ok",
+                                "base_shifted": False,
+                                "b0_pct": "0.00%",
+                                "b0_net_pct": "-0.05%",
+                                "b1_pct": "5.00%",
+                                "b2_pct": "4.95%",
+                                "b3_pct": "3.00%",
+                                "max_close_display": "10.80",
+                                "min_close_display": "9.90",
+                                "price_jump_review": False,
+                            },
+                            "10": {
+                                "horizon": 10,
+                                "status": "ok",
+                                "base_shifted": False,
+                                "b0_pct": "0.00%",
+                                "b0_net_pct": "-0.05%",
+                                "b1_pct": "10.00%",
+                                "b2_pct": "9.95%",
+                                "b3_pct": "6.00%",
+                                "max_close_display": "11.20",
+                                "min_close_display": "9.90",
+                                "price_jump_review": False,
+                            },
+                            "20": {
+                                "horizon": 20,
+                                "status": "ok",
+                                "base_shifted": False,
+                                "b0_pct": "0.00%",
+                                "b0_net_pct": "-0.05%",
+                                "b1_pct": "20.00%",
+                                "b2_pct": "19.94%",
+                                "b3_pct": "12.00%",
+                                "max_close_display": "12.30",
+                                "min_close_display": "9.90",
+                                "price_jump_review": False,
+                            },
+                        },
+                    },
+                    "sell_trade": {
+                        "trade_id": "trd_" + _ID_SUFFIX,
+                        "date": "2026-11-18",
+                        "price_display": "19.980000",
+                        "quantity_display": None,
+                        "amount_display": "9990.00",
+                        "reason": None,
+                        "reason_label": None,
+                        "forward": {
+                            "5": {
+                                "horizon": 5,
+                                "status": "pending",
+                                "base_shifted": False,
+                                "b0_pct": None,
+                                "b0_net_pct": None,
+                                "b1_pct": None,
+                                "b2_pct": None,
+                                "b3_pct": None,
+                                "max_close_display": None,
+                                "min_close_display": None,
+                                "price_jump_review": False,
+                            },
+                            "10": {
+                                "horizon": 10,
+                                "status": "pending",
+                                "base_shifted": False,
+                                "b0_pct": None,
+                                "b0_net_pct": None,
+                                "b1_pct": None,
+                                "b2_pct": None,
+                                "b3_pct": None,
+                                "max_close_display": None,
+                                "min_close_display": None,
+                                "price_jump_review": False,
+                            },
+                            "20": {
+                                "horizon": 20,
+                                "status": "pending",
+                                "base_shifted": False,
+                                "b0_pct": None,
+                                "b0_net_pct": None,
+                                "b1_pct": None,
+                                "b2_pct": None,
+                                "b3_pct": None,
+                                "max_close_display": None,
+                                "min_close_display": None,
+                                "price_jump_review": False,
+                            },
+                        },
+                    },
+                    "buy_excess_pct": "8.00%",
+                    "sell_avoid_pct": None,
+                    "combined_pct": None,
+                    "rank": None,
+                    "quadrant": None,
+                    "flags": ["addon", "profit_taking", "full_exit"],
+                    "quality": ["forward_incomplete"],
+                    "missed_profit_worst_display": "1010.00",
+                    "missed_profit_end_display": "510.00",
+                }
+            ],
+            "next_cursor": None,
+            "has_more": False,
+            "missing": [],
+            "assumptions": ["period_basis=close_date", "benchmark=hs300_tr"],
+            "disclaimer": (
+                "以下为事后统计，仅用于个人复盘，不构成投资建议；不评价个人能力，不预测收益；"
+                "相对基准为 hs300_tr ETF 代理；缺失/公司行动显示 —，不显示 0%。"
+            ),
+        }
+    },
+    # 2026-11-05（API-093）：单回合详情（逐笔理由/前瞻/旗标/排序）。
+    "getRoundInsight": {
+        "200": {
+            "round_id": "rnd_" + _ID_SUFFIX,
+            "security_code": "000422",
+            "security_name": "湖北宜化",
+            "status": "closed",
+            "open_date": "2026-11-02",
+            "close_date": "2026-11-18",
+            "holding_days_legacy": 16,
+            "holding_trading_days": 12,
+            "bucket": "swing",
+            "pnl": "1234.56",
+            "return_rate_pct": "4.56%",
+            "buy_trade": None,
+            "sell_trade": None,
+            "fills": [
+                {
+                    "fill_id": "fil_" + _ID_SUFFIX,
+                    "sequence": 1,
+                    "quantity_display": "100",
+                    "pnl_display": "1234.56",
+                    "open_date": "2026-11-02",
+                    "close_date": "2026-11-18",
+                    "holding_trading_days": 12,
+                    "bucket": "swing",
+                    "buy": None,
+                    "sell": None,
+                }
+            ],
+            "flags": ["swing", "profit_taking"],
+            "quality": [],
+            "ranking": {
+                "rank": None,
+                "buy_excess_pct": "8.00%",
+                "sell_avoid_pct": "5.00%",
+                "combined_pct": "6.50%",
+                "quadrant": "double_positive",
+                "basis": "benchmark_excess_20d",
+                "definition_version": "1.0",
+            },
+            "disclaimer": (
+                "以下为事后统计，仅用于个人复盘，不构成投资建议；不评价个人能力，不预测收益；"
+                "相对基准为 hs300_tr ETF 代理；缺失/公司行动显示 —，不显示 0%。"
+            ),
+        }
+    },
+    # 2026-11-05（API-094）：同步 200 与转作业 202 两条路径。
+    "refreshRoundInsights": {
+        "200": {
+            "computed": 3,
+            "skipped": 12,
+            "pending": 2,
+            "no_calendar": 0,
+            "no_bar": 1,
+            "corporate_action": 0,
+            "divisor_missing": 0,
+            "stale_price": 0,
+            "data_as_of": _DATE,
+        },
+        "202": {
+            "job_id": "job_" + _ID_SUFFIX,
+            "type": "refresh_round_insights",
+            "status": "pending",
+            "links": {
+                "self": f"/api/v1/jobs/job_{_ID_SUFFIX}",
+                "events": f"/api/v1/jobs/job_{_ID_SUFFIX}/events",
+            },
+        },
     },
 }
 
@@ -1835,6 +2222,8 @@ def _string_example(field: str | None, fmt: str | None) -> str:
             return _PRICE_VALUE
         if field in QUANTITY_FIELDS:
             return _QUANTITY_VALUE
+        if field in RATIO_TRIM3_FIELDS:
+            return _RATIO_TRIM3_VALUE
         if field in RATIO_FIELDS:
             return _RATIO_VALUE
         if field.endswith("_id") or field == "id":

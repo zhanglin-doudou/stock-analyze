@@ -24,12 +24,12 @@ from typing import Any
 import requests
 from bs4 import BeautifulSoup
 from sqlalchemy import func, select
-from stock_contracts.clock import Clock
+from stock_contracts.clock import SHANGHAI, Clock
 from stock_core.sector import SectorNode, resolve_level
 from stock_core.values import Price, Ratio
 
 from stock_platform.config import Settings
-from stock_platform.market_live import SessionFactory
+from stock_platform.market_live import CURRENT_DAY_PULL_AFTER, SessionFactory
 from stock_platform.market_models import (
     TAXONOMY_CONCEPT,
     TAXONOMY_INDUSTRY,
@@ -519,6 +519,43 @@ def _parse_quote_bridge(text: str, sector_code: str, year: int) -> dict[str, Any
     if not isinstance(payload, dict) or not isinstance(payload.get("data"), str):
         raise SectorValidationError(f"行业指数 {sector_code} {year} JSONP 缺少 data 字段")
     return payload
+
+
+def _parse_today_bar(text: str, sector_code: str) -> dict[str, Any] | None:
+    """解析当日 K 线 JSONP（``...today({"bk_xxx":{"1":"YYYYMMDD","11":"收盘"}})``）。
+
+    年度日 K 文件（``v4/line/.../{year}.js``）收盘后不会立刻回填当日 bar，
+    而 ``v6/line/.../today.js`` 已有。本函数只取「日期 + 收盘」；响应非 JSONP、
+    缺字段、日期/收盘非法时返回 ``None``（视为当日暂无可用数据），JSONP 损坏
+    （能定位花括号但内部非法）才抛 ``SectorValidationError``。
+    """
+    start = (text or "").find("{")
+    end = (text or "").rfind("}")
+    if start < 0 or end <= start:
+        return None
+    try:
+        payload = json.loads(text[start : end + 1])
+    except ValueError as exc:
+        raise SectorValidationError(
+            f"行业指数 {sector_code} 当日 K 线 JSONP 无法解析: {exc}"
+        ) from exc
+    if not isinstance(payload, dict):
+        return None
+    node = payload.get(f"bk_{sector_code}")
+    if not isinstance(node, dict):
+        return None
+    raw_date = str(node.get("1") or "").strip()
+    raw_close = str(node.get("11") or "").strip()
+    if len(raw_date) != 8 or not raw_date.isdigit() or not raw_close:
+        return None
+    try:
+        trade_date = date(int(raw_date[:4]), int(raw_date[4:6]), int(raw_date[6:8]))
+        close = Decimal(raw_close)
+    except (ValueError, InvalidOperation):
+        return None
+    if close <= 0:
+        return None
+    return {"日期": trade_date, "收盘价": raw_close}
 
 
 class AkshareSectorSource:
@@ -1148,7 +1185,12 @@ class AkshareSectorSource:
         return bars
 
     def _ths_board_bars(self, sector_code: str, start: date, end: date) -> list[SectorBar]:
-        """按年拉取行业指数日线（`d.10jqka.com.cn` JSONP），带登录 cookie 与 UA。"""
+        """按年拉取行业指数日线（`d.10jqka.com.cn` JSONP），带登录 cookie 与 UA。
+
+        年度文件（``v4/line/bk_{code}/01/{year}.js``）收盘后不会立刻回填当日 bar，
+        因此当目标区间覆盖今天且已过收盘发布窗口（东八区 16:30）时，额外拉
+        ``v6/line/bk_{code}/01/today.js`` 补当日行；同日重复以年度文件为准。
+        """
         cookie = self._require_cookie()
         records: list[dict[str, Any]] = []
         referer = f"http://q.10jqka.com.cn/thshy/detail/code/{sector_code}/"
@@ -1169,8 +1211,43 @@ class AkshareSectorSource:
                     ) from exc
                 if start <= trade_date <= end:
                     records.append({"日期": trade_date, "收盘价": fields[4]})
+        self._append_today_bar(
+            sector_code, cookie=cookie, referer=referer, start=start, end=end, records=records
+        )
         records.sort(key=lambda rec: rec["日期"])
         return _board_bar_records(TAXONOMY_INDUSTRY, sector_code, records)
+
+    def _append_today_bar(
+        self,
+        sector_code: str,
+        *,
+        cookie: str,
+        referer: str,
+        start: date,
+        end: date,
+        records: list[dict[str, Any]],
+    ) -> None:
+        """收盘后补拉 ``today.js`` 当日行（盘中不拉，避免把未定型收盘写进水位）。"""
+        now = self._clock.now().astimezone(SHANGHAI)
+        if end < self._clock.today() or (now.hour, now.minute) < CURRENT_DAY_PULL_AFTER:
+            return
+        url = f"https://d.10jqka.com.cn/v6/line/bk_{sector_code}/01/today.js"
+        try:
+            resp = self._ths_get(url, cookie=cookie, referer=referer)
+        except (SectorCookieError, SectorWafBlockedError):
+            raise
+        except SectorValidationError as exc:
+            # 当日接口只是年度文件的补充：单板取不到只丢当日行，不连累已拉到的年度数据。
+            log.warning(
+                "industry today bar unavailable", sector_code=sector_code, error=str(exc)[:120]
+            )
+            return
+        record = _parse_today_bar(resp.text, sector_code)
+        if record is None or not (start <= record["日期"] <= end):
+            return
+        if any(existing["日期"] == record["日期"] for existing in records):
+            return
+        records.append(record)
 
     async def _fetch_board_bars(
         self, boards: Sequence[tuple[str, str]], *, start: date, end: date
@@ -1354,7 +1431,17 @@ class AkshareSectorSource:
             return SyncReport(as_of=today, status="failed", message=f"板块日线落盘失败: {exc}")
         coverage = f"，bar_as_of={bar_as_of.isoformat()}" if bar_as_of else "（无数据落盘）"
         message = f"板块日线 {len(bars)} 根/{len({bar.sector_code for bar in bars})} 板块{coverage}"
-        if skipped:
+        if not bars:
+            watermark = (
+                state.bar_as_of.isoformat()
+                if state is not None and state.bar_as_of is not None
+                else "空"
+            )
+            message = (
+                f"上游 {effective_start.isoformat()}~{today.isoformat()} 无新增板块日线"
+                f"（0 根/0 板块；bar_as_of 保持 {watermark}）"
+            )
+        elif skipped:
             message += f"，单板块失败跳过 {len(skipped)} 个"
         return SyncReport(as_of=today, status="succeeded" if bars else "skipped", message=message)
 

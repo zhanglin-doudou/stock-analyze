@@ -1,11 +1,4 @@
-:root {
-  color-scheme: light;
-  --border: #d9dee5;
-  --muted: #6b7280;
-  --accent: #1f6feb;
-  --danger: #b42318;
-  --bg: #f7f8fa;
-}
+/* 视觉变量唯一来源：styles/tokens.css（本文件只消费 var()，不再定义 :root）。 */
 
 * {
   box-sizing: border-box;
@@ -22,7 +15,7 @@ body {
   font-family: -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
   font-size: 14px;
   background: var(--bg);
-  color: #1f2328;
+  color: var(--text);
 }
 
 a {
@@ -44,24 +37,7 @@ h3 {
   color: var(--muted);
 }
 
-/* layout */
-.app-header {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  padding: 10px 18px;
-  background: #fff;
-  border-bottom: 1px solid var(--border);
-}
-.app-nav {
-  display: flex;
-  gap: 14px;
-}
-.app-main {
-  max-width: 1080px;
-  margin: 0 auto;
-  padding: 18px;
-}
+/* layout：外壳与页面栅格由 layout/shell.css 提供，本文件不再定义页头/导航/主容器 */
 
 /* forms & buttons */
 .btn {
@@ -69,7 +45,7 @@ h3 {
   border: 1px solid var(--accent);
   border-radius: 6px;
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-contrast);
   cursor: pointer;
 }
 .btn:disabled {
@@ -78,7 +54,7 @@ h3 {
 }
 .btn-ghost {
   white-space: nowrap;
-  background: #fff;
+  background: var(--surface);
   color: var(--accent);
 }
 .btn-text {
@@ -106,15 +82,22 @@ input[type="password"] {
   width: 100%;
   padding: 6px 8px;
   margin-top: 4px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--line-strong);
   border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
 }
 input[type="checkbox"] {
   width: auto;
 }
 
+/* 占位文字在浅/深两套主题都由 --faint 提供（P0 暗色 placeholder 对比度修复的 token 化收口） */
+::placeholder {
+  color: var(--faint);
+}
+
 .card {
-  background: #fff;
+  background: var(--surface);
   border: 1px solid var(--border);
   border-radius: 8px;
   padding: 16px;
@@ -128,22 +111,39 @@ input[type="checkbox"] {
   border-color: var(--accent);
 }
 
-/* table */
+/* table（消费 tokens 的 --table-* 组，与 DataTable 观感一致） */
 .table {
   width: 100%;
   border-collapse: collapse;
-  background: #fff;
+  background: var(--surface);
   margin: 8px 0;
+  font-variant-numeric: tabular-nums;
 }
 .table th,
 .table td {
-  border: 1px solid var(--border);
-  padding: 6px 8px;
+  border: 1px solid var(--table-line);
+  padding: var(--s2) var(--table-cell-px);
   text-align: left;
   vertical-align: top;
 }
 .table th {
-  background: #f1f3f5;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  height: var(--table-head-h);
+  background: var(--table-head-bg);
+  color: var(--table-head-fg);
+  font-size: var(--fs-micro);
+  font-weight: var(--fw-regular);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.table tbody tr:nth-child(even) td {
+  background: var(--table-stripe-bg);
+}
+.table tbody tr:hover td {
+  background: var(--table-hover-bg);
 }
 .row-actions {
   display: flex;
@@ -156,7 +156,7 @@ input[type="checkbox"] {
 .problem {
   border: 1px solid var(--danger);
   border-left: 4px solid var(--danger);
-  background: #fff5f5;
+  background: var(--danger-soft);
   border-radius: 6px;
   padding: 10px 12px;
   margin: 10px 0;
@@ -179,7 +179,7 @@ input[type="checkbox"] {
 }
 .problem-code {
   font-family: monospace;
-  background: #ffe3e3;
+  background: var(--danger-soft);
   padding: 0 4px;
   border-radius: 4px;
 }
@@ -222,7 +222,7 @@ input[type="checkbox"] {
   border-radius: 4px;
 }
 .password-toggle:hover {
-  background: #f1f3f5;
+  background: var(--surface-2);
 }
 
 .field-error {
@@ -234,15 +234,15 @@ input[type="checkbox"] {
 
 /* misc */
 .notice {
-  color: #0a7d32;
+  color: var(--status-ok);
 }
 .notice-warn {
   margin: 10px 0;
   padding: 10px 12px;
-  border: 1px solid #f0c36d;
+  border: 1px solid var(--warn);
   border-radius: 6px;
-  background: #fff8e6;
-  color: #8a5a00;
+  background: var(--warn-soft);
+  color: var(--warn);
 }
 .notice-warn ul {
   margin: 8px 0;
@@ -263,7 +263,7 @@ input[type="checkbox"] {
 }
 .job-progress-bar {
   height: 10px;
-  background: #e5e7eb;
+  background: var(--line);
   border-radius: 5px;
   overflow: hidden;
 }
@@ -273,12 +273,12 @@ input[type="checkbox"] {
   transition: width 0.2s ease;
 }
 .token-once {
-  border-color: #0a7d32;
+  border-color: var(--status-ok);
 }
 .token-value {
   display: block;
   padding: 8px;
-  background: #f1f3f5;
+  background: var(--surface-2);
   border-radius: 6px;
   word-break: break-all;
   font-family: monospace;
@@ -290,25 +290,25 @@ input[type="checkbox"] {
   padding: 1px 8px;
   border-radius: 10px;
   font-size: 12px;
-  background: #eef1f4;
-  color: #1f2328;
+  background: var(--surface-2);
+  color: var(--text);
   white-space: nowrap;
 }
 .badge-succeeded {
-  background: #e6f4ea;
-  color: #0a7d32;
+  background: var(--status-ok-soft);
+  color: var(--status-ok);
 }
 .badge-failed {
-  background: #fde8e8;
+  background: var(--status-blocked-soft);
   color: var(--danger);
 }
 .badge-revoked {
-  background: #eceff3;
+  background: var(--status-missing-soft);
   color: var(--muted);
 }
 .badge-pending,
 .badge-running {
-  background: #e8f0fe;
+  background: var(--accent-soft);
   color: var(--accent);
 }
 .batch-result {
@@ -322,51 +322,51 @@ input[type="checkbox"] {
 
 /* rounds（Period2-02：FIFO 回合查询） */
 .badge-closed {
-  background: #e6f4ea;
-  color: #0a7d32;
+  background: var(--status-ok-soft);
+  color: var(--status-ok);
 }
 .badge-open {
-  background: #e8f0fe;
+  background: var(--accent-soft);
   color: var(--accent);
 }
 .badge-data_error {
-  background: #fde8e8;
+  background: var(--status-blocked-soft);
   color: var(--danger);
 }
 /* nav（Period2-03：净值与收益状态） */
 .badge-ok {
-  background: #e6f4ea;
-  color: #0a7d32;
+  background: var(--status-ok-soft);
+  color: var(--status-ok);
 }
 .badge-blocked {
-  background: #fde8e8;
+  background: var(--status-blocked-soft);
   color: var(--danger);
 }
 .badge-degraded {
-  background: #fff4e5;
-  color: #8a5300;
+  background: var(--status-degraded-soft);
+  color: var(--status-degraded);
 }
 /* 指标呈现层（P0-3）：可信度/判定三档 */
 .badge-good,
 .badge-high,
 .badge-sufficient {
-  background: #e6f4ea;
-  color: #0a7d32;
+  background: var(--status-ok-soft);
+  color: var(--status-ok);
 }
 .badge-neutral,
 .badge-medium {
-  background: #eef2f7;
-  color: #344054;
+  background: var(--surface-2);
+  color: var(--text-2);
 }
 .badge-watch,
 .badge-low {
-  background: #fff4e5;
-  color: #8a5300;
+  background: var(--status-degraded-soft);
+  color: var(--status-degraded);
 }
 .badge-unknown,
 .badge-unavailable {
-  background: #f2f4f7;
-  color: #667085;
+  background: var(--surface-2);
+  color: var(--muted);
 }
 /* A 股涨跌语义：红涨绿跌（D2）；颜色只作辅助，符号由后端字符串给出 */
 .money-pos {
@@ -391,17 +391,20 @@ select {
   width: 100%;
   padding: 6px 8px;
   margin-top: 4px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--line-strong);
   border-radius: 6px;
-  background: #fff;
+  background: var(--surface);
+  color: var(--text);
 }
 input[type="date"] {
   display: block;
   width: 100%;
   padding: 6px 8px;
   margin-top: 4px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--line-strong);
   border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
 }
 
 /* dashboard（Period2-12：两板块 + 状态徽标） */
@@ -409,12 +412,12 @@ input[type="date"] {
 .badge-missing,
 .badge-insufficient,
 .badge-unreliable {
-  background: #fff4e5;
-  color: #8a5300;
+  background: var(--status-degraded-soft);
+  color: var(--status-degraded);
 }
 .badge-current {
-  background: #e6f4ea;
-  color: #0a7d32;
+  background: var(--status-ok-soft);
+  color: var(--status-ok);
 }
 .kpi-grid {
   display: grid;
@@ -429,7 +432,7 @@ input[type="date"] {
   padding: 10px 12px;
   border: 1px solid var(--border);
   border-radius: 8px;
-  background: #fafafa;
+  background: var(--surface-raised);
 }
 .kpi-label {
   font-size: 12px;

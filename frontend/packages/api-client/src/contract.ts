@@ -99,6 +99,17 @@ export type RoundFillPageDocument = ApiSchemas["RoundFillPage"];
 export type RebuildRoundsIn = ApiSchemas["RebuildRoundsIn"];
 export type RebuildRoundsBody = RebuildRoundsIn;
 
+// 2026-11-05：FIFO 回合分析增强（API-090~094，设计 2026-11-04-fifo-round-insights.md）
+export type TradeReasonOut = ApiSchemas["TradeReasonOut"];
+export type TradeReasonIn = ApiSchemas["TradeReasonIn"];
+export type ForwardReturnOut = ApiSchemas["ForwardReturnOut"];
+export type TradeSideInsightOut = ApiSchemas["TradeSideInsightOut"];
+export type RoundInsightItemOut = ApiSchemas["RoundInsightItemOut"];
+export type RoundInsightsPageOut = ApiSchemas["RoundInsightsPageOut"];
+export type RoundInsightDetailOut = ApiSchemas["RoundInsightDetailOut"];
+export type RoundInsightsRefreshIn = ApiSchemas["RoundInsightsRefreshIn"];
+export type RoundInsightsRefreshOut = ApiSchemas["RoundInsightsRefreshOut"];
+
 // Period2-03：净值与收益（API-032）
 export type NavOut = ApiSchemas["NavOut"];
 export type NavPointOut = ApiSchemas["NavPointOut"];
@@ -215,6 +226,10 @@ export type RoundStatus = Round["status"];
 export type RoundPage = RoundPageDocument;
 export type RoundFill = RoundFillOut;
 export type RoundFillPage = RoundFillPageDocument;
+export type RoundInsightsPage = RoundInsightsPageOut;
+export type RoundInsightItem = RoundInsightItemOut;
+export type RoundInsightDetail = RoundInsightDetailOut;
+export type TradeReason = TradeReasonOut;
 
 /** Period2-03：净值与收益（份额法 TWR + XIRR/MWR）。 */
 export type Nav = NavOut;

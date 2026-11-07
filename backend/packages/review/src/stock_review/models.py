@@ -448,6 +448,113 @@ class MetricDependency(Base):
     )
 
 
+class TradeReason(Base):
+    """逐笔交易理由（设计 2026-11-04 §3.1）。
+
+    逻辑键是 `(user_id, trade_dedupe_key)`：重导入换 trade_id 但 dedupe_key 稳定，
+    理由不丢；有效行部分唯一（软删后可重新标注）。`version` 只用于乐观锁，
+    **不**写回 `ledger.trade.version`。
+    """
+
+    __tablename__ = "trade_reason"
+    __table_args__ = (
+        Index(
+            "uq_trade_reason_user_dedupe_active",
+            "user_id",
+            "trade_dedupe_key",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL"),
+        ),
+        Index("ix_trade_reason_user_dedupe", "user_id", "trade_dedupe_key"),
+        {"schema": SCHEMA},
+    )
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey(USER_FK, ondelete="CASCADE"), nullable=False
+    )
+    trade_dedupe_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    trade_id: Mapped[str] = mapped_column(String(40), nullable=False)
+    side: Mapped[str] = mapped_column(String(8), nullable=False)
+    reason_code: Mapped[str] = mapped_column(String(24), nullable=False)
+    reason_text: Mapped[str | None] = mapped_column(String(500))
+    emotion_code: Mapped[str | None] = mapped_column(String(16))
+    tags: Mapped[list[str] | None] = mapped_column(JSONB)
+    annotated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    late_annotated: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class TradeForwardReturn(Base):
+    """前瞻收益缓存（设计 2026-11-04 §4.2）：一行 = 交易 × horizon。
+
+    唯一键含 `definition_version`；读取只取当前版本。所有收益/价格均为标度整数。
+    """
+
+    __tablename__ = "trade_forward_return"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "trade_dedupe_key",
+            "horizon",
+            "definition_version",
+            name="uq_trade_forward_return_key",
+        ),
+        Index(
+            "ix_trade_forward_return_user_dedupe",
+            "user_id",
+            "trade_dedupe_key",
+            "definition_version",
+        ),
+        {"schema": SCHEMA},
+    )
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey(USER_FK, ondelete="CASCADE"), nullable=False
+    )
+    trade_dedupe_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    trade_id: Mapped[str] = mapped_column(String(40), nullable=False)
+    side: Mapped[str] = mapped_column(String(8), nullable=False)
+    d0: Mapped[date] = mapped_column(Date, nullable=False)
+    horizon: Mapped[int] = mapped_column(Integer, nullable=False)
+    status: Mapped[str] = mapped_column(String(24), nullable=False)
+    base_shifted: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    data_as_of: Mapped[date | None] = mapped_column(Date)
+    calendar_basis: Mapped[str] = mapped_column(String(16), nullable=False)
+    benchmark_id: Mapped[str] = mapped_column(String(32), nullable=False)
+    definition_version: Mapped[str] = mapped_column(String(8), nullable=False)
+    trade_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    price_gross_units: Mapped[int | None] = mapped_column(BigInteger)
+    price_net_units: Mapped[int | None] = mapped_column(BigInteger)
+    c0_units: Mapped[int | None] = mapped_column(BigInteger)
+    cn_units: Mapped[int | None] = mapped_column(BigInteger)
+    ret_b0_units: Mapped[int | None] = mapped_column(BigInteger)
+    ret_b0_net_units: Mapped[int | None] = mapped_column(BigInteger)
+    ret_b1_units: Mapped[int | None] = mapped_column(BigInteger)
+    ret_b2_units: Mapped[int | None] = mapped_column(BigInteger)
+    ret_b3_units: Mapped[int | None] = mapped_column(BigInteger)
+    bench_ret_n_units: Mapped[int | None] = mapped_column(BigInteger)
+    max_close_units: Mapped[int | None] = mapped_column(BigInteger)
+    min_close_units: Mapped[int | None] = mapped_column(BigInteger)
+    price_jump_review: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    bars_fingerprint: Mapped[str] = mapped_column(String(64), nullable=False)
+    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
 # 供迁移/RLS 门禁/测试 TRUNCATE 引用的表名清单（避免手写遗漏）
 REVIEW_TABLES: tuple[str, ...] = (
     Round.__tablename__,
@@ -458,6 +565,8 @@ REVIEW_TABLES: tuple[str, ...] = (
     AssetBuildState.__tablename__,
     MetricResult.__tablename__,
     MetricDependency.__tablename__,
+    TradeReason.__tablename__,
+    TradeForwardReturn.__tablename__,
 )
 
 __all__ = [
@@ -478,4 +587,6 @@ __all__ = [
     "Round",
     "RoundBuildState",
     "RoundFill",
+    "TradeForwardReturn",
+    "TradeReason",
 ]

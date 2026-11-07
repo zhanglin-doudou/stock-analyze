@@ -59,6 +59,11 @@
   --info: #3b5f4b;
   --info-soft: rgba(59, 95, 75, 0.1);
 
+  /* ── 兼容别名（仅承接旧 styles.css 的命名，语义与上方完全一致）── */
+  --border: var(--line);
+  --warning: var(--warn);
+  --warning-soft: var(--warn-soft);
+
   /* ── 字体 ────────────────────────────────────────── */
   --font-ui: -apple-system, "SF Pro Text", "PingFang SC", "Hiragino Sans GB",
     "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
@@ -76,6 +81,7 @@
 
   --lh-tight: 1.2;
   --lh-body: 1.55;
+  --lh-normal: var(--lh-body);
 
   --fw-regular: 400;
   --fw-medium: 500;
@@ -93,8 +99,8 @@
   /* ── 布局 ────────────────────────────────────────── */
   --gutter: 48px;
   --content-max: 1440px;
-  --rail-width: 76px;
-  --rail-width-compact: 64px;
+  --rail-width: 220px;
+  --rail-width-compact: 68px;
   --side-col: 400px;
   --topbar-h: 64px;
   --control-h: 34px;
@@ -114,6 +120,19 @@
   --row-h: 40px;
   --panel-pad: 0px;
   --panel-gap: 24px;
+
+  /* ── 表格观感（DataTable 与旧手写表共用；颜色全部引用语义 token）──
+   * 斑马纹用 text 的 4% 叠层：浅色是深墨叠层、暗色是浅雾叠层，两套主题都可见。
+   * 因此无需在 [data-theme="dark"] 里再写一份表头/斑马纹规则。 */
+  --table-head-h: 36px;
+  --table-head-bg: var(--surface-2);
+  --table-head-fg: var(--muted);
+  --table-row-h: var(--row-h);
+  --table-cell-px: var(--s3);
+  --table-line: var(--line);
+  --table-line-strong: var(--line-strong);
+  --table-stripe-bg: color-mix(in srgb, var(--text) 4%, transparent);
+  --table-hover-bg: var(--accent-soft);
 
   /* ── 动效 ────────────────────────────────────────── */
   --ease: cubic-bezier(0.2, 0.6, 0.2, 1);
@@ -172,8 +191,8 @@
   --text: #d7e0ea;
   --text-2: #aab7c7;
   --muted: #8a97a8;
-  /* dark 下次级微文字也需 ≥4.5:1（bg #0b0e12） */
-  --faint: #6f7d8e;
+  /* dark 下次级微文字也需 ≥4.5:1（#738193 对 surface #10151b 实测 4.62:1） */
+  --faint: #738193;
   --line: #1f2933;
   --line-strong: #2e3a47;
 

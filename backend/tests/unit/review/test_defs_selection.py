@@ -5,11 +5,14 @@ from __future__ import annotations
 import dataclasses
 from datetime import date
 
+from stock_core.insights.forward import ForwardTrade, compute_forward
+from stock_core.metrics.selection import bhar_mean
 from stock_review.metrics.defs import (
     selection_bhar_20,
     selection_bhar_60,
     selection_bhar_hit,
 )
+from stock_review.metrics.defs._bhar_common import compute_bhar_events
 from stock_review.metrics.views import weekday_days
 
 from support.metrics_factories import (
@@ -44,6 +47,52 @@ def _bhar20_ctx(*, benchmark: str | None = "000300.SH", with_series: bool = True
 
 
 # —— selection.bhar_20 ——
+
+
+def test_b3_equals_bhar20_per_event_and_mean() -> None:
+    """F7 对账：同一批买入、同一区间，回合洞察 B3 与 selection.bhar_20 逐笔/均值一致。"""
+    days = JUNE_DAYS
+    bars = tuple(
+        make_bar(day, close_units=10_000_000 + index * 100_000) for index, day in enumerate(days)
+    )
+    # 只取 d0+20 个交易日仍落在 6 月内的两个买入日（其余会 pending）。
+    trades = tuple(make_trade(index + 1, days[index]) for index in range(2))
+    ctx = dataclasses.replace(
+        make_context(benchmark="000300.SH"),
+        trades=trades,
+        bars=bars,
+        benchmark_series=_bench_series(days),
+    )
+    b3_units: list[int] = []
+    for trade in trades:
+        result = compute_forward(
+            ForwardTrade(
+                dedupe_key=trade.id,
+                trade_id=trade.id,
+                version=trade.version,
+                side=trade.side,
+                d0=trade.trade_date,
+                price_units=trade.price_units,
+                amount_units=trade.amount_units,
+                quantity_units=trade.quantity_units,
+            ),
+            horizon=20,
+            calendar=ctx.calendar.days,
+            bars=tuple((bar.trade_date, bar.close_units) for bar in ctx.bars),
+            benchmark_series=tuple(
+                (row.trade_date, row.return_units) for row in ctx.benchmark_series
+            ),
+            data_as_of=ctx.as_of,
+        )
+        assert result.status == "ok"
+        assert result.ret_b3_units is not None
+        b3_units.append(result.ret_b3_units)
+
+    events = compute_bhar_events(ctx, horizon=20)
+    assert events is not None
+    assert [event.bhar_units for event in events.events] == b3_units
+    # 均值用同一个 bhar_mean：逐笔一致 ⇒ 均值一致（差值 0 ≤ 1e-8）。
+    assert bhar_mean(b3_units) == selection_bhar_20.DEF.compute(ctx).value_units
 
 
 def test_bhar20_happy() -> None:

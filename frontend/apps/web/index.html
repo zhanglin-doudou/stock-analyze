@@ -4,6 +4,26 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#f6f5f0" />
+    <!-- 首屏预置主题：必须在 CSS/模块脚本之前执行，避免已选深色用户看到浅色闪烁。 -->
+    <script>
+      (function () {
+        try {
+          var stored = localStorage.getItem("sa.theme");
+          var theme = stored === "dark" || stored === "light" || stored === "system" ? stored : "light";
+          var resolved =
+            theme === "system"
+              ? window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches
+                ? "dark"
+                : "light"
+              : theme;
+          document.documentElement.dataset.theme = resolved;
+          var meta = document.querySelector('meta[name="theme-color"]');
+          if (meta) meta.setAttribute("content", resolved === "dark" ? "#0b0e12" : "#f6f5f0");
+        } catch (error) {
+          /* localStorage 不可用时保持默认浅色，不阻断首屏。 */
+        }
+      })();
+    </script>
     <meta name="description" content="个人 A 股交易复盘：看板、回合、净值、指标与洞察" />
     <title>交易复盘</title>
   </head>

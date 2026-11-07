@@ -1,0 +1,182 @@
+/*
+ * Phase 3 · 打印样式（仅 @media print，屏幕样式一行不改）。
+ *
+ * 这里刻意集中使用字面色值（#ffffff / #000000 / 灰阶细线），而不是消费屏幕 token：
+ * [data-theme="dark"] 会覆盖同一批变量，打印必须与当前主题无关、固定白底黑字，
+ * 因此这部分字面值是**有意为之**，且全部收敛在本块内，不影响任何屏幕颜色。
+ *
+ * 选择器统一加 `html` 前缀：页面级 CSS 是按路由 chunk 懒加载的，可能在本文件之后
+ * 注入；加一个类型选择器可确保打印规则在同等条件下仍然胜出，不必到处用 !important。
+ */
+
+@media print {
+  /* ── 1. 强制浅色（覆盖 light / dark 两套 token）────────────────── */
+  :root,
+  :root[data-theme="light"],
+  :root[data-theme="dark"] {
+    color-scheme: light;
+
+    --bg: #ffffff;
+    --surface: #ffffff;
+    --surface-2: #ffffff;
+    --surface-raised: #ffffff;
+    --text: #000000;
+    --text-2: #1a1a1a;
+    --muted: #333333;
+    --faint: #444444;
+    --line: #b5b5b5;
+    --line-strong: #7d7d7d;
+    --border: #b5b5b5;
+
+    --accent: #000000;
+    --accent-contrast: #ffffff;
+
+    /* 软底色一律压成白，避免打印出现灰色/彩色色块 */
+    --accent-soft: #ffffff;
+    --warn-soft: #ffffff;
+    --warning-soft: #ffffff;
+    --danger-soft: #ffffff;
+    --info-soft: #ffffff;
+    --up-soft: #ffffff;
+    --down-soft: #ffffff;
+    --status-ok-soft: #ffffff;
+    --status-degraded-soft: #ffffff;
+    --status-blocked-soft: #ffffff;
+    --status-missing-soft: #ffffff;
+    --status-insufficient-soft: #ffffff;
+    --status-unreliable-soft: #ffffff;
+    --status-pending-soft: transparent;
+
+    /* 趋势/状态语义保留，但压深到打印可辨的墨色 */
+    --up: #a02c1e;
+    --down: #1f5c43;
+    --warn: #7a5a20;
+    --warning: #7a5a20;
+    --danger: #a02c1e;
+    --status-ok: #1f5c43;
+    --status-degraded: #7a5a20;
+    --status-blocked: #a02c1e;
+    --status-missing: #4a4a4a;
+    --status-insufficient: #7a5a20;
+    --status-unreliable: #4a4a4a;
+
+    --table-head-bg: #ffffff;
+    --table-stripe-bg: transparent;
+    --table-hover-bg: transparent;
+    --table-line: #b5b5b5;
+    --table-line-strong: #7d7d7d;
+
+    --shadow-1: none;
+    --shadow-2: none;
+  }
+
+  html,
+  body {
+    background: #ffffff;
+    color: #000000;
+  }
+
+  /* 侧栏隐藏后内容必须回到左边缘（避免 220px 空白） */
+  html .shell-main {
+    margin-left: 0 !important;
+  }
+
+  /* ── 2. 隐藏外壳导航与操作类元素（非内容）───────────────────────── */
+  html .skip-link,
+  html .shell-rail,
+  html .shell-nav,
+  html .shell-topbar,
+  html .shell-command,
+  html .shell-command-text,
+  html .shell-iconbtn,
+  html .shell-status,
+  html .shell-nav-link,
+  html .shell-logout,
+  html .shell-loading,
+  html .btn,
+  html .btn-text,
+  html .dash-btn,
+  html .settings-btn,
+  html .settings-seg,
+  html .sector-tabs,
+  html .sector-back,
+  html .row-actions,
+  html .detail-toolbar,
+  html .cursor,
+  html .filter-bar-actions,
+  html .attr-quick,
+  html .attr-lookahead-toggle,
+  html .company-toggle,
+  html .password-toggle,
+  html .uploader,
+  html .uploader-btn,
+  html .dash-links {
+    display: none !important;
+  }
+
+  /* ── 3. 面板去阴影、去底色，只留细线边框 ────────────────────────── */
+  html .card,
+  html .kpi,
+  html .batch-result,
+  html .dash-panel,
+  html .problem,
+  html .notice-warn,
+  html .token-value,
+  html .dt-wrap {
+    background: #ffffff !important;
+    box-shadow: none !important;
+    border: 1px solid #b5b5b5;
+  }
+
+  /* 横向滚动容器在打印里必须展开，否则右侧列被裁掉 */
+  html .dt-wrap {
+    overflow: visible !important;
+    border: 0;
+  }
+
+  /* ── 4. 表格：表头跨页重复，行内不设 break-inside: avoid ───────────
+   * 长表允许自然分页；若给 tr 加 break-inside: avoid，每页可能只容下一行，
+   * 产生大片空白，因此这里刻意不写该规则。 */
+  html thead {
+    display: table-header-group;
+  }
+
+  html .dt,
+  html .dt-static,
+  html .table,
+  html .dash-table {
+    min-width: 0;
+  }
+
+  html .dt th,
+  html .dt-static th,
+  html .table th,
+  html .dash-table th {
+    position: static;
+    height: auto;
+    background: #ffffff !important;
+    color: #000000;
+    border-bottom: 1px solid #7d7d7d;
+  }
+
+  html .dt td,
+  html .dt-static td,
+  html .table td,
+  html .dash-table td {
+    height: auto;
+    white-space: normal;
+    background: transparent !important;
+  }
+
+  /* 屏幕上的列优先级在 A4（≈794 CSS px）会被误判为窄屏，打印时恢复全部列 */
+  html .dt .dt-p2,
+  html .dt .dt-p3 {
+    display: table-cell;
+  }
+
+  /* 链接在纸上不需要强调色 */
+  html a {
+    color: #000000;
+    text-decoration: none;
+  }
+}
