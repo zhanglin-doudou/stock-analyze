@@ -423,8 +423,8 @@ export function RoundInsights() {
           <div className="card">
             <h3>持有期分布</h3>
             <p className="muted">
-              已平仓 {summary.swing.closed} · 短线 {summary.swing.short} · 波段 {summary.swing.swing} ·
-              趋势 {summary.swing.trend}
+              已平仓 {summary.swing.closed} · {BUCKET_LABELS.short} {summary.swing.short} · {BUCKET_LABELS.swing} {summary.swing.swing} ·
+              {BUCKET_LABELS.trend} {summary.swing.trend}
             </p>
             <div className="kv">
               <span>平均持有交易日</span>
