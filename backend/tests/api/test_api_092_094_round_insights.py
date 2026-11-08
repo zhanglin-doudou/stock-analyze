@@ -74,8 +74,8 @@ async def addon_scenario(client, api_prefix, user, owner_engine, settings):
 
     * 06-01 同日两笔买入：100 股 @50.00（id 较小）与 50 股 @1800.00（id 较大）；
     * FIFO 稳定序是 `(交易日, 行号, 摘要, 数量, …)`，同日同摘要下 50 股排在前 → 该回合的
-      `open_trade_id` 是 50 股那笔；持仓推演按 `(交易日, id)` 排序，100 股那笔在前 →
-      开仓笔买入前已有持仓 → `addon`（与真实数据 `addon` 同源口径）；
+      `open_trade_id` 是 50 股那笔；随后 100 股那笔买入时已有 50 股持仓 → 是真正的加仓笔，
+      回合因此打 `addon`，买入侧判定（`below_avg` / `continued_decline` / B2）也落在加仓笔；
     * 06-19 卖 150 股 @100.00（均价 633.33 高于卖价 → 非止盈 → `stop_loss_rebound`）。
     """
     await _seed_trade(
@@ -161,14 +161,19 @@ async def sell_fly_scenario(client, api_prefix, user, owner_engine, settings):
 async def test_api_092_summary_addon_serialized(client, api_prefix, user, addon_scenario):
     """`summary.addon` 从聚合到序列化的完整路径（AC-D*）。
 
-    `avg_dip_pct` 只取 status=ok 的 20 日 B2 样本，并显式给出覆盖度；
+    买入侧判定落在「本回合最后一笔买入」（有加仓时即加仓笔）：本场景最后一笔是
+    06-01 的 100 股 @50.00（开仓笔是同日 50 股 @1800.00），因此
+    `continued_decline` 按 50.00 这笔评估（价格后续上涨 → 不命中），
+    `avg_dip_pct` 也取这笔的 20 日 B2。
     `missed_profit_*` 只统计 `profit_take_fly`，本场景是止损反弹 → 必须为 null。
     """
     resp = await _list(client, api_prefix, user.headers, "?period=2026-06")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     item = body["items"][0]
-    assert {"addon", "continued_decline", "stop_loss_rebound"} <= set(item["flags"])
+    assert {"addon", "below_avg", "stop_loss_rebound"} <= set(item["flags"])
+    # 加仓笔（100 股 @50）买后上涨，不再误打「加仓后下跌」。
+    assert "continued_decline" not in item["flags"]
     assert item["buy_trade"]["trade_id"] == "trd_addon000002"
     # 逐笔数量取 trade.quantity_units 的展示串（整数份额，不带尾零；此前该字段硬编码为 None）。
     assert item["buy_trade"]["quantity_display"] == "50"
@@ -176,10 +181,10 @@ async def test_api_092_summary_addon_serialized(client, api_prefix, user, addon_
     addon = body["summary"]["addon"]
     assert addon["count"] == 1
     assert addon["rounds"] == 1  # 兼容字段，与 count 同值
-    assert addon["declined_after_addon"] == 1
-    assert addon["declined_pct"] == "100.00%"
-    # B2 = (1705.96 − 1800.00) / 1800.00 = −5.22%
-    assert addon["avg_dip_pct"] == "-5.22%"
+    assert addon["declined_after_addon"] == 0
+    assert addon["declined_pct"] == "0.00%"
+    # 加仓笔 B2 = (1705.96 − 50.00) / 50.00 = +3311.92%
+    assert addon["avg_dip_pct"] == "3311.92%"
     assert addon["avg_dip_coverage"] == "1/1"
     assert addon["share_pct"] == "100.00%"  # 1/1 个平仓回合
 
@@ -807,3 +812,77 @@ async def test_api_092_unsupported_symbol_degrades_not_404(
 
     detail = await _detail(client, api_prefix, user.headers, unsupported["round_id"])
     assert detail.status_code == 200, detail.text
+
+
+async def test_api_092_addon_uses_statement_order_not_trade_id(
+    client, api_prefix, user, owner_engine, settings
+):
+    """回归：同日「先卖后买」不得把清仓后的重新建仓误判为加仓。
+
+    真实误判 `rnd_482e85a353666c92458668ea5f3fb829`（688126）：05-12 流水行号
+    1709/1711 卖出 1750×2 先把 3500 股清到 0，行号 1712 才买入 1900 股；但该买入的
+    ULID 随机段最小，只按 `(trade_date, id)` 排序会把它排到卖出之前 → `addon`。
+    这里用「卖出 id 字典序更大、行号更小」的最小场景复现：修复后按行号排序，
+    新回合首笔买入的 `qty_before=0`，不再出现 `addon` / `below_avg`。
+    """
+    # 05-06 建仓 100 股 → 回合 A；05-07 先卖 100 股（行号 20）→ A 清仓。
+    await _seed_trade(
+        owner_engine,
+        user_id=user.user_id,
+        trade_date=date(2026, 5, 6),
+        side="buy",
+        quantity_units=1_000_000,
+        price_units=10_000_000,
+        amount_units=-100_000,
+        line_no=10,
+        trade_id="trd_zzzz00000001",
+    )
+    await _seed_trade(
+        owner_engine,
+        user_id=user.user_id,
+        trade_date=date(2026, 5, 7),
+        side="sell",
+        quantity_units=1_000_000,
+        price_units=11_000_000,
+        amount_units=110_000,
+        line_no=20,
+        trade_id="trd_zzzz00000002",
+    )
+    # 05-07 再买 100 股（行号 21）：id 字典序最小，旧排序会排到卖出之前。
+    await _seed_trade(
+        owner_engine,
+        user_id=user.user_id,
+        trade_date=date(2026, 5, 7),
+        side="buy",
+        quantity_units=1_000_000,
+        price_units=12_000_000,
+        amount_units=-120_000,
+        line_no=21,
+        trade_id="trd_aaaa00000003",
+    )
+    await _seed_trade(
+        owner_engine,
+        user_id=user.user_id,
+        trade_date=date(2026, 5, 8),
+        side="sell",
+        quantity_units=1_000_000,
+        price_units=13_000_000,
+        amount_units=130_000,
+        line_no=30,
+        trade_id="trd_zzzz00000004",
+    )
+    await _rebuild_and_drain(client, api_prefix, user, settings)
+
+    resp = await _list(client, api_prefix, user.headers, "?period=2026-05")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    by_open = {item["open_date"]: item for item in body["items"]}
+    assert set(by_open) == {"2026-05-06", "2026-05-07"}
+    reopening = by_open["2026-05-07"]
+    assert reopening["buy_trade"]["trade_id"] == "trd_aaaa00000003"
+    assert "addon" not in reopening["flags"]
+    assert "below_avg" not in reopening["flags"]
+    assert "dip_sequence" not in reopening["flags"]
+    # 同源统计：本场景没有任何加仓，summary.addon 必须为 0。
+    assert body["summary"]["addon"]["count"] == 0
+    assert body["summary"]["addon"]["rounds"] == 0

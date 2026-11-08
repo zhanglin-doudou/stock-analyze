@@ -2,11 +2,44 @@
 
 from __future__ import annotations
 
+from datetime import date
+from types import SimpleNamespace
+from typing import Any
+
 from stock_review.insights.service import (
     SECURITY_TYPES,
     _missed_presentation,
+    _position_states,
     _security_type,
+    _trade_order_key,
 )
+
+
+def _trade(
+    trade_id: str,
+    *,
+    trade_date: date,
+    line_no: int,
+    side: str,
+    quantity_units: int = 0,
+    price_units: int = 0,
+    amount_units: int = 0,
+) -> Any:
+    """`_position_states` 只读这几个字段的轻量替身（不落库、不建 ORM 对象）。"""
+    return SimpleNamespace(
+        id=trade_id,
+        trade_date=trade_date,
+        line_no=line_no,
+        summary="证券买入" if side == "buy" else "证券卖出",
+        security_code="688126",
+        side=side,
+        quantity_units=quantity_units,
+        price_units=price_units,
+        amount_units=amount_units,
+        commission_units=0,
+        stamp_tax_units=0,
+        other_fee_units=0,
+    )
 
 
 def test_missed_presentation_positive_is_missed_gain() -> None:
@@ -53,3 +86,101 @@ def test_security_type_covers_every_symbol() -> None:
     )
     for code in codes:
         assert _security_type(code, code, set()) in SECURITY_TYPES
+
+
+def test_position_states_same_day_sells_before_buy_marks_no_addon() -> None:
+    """同日「先卖后买」：清仓后的重新建仓不得被判成加仓（真实误判 rnd_482e85…）。
+
+    复现 688126 的 2026-05-12：流水行号 1709/1711 两笔卖出先把 3500 股清到 0，
+    行号 1712 才买入 1900 股；但按 `(trade_date, id)` 排序时该买入的 ULID 最小，
+    会被错误地排到两笔卖出之前 → `qty_before=3500` → 误打 `addon`/`below_avg`。
+    """
+    trades = [
+        _trade(
+            "trd_01M6BQPFVYTDFVDP61R27P68Y3",
+            trade_date=date(2026, 4, 24),
+            line_no=1696,
+            side="buy",
+            quantity_units=20_000_000,
+            price_units=20_510_000,
+            amount_units=-4_102_541,
+        ),
+        _trade(
+            "trd_01M6BQPFVY72S9WPN0Z9XEMSKV",
+            trade_date=date(2026, 4, 30),
+            line_no=1702,
+            side="buy",
+            quantity_units=15_000_000,
+            price_units=20_140_000,
+            amount_units=-3_021_530,
+        ),
+        # 行号在前、ULID 随机段较大 → 旧的 `(trade_date, id)` 排序会把它们排到买入之后。
+        _trade(
+            "trd_01M6BQPFVYW399YA5X5NXXYKAM",
+            trade_date=date(2026, 5, 12),
+            line_no=1709,
+            side="sell",
+            quantity_units=17_500_000,
+            price_units=26_440_000,
+            amount_units=4_624_108,
+        ),
+        _trade(
+            "trd_01M6BQPFVYS4AB9ARBN8QTQ5C2",
+            trade_date=date(2026, 5, 12),
+            line_no=1711,
+            side="sell",
+            quantity_units=17_500_000,
+            price_units=25_100_000,
+            amount_units=4_389_755,
+        ),
+        # 行号在后、ULID 随机段最小（`…VY3J…` < `…VYS4…` < `…VYW3…`）。
+        _trade(
+            "trd_01M6BQPFVY3JZJ2SZSKZF17QDE",
+            trade_date=date(2026, 5, 12),
+            line_no=1712,
+            side="buy",
+            quantity_units=19_000_000,
+            price_units=25_140_000,
+            amount_units=-4_777_197,
+        ),
+    ]
+    reopening = trades[-1]
+    # 稳定序必须把 1712 的买入排到 1709/1711 的卖出之后。
+    assert [trade.line_no for trade in sorted(trades, key=_trade_order_key)] == [
+        1696,
+        1702,
+        1709,
+        1711,
+        1712,
+    ]
+    state = _position_states(trades)[reopening.id]
+    assert state.qty_before == 0
+    assert state.avg_cost_before is None
+
+
+def test_position_states_keeps_addon_when_position_really_held() -> None:
+    """真加仓仍然命中：04-24 买入 2000 股后，04-30 的买入前持仓 > 0。"""
+    addon = _trade(
+        "trd_01M6BQPFVY72S9WPN0Z9XEMSKV",
+        trade_date=date(2026, 4, 30),
+        line_no=1702,
+        side="buy",
+        quantity_units=15_000_000,
+        price_units=20_140_000,
+        amount_units=-3_021_530,
+    )
+    trades = [
+        _trade(
+            "trd_01M6BQPFVYTDFVDP61R27P68Y3",
+            trade_date=date(2026, 4, 24),
+            line_no=1696,
+            side="buy",
+            quantity_units=20_000_000,
+            price_units=20_510_000,
+            amount_units=-4_102_541,
+        ),
+        addon,
+    ]
+    state = _position_states(trades)[addon.id]
+    assert state.qty_before == 20_000_000
+    assert state.avg_cost_before == 20_512_705  # 4102541×1e8//20000000，price 1e-6 标度
