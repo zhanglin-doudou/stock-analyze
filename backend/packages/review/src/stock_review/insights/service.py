@@ -35,6 +35,7 @@ from stock_ledger.corporate_actions import is_corporate_action
 from stock_ledger.models import Trade
 from stock_platform.ids import new_id
 from stock_platform.ports import Bar, MarketDataSource
+from stock_platform.symbols import classify_symbol, is_convertible_bond
 from stock_review.insights import reasons
 from stock_review.insights.reasons import REASON_LABELS, ReasonDTO
 from stock_review.metrics.context import Period, parse_period_label
@@ -43,6 +44,18 @@ from stock_review.models import Round, RoundFill, TradeForwardReturn, TradeReaso
 
 HORIZONS: tuple[int, ...] = (5, 10, 20)
 _ADDON_LOOKBACK_TRADING_DAYS = 60
+
+# 证券类型筛选词表（设计 §6.3 `security_type`）：四类互斥且覆盖全部回合。
+SECURITY_TYPE_STOCK = "stock"
+SECURITY_TYPE_FUND = "fund"
+SECURITY_TYPE_CONVERTIBLE_BOND = "convertible_bond"
+SECURITY_TYPE_OTHER = "other"
+SECURITY_TYPES: tuple[str, ...] = (
+    SECURITY_TYPE_STOCK,
+    SECURITY_TYPE_FUND,
+    SECURITY_TYPE_CONVERTIBLE_BOND,
+    SECURITY_TYPE_OTHER,
+)
 
 
 @dataclass(slots=True)
@@ -106,6 +119,12 @@ class InsightItem:
     quality: list[str]
     missed_profit_worst_units: int | None
     missed_profit_end_units: int | None
+    missed_profit_worst_abs_display: str | None = None
+    missed_profit_worst_label: str | None = None
+    missed_profit_worst_label_en: str | None = None
+    missed_profit_end_abs_display: str | None = None
+    missed_profit_end_label: str | None = None
+    missed_profit_end_label_en: str | None = None
 
 
 @dataclass(slots=True)
@@ -181,6 +200,12 @@ class SellFlySummary:
     missed_profit_end_display: str | None
     rounds: int
     share_pct: str | None
+    missed_profit_worst_abs_display: str | None = None
+    missed_profit_worst_label: str | None = None
+    missed_profit_worst_label_en: str | None = None
+    missed_profit_end_abs_display: str | None = None
+    missed_profit_end_label: str | None = None
+    missed_profit_end_label_en: str | None = None
 
 
 @dataclass(slots=True)
@@ -270,6 +295,19 @@ def _pct(units: int | None) -> str | None:
 
 def _money(units: int | None) -> str | None:
     return None if units is None else str(Money(units))
+
+
+def _missed_presentation(units: int | None) -> tuple[str | None, str | None, str | None]:
+    """卖飞金额 → (绝对值展示串, 中文措辞, 英文措辞)。
+
+    符号 → 措辞（与归因 `factor_conclusion` 同思路）：非负表示「本该赚到却没赚到」→
+    少赚；负值表示卖后下跌、卖出反而避免了回撤 → 多赚。零归入「少赚」侧（零既不是
+    额外收益，也不宜渲染成「多赚」，取保守措辞）。`None` 三项全空，前端只渲染「—」。
+    """
+    if units is None:
+        return None, None, None
+    label, label_en = ("少赚", "missed gain") if units >= 0 else ("多赚", "extra gain")
+    return str(Money(abs(units))), label, label_en
 
 
 def _price_6dp(units: int | None) -> str | None:
@@ -836,6 +874,8 @@ def _build_item(
             else -sell_view.forward[20].ret_b3_units
         )
     combined = agg.combined_20(buy_excess, sell_avoid)
+    worst_abs, worst_label, worst_label_en = _missed_presentation(missed_worst)
+    end_abs, end_label, end_label_en = _missed_presentation(missed_end)
     item = InsightItem(
         round_id=round_row.id,
         security_code=round_row.security_code,
@@ -859,6 +899,12 @@ def _build_item(
         quality=quality,
         missed_profit_worst_units=missed_worst,
         missed_profit_end_units=missed_end,
+        missed_profit_worst_abs_display=worst_abs,
+        missed_profit_worst_label=worst_label,
+        missed_profit_worst_label_en=worst_label_en,
+        missed_profit_end_abs_display=end_abs,
+        missed_profit_end_label=end_label,
+        missed_profit_end_label_en=end_label_en,
     )
     for side in (buy_view, sell_view):
         if side is not None:
@@ -952,23 +998,33 @@ def _summary(
         rounds=len(addon_items),
         share_pct=f"{len(addon_items) * 100 / len(closed):.2f}%" if closed else None,
     )
+    worst_units = (
+        sum(item.missed_profit_worst_units or 0 for item in sell_fly_items)
+        if sell_fly_items
+        else None
+    )
+    end_units = (
+        sum(item.missed_profit_end_units or 0 for item in sell_fly_items)
+        if sell_fly_items
+        else None
+    )
+    worst_abs, worst_label, worst_label_en = _missed_presentation(worst_units)
+    end_abs, end_label, end_label_en = _missed_presentation(end_units)
     sell_fly_summary = SellFlySummary(
         sell_count=len(sell_items),
         profit_take_fly=len(sell_fly_items),
         stop_loss_rebound=len(rebound_items),
         fly_pct=f"{len(sell_fly_items) * 100 / len(sell_items):.2f}%" if sell_items else None,
-        missed_profit_worst_display=_money(
-            sum(item.missed_profit_worst_units or 0 for item in sell_fly_items)
-            if sell_fly_items
-            else None
-        ),
-        missed_profit_end_display=_money(
-            sum(item.missed_profit_end_units or 0 for item in sell_fly_items)
-            if sell_fly_items
-            else None
-        ),
+        missed_profit_worst_display=_money(worst_units),
+        missed_profit_end_display=_money(end_units),
         rounds=len(sell_fly_items),
         share_pct=f"{len(sell_fly_items) * 100 / len(closed):.2f}%" if closed else None,
+        missed_profit_worst_abs_display=worst_abs,
+        missed_profit_worst_label=worst_label,
+        missed_profit_worst_label_en=worst_label_en,
+        missed_profit_end_abs_display=end_abs,
+        missed_profit_end_label=end_label,
+        missed_profit_end_label_en=end_label_en,
     )
     combined_values = [item.combined_units for item in items if item.combined_units is not None]
     ranked = sorted(combined_values)
@@ -1098,6 +1154,26 @@ def _matches_flag(item: InsightItem, flag: str) -> bool:
     return flag in item.flags
 
 
+def _security_type(code: str, name: str, money_fund_codes: set[str]) -> str:
+    """证券类型（`security_type` 筛选口径）：stock / fund / convertible_bond / other。
+
+    * 代码区段是单一真相（`stock_platform.symbols`）：A 股 → stock，场内基金 → fund，
+      可转债 → convertible_bond，其余（国债/企业债/无法识别）→ other，保证四类互斥完备；
+    * 货币基金代码（如 940018）不在任何区段：由 `trade.money_fund_balance_units` 非空
+      或名称含「货币」识别，归入 fund（货币基金是基金的一种）。
+    """
+    if code in money_fund_codes or "货币" in name:
+        return SECURITY_TYPE_FUND
+    if is_convertible_bond(code):
+        return SECURITY_TYPE_CONVERTIBLE_BOND
+    kind = classify_symbol(code)
+    if kind == "stock":
+        return SECURITY_TYPE_STOCK
+    if kind == "fund":
+        return SECURITY_TYPE_FUND
+    return SECURITY_TYPE_OTHER
+
+
 async def get_insights_page(
     session: AsyncSession,
     user_id: uuid.UUID,
@@ -1110,6 +1186,7 @@ async def get_insights_page(
     has_reason: bool | None = None,
     reason_code: str | None = None,
     security_code: str | None = None,
+    security_types: Sequence[str] = (),
     sort: str = "combined",
     sort_dir: str = "desc",
     include_summary: bool = True,
@@ -1121,6 +1198,11 @@ async def get_insights_page(
         raise ApiError(ErrorCode.INVALID_SORT_FIELD, detail=f"不支持排序字段 {sort!r}")
     if sort_dir not in ("asc", "desc"):
         raise ApiError(ErrorCode.INVALID_SORT_FIELD, detail="sort_dir 只能是 asc/desc")
+    unknown_types = [value for value in security_types if value not in SECURITY_TYPES]
+    if unknown_types:
+        raise ApiError(
+            ErrorCode.VALIDATION_ERROR, detail=f"非法的 security_type: {unknown_types[0]}"
+        )
 
     rounds = await _load_rounds(session, user_id, start=resolved.start, end=resolved.end)
     symbol_trade_ids = {round_row.open_trade_id for round_row in rounds} | {
@@ -1172,6 +1254,18 @@ async def get_insights_page(
         items = [item for item in items if all(_matches_flag(item, flag) for flag in wanted)]
     if security_code:
         items = [item for item in items if item.security_code == security_code]
+    if security_types:
+        # 货基代码没有稳定的代码区段，只能用流水上的货基标记兜底识别。
+        money_fund_codes = {
+            trade.security_code for trade in trades if trade.money_fund_balance_units is not None
+        }
+        wanted_types = set(security_types)
+        items = [
+            item
+            for item in items
+            if _security_type(item.security_code, item.security_name, money_fund_codes)
+            in wanted_types
+        ]
     if has_reason is not None:
         items = [
             item

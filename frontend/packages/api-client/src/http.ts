@@ -242,6 +242,8 @@ export interface ListRoundInsightsQuery {
   has_reason?: boolean;
   reason_code?: string;
   security_code?: string;
+  /** 证券类型多选：stock / fund / convertible_bond / other；缺省不过滤。 */
+  security_type?: string[];
   sort?: string;
   sort_dir?: "asc" | "desc";
   include_summary?: boolean;
@@ -735,6 +737,7 @@ export function createClient(options: ClientOptions) {
           has_reason: query.has_reason,
           reason_code: query.reason_code,
           security_code: query.security_code,
+          security_type: query.security_type?.join(","),
           sort: query.sort,
           sort_dir: query.sort_dir,
           include_summary: query.include_summary,

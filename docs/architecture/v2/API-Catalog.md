@@ -464,11 +464,13 @@
 
 #### API-092 GET /rounds/insights
 - 用途：回合洞察列表 + 汇总；FR-R1/R8；认证 read；同步；operationId `listRoundInsights`。
-- 请求 query：`period`（默认 close_date 归属）/`bucket=all|short|swing|trend`/`flag`（addon_decline、sold_too_early、reason_missing、horizon_pending、corporate_action）/`has_reason`/`reason_code`/`security_code`/`sort`（combined_20、buy_excess_20、sell_avoid_20、close_date 及负向）/`limit`/`cursor`/`include_summary`。
+- 请求 query：`period`（默认 close_date 归属）/`bucket=all|short|swing|trend`/`flag`（addon_decline、sold_too_early、reason_missing、horizon_pending、corporate_action）/`has_reason`/`reason_code`/`security_code`/`security_type`（`stock`/`fund`/`convertible_bond`/`other`，逗号分隔或重复参数；缺省不过滤，非法值 422）/`sort`（combined_20、buy_excess_20、sell_avoid_20、close_date 及负向）/`limit`/`cursor`/`include_summary`。
 - 响应 200：`period`、`period_basis`、`definition_version`、`bucket_basis="round"`、`data_as_of`、`ranking_as_of`、`benchmark_id`、`basis="benchmark_excess_20d"`、`item_total`、`summary{swing,fill_swing,addon,sell_fly,reason_coverage,ranking,pending}`、`items[]`、`next_cursor`、`has_more`、`missing[]`、`assumptions`、`disclaimer`。
+- 证券类型筛选（2026-11-08）：类型由代码区段判定（`stock_platform.symbols`），货币基金（如 940018，无代码区段）由流水 `money_fund_balance_units` 非空识别并归入 `fund`；国债/企业债及无法识别的标的统一归入 `other`。四类互斥且**完备**（四类计数之和恒等于全量回合，单测/API 测试双重断言），任何标的都不会因分类不出来而从筛选项中消失。筛选作用于 `items`，`summary`/`item_total`/`fill_swing` 全部基于过滤后的集合计算。
+- 卖飞金额展示（2026-11-08，additive）：`sell_fly` 与 `items[]` 在既有 `missed_profit_*_display`（保留带符号原值）之外，新增 `missed_profit_*_abs_display`（绝对值串）、`missed_profit_*_label`（少赚/多赚）、`missed_profit_*_label_en`（missed gain/extra gain）；非负 → 少赚，负 → 多赚，零归入少赚侧；null 时三者皆 null（前端只渲染 —）。
 - 统计单位（AC-S3）：`bucket_basis="round"` 表示 `summary.swing` 的 `closed/short/swing/trend` 以**回合**为单位；`summary.fill_swing` 是**fill 级**波段配对（`bucket_basis="fill"`），字段 `pairs/win_rate_pct/avg_holding_trading_days/avg_pnl_display/total_pnl_display`，两种单位**不可相加**（页面必须标注）。
-- `items[]` 关键字段（实现口径，详见设计 §6.3/附录 C）：`round_id/security_code/status/open_date/close_date/holding_days_legacy/holding_trading_days/bucket/pnl/return_rate_pct/buy_trade/sell_trade/buy_excess_pct/sell_avoid_pct/combined_pct/rank/quadrant/flags[]/quality[]/missed_profit_worst_display/missed_profit_end_display`；`buy_trade`/`sell_trade` = `trade_id/date/price_display/quantity_display/amount_display/reason/reason_label/forward{"5","10","20"}`，其中每档前瞻含 `horizon/status/base_shifted/b0_pct/b0_net_pct/b1_pct/b2_pct/b3_pct/max_close_display/min_close_display/price_jump_review`。
-- 错误码：INVALID_PERIOD(422)、UNKNOWN_QUERY_PARAM(400)、INVALID_SORT_FIELD(400)、INVALID_CURSOR(400)、ADMIN_CANNOT_READ_TRADES(403)。
+- `items[]` 关键字段（实现口径，详见设计 §6.3/附录 C）：`round_id/security_code/status/open_date/close_date/holding_days_legacy/holding_trading_days/bucket/pnl/return_rate_pct/buy_trade/sell_trade/buy_excess_pct/sell_avoid_pct/combined_pct/rank/quadrant/flags[]/quality[]/missed_profit_worst_display/missed_profit_end_display/missed_profit_{worst,end}_abs_display/missed_profit_{worst,end}_label/missed_profit_{worst,end}_label_en`；`buy_trade`/`sell_trade` = `trade_id/date/price_display/quantity_display/amount_display/reason/reason_label/forward{"5","10","20"}`，其中每档前瞻含 `horizon/status/base_shifted/b0_pct/b0_net_pct/b1_pct/b2_pct/b3_pct/max_close_display/min_close_display/price_jump_review`。
+- 错误码：INVALID_PERIOD(422)、VALIDATION_ERROR(422)、UNKNOWN_QUERY_PARAM(400)、INVALID_SORT_FIELD(400)、INVALID_CURSOR(400)、ADMIN_CANNOT_READ_TRADES(403)。
 - 验收：`/rounds/insights` 返回 200（非动态路由 404）；所有数值有 `_pct/_display/label`；缺失 null 不 0；n<30 不排名；`sort` 白名单；summary 不随 cursor 变化；跨用户仅本人。
 
 #### API-093 GET /rounds/{round_id}/insights
@@ -700,7 +702,7 @@ data: {"job_id":"job_01J9Z6","status":"succeeded","result_ref":"/api/v1/reports/
 | API-088 | sectors_catalog | 200 且 items 按 (level,sector_code) 升序、L3 path 恰 3 层、L1/L2 member_count 为后代去重求和；未同步 200+items=[]+catalog_version=null+SECTOR_DATA_MISSING；is_active=false 默认不返回；损坏 cursor→400 INVALID_CURSOR；taxonomy/level 非法→422；admin 403、无 token 401 | fx_sector | P1 |
 | API-090 | trade_reason_upsert（已实现） | 201/200；If-Match 旧值 409；跨用户 404；理由写入后 ETag 变化；审计无明文 | fx_round_insights | P0 |
 | API-091 | trade_reason_delete（已实现） | 204；重复删除 204；跨用户 404 | fx_round_insights | P0 |
-| API-092 | round_insights_list（已实现） | 200；路由不被 `/{round_id}` 吞；筛选/排序白名单；`_pct/_display/label`；缺失 null 不 0；n<30 不排名；`bucket_basis` 透出且 fill/回合不相加 | fx_round_insights | P0 |
+| API-092 | round_insights_list（已实现） | 200；路由不被 `/{round_id}` 吞；筛选/排序白名单；`_pct/_display/label`；缺失 null 不 0；n<30 不排名；`bucket_basis` 透出且 fill/回合不相加；`security_type` 过滤后 items 与 summary 同源收敛、四类完备（四类之和 == 全量）、非法值 422；卖飞新增 abs+label 且原带符号字段不变 | fx_round_insights | P0 |
 | API-093 | round_insights_detail（已实现） | 200；逐笔理由/5/10/20 四口径；fill 级 `holding_trading_days/bucket`；跨用户 404；不混旧/新持有天 | fx_round_insights | P1 |
 | API-094 | round_insights_refresh（已实现） | 200/202+Location；Idempotency-Key 重放；单飞；data_as_of=DB max；GET 不写 | fx_round_insights | P1 |
 

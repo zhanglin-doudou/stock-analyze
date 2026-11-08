@@ -2277,10 +2277,22 @@ export interface components {
         InsightSellFlySummaryOut: {
             /** Fly Pct */
             fly_pct?: string | null;
+            /** Missed Profit End Abs Display */
+            missed_profit_end_abs_display?: string | null;
             /** Missed Profit End Display */
             missed_profit_end_display?: string | null;
+            /** Missed Profit End Label */
+            missed_profit_end_label?: string | null;
+            /** Missed Profit End Label En */
+            missed_profit_end_label_en?: string | null;
+            /** Missed Profit Worst Abs Display */
+            missed_profit_worst_abs_display?: string | null;
             /** Missed Profit Worst Display */
             missed_profit_worst_display?: string | null;
+            /** Missed Profit Worst Label */
+            missed_profit_worst_label?: string | null;
+            /** Missed Profit Worst Label En */
+            missed_profit_worst_label_en?: string | null;
             /** Profit Take Fly */
             profit_take_fly: number;
             /** Rounds */
@@ -3348,10 +3360,22 @@ export interface components {
             holding_days_legacy: number;
             /** Holding Trading Days */
             holding_trading_days?: number | null;
+            /** Missed Profit End Abs Display */
+            missed_profit_end_abs_display?: string | null;
             /** Missed Profit End Display */
             missed_profit_end_display?: string | null;
+            /** Missed Profit End Label */
+            missed_profit_end_label?: string | null;
+            /** Missed Profit End Label En */
+            missed_profit_end_label_en?: string | null;
+            /** Missed Profit Worst Abs Display */
+            missed_profit_worst_abs_display?: string | null;
             /** Missed Profit Worst Display */
             missed_profit_worst_display?: string | null;
+            /** Missed Profit Worst Label */
+            missed_profit_worst_label?: string | null;
+            /** Missed Profit Worst Label En */
+            missed_profit_worst_label_en?: string | null;
             /**
              * Open Date
              * Format: date
@@ -6449,6 +6473,7 @@ export interface operations {
                 has_reason?: boolean | null;
                 reason_code?: string | null;
                 security_code?: string | null;
+                security_type?: string[] | null;
                 sort?: string;
                 sort_dir?: string;
                 include_summary?: boolean;

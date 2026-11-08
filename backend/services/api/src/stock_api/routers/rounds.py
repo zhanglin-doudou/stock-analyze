@@ -223,6 +223,12 @@ def _item_out(item: Any) -> RoundInsightItemOut:
             if item.missed_profit_end_units is not None
             else None
         ),
+        missed_profit_worst_abs_display=item.missed_profit_worst_abs_display,
+        missed_profit_worst_label=item.missed_profit_worst_label,
+        missed_profit_worst_label_en=item.missed_profit_worst_label_en,
+        missed_profit_end_abs_display=item.missed_profit_end_abs_display,
+        missed_profit_end_label=item.missed_profit_end_label,
+        missed_profit_end_label_en=item.missed_profit_end_label_en,
     )
 
 
@@ -259,6 +265,12 @@ def _summary_out(summary: Any) -> InsightsSummaryOut:
             fly_pct=summary.sell_fly.fly_pct,
             missed_profit_worst_display=summary.sell_fly.missed_profit_worst_display,
             missed_profit_end_display=summary.sell_fly.missed_profit_end_display,
+            missed_profit_worst_abs_display=summary.sell_fly.missed_profit_worst_abs_display,
+            missed_profit_worst_label=summary.sell_fly.missed_profit_worst_label,
+            missed_profit_worst_label_en=summary.sell_fly.missed_profit_worst_label_en,
+            missed_profit_end_abs_display=summary.sell_fly.missed_profit_end_abs_display,
+            missed_profit_end_label=summary.sell_fly.missed_profit_end_label,
+            missed_profit_end_label_en=summary.sell_fly.missed_profit_end_label_en,
             rounds=summary.sell_fly.rounds,
             share_pct=summary.sell_fly.share_pct,
         ),
@@ -312,6 +324,7 @@ async def list_round_insights_endpoint(
     has_reason: Annotated[bool | None, Query()] = None,
     reason_code: Annotated[str | None, Query(max_length=24)] = None,
     security_code: Annotated[str | None, Query()] = None,
+    security_type: Annotated[list[str] | None, Query()] = None,
     sort: Annotated[str, Query()] = "combined",
     sort_dir: Annotated[str, Query()] = "desc",
     include_summary: Annotated[bool, Query()] = True,
@@ -327,6 +340,9 @@ async def list_round_insights_endpoint(
     flags: list[str] = []
     for raw in flag or []:
         flags.extend(part.strip() for part in raw.split(",") if part.strip())
+    security_types: list[str] = []
+    for raw in security_type or []:
+        security_types.extend(part.strip() for part in raw.split(",") if part.strip())
     async with state.db.session(user_id=user_id, begin=True) as session:
         page = await get_insights_page(
             session,
@@ -339,6 +355,7 @@ async def list_round_insights_endpoint(
             has_reason=has_reason,
             reason_code=reason_code,
             security_code=security_code,
+            security_types=security_types,
             sort=sort,
             sort_dir=sort_dir,
             include_summary=include_summary,

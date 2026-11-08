@@ -1587,6 +1587,13 @@ class RoundInsightItemOut(BaseModel):
     quality: list[str] = Field(default_factory=list)
     missed_profit_worst_display: str | None = None
     missed_profit_end_display: str | None = None
+    # additive：绝对值展示串 + 符号语义标签（少赚/多赚），前端只渲染不判符号。
+    missed_profit_worst_abs_display: str | None = None
+    missed_profit_worst_label: str | None = None
+    missed_profit_worst_label_en: str | None = None
+    missed_profit_end_abs_display: str | None = None
+    missed_profit_end_label: str | None = None
+    missed_profit_end_label_en: str | None = None
 
 
 class InsightBucketSummaryOut(BaseModel):
@@ -1662,6 +1669,13 @@ class InsightSellFlySummaryOut(BaseModel):
     fly_pct: str | None = None
     missed_profit_worst_display: str | None = None
     missed_profit_end_display: str | None = None
+    # additive：绝对值展示串 + 符号语义标签（少赚/多赚），前端只渲染不判符号。
+    missed_profit_worst_abs_display: str | None = None
+    missed_profit_worst_label: str | None = None
+    missed_profit_worst_label_en: str | None = None
+    missed_profit_end_abs_display: str | None = None
+    missed_profit_end_label: str | None = None
+    missed_profit_end_label_en: str | None = None
     rounds: int
     share_pct: str | None = None
 
