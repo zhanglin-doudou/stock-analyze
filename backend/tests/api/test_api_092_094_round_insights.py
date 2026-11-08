@@ -886,3 +886,37 @@ async def test_api_092_addon_uses_statement_order_not_trade_id(
     # 同源统计：本场景没有任何加仓，summary.addon 必须为 0。
     assert body["summary"]["addon"]["count"] == 0
     assert body["summary"]["addon"]["rounds"] == 0
+
+
+async def test_api_092_093_flag_glossary_serialized(client, api_prefix, user, sell_fly_scenario):
+    """旗标词表：列表与详情同源透出 16 个枚举值，且覆盖响应中出现的全部 item flags。"""
+    resp = await _list(client, api_prefix, user.headers, "?period=2026-07")
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    glossary = body["flag_glossary"]
+    assert len(glossary) == 16
+    assert len({entry["code"] for entry in glossary}) == 16
+    for entry in glossary:
+        assert set(entry) == {
+            "code",
+            "label_zh",
+            "label_en",
+            "description_zh",
+            "description_en",
+            "kind",
+        }
+        assert entry["label_zh"] and entry["label_en"]
+        assert entry["description_zh"] and entry["description_en"]
+        assert entry["kind"] in {"item_flag", "filter_alias"}
+
+    glossary_codes = {entry["code"] for entry in glossary}
+    observed_flags = {flag for item in body["items"] for flag in item["flags"]}
+    assert observed_flags <= glossary_codes
+    assert {"addon", "profit_take_fly", "stop_loss_rebound"} <= glossary_codes
+    assert {"addon_decline", "sold_too_early"} <= glossary_codes
+
+    detail = await _detail(client, api_prefix, user.headers, body["items"][0]["round_id"])
+    assert detail.status_code == 200, detail.text
+    assert [entry["code"] for entry in detail.json()["flag_glossary"]] == [
+        entry["code"] for entry in glossary
+    ]

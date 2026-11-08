@@ -15,6 +15,7 @@ import { ProblemView } from "../ui/Problem";
 import { DataTable, type DataTableColumn, type DataTableExpansion } from "../ui/DataTable";
 import { TradeReasonForm } from "../ui/TradeReasonForm";
 import { Icon } from "../ui/icons";
+import { FlagGlossary } from "../ui/FlagGlossary";
 import "./detail.css";
 import { roundStatusLabel } from "./Rounds";
 
@@ -584,6 +585,7 @@ export function RoundDetail() {
               </div>
 
               <p className="detail-note">{insight.disclaimer}</p>
+              <FlagGlossary entries={insight.flag_glossary} />
             </>
           ) : null}
         </>

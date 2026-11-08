@@ -514,3 +514,26 @@ describe("RoundDetail 回合详情页", () => {
     );
   });
 });
+
+it("旗标说明：详情页末尾渲染后端返回的 code 与中英文说明", async () => {
+  getInsight.mockResolvedValue(
+    makeInsight({
+      flag_glossary: [
+        {
+          code: "profit_take_fly",
+          label_zh: "卖飞",
+          label_en: "Sold too early",
+          description_zh: "止盈后 20 日最高收盘高出净卖价 3% 以上。",
+          description_en: "The 20-day high exceeded the net sell price by more than 3%.",
+          kind: "item_flag",
+        },
+      ],
+    }),
+  );
+  renderDetail();
+
+  const section = await screen.findByTestId("flag-glossary");
+  expect(section.textContent).toContain("profit_take_fly");
+  expect(section.textContent).toContain("止盈后 20 日最高收盘高出净卖价 3% 以上。");
+  expect(section.textContent).toContain("The 20-day high exceeded the net sell price by more than 3%.");
+});

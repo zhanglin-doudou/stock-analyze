@@ -292,3 +292,35 @@ describe("RoundInsights 回合洞察页", () => {
     expect(await screen.findByText(/已提交后台刷新任务（job_1）/)).toBeTruthy();
   });
 });
+
+it("旗标说明：末尾渲染后端返回的 code 与中英文说明（前端不拼文案）", async () => {
+  listInsights.mockResolvedValue(
+    makePage({
+      flag_glossary: [
+        {
+          code: "addon",
+          label_zh: "加仓",
+          label_en: "Add-on",
+          description_zh: "本回合内有买入发生在已有持仓之后。",
+          description_en: "A buy happened while the security was already held.",
+          kind: "item_flag",
+        },
+        {
+          code: "addon_decline",
+          label_zh: "加仓后下跌",
+          label_en: "Add-on then decline",
+          description_zh: "同时命中 addon 与 continued_decline。",
+          description_en: "Both addon and continued_decline.",
+          kind: "filter_alias",
+        },
+      ],
+    }),
+  );
+  renderPage();
+
+  const section = await screen.findByTestId("flag-glossary");
+  expect(section.textContent).toContain("旗标说明");
+  expect(section.textContent).toContain("addon");
+  expect(section.textContent).toContain("本回合内有买入发生在已有持仓之后。");
+  expect(section.textContent).toContain("A buy happened while the security was already held.");
+});

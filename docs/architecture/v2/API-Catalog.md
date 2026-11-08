@@ -465,7 +465,8 @@
 #### API-092 GET /rounds/insights
 - 用途：回合洞察列表 + 汇总；FR-R1/R8；认证 read；同步；operationId `listRoundInsights`。
 - 请求 query：`period`（默认 close_date 归属）/`bucket=all|short|swing|trend`/`flag`（addon_decline、sold_too_early、reason_missing、horizon_pending、corporate_action）/`has_reason`/`reason_code`/`security_code`/`security_type`（`stock`/`fund`/`convertible_bond`/`other`，逗号分隔或重复参数；缺省不过滤，非法值 422）/`sort`（combined_20、buy_excess_20、sell_avoid_20、close_date 及负向）/`limit`/`cursor`/`include_summary`。
-- 响应 200：`period`、`period_basis`、`definition_version`、`bucket_basis="round"`、`data_as_of`、`ranking_as_of`、`benchmark_id`、`basis="benchmark_excess_20d"`、`item_total`、`summary{swing,fill_swing,addon,sell_fly,reason_coverage,ranking,pending}`、`items[]`、`next_cursor`、`has_more`、`missing[]`、`assumptions`、`disclaimer`。
+- 响应 200：`period`、`period_basis`、`definition_version`、`bucket_basis="round"`、`data_as_of`、`ranking_as_of`、`benchmark_id`、`basis="benchmark_excess_20d"`、`item_total`、`summary{swing,fill_swing,addon,sell_fly,reason_coverage,ranking,pending}`、`items[]`、`next_cursor`、`has_more`、`missing[]`、`assumptions`、`disclaimer`、`flag_glossary[]`。
+- 旗标词表（2026-11-08，additive）：`flag_glossary[]` 由 `stock_core.insights.flags` 单点维护，覆盖 `items[].flags` 的 11 个回合旗标（`addon`/`dip_sequence`/`below_avg`/`continued_decline`/`profit_taking`/`profit_take_fly`/`stop_loss_rebound`/`rising_sell_sequence`/`full_exit`/`partial_exit`/`same_day`）与 `?flag=` 的 5 个查询别名（`addon_decline`/`sold_too_early`/`reason_missing`/`horizon_pending`/`corporate_action`），每项含 `code/label_zh/label_en/description_zh/description_en/kind`（`kind=item_flag|filter_alias`）。列表与详情同源返回，前端零口径直接渲染。
 - 加仓口径（2026-11-08）：加仓 = **买入前该标的已有持仓**（按 FIFO 稳定序 `(trade_date, line_no, summary, quantity, price, id)` 推演，同日多笔以流水文件行号为准）。回合从 0 股开启，因此开仓笔永远不是加仓；回合旗标按「本回合最后一笔买入」判定——无加仓时即开仓笔，有加仓时即最后一笔加仓笔。`addon`/`below_avg`/`continued_decline` 与 `summary.addon`（`count`/`declined_after_addon`/`avg_dip_pct`，B2 取加仓笔）同源。
 - 证券类型筛选（2026-11-08）：类型由代码区段判定（`stock_platform.symbols`），货币基金（如 940018，无代码区段）由流水 `money_fund_balance_units` 非空识别并归入 `fund`；国债/企业债及无法识别的标的统一归入 `other`。四类互斥且**完备**（四类计数之和恒等于全量回合，单测/API 测试双重断言），任何标的都不会因分类不出来而从筛选项中消失。筛选作用于 `items`，`summary`/`item_total`/`fill_swing` 全部基于过滤后的集合计算。
 - 卖飞金额展示（2026-11-08，additive）：`sell_fly` 与 `items[]` 在既有 `missed_profit_*_display`（保留带符号原值）之外，新增 `missed_profit_*_abs_display`（绝对值串）、`missed_profit_*_label`（少赚/多赚）、`missed_profit_*_label_en`（missed gain/extra gain）；非负 → 少赚，负 → 多赚，零归入少赚侧；null 时三者皆 null（前端只渲染 —）。
@@ -476,7 +477,7 @@
 
 #### API-093 GET /rounds/{round_id}/insights
 - 用途：单回合逐笔理由/前瞻/标签/排序详情；FR-R8；认证 read；同步；operationId `getRoundInsight`。
-- 响应 200：回合基础 + `holding_trading_days` + `fills[]{fill_id,sequence,buy,sell,quantity_display,pnl_display,open_date,close_date,holding_trading_days,bucket}` + 每笔 buy/sell `reason` + `forward{5,10,20}` + `flags` + `ranking` + `quality[]` + `data_as_of`。`fills[].holding_trading_days/bucket` 用真实交易日历，与回合级 `bucket` 同一口径。
+- 响应 200：回合基础 + `holding_trading_days` + `fills[]{fill_id,sequence,buy,sell,quantity_display,pnl_display,open_date,close_date,holding_trading_days,bucket}` + 每笔 buy/sell `reason` + `forward{5,10,20}` + `flags` + `ranking` + `quality[]` + `data_as_of` + `flag_glossary[]`（与 API-092 同源同序，供详情页末尾渲染旗标说明）。`fills[].holding_trading_days/bucket` 用真实交易日历，与回合级 `bucket` 同一口径。
 - 错误码：NOT_FOUND(404)、ADMIN_CANNOT_READ_TRADES(403)。
 - 验收：字段齐全；跨用户 404；理由/前瞻逐笔可追溯；不混旧 `holding_days` 与真实 TD。
 
@@ -703,8 +704,8 @@ data: {"job_id":"job_01J9Z6","status":"succeeded","result_ref":"/api/v1/reports/
 | API-088 | sectors_catalog | 200 且 items 按 (level,sector_code) 升序、L3 path 恰 3 层、L1/L2 member_count 为后代去重求和；未同步 200+items=[]+catalog_version=null+SECTOR_DATA_MISSING；is_active=false 默认不返回；损坏 cursor→400 INVALID_CURSOR；taxonomy/level 非法→422；admin 403、无 token 401 | fx_sector | P1 |
 | API-090 | trade_reason_upsert（已实现） | 201/200；If-Match 旧值 409；跨用户 404；理由写入后 ETag 变化；审计无明文 | fx_round_insights | P0 |
 | API-091 | trade_reason_delete（已实现） | 204；重复删除 204；跨用户 404 | fx_round_insights | P0 |
-| API-092 | round_insights_list（已实现） | 200；路由不被 `/{round_id}` 吞；筛选/排序白名单；`_pct/_display/label`；缺失 null 不 0；n<30 不排名；`bucket_basis` 透出且 fill/回合不相加；`security_type` 过滤后 items 与 summary 同源收敛、四类完备（四类之和 == 全量）、非法值 422；卖飞新增 abs+label 且原带符号字段不变；同日先卖后买不误判加仓（按 `line_no` 稳定序） | fx_round_insights | P0 |
-| API-093 | round_insights_detail（已实现） | 200；逐笔理由/5/10/20 四口径；fill 级 `holding_trading_days/bucket`；跨用户 404；不混旧/新持有天 | fx_round_insights | P1 |
+| API-092 | round_insights_list（已实现） | 200；路由不被 `/{round_id}` 吞；筛选/排序白名单；`_pct/_display/label`；缺失 null 不 0；n<30 不排名；`bucket_basis` 透出且 fill/回合不相加；`security_type` 过滤后 items 与 summary 同源收敛、四类完备（四类之和 == 全量）、非法值 422；卖飞新增 abs+label 且原带符号字段不变；`flag_glossary` 覆盖 16 个枚举值且中英文说明非空；同日先卖后买不误判加仓（按 `line_no` 稳定序） | fx_round_insights | P0 |
+| API-093 | round_insights_detail（已实现） | 200；逐笔理由/5/10/20 四口径；fill 级 `holding_trading_days/bucket`；跨用户 404；不混旧/新持有天；`flag_glossary` 与列表同源同序 | fx_round_insights | P1 |
 | API-094 | round_insights_refresh（已实现） | 200/202+Location；Idempotency-Key 重放；单飞；data_as_of=DB max；GET 不写 | fx_round_insights | P1 |
 
 

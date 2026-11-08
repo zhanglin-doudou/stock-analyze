@@ -11,6 +11,7 @@ import { api } from "../client";
 import { signedClass } from "../lib/signed";
 import { Cursor } from "../ui/Cursor";
 import { FilterBar, FilterField } from "../ui/FilterBar";
+import { FlagGlossary } from "../ui/FlagGlossary";
 import { PeriodInput } from "../ui/PeriodInput";
 import { ProblemView } from "../ui/Problem";
 import { DataTable, type DataTableColumn } from "../ui/DataTable";
@@ -612,6 +613,8 @@ export function RoundInsights() {
       {page?.assumptions?.length ? (
         <p className="muted">口径假设：{page.assumptions.join("；")}</p>
       ) : null}
+
+      <FlagGlossary entries={page?.flag_glossary} />
     </div>
   );
 }

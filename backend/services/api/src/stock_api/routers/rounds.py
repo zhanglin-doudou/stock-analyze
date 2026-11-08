@@ -31,6 +31,7 @@ from stock_platform.tenant import TenantContext
 from stock_api.deps import get_state, get_tenant
 from stock_api.routing import StrictQueryRoute
 from stock_api.schemas import (
+    FlagGlossaryOut,
     ForwardReturnOut,
     InsightAddonSummaryOut,
     InsightBucketSummaryOut,
@@ -150,6 +151,21 @@ async def list_rounds_endpoint(
         next_cursor=next_cursor,
         has_more=next_cursor is not None,
     )
+
+
+def _glossary_out(entries: list[Any]) -> list[FlagGlossaryOut]:
+    """旗标词表原样透出（文案由 core 单点维护，本层不做拼装/翻译）。"""
+    return [
+        FlagGlossaryOut(
+            code=entry.code,
+            label_zh=entry.label_zh,
+            label_en=entry.label_en,
+            description_zh=entry.description_zh,
+            description_en=entry.description_en,
+            kind=entry.kind,
+        )
+        for entry in entries
+    ]
 
 
 def _forward_out(view: Any) -> ForwardReturnOut:
@@ -379,6 +395,7 @@ async def list_round_insights_endpoint(
         missing=page.missing,
         assumptions=page.assumptions,
         disclaimer=page.disclaimer,
+        flag_glossary=_glossary_out(page.flag_glossary),
     )
 
 
@@ -433,6 +450,7 @@ async def get_round_insights_endpoint(
         quality=list(dict.fromkeys(detail.quality)),
         ranking=detail.ranking,
         disclaimer=detail.disclaimer,
+        flag_glossary=_glossary_out(detail.flag_glossary),
     )
 
 

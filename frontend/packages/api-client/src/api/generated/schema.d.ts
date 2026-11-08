@@ -2075,6 +2075,27 @@ export interface components {
             }[];
         };
         /**
+         * FlagGlossaryOut
+         * @description 旗标枚举值的解释（code + 中英文标签与说明），前端零口径直接渲染。
+         */
+        FlagGlossaryOut: {
+            /** Code */
+            code: string;
+            /** Description En */
+            description_en: string;
+            /** Description Zh */
+            description_zh: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "item_flag" | "filter_alias";
+            /** Label En */
+            label_en: string;
+            /** Label Zh */
+            label_zh: string;
+        };
+        /**
          * ForwardReturnOut
          * @description 前瞻收益（B0~B3）；`*_pct`/`*_display` 均为后端格式化字符串。
          */
@@ -3309,6 +3330,8 @@ export interface components {
             fills?: {
                 [key: string]: unknown;
             }[];
+            /** Flag Glossary */
+            flag_glossary?: components["schemas"]["FlagGlossaryOut"][];
             /** Flags */
             flags?: string[];
             /** Holding Days Legacy */
@@ -3422,6 +3445,8 @@ export interface components {
             definition_version: string;
             /** Disclaimer */
             disclaimer: string;
+            /** Flag Glossary */
+            flag_glossary?: components["schemas"]["FlagGlossaryOut"][];
             /** Has More */
             has_more: boolean;
             /** Item Total */

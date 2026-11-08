@@ -1690,6 +1690,17 @@ class InsightsSummaryOut(BaseModel):
     pending: dict[str, int]
 
 
+class FlagGlossaryOut(BaseModel):
+    """旗标枚举值的解释（code + 中英文标签与说明），前端零口径直接渲染。"""
+
+    code: str
+    label_zh: str
+    label_en: str
+    description_zh: str
+    description_en: str
+    kind: Literal["item_flag", "filter_alias"]
+
+
 class RoundInsightsPageOut(BaseModel):
     period: str
     period_basis: str
@@ -1707,6 +1718,7 @@ class RoundInsightsPageOut(BaseModel):
     missing: list[str] = Field(default_factory=list)
     assumptions: list[str] = Field(default_factory=list)
     disclaimer: str
+    flag_glossary: list[FlagGlossaryOut] = Field(default_factory=list)
 
 
 class RoundInsightDetailOut(BaseModel):
@@ -1728,6 +1740,7 @@ class RoundInsightDetailOut(BaseModel):
     quality: list[str] = Field(default_factory=list)
     ranking: dict[str, Any] = Field(default_factory=dict)
     disclaimer: str
+    flag_glossary: list[FlagGlossaryOut] = Field(default_factory=list)
 
 
 class RoundInsightsRefreshIn(StrictModel):

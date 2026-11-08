@@ -1,0 +1,42 @@
+/*
+ * 旗标说明（API-092/093 的 flag_glossary）
+ *
+ * 只消费 tokens.css 的语义变量，不写裸 hex；文案全部来自后端。
+ */
+
+.flag-glossary {
+  margin-top: var(--s4);
+}
+
+.flag-glossary h2 {
+  margin: 0 0 var(--s3);
+}
+
+.flag-glossary dl {
+  display: grid;
+  gap: var(--s3);
+  margin: 0;
+}
+
+.flag-glossary-item dt {
+  display: flex;
+  align-items: baseline;
+  gap: var(--s2);
+  font-weight: 600;
+}
+
+.flag-glossary-item dt code {
+  font-size: var(--fs-xs);
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.flag-glossary-item dd {
+  margin: var(--s1) 0 0;
+  font-size: var(--fs-sm);
+  line-height: var(--lh-normal);
+}
+
+.flag-glossary-item dd p {
+  margin: 0;
+}

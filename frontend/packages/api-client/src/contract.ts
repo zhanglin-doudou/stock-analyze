@@ -109,6 +109,7 @@ export type RoundInsightsPageOut = ApiSchemas["RoundInsightsPageOut"];
 export type RoundInsightDetailOut = ApiSchemas["RoundInsightDetailOut"];
 export type RoundInsightsRefreshIn = ApiSchemas["RoundInsightsRefreshIn"];
 export type RoundInsightsRefreshOut = ApiSchemas["RoundInsightsRefreshOut"];
+export type FlagGlossaryOut = ApiSchemas["FlagGlossaryOut"];
 
 // Period2-03：净值与收益（API-032）
 export type NavOut = ApiSchemas["NavOut"];

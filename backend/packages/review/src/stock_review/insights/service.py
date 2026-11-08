@@ -29,6 +29,7 @@ from stock_contracts.errors import ApiError, ErrorCode
 from stock_core.insights import DEFINITION_VERSION, classify
 from stock_core.insights import aggregate as agg
 from stock_core.insights import calendar as cal
+from stock_core.insights.flags import FLAG_DEFINITIONS, FlagDefinition
 from stock_core.insights.forward import ForwardResult, ForwardTrade, compute_forward, price_net
 from stock_core.values import Money, Price, Ratio, format_quantity
 from stock_ledger.corporate_actions import is_corporate_action
@@ -239,6 +240,7 @@ class InsightsPage:
     missing: list[str]
     assumptions: list[str]
     disclaimer: str
+    flag_glossary: list[FlagDefinition] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -261,6 +263,7 @@ class RoundInsightDetail:
     quality: list[str]
     ranking: dict[str, Any]
     disclaimer: str
+    flag_glossary: list[FlagDefinition] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -1420,6 +1423,7 @@ async def get_insights_page(
             "收益基于未复权日线，公司行动窗口内降级不排名",
         ],
         disclaimer=DISCLAIMER,
+        flag_glossary=list(FLAG_DEFINITIONS),
     )
 
 
@@ -1545,6 +1549,7 @@ async def get_round_insight(
             "definition_version": DEFINITION_VERSION,
         },
         disclaimer=DISCLAIMER,
+        flag_glossary=list(FLAG_DEFINITIONS),
     )
 
 

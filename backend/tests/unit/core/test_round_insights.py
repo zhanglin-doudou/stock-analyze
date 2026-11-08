@@ -457,3 +457,41 @@ def test_swing_fill_pairs_range_and_no_additivity() -> None:
     assert stats.pnl_units == (300, -400)
     assert stats.holding_trading_days == (2, 20)
     assert agg.swing_fill_pairs([], CAL).pairs == 0
+
+
+def test_flag_glossary_covers_every_enumerated_flag() -> None:
+    """旗标词表必须覆盖全部枚举值，且每个值都带中英文标签与说明（API-092/093）。"""
+    from stock_core.insights.flags import (
+        FILTER_FLAG_CODES,
+        FLAG_DEFINITIONS,
+        ITEM_FLAG_CODES,
+    )
+
+    codes = [entry.code for entry in FLAG_DEFINITIONS]
+    assert len(codes) == len(set(codes)) == 16
+    # items[].flags 的 11 个回合旗标（与 service 实际追加的字符串一一对应）。
+    assert set(ITEM_FLAG_CODES) == {
+        "addon",
+        "dip_sequence",
+        "below_avg",
+        "continued_decline",
+        "profit_taking",
+        "profit_take_fly",
+        "stop_loss_rebound",
+        "rising_sell_sequence",
+        "full_exit",
+        "partial_exit",
+        "same_day",
+    }
+    # ?flag= 查询词表的 5 个别名。
+    assert set(FILTER_FLAG_CODES) == {
+        "addon_decline",
+        "sold_too_early",
+        "reason_missing",
+        "horizon_pending",
+        "corporate_action",
+    }
+    for entry in FLAG_DEFINITIONS:
+        assert entry.kind in {"item_flag", "filter_alias"}
+        assert entry.label_zh and entry.label_en
+        assert entry.description_zh and entry.description_en
