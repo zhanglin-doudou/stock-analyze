@@ -40,6 +40,15 @@
   letter-spacing: 0.02em;
 }
 
+/* 多选（复选框组）：单行排布、可折行，高度与单控件对齐。 */
+.filter-field-options {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s1) var(--s3);
+  min-height: var(--control-h);
+}
+
 /* 单控件统一外观：高度/内边距/边框一致，后端字符串照原样渲染。 */
 .filter-bar-fields input:not([type="checkbox"]),
 .filter-bar-fields select {

@@ -1,0 +1,304 @@
+"""账单级旗标词表（独立命名空间，与回合旗标 `insights.flags` 互不引用）。
+
+中英文案按本系统实际判定口径编写，API 直接透出，前端零口径渲染。
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Literal
+
+
+@dataclass(frozen=True, slots=True)
+class TradeFlagDefinition:
+    code: str
+    label_zh: str
+    label_en: str
+    description_zh: str
+    description_en: str
+    side: Literal["buy", "sell"]
+    lookahead: bool = False
+
+
+TRADE_FLAG_DEFINITIONS: tuple[TradeFlagDefinition, ...] = (
+    # ── 买入侧 ─────────────────────────────────────────────
+    TradeFlagDefinition(
+        code="first_entry",
+        label_zh="首次建仓",
+        label_en="First entry",
+        description_zh=(
+            "买入前该标的持仓为 0，本笔建立新持仓。与「均价加仓」「抄底加仓」「追涨加仓」互斥；"
+            "「无持仓成本」的买入（已有持仓但成本不可得）不属于首次建仓。"
+        ),
+        description_en=(
+            "The position before the buy was zero, so this buy opens a new position. Mutually "
+            "exclusive with the three add-on states; buys with no cost basis are not first entries."
+        ),
+        side="buy",
+    ),
+    TradeFlagDefinition(
+        code="addon_average",
+        label_zh="均价加仓",
+        label_en="Add-on at average cost",
+        description_zh=(
+            "本笔不是首次建仓，且含费净买价落在买入前持仓含费均价的上下 1% 以内。"
+            "与「抄底加仓」「追涨加仓」互斥。"
+        ),
+        description_en=(
+            "Not the first entry, and the fee-inclusive net buy price is within ±1% of the "
+            "position's fee-inclusive average cost before the buy. Mutually exclusive with "
+            "dip add-on and chase add-on."
+        ),
+        side="buy",
+    ),
+    TradeFlagDefinition(
+        code="addon_dip",
+        label_zh="抄底加仓",
+        label_en="Dip add-on",
+        description_zh=(
+            "本笔不是首次建仓，且含费净买价低于买入前持仓含费均价 1% 以上（摊低成本）。"
+        ),
+        description_en=(
+            "Not the first entry, and the fee-inclusive net buy price is more than 1% below "
+            "the position's fee-inclusive average cost before the buy (averaging down)."
+        ),
+        side="buy",
+    ),
+    TradeFlagDefinition(
+        code="addon_chase",
+        label_zh="追涨加仓",
+        label_en="Chase add-on",
+        description_zh=(
+            "本笔不是首次建仓，且含费净买价高于买入前持仓含费均价 1% 以上（抬升成本加仓）。"
+        ),
+        description_en=(
+            "Not the first entry, and the fee-inclusive net buy price is more than 1% above "
+            "the position's fee-inclusive average cost before the buy (averaging up)."
+        ),
+        side="buy",
+    ),
+    TradeFlagDefinition(
+        code="chase",
+        label_zh="追涨买入",
+        label_en="Chasing the rally",
+        description_zh=(
+            "含费净买价高于买入日前 5 个行情日最高收盘价的 1% 以上。"
+            "（行情源只提供收盘价，极值按收盘价计。）"
+        ),
+        description_en=(
+            "The fee-inclusive net buy price is more than 1% above the highest close of the "
+            "5 trading days before the buy. (Only closing prices are available, so extremes "
+            "are computed on closes.)"
+        ),
+        side="buy",
+    ),
+    TradeFlagDefinition(
+        code="instant_bottom",
+        label_zh="即时抄底",
+        label_en="Buying the dip",
+        description_zh=(
+            "含费净买价距买入日前 5 个行情日最低收盘价 5% 以内。"
+            "（行情源只提供收盘价，极值按收盘价计。）"
+        ),
+        description_en=(
+            "The fee-inclusive net buy price is within 5% of the lowest close of the "
+            "5 trading days before the buy. (Only closing prices are available.)"
+        ),
+        side="buy",
+    ),
+    TradeFlagDefinition(
+        code="short_term_win",
+        label_zh="短期成功",
+        label_en="Short-term win",
+        description_zh=(
+            "含费净买价距买入日前后各 5 个行情日（不含当日，共 10 个）最低收盘价 5% 以内。"
+            "使用未来行情，属事后指标；未来 5 个行情日未走完时状态为「待算」。"
+        ),
+        description_en=(
+            "The fee-inclusive net buy price is within 5% of the lowest close across the "
+            "5 trading days before and after the buy (10 days, excluding the day). Uses "
+            "future bars, so it is an ex-post metric and stays pending until the future "
+            "window is complete."
+        ),
+        side="buy",
+        lookahead=True,
+    ),
+    # ── 卖出侧 ─────────────────────────────────────────────
+    TradeFlagDefinition(
+        code="reduce_breakeven",
+        label_zh="回本减仓",
+        label_en="Break-even reduction",
+        description_zh=(
+            "未一次性清仓，且含费净卖价落在卖出前持仓含费均价的上下 1% 以内。"
+            "与「止盈减仓」「止损减仓」互斥。"
+        ),
+        description_en=(
+            "Not a full exit, and the fee-inclusive net sell price is within ±1% of the "
+            "position's fee-inclusive average cost before the sale. Mutually exclusive with "
+            "profit-taking and stop-loss reductions."
+        ),
+        side="sell",
+    ),
+    TradeFlagDefinition(
+        code="reduce_profit",
+        label_zh="止盈减仓",
+        label_en="Profit-taking reduction",
+        description_zh=("未一次性清仓，且含费净卖价高于卖出前持仓含费均价 1% 以上。"),
+        description_en=(
+            "Not a full exit, and the fee-inclusive net sell price is more than 1% above the "
+            "position's fee-inclusive average cost before the sale."
+        ),
+        side="sell",
+    ),
+    TradeFlagDefinition(
+        code="reduce_loss",
+        label_zh="止损减仓",
+        label_en="Loss-cutting reduction",
+        description_zh=("未一次性清仓，且含费净卖价低于卖出前持仓含费均价 1% 以上。"),
+        description_en=(
+            "Not a full exit, and the fee-inclusive net sell price is more than 1% below the "
+            "position's fee-inclusive average cost before the sale."
+        ),
+        side="sell",
+    ),
+    TradeFlagDefinition(
+        code="full_exit",
+        label_zh="清仓",
+        label_en="Full exit",
+        description_zh=(
+            "本笔卖出数量覆盖卖出前的全部持仓；此时不再给出「回本/止盈/止损减仓」，"
+            "改由「回本清仓」「止盈清仓」「止损清仓」三态接管，且三者互斥。"
+        ),
+        description_en=(
+            "The sold quantity covers the entire position before the sale; the break-even / "
+            "profit-taking / stop-loss reduction labels are then replaced by the three "
+            "full-exit states, which are mutually exclusive."
+        ),
+        side="sell",
+    ),
+    TradeFlagDefinition(
+        code="full_exit_breakeven",
+        label_zh="回本清仓",
+        label_en="Break-even full exit",
+        description_zh=(
+            "一次性清空持仓，且含费净卖价落在卖出前持仓含费均价的上下 1% 以内。"
+            "与「止盈清仓」「止损清仓」互斥，与减仓三态互斥。"
+        ),
+        description_en=(
+            "A full exit where the fee-inclusive net sell price is within ±1% of the position's "
+            "fee-inclusive average cost before the sale. Mutually exclusive with the other two "
+            "full-exit states and with the reduction states."
+        ),
+        side="sell",
+    ),
+    TradeFlagDefinition(
+        code="full_exit_profit",
+        label_zh="止盈清仓",
+        label_en="Profit-taking full exit",
+        description_zh=("一次性清空持仓，且含费净卖价高于卖出前持仓含费均价 1% 以上。"),
+        description_en=(
+            "A full exit where the fee-inclusive net sell price is more than 1% above the "
+            "position's fee-inclusive average cost before the sale."
+        ),
+        side="sell",
+    ),
+    TradeFlagDefinition(
+        code="full_exit_loss",
+        label_zh="止损清仓",
+        label_en="Loss-cutting full exit",
+        description_zh=("一次性清空持仓，且含费净卖价低于卖出前持仓含费均价 1% 以上。"),
+        description_en=(
+            "A full exit where the fee-inclusive net sell price is more than 1% below the "
+            "position's fee-inclusive average cost before the sale."
+        ),
+        side="sell",
+    ),
+    TradeFlagDefinition(
+        code="stop_loss",
+        label_zh="止损卖出",
+        label_en="Stop-loss exit",
+        description_zh=(
+            "含费净卖价低于卖出日前 5 个行情日最低收盘价的 1% 以上。"
+            "（行情源只提供收盘价，极值按收盘价计。）"
+        ),
+        description_en=(
+            "The fee-inclusive net sell price is more than 1% below the lowest close of the "
+            "5 trading days before the sale. (Only closing prices are available.)"
+        ),
+        side="sell",
+    ),
+    TradeFlagDefinition(
+        code="instant_top",
+        label_zh="即时逃顶",
+        label_en="Selling near the top",
+        description_zh=(
+            "含费净卖价距卖出日前 5 个行情日最高收盘价 5% 以内。"
+            "（行情源只提供收盘价，极值按收盘价计。）"
+        ),
+        description_en=(
+            "The fee-inclusive net sell price is within 5% of the highest close of the "
+            "5 trading days before the sale. (Only closing prices are available.)"
+        ),
+        side="sell",
+    ),
+    TradeFlagDefinition(
+        code="short_term_top",
+        label_zh="短期逃顶",
+        label_en="Short-term top exit",
+        description_zh=(
+            "含费净卖价距卖出日前后各 5 个行情日（不含当日，共 10 个）最高收盘价 5% 以内。"
+            "使用未来行情，属事后指标；未来 5 个行情日未走完时状态为「待算」。"
+        ),
+        description_en=(
+            "The fee-inclusive net sell price is within 5% of the highest close across the "
+            "5 trading days before and after the sale (10 days, excluding the day). Uses "
+            "future bars, so it is an ex-post metric and stays pending until the future "
+            "window is complete."
+        ),
+        side="sell",
+        lookahead=True,
+    ),
+)
+
+TRADE_FLAG_BY_CODE: dict[str, TradeFlagDefinition] = {
+    item.code: item for item in TRADE_FLAG_DEFINITIONS
+}
+TRADE_FLAG_CODES: tuple[str, ...] = tuple(item.code for item in TRADE_FLAG_DEFINITIONS)
+TRADE_FLAG_LOOKAHEAD_CODES: tuple[str, ...] = tuple(
+    item.code for item in TRADE_FLAG_DEFINITIONS if item.lookahead
+)
+
+BUY_FLAG_CODES: tuple[str, ...] = tuple(
+    item.code for item in TRADE_FLAG_DEFINITIONS if item.side == "buy"
+)
+SELL_FLAG_CODES: tuple[str, ...] = tuple(
+    item.code for item in TRADE_FLAG_DEFINITIONS if item.side == "sell"
+)
+
+# 看板趋势口径：买卖各取三个代表性状态旗标（先买后卖，保持图表系列顺序）。
+# 只决定看板展示哪些码，不参与判定；13 码全量仍由 `TRADE_FLAG_CODES` 维护。
+TREND_FLAG_CODES: tuple[str, ...] = (
+    "chase",
+    "instant_bottom",
+    "short_term_win",
+    "stop_loss",
+    "instant_top",
+    "short_term_top",
+)
+
+# 看板柱状图口径：买卖两侧的互斥状态（先买后卖，保持堆叠顺序）。
+# 买侧 = 首次建仓 + 加仓三态；卖侧 = 减仓三态 + 清仓三态；清仓与减仓互斥。
+# 例外：已有持仓但成本不可得（no_cost_basis）的买入既非首次建仓也非加仓三态，
+# 会成为买侧残余，不并入任何一类；本元组只决定展示，不参与判定。
+STACKED_STATE_FLAG_CODES: tuple[str, ...] = (
+    "first_entry",
+    "addon_average",
+    "addon_dip",
+    "addon_chase",
+    "reduce_breakeven",
+    "reduce_profit",
+    "reduce_loss",
+    "full_exit_breakeven",
+    "full_exit_profit",
+    "full_exit_loss",
+)

@@ -129,17 +129,12 @@ describe("AppShell 两级菜单", () => {
     expect(screen.getByRole("link", { name: "回合" }).getAttribute("aria-current")).toBeNull();
   });
 
-  it("⌘K 打开命令面板，F 切换专注模式", () => {
-    const { container } = renderShell("/assets");
+  it("⌘K 打开命令面板", () => {
+    renderShell("/assets");
     fireEvent.keyDown(window, { key: "k", metaKey: true });
     expect(screen.getByRole("dialog", { name: "命令面板" })).toBeTruthy();
     fireEvent.keyDown(screen.getByRole("combobox"), { key: "Escape" });
     expect(screen.queryByRole("dialog", { name: "命令面板" })).toBeNull();
-
-    const shell = container.querySelector(".app-shell");
-    expect(shell?.getAttribute("data-focus")).toBe("false");
-    fireEvent.keyDown(window, { key: "f" });
-    expect(shell?.getAttribute("data-focus")).toBe("true");
   });
 
   it("顶栏主题按钮在浅/深之间切换并持久化", () => {

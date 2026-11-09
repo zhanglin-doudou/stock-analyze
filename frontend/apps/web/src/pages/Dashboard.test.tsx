@@ -1,29 +1,36 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import {
   type AssetChart,
   type DashboardOut,
   type DashboardRoundOut,
+  type DashboardTradeFlagsOut,
   type MetricBatch,
   type SectorsOverview,
 } from "@sa/api-client";
 import { Dashboard } from "./Dashboard";
+import { buildCharts } from "./dashboard/TradeFlagCharts";
 import dashboardSource from "./Dashboard.tsx?raw";
 import sectorBlockSource from "./dashboard/SectorBlock.tsx?raw";
 import { api } from "../client";
 
 vi.mock("../client", () => ({
   api: {
-    dashboard: { get: vi.fn() },
+    dashboard: { get: vi.fn(), tradeFlags: vi.fn() },
     metrics: { batch: vi.fn() },
     assets: { chart: vi.fn() },
     sectors: { overview: vi.fn() },
   },
 }));
 
+// nivo 依赖真实容器尺寸/ResizeObserver；jsdom 下用空组件替代，投影逻辑单独测。
+vi.mock("@nivo/bar", () => ({ ResponsiveBar: () => null }));
+vi.mock("@nivo/line", () => ({ ResponsiveLine: () => null }));
+
 const getDashboard = vi.mocked(api.dashboard.get);
+const getTradeFlags = vi.mocked(api.dashboard.tradeFlags);
 const batchMetrics = vi.mocked(api.metrics.batch);
 const getAssetChart = vi.mocked(api.assets.chart);
 const getSectorsOverview = vi.mocked(api.sectors.overview);
@@ -511,6 +518,63 @@ function makeConceptOverview(overrides: Partial<SectorsOverview> = {}): SectorsO
   };
 }
 
+function makeTradeFlags(overrides: Partial<DashboardTradeFlagsOut> = {}): DashboardTradeFlagsOut {
+  const series = [
+    { code: "chase", label_zh: "追涨", label_en: "Chase", side: "buy" as const, lookahead: false },
+    { code: "instant_bottom", label_zh: "即时抄底", label_en: "Instant bottom", side: "buy" as const, lookahead: false },
+    { code: "short_term_win", label_zh: "短期成功", label_en: "Short-term win", side: "buy" as const, lookahead: true },
+    { code: "stop_loss", label_zh: "止损", label_en: "Stop loss", side: "sell" as const, lookahead: false },
+    { code: "instant_top", label_zh: "即时逃顶", label_en: "Instant top", side: "sell" as const, lookahead: false },
+    { code: "short_term_top", label_zh: "短期逃顶", label_en: "Short-term top", side: "sell" as const, lookahead: true },
+  ];
+  const stateSeries = [
+    { code: "first_entry", label_zh: "首次建仓", label_en: "First entry", side: "buy" as const, lookahead: false },
+    { code: "addon_average", label_zh: "均价加仓", label_en: "Add at average", side: "buy" as const, lookahead: false },
+    { code: "addon_dip", label_zh: "抄底加仓", label_en: "Add on dip", side: "buy" as const, lookahead: false },
+    { code: "addon_chase", label_zh: "追涨加仓", label_en: "Add on chase", side: "buy" as const, lookahead: false },
+    { code: "reduce_breakeven", label_zh: "回本减仓", label_en: "Reduce at breakeven", side: "sell" as const, lookahead: false },
+    { code: "reduce_profit", label_zh: "止盈减仓", label_en: "Reduce on profit", side: "sell" as const, lookahead: false },
+    { code: "reduce_loss", label_zh: "止损减仓", label_en: "Reduce on loss", side: "sell" as const, lookahead: false },
+    { code: "full_exit_breakeven", label_zh: "回本清仓", label_en: "Break-even exit", side: "sell" as const, lookahead: false },
+    { code: "full_exit_profit", label_zh: "止盈清仓", label_en: "Profit exit", side: "sell" as const, lookahead: false },
+    { code: "full_exit_loss", label_zh: "止损清仓", label_en: "Loss exit", side: "sell" as const, lookahead: false },
+  ];
+  const month = (
+    label: string,
+    buy_count: number,
+    sell_count: number,
+    hits: number[],
+    stateHits: number[] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+  ) => ({
+    month: label,
+    label,
+    buy_count,
+    sell_count,
+    flags: series.map((item, index) => ({ code: item.code, count: hits[index] ?? 0 })),
+    states: stateSeries.map((item, index) => ({ code: item.code, count: stateHits[index] ?? 0 })),
+  });
+  return {
+    window_months: 6,
+    start_month: "2026-01",
+    end_month: "2026-06",
+    latest_complete_month: "2026-06",
+    months_basis: "完整月 = 已自然结束的日历月。",
+    definition_version: "1.1",
+    has_data: true,
+    has_flag_data: true,
+    has_state_data: true,
+    series,
+    state_series: stateSeries,
+    total_labels: { buy: "买入笔数", sell: "卖出笔数" },
+    items: [
+      month("2026-05", 1, 0, [0, 0, 0, 0, 0, 0]),
+      month("2026-06", 3, 2, [2, 1, 0, 1, 0, 1], [1, 1, 1, 0, 0, 1, 0, 1, 0, 0]),
+    ],
+    months_without_data: ["2026-01", "2026-02", "2026-03", "2026-04"],
+    ...overrides,
+  };
+}
+
 function renderPage(): ReturnType<typeof render> {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
@@ -527,6 +591,7 @@ function renderPage(): ReturnType<typeof render> {
 beforeEach(() => {
   vi.clearAllMocks();
   getDashboard.mockResolvedValue(makeDashboard());
+  getTradeFlags.mockResolvedValue(makeTradeFlags());
   batchMetrics.mockResolvedValue(makeMetricBatch());
   getAssetChart.mockResolvedValue(makeAssetChart());
   getSectorsOverview.mockImplementation(async ({ taxonomy }) =>
@@ -721,5 +786,151 @@ describe("Dashboard 看板", () => {
     await screen.findByTestId("sector-kpi-hhi");
     expect(screen.getByTestId("sector-kpi-hhi").textContent).toContain("—");
     expect(block.textContent ?? "").not.toMatch(/\d+\.\d{2}%/);
+  });
+
+  it("FT-07 账单旗标图：默认请求 12 个月，切换范围改请求参数，月份口径来自后端", async () => {
+    renderPage();
+
+    const section = await screen.findByTestId("trade-flag-charts");
+    await waitFor(() => expect(getTradeFlags).toHaveBeenCalledWith(12));
+    expect(section.textContent).toContain("2026-01");
+    expect(section.textContent).toContain("完整月 = 已自然结束的日历月。");
+    expect(screen.getByTestId("tfc-range-12").getAttribute("aria-pressed")).toBe("true");
+
+    fireEvent.click(screen.getByTestId("tfc-range-6"));
+    await waitFor(() => expect(getTradeFlags).toHaveBeenCalledWith(6));
+    expect(screen.getByTestId("tfc-range-6").getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("FT-08 无旗标数据：展示空态与构建命令，不渲染空白图表", async () => {
+    getTradeFlags.mockResolvedValue(
+      makeTradeFlags({
+        has_data: false,
+        has_flag_data: false,
+        has_state_data: false,
+        items: [],
+        months_without_data: [],
+      }),
+    );
+    renderPage();
+
+    const empty = await screen.findByTestId("tfc-empty");
+    expect(empty.textContent).toContain("没有账单旗标数据");
+    expect(empty.textContent).toContain("make build-trade-flags");
+    expect(document.querySelector(".tfc-chart-bar")).toBeNull();
+  });
+
+  it("FT-09 有交易但无加仓/减仓状态命中：两张图都给空态，不画空白坐标轴", async () => {
+    getTradeFlags.mockResolvedValue(
+      makeTradeFlags({ has_flag_data: false, has_state_data: false }),
+    );
+    renderPage();
+
+    expect(await screen.findByTestId("tfc-unbuilt")).toBeTruthy();
+    expect(await screen.findByTestId("tfc-bar-empty")).toBeTruthy();
+    expect(
+      await screen.findByText("所选区间内暂无状态旗标命中。"),
+    ).toBeTruthy();
+    expect(document.querySelector(".tfc-chart-bar")).toBeNull();
+  });
+
+  it("FT-10 图表数据投影：标签/计数原样透传，柱状系列先买后卖且配色按侧分组", () => {
+    const palette = {
+      text: "t",
+      muted: "m",
+      grid: "g",
+      line: "l",
+      surface: "s",
+      selection: "sel",
+      series: {
+        buy: "buy-total",
+        sell: "sell-total",
+        chase: "buy-1",
+        instant_bottom: "buy-2",
+        short_term_win: "buy-3",
+        stop_loss: "sell-1",
+        instant_top: "sell-2",
+        short_term_top: "sell-3",
+        addon_average: "buy-1",
+        addon_dip: "buy-2",
+        addon_chase: "buy-3",
+        first_entry: "buy-0",
+        reduce_breakeven: "sell-1",
+        reduce_profit: "sell-2",
+        reduce_loss: "sell-3",
+        full_exit_breakeven: "sell-exit-1",
+        full_exit_profit: "sell-exit-2",
+        full_exit_loss: "sell-exit-3",
+      },
+    };
+    const charts = buildCharts(makeTradeFlags(), palette);
+
+    expect(charts.barKeys).toEqual([
+      { key: "首次建仓", color: "buy-0" },
+      { key: "均价加仓", color: "buy-1" },
+      { key: "抄底加仓", color: "buy-2" },
+      { key: "追涨加仓", color: "buy-3" },
+      { key: "回本减仓", color: "sell-1" },
+      { key: "止盈减仓", color: "sell-2" },
+      { key: "止损减仓", color: "sell-3" },
+      { key: "回本清仓", color: "sell-exit-1" },
+      { key: "止盈清仓", color: "sell-exit-2" },
+      { key: "止损清仓", color: "sell-exit-3" },
+    ]);
+    expect(charts.barData[1]).toEqual({
+      month: "2026-06",
+      首次建仓: 1,
+      均价加仓: 1,
+      抄底加仓: 1,
+      追涨加仓: 0,
+      回本减仓: 0,
+      止盈减仓: 1,
+      止损减仓: 0,
+      回本清仓: 1,
+      止盈清仓: 0,
+      止损清仓: 0,
+    });
+    expect(charts.lineSeries.map((serie) => serie.id)).toEqual([
+      "追涨",
+      "即时抄底",
+      "短期成功",
+      "止损",
+      "即时逃顶",
+      "短期逃顶",
+    ]);
+    expect(charts.lineSeries[0]?.data).toEqual([
+      { x: "2026-05", y: 0 },
+      { x: "2026-06", y: 2 },
+    ]);
+    expect(charts.lineColors).toEqual([
+      "buy-1",
+      "buy-2",
+      "buy-3",
+      "sell-1",
+      "sell-2",
+      "sell-3",
+    ]);
+  });
+
+  it("FT-11 图例点击：其余系列叠加 0.5 透明度，再点同系列取消", async () => {
+    renderPage();
+
+    const first = await screen.findByRole("button", { name: "首次建仓" });
+    const other = screen.getByRole("button", { name: "均价加仓" });
+    expect(first.getAttribute("aria-pressed")).toBe("false");
+    expect(other.closest("li")?.className).not.toContain("is-dim");
+
+    fireEvent.click(first);
+    expect(first.getAttribute("aria-pressed")).toBe("true");
+    expect(first.closest("li")?.className).not.toContain("is-dim");
+    expect(other.closest("li")?.className).toContain("is-dim");
+
+    fireEvent.click(first);
+    expect(first.getAttribute("aria-pressed")).toBe("false");
+    expect(other.closest("li")?.className).not.toContain("is-dim");
+
+    fireEvent.click(other);
+    expect(other.getAttribute("aria-pressed")).toBe("true");
+    expect(first.closest("li")?.className).toContain("is-dim");
   });
 });

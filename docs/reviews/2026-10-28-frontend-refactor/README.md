@@ -734,6 +734,6 @@ cd docs/reviews/2026-10-28-frontend-refactor
 | Phase 3a | ✅ 已完成 | `dc50cb3` | Settings 外观偏好 + 后端 display 字段 + Register/UTC 月份修复 |
 | Phase 3b | ✅ 已完成 | `b524d50` | MetricDetail/RoundDetail/Import tokens 化 + 导入列映射 DataTable |
 | Phase 4a | ✅ 已完成 | `3b0d8ef` | ESLint + 零口径 no-restricted-syntax + 前端 CI（lint/typecheck/test/build） |
-| Phase 4b | ✅ 已完成 | `1cc1582` | ⌘K 命令面板 + F 专注模式 + 键盘地图 |
+| Phase 4b | ✅ 已完成 | `1cc1582` | ⌘K 命令面板 + 键盘地图 |
 | Phase 4c | ✅ 已完成 | `c2dfd3a` | a11y（skip-link/焦点/图表数据表/progressbar）、iPadOS 月份降级、性能预算门禁；Playwright 视觉回归按 PRD 标注 SKIP |
 | Phase 5 | ✅ 已完成 | `81aa307` | 深色主题（同名 token 覆盖 + 旧组件暗色补丁）+ Settings 主题切换；浅色仍为默认 |

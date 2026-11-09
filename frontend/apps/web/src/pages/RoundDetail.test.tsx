@@ -251,6 +251,7 @@ describe("RoundDetail 回合详情页", () => {
       "价格",
       "金额",
       "执行价差（相对当日收盘）",
+      "账单旗标",
       "操作理由",
     ]);
 
@@ -278,6 +279,45 @@ describe("RoundDetail 回合详情页", () => {
     const sellTable = screen.getByRole("table", { name: "卖出流水与事后表现" });
     const sellRow = mainRows(sellTable)[0];
     expect(sellRow.textContent).toContain("18000.00");
+  });
+
+  it("账单旗标列渲染后端文案，说明面板默认折叠", async () => {
+    const base = makeInsight();
+    getInsight.mockResolvedValue({
+      ...base,
+      buy_trade: {
+        ...base.buy_trade!,
+        trade_flags: [
+          {
+            code: "addon_average",
+            label_zh: "均价加仓",
+            label_en: "Add-on at average cost",
+            status: "hit",
+            status_label: "命中",
+            lookahead: false,
+            lookahead_label: null,
+            reason: null,
+          },
+        ],
+      },
+      trade_flag_glossary: [
+        {
+          code: "addon_average",
+          label_zh: "均价加仓",
+          label_en: "Add-on at average cost",
+          description_zh: "含费净买价落在持仓均价的上下 1% 以内。",
+          description_en: "Within ±1% of the average cost.",
+          side: "buy",
+          lookahead: false,
+        },
+      ],
+    });
+    renderDetail();
+
+    expect((await screen.findAllByText("均价加仓")).length).toBeGreaterThan(0);
+    const panel = document.querySelector("details.trade-flag-glossary") as HTMLDetailsElement;
+    expect(panel).toBeTruthy();
+    expect(panel.open).toBe(false);
   });
 
   it("同一笔卖出参与多个配对时按 trade 去重，行数 = 流水笔数", async () => {
@@ -513,4 +553,27 @@ describe("RoundDetail 回合详情页", () => {
       "计划外减仓",
     );
   });
+});
+
+it("旗标说明：详情页末尾渲染后端返回的 code 与中英文说明", async () => {
+  getInsight.mockResolvedValue(
+    makeInsight({
+      flag_glossary: [
+        {
+          code: "profit_take_fly",
+          label_zh: "卖飞",
+          label_en: "Sold too early",
+          description_zh: "止盈后 20 日最高收盘高出净卖价 3% 以上。",
+          description_en: "The 20-day high exceeded the net sell price by more than 3%.",
+          kind: "item_flag",
+        },
+      ],
+    }),
+  );
+  renderDetail();
+
+  const section = await screen.findByTestId("flag-glossary");
+  expect(section.textContent).toContain("profit_take_fly");
+  expect(section.textContent).toContain("止盈后 20 日最高收盘高出净卖价 3% 以上。");
+  expect(section.textContent).toContain("The 20-day high exceeded the net sell price by more than 3%.");
 });

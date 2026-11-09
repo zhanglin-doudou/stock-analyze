@@ -73,6 +73,8 @@ _REVIEW_TABLES = (
     # Period2-09（迁移 0012）
     "trade_reason",
     "trade_forward_return",
+    # 2026-11-09：账单级旗标（迁移 0013）
+    "trade_flag",
 )
 # market schema（迁移 0005）是公共行情缓存：跨用例共享、跨全量测试保留，
 # 避免重复拉取。测试缓存本身的用例（unit/platform/test_market_cache.py）自清理。

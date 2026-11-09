@@ -908,6 +908,54 @@ class DashboardOut(StrictModel):
     inputs_hash: str
 
 
+class DashboardTradeFlagSeriesOut(StrictModel):
+    """看板图表的旗标系列（标签/方向/事后属性由后端提供，前端零口径）。"""
+
+    code: str
+    label_zh: str
+    label_en: str
+    side: Literal["buy", "sell"]
+    lookahead: bool
+
+
+class DashboardTradeFlagCountOut(StrictModel):
+    code: str
+    count: int
+
+
+class DashboardTradeFlagMonthOut(StrictModel):
+    """一个完整月的买卖笔数 + 折线趋势旗标 + 柱状图互斥状态旗标命中数。"""
+
+    month: str
+    label: str
+    buy_count: int
+    sell_count: int
+    flags: list[DashboardTradeFlagCountOut]
+    states: list[DashboardTradeFlagCountOut]
+
+
+class DashboardTradeFlagsOut(StrictModel):
+    """API-095：账单旗标月度聚合（最近 6/12/24 个完整月）。"""
+
+    window_months: int
+    start_month: str
+    end_month: str
+    latest_complete_month: str
+    months_basis: str
+    definition_version: str
+    has_data: bool
+    has_flag_data: bool
+    has_state_data: bool
+    series: list[DashboardTradeFlagSeriesOut]
+    # 柱状图口径：买卖两侧各三个互斥的加仓/减仓状态。
+    state_series: list[DashboardTradeFlagSeriesOut]
+    # 买卖笔数展示标签（side -> 文案），前端不再自造文案。
+    total_labels: dict[str, str]
+    items: list[DashboardTradeFlagMonthOut]
+    # 区间内没有任何旗标记录的月份（可能未运行 build-trade-flags，或当月无交易）。
+    months_without_data: list[str]
+
+
 # ── 板块（API-087/088，2026-10-31 sector-data）────────────────
 SectorTaxonomy = Literal["industry", "concept"]
 SectorStatus = Literal["ok", "degraded", "stale", "insufficient", "missing", "blocked"]
@@ -1553,6 +1601,31 @@ class ForwardReturnOut(BaseModel):
     price_jump_review: bool = False
 
 
+class TradeFlagOut(BaseModel):
+    """账单级旗标（与回合旗标隔离）；前端只渲染码值与后端文案。"""
+
+    code: str
+    label_zh: str
+    label_en: str
+    status: str
+    status_label: str
+    lookahead: bool = False
+    lookahead_label: str | None = None
+    reason: str | None = None
+
+
+class TradeFlagGlossaryOut(BaseModel):
+    """账单级旗标说明（中英文单点维护）。"""
+
+    code: str
+    label_zh: str
+    label_en: str
+    description_zh: str
+    description_en: str
+    side: Literal["buy", "sell"]
+    lookahead: bool = False
+
+
 class TradeSideInsightOut(BaseModel):
     trade_id: str
     date: date
@@ -1562,6 +1635,7 @@ class TradeSideInsightOut(BaseModel):
     reason: TradeReasonOut | None = None
     reason_label: str | None = None
     forward: dict[str, ForwardReturnOut] = Field(default_factory=dict)
+    trade_flags: list[TradeFlagOut] = Field(default_factory=list)
 
 
 class RoundInsightItemOut(BaseModel):
@@ -1587,6 +1661,13 @@ class RoundInsightItemOut(BaseModel):
     quality: list[str] = Field(default_factory=list)
     missed_profit_worst_display: str | None = None
     missed_profit_end_display: str | None = None
+    # additive：绝对值展示串 + 符号语义标签（少赚/多赚），前端只渲染不判符号。
+    missed_profit_worst_abs_display: str | None = None
+    missed_profit_worst_label: str | None = None
+    missed_profit_worst_label_en: str | None = None
+    missed_profit_end_abs_display: str | None = None
+    missed_profit_end_label: str | None = None
+    missed_profit_end_label_en: str | None = None
 
 
 class InsightBucketSummaryOut(BaseModel):
@@ -1662,6 +1743,13 @@ class InsightSellFlySummaryOut(BaseModel):
     fly_pct: str | None = None
     missed_profit_worst_display: str | None = None
     missed_profit_end_display: str | None = None
+    # additive：绝对值展示串 + 符号语义标签（少赚/多赚），前端只渲染不判符号。
+    missed_profit_worst_abs_display: str | None = None
+    missed_profit_worst_label: str | None = None
+    missed_profit_worst_label_en: str | None = None
+    missed_profit_end_abs_display: str | None = None
+    missed_profit_end_label: str | None = None
+    missed_profit_end_label_en: str | None = None
     rounds: int
     share_pct: str | None = None
 
@@ -1674,6 +1762,17 @@ class InsightsSummaryOut(BaseModel):
     reason_coverage: InsightReasonCoverageOut
     ranking: InsightRankingOut
     pending: dict[str, int]
+
+
+class FlagGlossaryOut(BaseModel):
+    """旗标枚举值的解释（code + 中英文标签与说明），前端零口径直接渲染。"""
+
+    code: str
+    label_zh: str
+    label_en: str
+    description_zh: str
+    description_en: str
+    kind: Literal["item_flag", "filter_alias"]
 
 
 class RoundInsightsPageOut(BaseModel):
@@ -1693,6 +1792,7 @@ class RoundInsightsPageOut(BaseModel):
     missing: list[str] = Field(default_factory=list)
     assumptions: list[str] = Field(default_factory=list)
     disclaimer: str
+    flag_glossary: list[FlagGlossaryOut] = Field(default_factory=list)
 
 
 class RoundInsightDetailOut(BaseModel):
@@ -1714,6 +1814,8 @@ class RoundInsightDetailOut(BaseModel):
     quality: list[str] = Field(default_factory=list)
     ranking: dict[str, Any] = Field(default_factory=dict)
     disclaimer: str
+    flag_glossary: list[FlagGlossaryOut] = Field(default_factory=list)
+    trade_flag_glossary: list[TradeFlagGlossaryOut] = Field(default_factory=list)
 
 
 class RoundInsightsRefreshIn(StrictModel):

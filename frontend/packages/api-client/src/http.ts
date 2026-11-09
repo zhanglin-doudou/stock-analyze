@@ -14,6 +14,7 @@ import type {
   CommitImportBody,
   CreateTokenBody,
   DashboardOut,
+  DashboardTradeFlagsOut,
   ErrorCatalogOut,
   HealthOut,
   ImportBatch,
@@ -242,6 +243,8 @@ export interface ListRoundInsightsQuery {
   has_reason?: boolean;
   reason_code?: string;
   security_code?: string;
+  /** 证券类型多选：stock / fund / convertible_bond / other；缺省不过滤。 */
+  security_type?: string[];
   sort?: string;
   sort_dir?: "asc" | "desc";
   include_summary?: boolean;
@@ -735,6 +738,7 @@ export function createClient(options: ClientOptions) {
           has_reason: query.has_reason,
           reason_code: query.reason_code,
           security_code: query.security_code,
+          security_type: query.security_type?.join(","),
           sort: query.sort,
           sort_dir: query.sort_dir,
           include_summary: query.include_summary,
@@ -811,6 +815,13 @@ export function createClient(options: ClientOptions) {
     /** API-084：Dashboard 两板块聚合（纯读；金额/比率全部后端格式化）。 */
     get() {
       return send<DashboardOut>({ path: "/dashboard" }).then((r) => r.data);
+    },
+    /** API-095：账单旗标月度聚合（最近 6/12/24 个完整月，纯读）。 */
+    tradeFlags(months: 6 | 12 | 24 = 6) {
+      return send<DashboardTradeFlagsOut>({
+        path: "/dashboard/trade-flags",
+        query: { months },
+      }).then((r) => r.data);
     },
   };
 

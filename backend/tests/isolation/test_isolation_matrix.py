@@ -257,6 +257,8 @@ ADMIN_FORBIDDEN: list[tuple[str, str]] = [
     ("get", "/metrics/{metric_id}/drilldown"),
     # Period2-12：Dashboard 聚合（身份越权 → 403）
     ("get", "/dashboard"),
+    # 2026-11-09（API-095）：账单旗标月度聚合（身份越权 → 403）
+    ("get", "/dashboard/trade-flags"),
     # 2026-10-31（API-087/088）：板块概览与目录（公共目录也不给 admin）
     ("get", "/sectors/overview"),
     ("get", "/sectors"),
@@ -343,6 +345,8 @@ UNAUTHENTICATED_MATRIX: list[tuple[str, str]] = [
     ("post", "/jobs/rebuild-period"),
     # Period2-12（API-084 Dashboard 聚合）
     ("get", "/dashboard"),
+    # 2026-11-09（API-095 账单旗标月度聚合）
+    ("get", "/dashboard/trade-flags"),
     # 2026-10-31（API-087/088 板块概览/目录）
     ("get", "/sectors/overview"),
     ("get", "/sectors"),

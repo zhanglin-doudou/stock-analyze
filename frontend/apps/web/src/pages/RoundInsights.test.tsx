@@ -141,6 +141,24 @@ function renderPage(): ReturnType<typeof render> {
   );
 }
 
+/** 卖飞金额带符号：正 → 少赚、负 → 多赚，前端只拼后端串与标签。 */
+function makePageWithMissedProfit(): RoundInsightsPage {
+  const page = makePage();
+  if (page.summary) {
+    page.summary.sell_fly = {
+      ...page.summary.sell_fly,
+      profit_take_fly: 1,
+      missed_profit_worst_display: "5206.21",
+      missed_profit_end_display: "-21965.03",
+      missed_profit_worst_abs_display: "5206.21",
+      missed_profit_worst_label: "少赚",
+      missed_profit_end_abs_display: "21965.03",
+      missed_profit_end_label: "多赚",
+    };
+  }
+  return page;
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
   listInsights.mockResolvedValue(makePage());
@@ -222,6 +240,44 @@ describe("RoundInsights 回合洞察页", () => {
     });
   });
 
+  it("卖飞金额：正数少赚、负数多赚（后端给绝对值串与标签，前端不判符号）", async () => {
+    listInsights.mockResolvedValue(makePageWithMissedProfit());
+    renderPage();
+
+    await screen.findByText(/以下为事后统计/);
+    const bodyText = document.body.textContent?.replace(/\s+/g, "") ?? "";
+    expect(bodyText).toContain("最差少赚5206.21，期末多赚21965.03");
+    expect(bodyText).not.toContain("-21965.03");
+  });
+
+  it("卖飞金额缺失：只渲染 —，不出现「多赚 —」组合", async () => {
+    renderPage();
+
+    await screen.findByText(/以下为事后统计/);
+    const bodyText = document.body.textContent?.replace(/\s+/g, "") ?? "";
+    expect(bodyText).toContain("最差—，期末—");
+    expect(bodyText).not.toContain("多赚—");
+  });
+
+  it("证券类型默认只选股票；勾选基金后按多选请求后端", async () => {
+    renderPage();
+
+    await waitFor(() => {
+      expect(listInsights).toHaveBeenCalledWith(
+        expect.objectContaining({ security_type: ["stock"] }),
+      );
+    });
+
+    screen.getByRole("checkbox", { name: "基金" }).click();
+    await waitFor(() => {
+      expect(listInsights).toHaveBeenLastCalledWith(
+        expect.objectContaining({ security_type: ["stock", "fund"] }),
+      );
+    });
+    const otherBox = screen.getByRole("checkbox", { name: "其他" }) as HTMLInputElement;
+    expect(otherBox.checked).toBe(false);
+  });
+
   it("刷新前瞻走幂等键；202 时提示后台作业并在完成后刷新列表", async () => {
     renderPage();
     const button = await screen.findByRole("button", { name: "刷新前瞻" });
@@ -235,4 +291,36 @@ describe("RoundInsights 回合洞察页", () => {
     });
     expect(await screen.findByText(/已提交后台刷新任务（job_1）/)).toBeTruthy();
   });
+});
+
+it("旗标说明：末尾渲染后端返回的 code 与中英文说明（前端不拼文案）", async () => {
+  listInsights.mockResolvedValue(
+    makePage({
+      flag_glossary: [
+        {
+          code: "addon",
+          label_zh: "加仓",
+          label_en: "Add-on",
+          description_zh: "本回合内有买入发生在已有持仓之后。",
+          description_en: "A buy happened while the security was already held.",
+          kind: "item_flag",
+        },
+        {
+          code: "addon_decline",
+          label_zh: "加仓后下跌",
+          label_en: "Add-on then decline",
+          description_zh: "同时命中 addon 与 continued_decline。",
+          description_en: "Both addon and continued_decline.",
+          kind: "filter_alias",
+        },
+      ],
+    }),
+  );
+  renderPage();
+
+  const section = await screen.findByTestId("flag-glossary");
+  expect(section.textContent).toContain("旗标说明");
+  expect(section.textContent).toContain("addon");
+  expect(section.textContent).toContain("本回合内有买入发生在已有持仓之后。");
+  expect(section.textContent).toContain("A buy happened while the security was already held.");
 });

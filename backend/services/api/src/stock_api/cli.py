@@ -30,7 +30,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import create_async_engine
 from stock_contracts.clock import SHANGHAI, FrozenClock, SystemClock
 from stock_contracts.enums import ImportBatchStatus, Role
-from stock_contracts.errors import CATALOG
+from stock_contracts.errors import CATALOG, ApiError
 from stock_ledger.application.imports import commit_batch
 from stock_ledger.application.preview import create_preview, default_object_store
 from stock_ledger.fixtures import generate_huatai_bill, generate_market_quotes
@@ -47,6 +47,8 @@ from stock_platform.sector_fixture import generate_sector_fixture
 from stock_platform.sector_source import create_live_sector_source
 from stock_platform.security import hasher_for
 from stock_platform.symbols import classify_symbol
+from stock_review.metrics.context import parse_period_label
+from stock_review.trade_flags import build_trade_flags_for_user
 
 # ── 常量 ────────────────────────────────────────────────────────
 API_PREFIX = "/api/v1"
@@ -989,6 +991,63 @@ async def _sync_market(
         await db.dispose()
 
 
+async def _build_trade_flags(*, month: str, email: str | None, dry_run: bool) -> int:
+    """按月批量构建账单级旗标（幂等；缺省扫当月有流水的全部用户）。"""
+    settings = get_settings()
+    clock = SystemClock()
+    try:
+        period = parse_period_label(month, today=clock.today())
+    except ApiError as exc:
+        return fail(f"{exc.code}: {exc.detail}")
+    db = Database(settings, role="owner")
+    market = create_market_source(settings, session_factory=db.session, clock=clock)
+    try:
+        async with db.session(begin=False) as session:
+            if email:
+                user = await UserRepository(session).by_email(email)
+                if user is None:
+                    return fail(f"账号不存在：{email}")
+                user_ids = [user.id]
+            else:
+                rows = await session.execute(
+                    select(Trade.user_id)
+                    .where(
+                        Trade.deleted_at.is_(None),
+                        Trade.trade_date >= period.start,
+                        Trade.trade_date <= period.end,
+                    )
+                    .distinct()
+                )
+                user_ids = sorted({row[0] for row in rows})
+        if not user_ids:
+            emit(f"ℹ️  {period.label} 没有买入/卖出流水，无需构建")
+            return 0
+        emit(f"== build-trade-flags {period.label}{'（dry-run）' if dry_run else ''} ==")
+        total_trades = 0
+        total_rows = 0
+        for user_id in user_ids:
+            async with db.session(user_id=user_id, begin=True) as session:
+                result = await build_trade_flags_for_user(
+                    session,
+                    user_id,
+                    period=period,
+                    market_data=market,
+                    clock=clock,
+                    dry_run=dry_run,
+                )
+            total_trades += result.trades
+            total_rows += result.rows
+            if result.trades:
+                emit(f"  {user_id}：{result.trades} 笔账单 / {result.rows} 行旗标")
+        emit(
+            f"✅ {'预演' if dry_run else '构建'}完成：{len(user_ids)} 个账号，"
+            f"{total_trades} 笔账单，{total_rows} 行旗标"
+        )
+        return 0
+    finally:
+        await db.dispose()
+
+
 # ── 板块同步（公共参考数据，仅 live）───────────────────────────
 _SYNC_BROWSER_UA = (
     "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
@@ -1235,6 +1294,14 @@ def build_parser() -> argparse.ArgumentParser:
     sector_bars.add_argument(
         "--dry-run", action="store_true", help="只做配置/DB 检查，不联网不写库"
     )
+    trade_flags = subparsers.add_parser(
+        "build-trade-flags", help="按月批量构建账单级旗标（幂等，可重跑）"
+    )
+    trade_flags.add_argument("--month", required=True, help="目标月份 YYYY-MM")
+    trade_flags.add_argument(
+        "--email", default=None, help="只构建该账号（缺省=当月有流水的全部用户）"
+    )
+    trade_flags.add_argument("--dry-run", action="store_true", help="只计算并打印统计，不写库")
     subparsers.add_parser("api-check", help="契约完整性检查（路径/operationId/错误码/错误响应）")
     snapshot = subparsers.add_parser("api-snapshot", help="规范化写出 contracts/openapi.json")
     snapshot.add_argument("--check", action="store_true", help="只比对不写，漂移则退出码 1")
@@ -1286,6 +1353,8 @@ async def _dispatch(args: argparse.Namespace) -> int:
         return await _sync_sectors(taxonomies=("concept",), dry_run=args.dry_run)
     if command == "sync-sector-bars":
         return await _sync_sector_bars(start=args.start, dry_run=args.dry_run)
+    if command == "build-trade-flags":
+        return await _build_trade_flags(month=args.month, email=args.email, dry_run=args.dry_run)
     if command == "db-truncate":
         return await _db_truncate()
     if command == "api-check":
@@ -1312,6 +1381,7 @@ COMMANDS: dict[str, Callable[[argparse.Namespace], Coroutine[Any, Any, int]]] = 
         "sync-sector-industry",
         "sync-sector-concept",
         "sync-sector-bars",
+        "build-trade-flags",
         "db-truncate",
         "api-check",
         "api-snapshot",

@@ -218,6 +218,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/dashboard/trade-flags": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Dashboard Trade Flags Endpoint
+         * @description API-095：账单旗标月度聚合（最近 6/12/24 个完整月，只读）。
+         */
+        get: operations["getDashboardTradeFlags"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/errors": {
         parameters: {
             query?: never;
@@ -2046,6 +2066,86 @@ export interface components {
             /** Trade Count */
             trade_count: number;
         };
+        /** DashboardTradeFlagCountOut */
+        DashboardTradeFlagCountOut: {
+            /** Code */
+            code: string;
+            /** Count */
+            count: number;
+        };
+        /**
+         * DashboardTradeFlagMonthOut
+         * @description 一个完整月的买卖笔数 + 折线趋势旗标 + 柱状图互斥状态旗标命中数。
+         */
+        DashboardTradeFlagMonthOut: {
+            /** Buy Count */
+            buy_count: number;
+            /** Flags */
+            flags: components["schemas"]["DashboardTradeFlagCountOut"][];
+            /** Label */
+            label: string;
+            /** Month */
+            month: string;
+            /** Sell Count */
+            sell_count: number;
+            /** States */
+            states: components["schemas"]["DashboardTradeFlagCountOut"][];
+        };
+        /**
+         * DashboardTradeFlagSeriesOut
+         * @description 看板图表的旗标系列（标签/方向/事后属性由后端提供，前端零口径）。
+         */
+        DashboardTradeFlagSeriesOut: {
+            /** Code */
+            code: string;
+            /** Label En */
+            label_en: string;
+            /** Label Zh */
+            label_zh: string;
+            /** Lookahead */
+            lookahead: boolean;
+            /**
+             * Side
+             * @enum {string}
+             */
+            side: "buy" | "sell";
+        };
+        /**
+         * DashboardTradeFlagsOut
+         * @description API-095：账单旗标月度聚合（最近 6/12/24 个完整月）。
+         */
+        DashboardTradeFlagsOut: {
+            /** Definition Version */
+            definition_version: string;
+            /** End Month */
+            end_month: string;
+            /** Has Data */
+            has_data: boolean;
+            /** Has Flag Data */
+            has_flag_data: boolean;
+            /** Has State Data */
+            has_state_data: boolean;
+            /** Items */
+            items: components["schemas"]["DashboardTradeFlagMonthOut"][];
+            /** Latest Complete Month */
+            latest_complete_month: string;
+            /** Months Basis */
+            months_basis: string;
+            /** Months Without Data */
+            months_without_data: string[];
+            /** Series */
+            series: components["schemas"]["DashboardTradeFlagSeriesOut"][];
+            /** Start Month */
+            start_month: string;
+            /** State Series */
+            state_series: components["schemas"]["DashboardTradeFlagSeriesOut"][];
+            /** Total Labels */
+            total_labels: {
+                [key: string]: string;
+            };
+            /** Window Months */
+            window_months: number;
+        };
         /** @description RFC 7807 问题详情 + 平台扩展字段（code/user_message/what_to_do/retryable/request_id/errors），对应 Content-Type: application/problem+json。 */
         Error: {
             code: string;
@@ -2073,6 +2173,27 @@ export interface components {
             items: {
                 [key: string]: unknown;
             }[];
+        };
+        /**
+         * FlagGlossaryOut
+         * @description 旗标枚举值的解释（code + 中英文标签与说明），前端零口径直接渲染。
+         */
+        FlagGlossaryOut: {
+            /** Code */
+            code: string;
+            /** Description En */
+            description_en: string;
+            /** Description Zh */
+            description_zh: string;
+            /**
+             * Kind
+             * @enum {string}
+             */
+            kind: "item_flag" | "filter_alias";
+            /** Label En */
+            label_en: string;
+            /** Label Zh */
+            label_zh: string;
         };
         /**
          * ForwardReturnOut
@@ -2277,10 +2398,22 @@ export interface components {
         InsightSellFlySummaryOut: {
             /** Fly Pct */
             fly_pct?: string | null;
+            /** Missed Profit End Abs Display */
+            missed_profit_end_abs_display?: string | null;
             /** Missed Profit End Display */
             missed_profit_end_display?: string | null;
+            /** Missed Profit End Label */
+            missed_profit_end_label?: string | null;
+            /** Missed Profit End Label En */
+            missed_profit_end_label_en?: string | null;
+            /** Missed Profit Worst Abs Display */
+            missed_profit_worst_abs_display?: string | null;
             /** Missed Profit Worst Display */
             missed_profit_worst_display?: string | null;
+            /** Missed Profit Worst Label */
+            missed_profit_worst_label?: string | null;
+            /** Missed Profit Worst Label En */
+            missed_profit_worst_label_en?: string | null;
             /** Profit Take Fly */
             profit_take_fly: number;
             /** Rounds */
@@ -3297,6 +3430,8 @@ export interface components {
             fills?: {
                 [key: string]: unknown;
             }[];
+            /** Flag Glossary */
+            flag_glossary?: components["schemas"]["FlagGlossaryOut"][];
             /** Flags */
             flags?: string[];
             /** Holding Days Legacy */
@@ -3327,6 +3462,8 @@ export interface components {
             sell_trade?: components["schemas"]["TradeSideInsightOut"] | null;
             /** Status */
             status: string;
+            /** Trade Flag Glossary */
+            trade_flag_glossary?: components["schemas"]["TradeFlagGlossaryOut"][];
         };
         /** RoundInsightItemOut */
         RoundInsightItemOut: {
@@ -3348,10 +3485,22 @@ export interface components {
             holding_days_legacy: number;
             /** Holding Trading Days */
             holding_trading_days?: number | null;
+            /** Missed Profit End Abs Display */
+            missed_profit_end_abs_display?: string | null;
             /** Missed Profit End Display */
             missed_profit_end_display?: string | null;
+            /** Missed Profit End Label */
+            missed_profit_end_label?: string | null;
+            /** Missed Profit End Label En */
+            missed_profit_end_label_en?: string | null;
+            /** Missed Profit Worst Abs Display */
+            missed_profit_worst_abs_display?: string | null;
             /** Missed Profit Worst Display */
             missed_profit_worst_display?: string | null;
+            /** Missed Profit Worst Label */
+            missed_profit_worst_label?: string | null;
+            /** Missed Profit Worst Label En */
+            missed_profit_worst_label_en?: string | null;
             /**
              * Open Date
              * Format: date
@@ -3398,6 +3547,8 @@ export interface components {
             definition_version: string;
             /** Disclaimer */
             disclaimer: string;
+            /** Flag Glossary */
+            flag_glossary?: components["schemas"]["FlagGlossaryOut"][];
             /** Has More */
             has_more: boolean;
             /** Item Total */
@@ -3966,6 +4117,57 @@ export interface components {
             /** Side */
             side?: ("buy" | "sell" | "both") | null;
         };
+        /**
+         * TradeFlagGlossaryOut
+         * @description 账单级旗标说明（中英文单点维护）。
+         */
+        TradeFlagGlossaryOut: {
+            /** Code */
+            code: string;
+            /** Description En */
+            description_en: string;
+            /** Description Zh */
+            description_zh: string;
+            /** Label En */
+            label_en: string;
+            /** Label Zh */
+            label_zh: string;
+            /**
+             * Lookahead
+             * @default false
+             */
+            lookahead: boolean;
+            /**
+             * Side
+             * @enum {string}
+             */
+            side: "buy" | "sell";
+        };
+        /**
+         * TradeFlagOut
+         * @description 账单级旗标（与回合旗标隔离）；前端只渲染码值与后端文案。
+         */
+        TradeFlagOut: {
+            /** Code */
+            code: string;
+            /** Label En */
+            label_en: string;
+            /** Label Zh */
+            label_zh: string;
+            /**
+             * Lookahead
+             * @default false
+             */
+            lookahead: boolean;
+            /** Lookahead Label */
+            lookahead_label?: string | null;
+            /** Reason */
+            reason?: string | null;
+            /** Status */
+            status: string;
+            /** Status Label */
+            status_label: string;
+        };
         /** TradeHistoryItem */
         TradeHistoryItem: {
             /** Actor Id */
@@ -4194,6 +4396,8 @@ export interface components {
             reason?: components["schemas"]["TradeReasonOut"] | null;
             /** Reason Label */
             reason_label?: string | null;
+            /** Trade Flags */
+            trade_flags?: components["schemas"]["TradeFlagOut"][];
             /** Trade Id */
             trade_id: string;
         };
@@ -4834,6 +5038,68 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["DashboardOut"];
+                };
+            };
+            /** @description 请求参数错误 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getDashboardTradeFlags: {
+        parameters: {
+            query?: {
+                months?: number;
+            };
+            header?: {
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DashboardTradeFlagsOut"];
                 };
             };
             /** @description 请求参数错误 */
@@ -6449,6 +6715,7 @@ export interface operations {
                 has_reason?: boolean | null;
                 reason_code?: string | null;
                 security_code?: string | null;
+                security_type?: string[] | null;
                 sort?: string;
                 sort_dir?: string;
                 include_summary?: boolean;

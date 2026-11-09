@@ -8,6 +8,7 @@
   background: var(--surface);
   color: var(--text);
   font: inherit;
+  min-width: 120px !important;
 }
 
 .month-fallback {

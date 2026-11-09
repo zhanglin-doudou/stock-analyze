@@ -23,6 +23,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from stock_contracts.enums import Role
 from stock_contracts.errors import ApiError, ErrorCode, FieldError
+from stock_core.trade_flags import LOOKAHEAD_LABEL_ZH, STATUS_LABELS, TRADE_FLAG_BY_CODE
 from stock_core.values import Money, Ratio, format_quantity
 from stock_platform.audit import record as audit_record
 from stock_platform.idempotency import IdempotencyStore
@@ -31,6 +32,7 @@ from stock_platform.tenant import TenantContext
 from stock_api.deps import get_state, get_tenant
 from stock_api.routing import StrictQueryRoute
 from stock_api.schemas import (
+    FlagGlossaryOut,
     ForwardReturnOut,
     InsightAddonSummaryOut,
     InsightBucketSummaryOut,
@@ -52,6 +54,8 @@ from stock_api.schemas import (
     RoundInsightsRefreshOut,
     RoundOut,
     RoundPage,
+    TradeFlagGlossaryOut,
+    TradeFlagOut,
     TradeSideInsightOut,
 )
 
@@ -152,6 +156,21 @@ async def list_rounds_endpoint(
     )
 
 
+def _glossary_out(entries: list[Any]) -> list[FlagGlossaryOut]:
+    """旗标词表原样透出（文案由 core 单点维护，本层不做拼装/翻译）。"""
+    return [
+        FlagGlossaryOut(
+            code=entry.code,
+            label_zh=entry.label_zh,
+            label_en=entry.label_en,
+            description_zh=entry.description_zh,
+            description_en=entry.description_en,
+            kind=entry.kind,
+        )
+        for entry in entries
+    ]
+
+
 def _forward_out(view: Any) -> ForwardReturnOut:
     return ForwardReturnOut(
         horizon=view.horizon,
@@ -168,6 +187,40 @@ def _forward_out(view: Any) -> ForwardReturnOut:
     )
 
 
+def _trade_flags_out(records: Any) -> list[TradeFlagOut]:
+    out: list[TradeFlagOut] = []
+    for record in records:
+        definition = TRADE_FLAG_BY_CODE[record.code]
+        out.append(
+            TradeFlagOut(
+                code=record.code,
+                label_zh=definition.label_zh,
+                label_en=definition.label_en,
+                status=record.status,
+                status_label=STATUS_LABELS.get(record.status, record.status),
+                lookahead=record.lookahead,
+                lookahead_label=(LOOKAHEAD_LABEL_ZH if record.lookahead else None),
+                reason=record.reason,
+            )
+        )
+    return out
+
+
+def _trade_flag_glossary_out(entries: Any) -> list[TradeFlagGlossaryOut]:
+    return [
+        TradeFlagGlossaryOut(
+            code=entry.code,
+            label_zh=entry.label_zh,
+            label_en=entry.label_en,
+            description_zh=entry.description_zh,
+            description_en=entry.description_en,
+            side=entry.side,
+            lookahead=entry.lookahead,
+        )
+        for entry in entries
+    ]
+
+
 def _side_out(view: Any) -> TradeSideInsightOut | None:
     if view is None:
         return None
@@ -180,6 +233,7 @@ def _side_out(view: Any) -> TradeSideInsightOut | None:
         reason=_trade_reason_out(view.reason),
         reason_label=view.reason_label,
         forward={str(horizon): _forward_out(item) for horizon, item in view.forward.items()},
+        trade_flags=_trade_flags_out(view.trade_flags),
     )
 
 
@@ -223,6 +277,12 @@ def _item_out(item: Any) -> RoundInsightItemOut:
             if item.missed_profit_end_units is not None
             else None
         ),
+        missed_profit_worst_abs_display=item.missed_profit_worst_abs_display,
+        missed_profit_worst_label=item.missed_profit_worst_label,
+        missed_profit_worst_label_en=item.missed_profit_worst_label_en,
+        missed_profit_end_abs_display=item.missed_profit_end_abs_display,
+        missed_profit_end_label=item.missed_profit_end_label,
+        missed_profit_end_label_en=item.missed_profit_end_label_en,
     )
 
 
@@ -259,6 +319,12 @@ def _summary_out(summary: Any) -> InsightsSummaryOut:
             fly_pct=summary.sell_fly.fly_pct,
             missed_profit_worst_display=summary.sell_fly.missed_profit_worst_display,
             missed_profit_end_display=summary.sell_fly.missed_profit_end_display,
+            missed_profit_worst_abs_display=summary.sell_fly.missed_profit_worst_abs_display,
+            missed_profit_worst_label=summary.sell_fly.missed_profit_worst_label,
+            missed_profit_worst_label_en=summary.sell_fly.missed_profit_worst_label_en,
+            missed_profit_end_abs_display=summary.sell_fly.missed_profit_end_abs_display,
+            missed_profit_end_label=summary.sell_fly.missed_profit_end_label,
+            missed_profit_end_label_en=summary.sell_fly.missed_profit_end_label_en,
             rounds=summary.sell_fly.rounds,
             share_pct=summary.sell_fly.share_pct,
         ),
@@ -312,6 +378,7 @@ async def list_round_insights_endpoint(
     has_reason: Annotated[bool | None, Query()] = None,
     reason_code: Annotated[str | None, Query(max_length=24)] = None,
     security_code: Annotated[str | None, Query()] = None,
+    security_type: Annotated[list[str] | None, Query()] = None,
     sort: Annotated[str, Query()] = "combined",
     sort_dir: Annotated[str, Query()] = "desc",
     include_summary: Annotated[bool, Query()] = True,
@@ -327,6 +394,9 @@ async def list_round_insights_endpoint(
     flags: list[str] = []
     for raw in flag or []:
         flags.extend(part.strip() for part in raw.split(",") if part.strip())
+    security_types: list[str] = []
+    for raw in security_type or []:
+        security_types.extend(part.strip() for part in raw.split(",") if part.strip())
     async with state.db.session(user_id=user_id, begin=True) as session:
         page = await get_insights_page(
             session,
@@ -339,6 +409,7 @@ async def list_round_insights_endpoint(
             has_reason=has_reason,
             reason_code=reason_code,
             security_code=security_code,
+            security_types=security_types,
             sort=sort,
             sort_dir=sort_dir,
             include_summary=include_summary,
@@ -362,6 +433,7 @@ async def list_round_insights_endpoint(
         missing=page.missing,
         assumptions=page.assumptions,
         disclaimer=page.disclaimer,
+        flag_glossary=_glossary_out(page.flag_glossary),
     )
 
 
@@ -416,6 +488,8 @@ async def get_round_insights_endpoint(
         quality=list(dict.fromkeys(detail.quality)),
         ranking=detail.ranking,
         disclaimer=detail.disclaimer,
+        flag_glossary=_glossary_out(detail.flag_glossary),
+        trade_flag_glossary=_trade_flag_glossary_out(detail.trade_flag_glossary),
     )
 
 

@@ -234,26 +234,15 @@ export function AppShell() {
   // Phase 4b 键盘地图：⌘K/Ctrl+K 命令面板；F 切换专注模式（输入框内不触发）。
   useEffect(() => {
     function onKeyDown(event: globalThis.KeyboardEvent): void {
-      const target = event.target as HTMLElement | null;
-      const typing =
-        target?.tagName === "INPUT" ||
-        target?.tagName === "TEXTAREA" ||
-        target?.tagName === "SELECT" ||
-        target?.isContentEditable === true;
       if ((event.metaKey || event.ctrlKey) && event.key.toLowerCase() === "k") {
         event.preventDefault();
         setPaletteOpen((open) => !open);
         return;
       }
-      if (paletteOpen || typing) return;
-      if (event.key === "f" || event.key === "F") {
-        event.preventDefault();
-        setFocusMode((enabled) => !enabled);
-      }
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [paletteOpen]);
+  }, []);
 
   const settingsActive = isNavItemActive(location.pathname, SETTINGS_ITEM.to);
 
@@ -272,7 +261,7 @@ export function AppShell() {
         className={`shell-rail${expanded ? " is-expanded" : " is-compact"}`}
         data-nav-mode={expanded ? "expanded" : "compact"}
       >
-        <div className="shell-brand" aria-label="交易复盘">
+        <div className="shell-brand" aria-label="交易复盘" onClick={() => window.location.href = '/'}>
           <span className="shell-brand-mark" aria-hidden="true">
             静
           </span>
@@ -396,7 +385,7 @@ export function AppShell() {
             className="shell-iconbtn"
             aria-label={focusMode ? "退出专注模式" : "进入专注模式"}
             aria-pressed={focusMode}
-            title="专注模式（F）"
+            title="专注模式"
             onClick={() => setFocusMode((enabled) => !enabled)}
           >
             <Icon name="focus" size={16} />

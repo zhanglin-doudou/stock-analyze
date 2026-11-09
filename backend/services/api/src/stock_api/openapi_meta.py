@@ -709,6 +709,20 @@ OPERATION_META: dict[str, dict[str, Any]] = {
             "UNKNOWN_QUERY_PARAM",
         ],
     },
+    "getDashboardTradeFlags": {
+        "api_id": "API-095",
+        "scope": "read",
+        "idempotent": False,
+        "async": False,
+        "error_codes": [
+            "TOKEN_EXPIRED",
+            "TOKEN_REVOKED",
+            "MULTIPLE_CREDENTIALS",
+            "ADMIN_CANNOT_READ_TRADES",
+            "UNKNOWN_QUERY_PARAM",
+            "VALIDATION_ERROR",
+        ],
+    },
     "getSectorsOverview": {
         "api_id": "API-087",
         "scope": "read",
@@ -1884,6 +1898,12 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
                     "fly_pct": "100.0%",
                     "missed_profit_worst_display": "1010.00",
                     "missed_profit_end_display": "510.00",
+                    "missed_profit_worst_abs_display": "1010.00",
+                    "missed_profit_worst_label": "少赚",
+                    "missed_profit_worst_label_en": "missed gain",
+                    "missed_profit_end_abs_display": "510.00",
+                    "missed_profit_end_label": "少赚",
+                    "missed_profit_end_label_en": "missed gain",
                 },
                 "reason_coverage": {
                     "annotated": 1,
@@ -2040,6 +2060,12 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
                     "quality": ["forward_incomplete"],
                     "missed_profit_worst_display": "1010.00",
                     "missed_profit_end_display": "510.00",
+                    "missed_profit_worst_abs_display": "1010.00",
+                    "missed_profit_worst_label": "少赚",
+                    "missed_profit_worst_label_en": "missed gain",
+                    "missed_profit_end_abs_display": "510.00",
+                    "missed_profit_end_label": "少赚",
+                    "missed_profit_end_label_en": "missed gain",
                 }
             ],
             "next_cursor": None,
@@ -2050,6 +2076,35 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
                 "以下为事后统计，仅用于个人复盘，不构成投资建议；不评价个人能力，不预测收益；"
                 "相对基准为 hs300_tr ETF 代理；缺失/公司行动显示 —，不显示 0%。"
             ),
+            "flag_glossary": [
+                {
+                    "code": "addon",
+                    "label_zh": "加仓",
+                    "label_en": "Add-on",
+                    "description_zh": (
+                        "本回合内有买入发生在已有持仓之后（按流水发生顺序推演，"
+                        "同日多笔以文件行号排序）；回合的第一笔建仓不算加仓。"
+                    ),
+                    "description_en": "A buy inside this round happened while the security was already held.",
+                    "kind": "item_flag",
+                },
+                {
+                    "code": "profit_take_fly",
+                    "label_zh": "卖飞",
+                    "label_en": "Sold too early",
+                    "description_zh": "止盈卖出后 20 个交易日最高收盘 > 净卖价 × 1.03。",
+                    "description_en": "After a profitable sale, the 20-day highest close exceeded the net sell price by more than 3%.",
+                    "kind": "item_flag",
+                },
+                {
+                    "code": "addon_decline",
+                    "label_zh": "加仓后下跌",
+                    "label_en": "Add-on then decline",
+                    "description_zh": "查询别名：同时命中 `addon` 与 `continued_decline`。",
+                    "description_en": "Query alias matching rounds flagged with both `addon` and `continued_decline`.",
+                    "kind": "filter_alias",
+                },
+            ],
         }
     },
     # 2026-11-05（API-093）：单回合详情（逐笔理由/前瞻/旗标/排序）。
@@ -2097,6 +2152,35 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
                 "以下为事后统计，仅用于个人复盘，不构成投资建议；不评价个人能力，不预测收益；"
                 "相对基准为 hs300_tr ETF 代理；缺失/公司行动显示 —，不显示 0%。"
             ),
+            "flag_glossary": [
+                {
+                    "code": "addon",
+                    "label_zh": "加仓",
+                    "label_en": "Add-on",
+                    "description_zh": (
+                        "本回合内有买入发生在已有持仓之后（按流水发生顺序推演，"
+                        "同日多笔以文件行号排序）；回合的第一笔建仓不算加仓。"
+                    ),
+                    "description_en": "A buy inside this round happened while the security was already held.",
+                    "kind": "item_flag",
+                },
+                {
+                    "code": "profit_take_fly",
+                    "label_zh": "卖飞",
+                    "label_en": "Sold too early",
+                    "description_zh": "止盈卖出后 20 个交易日最高收盘 > 净卖价 × 1.03。",
+                    "description_en": "After a profitable sale, the 20-day highest close exceeded the net sell price by more than 3%.",
+                    "kind": "item_flag",
+                },
+                {
+                    "code": "addon_decline",
+                    "label_zh": "加仓后下跌",
+                    "label_en": "Add-on then decline",
+                    "description_zh": "查询别名：同时命中 `addon` 与 `continued_decline`。",
+                    "description_en": "Query alias matching rounds flagged with both `addon` and `continued_decline`.",
+                    "kind": "filter_alias",
+                },
+            ],
         }
     },
     # 2026-11-05（API-094）：同步 200 与转作业 202 两条路径。

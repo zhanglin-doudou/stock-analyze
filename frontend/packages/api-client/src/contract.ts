@@ -109,6 +109,11 @@ export type RoundInsightsPageOut = ApiSchemas["RoundInsightsPageOut"];
 export type RoundInsightDetailOut = ApiSchemas["RoundInsightDetailOut"];
 export type RoundInsightsRefreshIn = ApiSchemas["RoundInsightsRefreshIn"];
 export type RoundInsightsRefreshOut = ApiSchemas["RoundInsightsRefreshOut"];
+export type FlagGlossaryOut = ApiSchemas["FlagGlossaryOut"];
+
+// 2026-11-09：账单级独立旗标（与回合旗标隔离）
+export type TradeFlagOut = ApiSchemas["TradeFlagOut"];
+export type TradeFlagGlossaryOut = ApiSchemas["TradeFlagGlossaryOut"];
 
 // Period2-03：净值与收益（API-032）
 export type NavOut = ApiSchemas["NavOut"];
@@ -134,6 +139,12 @@ export type DashboardRoundOut = ApiSchemas["DashboardRoundOut"];
 export type DashboardTradeCountOut = ApiSchemas["DashboardTradeCountOut"];
 export type DashboardMaxDrawdownOut = ApiSchemas["DashboardMaxDrawdownOut"];
 export type DashboardMissingOut = ApiSchemas["DashboardMissingOut"];
+
+// Period2-12：账单旗标月度聚合（API-095）
+export type DashboardTradeFlagsOut = ApiSchemas["DashboardTradeFlagsOut"];
+export type DashboardTradeFlagSeriesOut = ApiSchemas["DashboardTradeFlagSeriesOut"];
+export type DashboardTradeFlagMonthOut = ApiSchemas["DashboardTradeFlagMonthOut"];
+export type DashboardTradeFlagCountOut = ApiSchemas["DashboardTradeFlagCountOut"];
 
 // Period2-05/07：三域指标（API-033/079）+ 按月一键编排（API-083）
 export type MetricItemOut = ApiSchemas["MetricItemOut"];

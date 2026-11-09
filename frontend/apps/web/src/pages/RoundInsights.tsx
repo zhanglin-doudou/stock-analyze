@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import {
   newIdempotencyKey,
@@ -11,6 +11,7 @@ import { api } from "../client";
 import { signedClass } from "../lib/signed";
 import { Cursor } from "../ui/Cursor";
 import { FilterBar, FilterField } from "../ui/FilterBar";
+import { FlagGlossary } from "../ui/FlagGlossary";
 import { PeriodInput } from "../ui/PeriodInput";
 import { ProblemView } from "../ui/Problem";
 import { DataTable, type DataTableColumn } from "../ui/DataTable";
@@ -40,6 +41,28 @@ const SORT_OPTIONS = [
   { value: "return", label: "收益率" },
   { value: "close_date", label: "平仓日" },
 ];
+
+/** 证券类型多选（值域与后端 `security_type` 白名单一致，四类覆盖全部回合）。 */
+const SECURITY_TYPE_OPTIONS = [
+  { value: "stock", label: "股票" },
+  { value: "fund", label: "基金" },
+  { value: "convertible_bond", label: "可转债" },
+  { value: "other", label: "其他" },
+] as const;
+
+/** 页面默认只看股票（货基申购赎回会稀释回合统计）；URL 缺省即此值，保持干净。 */
+const DEFAULT_SECURITY_TYPES: string[] = ["stock"];
+
+/** URL 缺省 → 默认股票；非法/空值回落默认，不把空选择传给后端（避免变成「全部」）。 */
+function parseSecurityTypes(raw: string | null): string[] {
+  if (!raw) return DEFAULT_SECURITY_TYPES;
+  const allowed = new Set<string>(SECURITY_TYPE_OPTIONS.map((option) => option.value));
+  const picked = raw
+    .split(",")
+    .map((value) => value.trim())
+    .filter((value) => allowed.has(value));
+  return picked.length ? picked : DEFAULT_SECURITY_TYPES;
+}
 
 const FLAG_LABELS: Record<string, string> = {
   addon: "加仓",
@@ -95,6 +118,11 @@ interface SellFlySummary {
   fly_pct?: string | null;
   missed_profit_worst_display?: string | null;
   missed_profit_end_display?: string | null;
+  /** 后端给好的绝对值串 + 措辞（少赚/多赚）；前端只渲染，不判符号、不做 abs。 */
+  missed_profit_worst_abs_display?: string | null;
+  missed_profit_worst_label?: string | null;
+  missed_profit_end_abs_display?: string | null;
+  missed_profit_end_label?: string | null;
 }
 interface RankingSummary {
   n_sample: number;
@@ -131,6 +159,11 @@ export function RoundInsights() {
   const flag = search.get("flag") ?? "";
   const hasReason = search.get("has_reason") ?? "";
   const securityCode = search.get("security_code") ?? "";
+  const securityTypeParam = search.get("security_type");
+  const securityTypes = useMemo(
+    () => parseSecurityTypes(securityTypeParam),
+    [securityTypeParam],
+  );
   const sort = search.get("sort") ?? "combined";
 
   const [codeDraft, setCodeDraft] = useState(securityCode);
@@ -163,6 +196,7 @@ export function RoundInsights() {
             flag: flag ? [flag] : undefined,
             has_reason: hasReason === "" ? undefined : hasReason === "true",
             security_code: securityCode || undefined,
+            security_type: securityTypes,
             sort,
             sort_dir: "desc",
             include_summary: true,
@@ -176,12 +210,25 @@ export function RoundInsights() {
         setLoading(false);
       }
     },
-    [period, bucket, flag, hasReason, securityCode, sort],
+    [period, bucket, flag, hasReason, securityCode, securityTypes, sort],
   );
 
   useEffect(() => {
     void load();
   }, [load]);
+
+  /** 勾选/取消证券类型；至少保留一项，且仅「股票」时把 URL 参数删掉保持干净。 */
+  function toggleSecurityType(value: string): void {
+    const picked = securityTypes.includes(value)
+      ? securityTypes.filter((item) => item !== value)
+      : [...securityTypes, value];
+    if (picked.length === 0) return;
+    const ordered = SECURITY_TYPE_OPTIONS.map((option) => option.value).filter((item) =>
+      picked.includes(item),
+    );
+    const isDefault = ordered.length === 1 && ordered[0] === DEFAULT_SECURITY_TYPES[0];
+    setParam("security_type", isDefault ? "" : ordered.join(","));
+  }
 
   async function refresh(): Promise<void> {
     setRefreshing(true);
@@ -328,6 +375,8 @@ export function RoundInsights() {
                 if (tab.flag) next.set("flag", tab.flag);
                 if (tab.hasReason) next.set("has_reason", tab.hasReason);
                 if (period) next.set("period", period);
+                // 证券类型是全局范围偏好（同 period），切 Tab 时保留
+                if (securityTypeParam) next.set("security_type", securityTypeParam);
                 next.delete("cursor");
                 setSearch(next, { replace: true });
               }}
@@ -389,6 +438,20 @@ export function RoundInsights() {
             <option value="true">已标注理由</option>
             <option value="false">未标注理由</option>
           </select>
+        </FilterField>
+        <FilterField label="证券类型">
+          <span className="filter-field-options">
+            {SECURITY_TYPE_OPTIONS.map((option) => (
+              <label key={option.value} className="check">
+                <input
+                  type="checkbox"
+                  checked={securityTypes.includes(option.value)}
+                  onChange={() => toggleSecurityType(option.value)}
+                />
+                {option.label}
+              </label>
+            ))}
+          </span>
         </FilterField>
         <FilterField label="证券代码">
           <input
@@ -465,13 +528,13 @@ export function RoundInsights() {
               <p className="muted">
                 卖出 {sellFly.sell_count} 次；卖飞 {sellFly.profit_take_fly}（止盈）/{" "}
                 {sellFly.stop_loss_rebound}（止损后反弹）；占比 {text(sellFly.fly_pct)}；
-                最差少赚{" "}
-                <span className={signedClass(sellFly.missed_profit_worst_display)}>
-                  {text(sellFly.missed_profit_worst_display)}
+                最差{sellFly.missed_profit_worst_label ?? ""}{" "}
+                <span className={signedClass(sellFly.missed_profit_worst_abs_display)}>
+                  {text(sellFly.missed_profit_worst_abs_display)}
                 </span>
-                ，期末少赚{" "}
-                <span className={signedClass(sellFly.missed_profit_end_display)}>
-                  {text(sellFly.missed_profit_end_display)}
+                ，期末{sellFly.missed_profit_end_label ?? ""}{" "}
+                <span className={signedClass(sellFly.missed_profit_end_abs_display)}>
+                  {text(sellFly.missed_profit_end_abs_display)}
                 </span>
                 。
               </p>
@@ -550,6 +613,8 @@ export function RoundInsights() {
       {page?.assumptions?.length ? (
         <p className="muted">口径假设：{page.assumptions.join("；")}</p>
       ) : null}
+
+      <FlagGlossary entries={page?.flag_glossary} />
     </div>
   );
 }

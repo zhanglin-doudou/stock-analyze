@@ -1,6 +1,9 @@
-"""Dashboard 聚合端点（API-084，Period2-12）：资产概览 + 历史概览。
+"""Dashboard 聚合端点（API-084/095，Period2-12）：资产概览 + 历史概览 + 账单旗标月度趋势。
 
 * `GET /dashboard`（`getDashboard`）：**只读**，不落库、不触发构建/job；
+* `GET /dashboard/trade-flags`（`getDashboardTradeFlags`）：按「月 × 旗标码」聚合
+  `review.trade_flag`，只读当前定义版本的落库结果（不重算）；「完整月」以服务端
+  业务日（东八区）为准，最新完整月固定为今天所在月的前一个月；
 * 当前快照取最新 `asset_daily` 行（`trade_date <= today`），历史概览为全历史；
 * 年度指标区间（`metrics_period`/`_start`/`_end`）= 该快照日所在年份年初 → 快照日；
 * 所有金额/数量/比率在本层转**定点字符串**；blocked/missing 字段显式 `null`；
@@ -13,9 +16,11 @@ from __future__ import annotations
 
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
+from stock_contracts.errors import ApiError, ErrorCode
 from stock_core.values import Money, Ratio, format_quantity
 from stock_platform.tenant import TenantContext
+from stock_review.trade_flags import TradeFlagMonthlySummary, monthly_trade_flag_summary
 
 from stock_api.deps import get_market_data, get_state, get_tenant
 from stock_api.routing import StrictQueryRoute
@@ -29,9 +34,20 @@ from stock_api.schemas import (
     DashboardOut,
     DashboardRoundOut,
     DashboardTradeCountOut,
+    DashboardTradeFlagCountOut,
+    DashboardTradeFlagMonthOut,
+    DashboardTradeFlagSeriesOut,
+    DashboardTradeFlagsOut,
 )
 
 router = APIRouter(tags=["dashboard"], route_class=StrictQueryRoute)
+
+MONTHS_BASIS = (
+    "完整月 = 服务端业务日（东八区）所在月之前、已自然结束的日历月；"
+    "最新完整月固定为上一个月。旗标数量为当月命中该旗标的账单数（同一账单可命中多个旗标）。"
+)
+
+TOTAL_LABELS: dict[str, str] = {"buy": "买入笔数", "sell": "卖出笔数"}
 
 
 def _pct_2dp(ratio_units: int | None) -> str | None:
@@ -237,6 +253,79 @@ async def get_dashboard_endpoint(
             market_data=market_data,
         )
     return _to_out(result)
+
+
+def _to_flags_out(result: TradeFlagMonthlySummary) -> DashboardTradeFlagsOut:
+    def _series(items: Any) -> list[DashboardTradeFlagSeriesOut]:
+        return [
+            DashboardTradeFlagSeriesOut(
+                code=item.code,
+                label_zh=item.label_zh,
+                label_en=item.label_en,
+                side=item.side,
+                lookahead=item.lookahead,
+            )
+            for item in items
+        ]
+
+    return DashboardTradeFlagsOut(
+        window_months=result.window_months,
+        start_month=result.start_month,
+        end_month=result.end_month,
+        latest_complete_month=result.latest_complete_month,
+        months_basis=MONTHS_BASIS,
+        definition_version=result.definition_version,
+        has_data=result.has_data,
+        has_flag_data=result.has_flag_data,
+        has_state_data=result.has_state_data,
+        series=_series(result.series),
+        state_series=_series(result.state_series),
+        total_labels=dict(TOTAL_LABELS),
+        items=[
+            DashboardTradeFlagMonthOut(
+                month=item.month,
+                label=item.month,
+                buy_count=item.buy_count,
+                sell_count=item.sell_count,
+                flags=[
+                    DashboardTradeFlagCountOut(code=code, count=count)
+                    for code, count in item.flag_counts.items()
+                ],
+                states=[
+                    DashboardTradeFlagCountOut(code=code, count=count)
+                    for code, count in item.state_counts.items()
+                ],
+            )
+            for item in result.items
+        ],
+        months_without_data=list(result.months_without_data),
+    )
+
+
+@router.get(
+    "/dashboard/trade-flags",
+    response_model=DashboardTradeFlagsOut,
+    operation_id="getDashboardTradeFlags",
+)
+async def get_dashboard_trade_flags_endpoint(
+    request: Request,
+    ctx: Annotated[TenantContext, Depends(get_tenant)],
+    months: Annotated[int, Query()] = 6,
+) -> DashboardTradeFlagsOut:
+    """API-095：账单旗标月度聚合（最近 6/12/24 个完整月，只读）。"""
+    if months not in (6, 12, 24):
+        raise ApiError(ErrorCode.VALIDATION_ERROR, detail="months 只支持 6/12/24")
+    ctx.forbid_admin_trades()
+    user_id = ctx.require_user()
+    state = get_state(request)
+    async with state.db.session(user_id=user_id, begin=True) as session:
+        result = await monthly_trade_flag_summary(
+            session,
+            user_id,
+            window_months=months,
+            clock=state.clock,
+        )
+    return _to_flags_out(result)
 
 
 __all__ = ["router"]
