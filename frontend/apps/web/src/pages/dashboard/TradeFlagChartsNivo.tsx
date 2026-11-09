@@ -102,7 +102,7 @@ export default function TradeFlagChartsNivo({
   }));
 
   return (
-    <>
+    <div className="tfc-chart-container">
       <div className="tfc-chart-block">
         <h3 className="tfc-chart-title">月度买卖状态（买侧建仓 / 加仓 · 卖侧减仓 / 清仓）</h3>
         {barData.length === 0 ? (
@@ -131,7 +131,7 @@ export default function TradeFlagChartsNivo({
                   }}
                   axisLeft={{ tickSize: 0, tickPadding: 6, tickValues: 5 }}
                   enableGridX={false}
-                  enableLabel={false}
+                  labelSkipHeight={12}
                   animate={false}
                   role="img"
                   ariaLabel="按月统计买入建仓/加仓与卖出减仓/清仓状态的叠放柱状图"
@@ -189,6 +189,6 @@ export default function TradeFlagChartsNivo({
           </>
         )}
       </div>
-    </>
+    </div>
   );
 }

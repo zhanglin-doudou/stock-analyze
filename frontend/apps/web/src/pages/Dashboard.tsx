@@ -392,9 +392,6 @@ export function Dashboard(): ReactElement {
           />
         </div>
       </section>
-
-      <SectorBlock asOf={data.as_of} linkHref={data.links.sectors} />
-
       {/* 总资产趋势 */}
       <section className="dash-panel dash-chart-panel">
         <div className="dash-panel-head">
@@ -422,6 +419,69 @@ export function Dashboard(): ReactElement {
           <span>有效观测 {drawdown.n_obs} 天</span>
         </div>
       </section>
+      <div className="dash-grid">
+        <section className="dash-panel">
+          <div className="dash-panel-head">
+            <h2>当前持仓</h2>
+            <span className="dash-panel-meta">
+              {asset.holdings.length} 只 · 市值 {displayValue(asset.market_value)}
+            </span>
+            <div className="dash-grow" />
+            <Link className="dash-link" to={data.links.assets}>
+              资产明细
+            </Link>
+          </div>
+          {asset.holdings.length === 0 ? (
+            <p className="dash-muted">没有持仓（或资产表未构建）。</p>
+          ) : (
+            <table className="dash-table dash-holdings">
+              <thead>
+                <tr>
+                  <th>标的</th>
+                  <th>数量</th>
+                  <th>市值</th>
+                  <th>权重</th>
+                </tr>
+              </thead>
+              <tbody>
+                {asset.holdings.map((row) => (
+                  <tr key={row.security_code} data-testid={`holding-row-${row.security_code}`}>
+                    <td>
+                      <span className="dash-holding-name">
+                        {row.security_name}
+                        <span className="dash-holding-code">{row.security_code}</span>
+                      </span>
+                    </td>
+                    <td className="num">{row.quantity}</td>
+                    <td className="num">{displayValue(shown(row.market_value_display, row.market_value))}</td>
+                    <td>
+                      <span className="dash-weight-cell">
+                        <span className="num">{displayValue(row.weight_display ?? row.weight_pct)}</span>
+                        <span className="dash-weight-track" aria-hidden="true">
+                          <i style={{ "--w": row.weight_pct ?? "0" } as CSSProperties} />
+                        </span>
+                      </span>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+          <div className="dash-links">
+            <Link to={data.links.assets}>资产明细</Link>
+            <Link to={data.links.exports} data-testid="link-exports">
+              导出（占位）
+            </Link>
+            <Link to={data.links.reports} data-testid="link-reports">
+              月报（占位）
+            </Link>
+            <Link to={data.links.attribution} data-testid="link-attribution">
+              归因（占位）
+            </Link>
+          </div>
+        </section>
+        <SectorBlock asOf={data.as_of} linkHref={data.links.sectors} />
+      </div>
 
       <TradeFlagCharts />
       </div>
@@ -429,6 +489,14 @@ export function Dashboard(): ReactElement {
       {/* 历史概览 + 持仓（板块级容器 history-overview） */}
       <div data-board="history-overview">
       <div className="dash-grid">
+        <AnnualMetrics
+          period={data.metrics_period}
+          start={data.metrics_period_start}
+          end={data.metrics_period_end}
+          batch={metricsQuery.data ?? null}
+          loading={metricsQuery.isLoading}
+          error={metricsQuery.error}
+        />
         <section className="dash-panel" data-testid="history-overview">
           <div className="dash-panel-head">
             <h2>历史概览</h2>
@@ -500,67 +568,6 @@ export function Dashboard(): ReactElement {
             </div>
           </div>
         </section>
-
-        <section className="dash-panel">
-          <div className="dash-panel-head">
-            <h2>当前持仓</h2>
-            <span className="dash-panel-meta">
-              {asset.holdings.length} 只 · 市值 {displayValue(asset.market_value)}
-            </span>
-            <div className="dash-grow" />
-            <Link className="dash-link" to={data.links.assets}>
-              资产明细
-            </Link>
-          </div>
-          {asset.holdings.length === 0 ? (
-            <p className="dash-muted">没有持仓（或资产表未构建）。</p>
-          ) : (
-            <table className="dash-table dash-holdings">
-              <thead>
-                <tr>
-                  <th>标的</th>
-                  <th>数量</th>
-                  <th>市值</th>
-                  <th>权重</th>
-                </tr>
-              </thead>
-              <tbody>
-                {asset.holdings.map((row) => (
-                  <tr key={row.security_code} data-testid={`holding-row-${row.security_code}`}>
-                    <td>
-                      <span className="dash-holding-name">
-                        {row.security_name}
-                        <span className="dash-holding-code">{row.security_code}</span>
-                      </span>
-                    </td>
-                    <td className="num">{row.quantity}</td>
-                    <td className="num">{displayValue(shown(row.market_value_display, row.market_value))}</td>
-                    <td>
-                      <span className="dash-weight-cell">
-                        <span className="num">{displayValue(row.weight_display ?? row.weight_pct)}</span>
-                        <span className="dash-weight-track" aria-hidden="true">
-                          <i style={{ "--w": row.weight_pct ?? "0" } as CSSProperties} />
-                        </span>
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-          <div className="dash-links">
-            <Link to={data.links.assets}>资产明细</Link>
-            <Link to={data.links.exports} data-testid="link-exports">
-              导出（占位）
-            </Link>
-            <Link to={data.links.reports} data-testid="link-reports">
-              月报（占位）
-            </Link>
-            <Link to={data.links.attribution} data-testid="link-attribution">
-              归因（占位）
-            </Link>
-          </div>
-        </section>
       </div>
 
       {/* 最赚 / 最亏 */}
@@ -627,14 +634,6 @@ export function Dashboard(): ReactElement {
         </section>
       </div>
 
-      <AnnualMetrics
-        period={data.metrics_period}
-        start={data.metrics_period_start}
-        end={data.metrics_period_end}
-        batch={metricsQuery.data ?? null}
-        loading={metricsQuery.isLoading}
-        error={metricsQuery.error}
-      />
       </div>
 
       <footer className="dash-foot">

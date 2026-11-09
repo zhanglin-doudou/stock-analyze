@@ -186,8 +186,8 @@ export function SectorBlock({ asOf, linkHref }: { asOf: string; linkHref: string
         <div className="dash-sector-pref" data-testid="sector-kpi-preference">
           {pref.benchmark ? (
             <>
-              <PreferenceList title="超配 Top3" items={pref.over} />
-              <PreferenceList title="低配 Top3" items={pref.under} />
+              <PreferenceList title="超配 Top5" items={pref.over} />
+              <PreferenceList title="低配 Top5" items={pref.under} />
             </>
           ) : (
             <>

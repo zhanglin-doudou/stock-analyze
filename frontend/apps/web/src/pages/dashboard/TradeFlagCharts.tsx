@@ -57,7 +57,7 @@ export function buildCharts(
  * nivo 数据结构的投影与配色映射，不做任何重算/取整。范围切换直接换请求参数。
  */
 export function TradeFlagCharts(): ReactElement {
-  const [months, setMonths] = useState<RangeMonths>(6);
+  const [months, setMonths] = useState<RangeMonths>(12);
   const palette = useChartPalette();
   const query = useQuery({
     queryKey: ["dashboard", "trade-flags", months],

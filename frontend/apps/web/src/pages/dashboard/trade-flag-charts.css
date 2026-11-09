@@ -51,7 +51,12 @@
   margin: var(--s2) 0 0;
   font-size: var(--fs-sm);
 }
-
+.tfc-chart-container {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--s4);
+    align-items: start;
+}
 .tfc-chart-block + .tfc-chart-block {
   margin-top: var(--s5);
 }
@@ -98,6 +103,13 @@
   height: 8px;
   border-radius: var(--r-pill);
   flex: none;
+}
+
+/* ── 平板 ──────────────────────────────────── */
+@media (max-width: 1279px) {
+  .tfc-chart-container {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 640px) {
