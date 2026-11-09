@@ -105,6 +105,37 @@
   flex: none;
 }
 
+/* 图例可点击：选中系列高亮，其余系列叠加 0.5 透明度。 */
+.tfc-legend-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+  padding: 2px 4px;
+  border: 0;
+  border-radius: var(--r-sm);
+  background: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+.tfc-legend-btn:hover {
+  background: var(--accent-soft);
+}
+
+.tfc-legend-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.tfc-legend-item.is-dim {
+  opacity: 0.5;
+}
+
+.tfc-legend-item.is-dim .tfc-legend-btn:hover {
+  opacity: 1;
+}
+
 /* ── 平板 ──────────────────────────────────── */
 @media (max-width: 1279px) {
   .tfc-chart-container {

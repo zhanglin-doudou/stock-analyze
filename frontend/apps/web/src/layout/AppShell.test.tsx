@@ -130,6 +130,7 @@ describe("AppShell 两级菜单", () => {
   });
 
   it("⌘K 打开命令面板", () => {
+    renderShell("/assets");
     fireEvent.keyDown(window, { key: "k", metaKey: true });
     expect(screen.getByRole("dialog", { name: "命令面板" })).toBeTruthy();
     fireEvent.keyDown(screen.getByRole("combobox"), { key: "Escape" });

@@ -7,6 +7,8 @@ export interface ChartPalette {
   grid: string;
   line: string;
   surface: string;
+  /** 选中态描边色（海洋蓝，`--chart-4`），浅/暗主题各一套。 */
+  selection: string;
   series: Record<string, string>;
 }
 
@@ -50,6 +52,7 @@ function readPalette(): ChartPalette {
     grid: readVar(style, "--chart-grid"),
     line: readVar(style, "--line"),
     surface: readVar(style, "--surface-raised"),
+    selection: readVar(style, "--chart-4"),
     series,
   };
 }

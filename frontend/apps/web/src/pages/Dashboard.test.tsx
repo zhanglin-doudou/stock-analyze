@@ -788,18 +788,18 @@ describe("Dashboard 看板", () => {
     expect(block.textContent ?? "").not.toMatch(/\d+\.\d{2}%/);
   });
 
-  it("FT-07 账单旗标图：默认请求 6 个月，切换范围改请求参数，月份口径来自后端", async () => {
+  it("FT-07 账单旗标图：默认请求 12 个月，切换范围改请求参数，月份口径来自后端", async () => {
     renderPage();
 
     const section = await screen.findByTestId("trade-flag-charts");
-    await waitFor(() => expect(getTradeFlags).toHaveBeenCalledWith(6));
+    await waitFor(() => expect(getTradeFlags).toHaveBeenCalledWith(12));
     expect(section.textContent).toContain("2026-01");
     expect(section.textContent).toContain("完整月 = 已自然结束的日历月。");
-    expect(screen.getByTestId("tfc-range-6").getAttribute("aria-pressed")).toBe("true");
-
-    fireEvent.click(screen.getByTestId("tfc-range-12"));
-    await waitFor(() => expect(getTradeFlags).toHaveBeenCalledWith(12));
     expect(screen.getByTestId("tfc-range-12").getAttribute("aria-pressed")).toBe("true");
+
+    fireEvent.click(screen.getByTestId("tfc-range-6"));
+    await waitFor(() => expect(getTradeFlags).toHaveBeenCalledWith(6));
+    expect(screen.getByTestId("tfc-range-6").getAttribute("aria-pressed")).toBe("true");
   });
 
   it("FT-08 无旗标数据：展示空态与构建命令，不渲染空白图表", async () => {
@@ -841,6 +841,7 @@ describe("Dashboard 看板", () => {
       grid: "g",
       line: "l",
       surface: "s",
+      selection: "sel",
       series: {
         buy: "buy-total",
         sell: "sell-total",
@@ -909,5 +910,27 @@ describe("Dashboard 看板", () => {
       "sell-2",
       "sell-3",
     ]);
+  });
+
+  it("FT-11 图例点击：其余系列叠加 0.5 透明度，再点同系列取消", async () => {
+    renderPage();
+
+    const first = await screen.findByRole("button", { name: "首次建仓" });
+    const other = screen.getByRole("button", { name: "均价加仓" });
+    expect(first.getAttribute("aria-pressed")).toBe("false");
+    expect(other.closest("li")?.className).not.toContain("is-dim");
+
+    fireEvent.click(first);
+    expect(first.getAttribute("aria-pressed")).toBe("true");
+    expect(first.closest("li")?.className).not.toContain("is-dim");
+    expect(other.closest("li")?.className).toContain("is-dim");
+
+    fireEvent.click(first);
+    expect(first.getAttribute("aria-pressed")).toBe("false");
+    expect(other.closest("li")?.className).not.toContain("is-dim");
+
+    fireEvent.click(other);
+    expect(other.getAttribute("aria-pressed")).toBe("true");
+    expect(first.closest("li")?.className).toContain("is-dim");
   });
 });
