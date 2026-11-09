@@ -23,6 +23,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select
 from stock_contracts.enums import Role
 from stock_contracts.errors import ApiError, ErrorCode, FieldError
+from stock_core.trade_flags import LOOKAHEAD_LABEL_ZH, STATUS_LABELS, TRADE_FLAG_BY_CODE
 from stock_core.values import Money, Ratio, format_quantity
 from stock_platform.audit import record as audit_record
 from stock_platform.idempotency import IdempotencyStore
@@ -53,6 +54,8 @@ from stock_api.schemas import (
     RoundInsightsRefreshOut,
     RoundOut,
     RoundPage,
+    TradeFlagGlossaryOut,
+    TradeFlagOut,
     TradeSideInsightOut,
 )
 
@@ -184,6 +187,40 @@ def _forward_out(view: Any) -> ForwardReturnOut:
     )
 
 
+def _trade_flags_out(records: Any) -> list[TradeFlagOut]:
+    out: list[TradeFlagOut] = []
+    for record in records:
+        definition = TRADE_FLAG_BY_CODE[record.code]
+        out.append(
+            TradeFlagOut(
+                code=record.code,
+                label_zh=definition.label_zh,
+                label_en=definition.label_en,
+                status=record.status,
+                status_label=STATUS_LABELS.get(record.status, record.status),
+                lookahead=record.lookahead,
+                lookahead_label=(LOOKAHEAD_LABEL_ZH if record.lookahead else None),
+                reason=record.reason,
+            )
+        )
+    return out
+
+
+def _trade_flag_glossary_out(entries: Any) -> list[TradeFlagGlossaryOut]:
+    return [
+        TradeFlagGlossaryOut(
+            code=entry.code,
+            label_zh=entry.label_zh,
+            label_en=entry.label_en,
+            description_zh=entry.description_zh,
+            description_en=entry.description_en,
+            side=entry.side,
+            lookahead=entry.lookahead,
+        )
+        for entry in entries
+    ]
+
+
 def _side_out(view: Any) -> TradeSideInsightOut | None:
     if view is None:
         return None
@@ -196,6 +233,7 @@ def _side_out(view: Any) -> TradeSideInsightOut | None:
         reason=_trade_reason_out(view.reason),
         reason_label=view.reason_label,
         forward={str(horizon): _forward_out(item) for horizon, item in view.forward.items()},
+        trade_flags=_trade_flags_out(view.trade_flags),
     )
 
 
@@ -451,6 +489,7 @@ async def get_round_insights_endpoint(
         ranking=detail.ranking,
         disclaimer=detail.disclaimer,
         flag_glossary=_glossary_out(detail.flag_glossary),
+        trade_flag_glossary=_trade_flag_glossary_out(detail.trade_flag_glossary),
     )
 
 

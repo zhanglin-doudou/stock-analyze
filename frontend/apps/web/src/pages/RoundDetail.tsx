@@ -16,6 +16,7 @@ import { DataTable, type DataTableColumn, type DataTableExpansion } from "../ui/
 import { TradeReasonForm } from "../ui/TradeReasonForm";
 import { Icon } from "../ui/icons";
 import { FlagGlossary } from "../ui/FlagGlossary";
+import { TradeFlagGlossary } from "../ui/TradeFlagGlossary";
 import "./detail.css";
 import { roundStatusLabel } from "./Rounds";
 
@@ -359,6 +360,29 @@ export function RoundDetail() {
         },
       },
       {
+        key: "trade_flags",
+        header: "账单旗标",
+        render: (trade) => {
+          const flags = trade.trade_flags ?? [];
+          if (!flags.length) return null;
+          return (
+            <span className="chips">
+              {flags.map((flag) => (
+                <span
+                  key={flag.code}
+                  className={flag.status === "hit" ? "chip" : "chip chip-muted"}
+                  title={flag.label_en}
+                >
+                  {flag.label_zh}
+                  {flag.status === "hit" ? "" : `：${flag.status_label}`}
+                  {flag.lookahead_label ? ` · ${flag.lookahead_label}` : ""}
+                </span>
+              ))}
+            </span>
+          );
+        },
+      },
+      {
         key: "reason",
         header: "操作理由",
         render: (trade) => (
@@ -527,8 +551,9 @@ export function RoundDetail() {
                 </p>
                 <p className="muted">
                   金额保留后端符号（买入为负）；数量/价格/金额/百分比均为后端返回的定点字符串，
-                  前端不做算术或格式改写。
+                  前端不做算术或格式改写。账单旗标只渲染后端返回的码值与文案，与回合旗标相互独立。
                 </p>
+                <TradeFlagGlossary entries={insight.trade_flag_glossary ?? []} />
               </div>
 
               <h2 className="detail-section-title">标签 / 排序</h2>

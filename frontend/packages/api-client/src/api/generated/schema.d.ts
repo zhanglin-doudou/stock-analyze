@@ -3362,6 +3362,8 @@ export interface components {
             sell_trade?: components["schemas"]["TradeSideInsightOut"] | null;
             /** Status */
             status: string;
+            /** Trade Flag Glossary */
+            trade_flag_glossary?: components["schemas"]["TradeFlagGlossaryOut"][];
         };
         /** RoundInsightItemOut */
         RoundInsightItemOut: {
@@ -4015,6 +4017,57 @@ export interface components {
             /** Side */
             side?: ("buy" | "sell" | "both") | null;
         };
+        /**
+         * TradeFlagGlossaryOut
+         * @description 账单级旗标说明（中英文单点维护）。
+         */
+        TradeFlagGlossaryOut: {
+            /** Code */
+            code: string;
+            /** Description En */
+            description_en: string;
+            /** Description Zh */
+            description_zh: string;
+            /** Label En */
+            label_en: string;
+            /** Label Zh */
+            label_zh: string;
+            /**
+             * Lookahead
+             * @default false
+             */
+            lookahead: boolean;
+            /**
+             * Side
+             * @enum {string}
+             */
+            side: "buy" | "sell";
+        };
+        /**
+         * TradeFlagOut
+         * @description 账单级旗标（与回合旗标隔离）；前端只渲染码值与后端文案。
+         */
+        TradeFlagOut: {
+            /** Code */
+            code: string;
+            /** Label En */
+            label_en: string;
+            /** Label Zh */
+            label_zh: string;
+            /**
+             * Lookahead
+             * @default false
+             */
+            lookahead: boolean;
+            /** Lookahead Label */
+            lookahead_label?: string | null;
+            /** Reason */
+            reason?: string | null;
+            /** Status */
+            status: string;
+            /** Status Label */
+            status_label: string;
+        };
         /** TradeHistoryItem */
         TradeHistoryItem: {
             /** Actor Id */
@@ -4243,6 +4296,8 @@ export interface components {
             reason?: components["schemas"]["TradeReasonOut"] | null;
             /** Reason Label */
             reason_label?: string | null;
+            /** Trade Flags */
+            trade_flags?: components["schemas"]["TradeFlagOut"][];
             /** Trade Id */
             trade_id: string;
         };

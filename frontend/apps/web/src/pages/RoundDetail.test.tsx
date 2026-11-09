@@ -251,6 +251,7 @@ describe("RoundDetail 回合详情页", () => {
       "价格",
       "金额",
       "执行价差（相对当日收盘）",
+      "账单旗标",
       "操作理由",
     ]);
 
@@ -278,6 +279,45 @@ describe("RoundDetail 回合详情页", () => {
     const sellTable = screen.getByRole("table", { name: "卖出流水与事后表现" });
     const sellRow = mainRows(sellTable)[0];
     expect(sellRow.textContent).toContain("18000.00");
+  });
+
+  it("账单旗标列渲染后端文案，说明面板默认折叠", async () => {
+    const base = makeInsight();
+    getInsight.mockResolvedValue({
+      ...base,
+      buy_trade: {
+        ...base.buy_trade!,
+        trade_flags: [
+          {
+            code: "addon_average",
+            label_zh: "均价加仓",
+            label_en: "Add-on at average cost",
+            status: "hit",
+            status_label: "命中",
+            lookahead: false,
+            lookahead_label: null,
+            reason: null,
+          },
+        ],
+      },
+      trade_flag_glossary: [
+        {
+          code: "addon_average",
+          label_zh: "均价加仓",
+          label_en: "Add-on at average cost",
+          description_zh: "含费净买价落在持仓均价的上下 1% 以内。",
+          description_en: "Within ±1% of the average cost.",
+          side: "buy",
+          lookahead: false,
+        },
+      ],
+    });
+    renderDetail();
+
+    expect((await screen.findAllByText("均价加仓")).length).toBeGreaterThan(0);
+    const panel = document.querySelector("details.trade-flag-glossary") as HTMLDetailsElement;
+    expect(panel).toBeTruthy();
+    expect(panel.open).toBe(false);
   });
 
   it("同一笔卖出参与多个配对时按 trade 去重，行数 = 流水笔数", async () => {

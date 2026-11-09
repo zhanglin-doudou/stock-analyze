@@ -31,6 +31,7 @@ from stock_core.insights import aggregate as agg
 from stock_core.insights import calendar as cal
 from stock_core.insights.flags import FLAG_DEFINITIONS, FlagDefinition
 from stock_core.insights.forward import ForwardResult, ForwardTrade, compute_forward, price_net
+from stock_core.trade_flags import TradeFlagDefinition
 from stock_core.values import Money, Price, Ratio, format_quantity
 from stock_ledger.corporate_actions import is_corporate_action
 from stock_ledger.models import Trade
@@ -42,6 +43,11 @@ from stock_review.insights.reasons import REASON_LABELS, ReasonDTO
 from stock_review.metrics.context import Period, parse_period_label
 from stock_review.metrics.datasets import DEFAULT_BENCHMARK, benchmark_fetch_symbol
 from stock_review.models import Round, RoundFill, TradeForwardReturn, TradeReason
+from stock_review.trade_flags import (
+    TradeFlagRecord,
+    load_trade_flags,
+    trade_flag_glossary,
+)
 
 HORIZONS: tuple[int, ...] = (5, 10, 20)
 _ADDON_LOOKBACK_TRADING_DAYS = 60
@@ -86,6 +92,7 @@ class TradeSideView:
     reason: ReasonDTO | None
     reason_label: str | None
     forward: dict[int, ForwardView] = field(default_factory=dict)
+    trade_flags: list[TradeFlagRecord] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -264,6 +271,7 @@ class RoundInsightDetail:
     ranking: dict[str, Any]
     disclaimer: str
     flag_glossary: list[FlagDefinition] = field(default_factory=list)
+    trade_flag_glossary: list[TradeFlagDefinition] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -735,6 +743,7 @@ def _side_view(
     market: _MarketData,
     corporate: dict[str, list[date]],
     fingerprint: str,
+    flag_map: dict[str, list[TradeFlagRecord]] | None = None,
 ) -> TradeSideView | None:
     if trade is None:
         return None
@@ -761,6 +770,7 @@ def _side_view(
         reason=dto,
         reason_label=(REASON_LABELS.get(dto.reason_code) if dto else None),
         forward=forward,
+        trade_flags=list((flag_map or {}).get(trade.dedupe_key, [])),
     )
 
 
@@ -1457,6 +1467,7 @@ async def get_round_insight(
     states = _position_states(ordered_trades)
     wanted = {trade.dedupe_key for trade in trades}
     reason_map = await reasons.active_by_dedupe(session, user_id, wanted)
+    flag_map = await load_trade_flags(session, user_id, wanted)
     cached = await _cached_forwards(session, user_id, list(wanted))
     buy_view = _side_view(
         buy,
@@ -1465,6 +1476,7 @@ async def get_round_insight(
         market=market,
         corporate=corporate,
         fingerprint=fingerprint,
+        flag_map=flag_map,
     )
     sell_view = _side_view(
         sell,
@@ -1473,6 +1485,7 @@ async def get_round_insight(
         market=market,
         corporate=corporate,
         fingerprint=fingerprint,
+        flag_map=flag_map,
     )
     item = _build_item(
         round_row=round_row,
@@ -1505,6 +1518,7 @@ async def get_round_insight(
                     market=market,
                     corporate=corporate,
                     fingerprint=fingerprint,
+                    flag_map=flag_map,
                 ),
                 "sell": _side_view(
                     sell_trade,
@@ -1513,6 +1527,7 @@ async def get_round_insight(
                     market=market,
                     corporate=corporate,
                     fingerprint=fingerprint,
+                    flag_map=flag_map,
                 ),
                 "quantity_display": format_quantity(fill.quantity_units),
                 "pnl_display": _money(fill.pnl_units),
@@ -1550,6 +1565,7 @@ async def get_round_insight(
         },
         disclaimer=DISCLAIMER,
         flag_glossary=list(FLAG_DEFINITIONS),
+        trade_flag_glossary=trade_flag_glossary(),
     )
 
 

@@ -33,6 +33,7 @@ help:
 	@echo "  make sync-sector-industry   只同步行业板块（同花顺）"
 	@echo "  make sync-sector-concept    只同步概念板块（同花顺）"
 	@echo "  make sync-sector-bars       只同步行业板块指数日线（ARGS='--start 2026-04-01 [--dry-run]'）"
+	@echo "  make build-trade-flags      按月构建账单级旗标（ARGS='--month 2026-09 [--email x] [--dry-run]'）"
 	@echo "── 质量 ──────────────────────────────────────────────"
 	@echo "  make lint           ruff + eslint + frontend tsc"
 	@echo "  make typecheck      mypy + tsc + import-linter"
@@ -179,6 +180,10 @@ sync-sector-concept:
 .PHONY: sync-sector-bars
 sync-sector-bars:
 	@$(PY) -m stock_api.cli sync-sector-bars $(ARGS)
+
+.PHONY: build-trade-flags
+build-trade-flags:
+	@$(PY) -m stock_api.cli build-trade-flags $(ARGS)
 
 # ── 质量 ────────────────────────────────────────────────────
 .PHONY: lint

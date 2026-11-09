@@ -6233,6 +6233,13 @@
           "status": {
             "title": "Status",
             "type": "string"
+          },
+          "trade_flag_glossary": {
+            "items": {
+              "$ref": "#/components/schemas/TradeFlagGlossaryOut"
+            },
+            "title": "Trade Flag Glossary",
+            "type": "array"
           }
         },
         "required": [
@@ -8340,6 +8347,115 @@
         "title": "SummaryRulePatchIn",
         "type": "object"
       },
+      "TradeFlagGlossaryOut": {
+        "description": "账单级旗标说明（中英文单点维护）。",
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "description_en": {
+            "title": "Description En",
+            "type": "string"
+          },
+          "description_zh": {
+            "title": "Description Zh",
+            "type": "string"
+          },
+          "label_en": {
+            "title": "Label En",
+            "type": "string"
+          },
+          "label_zh": {
+            "title": "Label Zh",
+            "type": "string"
+          },
+          "lookahead": {
+            "default": false,
+            "title": "Lookahead",
+            "type": "boolean"
+          },
+          "side": {
+            "enum": [
+              "buy",
+              "sell"
+            ],
+            "title": "Side",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "label_zh",
+          "label_en",
+          "description_zh",
+          "description_en",
+          "side"
+        ],
+        "title": "TradeFlagGlossaryOut",
+        "type": "object"
+      },
+      "TradeFlagOut": {
+        "description": "账单级旗标（与回合旗标隔离）；前端只渲染码值与后端文案。",
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "label_en": {
+            "title": "Label En",
+            "type": "string"
+          },
+          "label_zh": {
+            "title": "Label Zh",
+            "type": "string"
+          },
+          "lookahead": {
+            "default": false,
+            "title": "Lookahead",
+            "type": "boolean"
+          },
+          "lookahead_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lookahead Label"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          },
+          "status_label": {
+            "title": "Status Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "label_zh",
+          "label_en",
+          "status",
+          "status_label"
+        ],
+        "title": "TradeFlagOut",
+        "type": "object"
+      },
       "TradeHistoryItem": {
         "properties": {
           "actor_id": {
@@ -9068,6 +9184,13 @@
               }
             ],
             "title": "Reason Label"
+          },
+          "trade_flags": {
+            "items": {
+              "$ref": "#/components/schemas/TradeFlagOut"
+            },
+            "title": "Trade Flags",
+            "type": "array"
           },
           "trade_id": {
             "title": "Trade Id",

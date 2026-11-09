@@ -555,6 +555,51 @@ class TradeForwardReturn(Base):
     )
 
 
+class TradeFlag(Base):
+    """账单级旗标（独立于回合旗标；设计 2026-11-09）。
+
+    行粒度 = (账单, 检查项)，`status` 记录命中/未命中/待算/无行情等原因，非 hit 也落库，
+    避免把数据边界静默当成「未命中」。唯一键含 `definition_version`，重跑幂等；
+    `(user_id, flag_code, status)` 索引为后续按旗标 groupBy 铺路。
+    """
+
+    __tablename__ = "trade_flag"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "trade_dedupe_key",
+            "flag_code",
+            "definition_version",
+            name="uq_trade_flag_key",
+        ),
+        Index("ix_trade_flag_user_date", "user_id", "trade_date"),
+        Index("ix_trade_flag_user_code", "user_id", "flag_code", "status"),
+        {"schema": SCHEMA},
+    )
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey(USER_FK, ondelete="CASCADE"), nullable=False
+    )
+    trade_dedupe_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    trade_id: Mapped[str] = mapped_column(String(40), nullable=False)
+    security_code: Mapped[str] = mapped_column(String(16), nullable=False)
+    side: Mapped[str] = mapped_column(String(8), nullable=False)
+    trade_date: Mapped[date] = mapped_column(Date, nullable=False)
+    flag_code: Mapped[str] = mapped_column(String(32), nullable=False)
+    status: Mapped[str] = mapped_column(String(24), nullable=False)
+    reason: Mapped[str | None] = mapped_column(String(64))
+    lookahead: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    definition_version: Mapped[str] = mapped_column(String(8), nullable=False)
+    computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
 # 供迁移/RLS 门禁/测试 TRUNCATE 引用的表名清单（避免手写遗漏）
 REVIEW_TABLES: tuple[str, ...] = (
     Round.__tablename__,
@@ -567,6 +612,7 @@ REVIEW_TABLES: tuple[str, ...] = (
     MetricDependency.__tablename__,
     TradeReason.__tablename__,
     TradeForwardReturn.__tablename__,
+    TradeFlag.__tablename__,
 )
 
 __all__ = [
@@ -587,6 +633,7 @@ __all__ = [
     "Round",
     "RoundBuildState",
     "RoundFill",
+    "TradeFlag",
     "TradeForwardReturn",
     "TradeReason",
 ]

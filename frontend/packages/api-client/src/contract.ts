@@ -111,6 +111,10 @@ export type RoundInsightsRefreshIn = ApiSchemas["RoundInsightsRefreshIn"];
 export type RoundInsightsRefreshOut = ApiSchemas["RoundInsightsRefreshOut"];
 export type FlagGlossaryOut = ApiSchemas["FlagGlossaryOut"];
 
+// 2026-11-09：账单级独立旗标（与回合旗标隔离）
+export type TradeFlagOut = ApiSchemas["TradeFlagOut"];
+export type TradeFlagGlossaryOut = ApiSchemas["TradeFlagGlossaryOut"];
+
 // Period2-03：净值与收益（API-032）
 export type NavOut = ApiSchemas["NavOut"];
 export type NavPointOut = ApiSchemas["NavPointOut"];

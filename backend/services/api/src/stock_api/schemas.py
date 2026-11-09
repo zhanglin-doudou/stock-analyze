@@ -1553,6 +1553,31 @@ class ForwardReturnOut(BaseModel):
     price_jump_review: bool = False
 
 
+class TradeFlagOut(BaseModel):
+    """账单级旗标（与回合旗标隔离）；前端只渲染码值与后端文案。"""
+
+    code: str
+    label_zh: str
+    label_en: str
+    status: str
+    status_label: str
+    lookahead: bool = False
+    lookahead_label: str | None = None
+    reason: str | None = None
+
+
+class TradeFlagGlossaryOut(BaseModel):
+    """账单级旗标说明（中英文单点维护）。"""
+
+    code: str
+    label_zh: str
+    label_en: str
+    description_zh: str
+    description_en: str
+    side: Literal["buy", "sell"]
+    lookahead: bool = False
+
+
 class TradeSideInsightOut(BaseModel):
     trade_id: str
     date: date
@@ -1562,6 +1587,7 @@ class TradeSideInsightOut(BaseModel):
     reason: TradeReasonOut | None = None
     reason_label: str | None = None
     forward: dict[str, ForwardReturnOut] = Field(default_factory=dict)
+    trade_flags: list[TradeFlagOut] = Field(default_factory=list)
 
 
 class RoundInsightItemOut(BaseModel):
@@ -1741,6 +1767,7 @@ class RoundInsightDetailOut(BaseModel):
     ranking: dict[str, Any] = Field(default_factory=dict)
     disclaimer: str
     flag_glossary: list[FlagGlossaryOut] = Field(default_factory=list)
+    trade_flag_glossary: list[TradeFlagGlossaryOut] = Field(default_factory=list)
 
 
 class RoundInsightsRefreshIn(StrictModel):
