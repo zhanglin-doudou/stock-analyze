@@ -2672,6 +2672,205 @@
         "title": "DashboardTradeCountOut",
         "type": "object"
       },
+      "DashboardTradeFlagCountOut": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "code",
+          "count"
+        ],
+        "title": "DashboardTradeFlagCountOut",
+        "type": "object"
+      },
+      "DashboardTradeFlagMonthOut": {
+        "additionalProperties": false,
+        "description": "一个完整月的买卖笔数 + 折线趋势旗标 + 柱状图互斥状态旗标命中数。",
+        "properties": {
+          "buy_count": {
+            "title": "Buy Count",
+            "type": "integer"
+          },
+          "flags": {
+            "items": {
+              "$ref": "#/components/schemas/DashboardTradeFlagCountOut"
+            },
+            "title": "Flags",
+            "type": "array"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "month": {
+            "title": "Month",
+            "type": "string"
+          },
+          "sell_count": {
+            "title": "Sell Count",
+            "type": "integer"
+          },
+          "states": {
+            "items": {
+              "$ref": "#/components/schemas/DashboardTradeFlagCountOut"
+            },
+            "title": "States",
+            "type": "array"
+          }
+        },
+        "required": [
+          "month",
+          "label",
+          "buy_count",
+          "sell_count",
+          "flags",
+          "states"
+        ],
+        "title": "DashboardTradeFlagMonthOut",
+        "type": "object"
+      },
+      "DashboardTradeFlagSeriesOut": {
+        "additionalProperties": false,
+        "description": "看板图表的旗标系列（标签/方向/事后属性由后端提供，前端零口径）。",
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "label_en": {
+            "title": "Label En",
+            "type": "string"
+          },
+          "label_zh": {
+            "title": "Label Zh",
+            "type": "string"
+          },
+          "lookahead": {
+            "title": "Lookahead",
+            "type": "boolean"
+          },
+          "side": {
+            "enum": [
+              "buy",
+              "sell"
+            ],
+            "title": "Side",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "label_zh",
+          "label_en",
+          "side",
+          "lookahead"
+        ],
+        "title": "DashboardTradeFlagSeriesOut",
+        "type": "object"
+      },
+      "DashboardTradeFlagsOut": {
+        "additionalProperties": false,
+        "description": "API-095：账单旗标月度聚合（最近 6/12/24 个完整月）。",
+        "properties": {
+          "definition_version": {
+            "title": "Definition Version",
+            "type": "string"
+          },
+          "end_month": {
+            "title": "End Month",
+            "type": "string"
+          },
+          "has_data": {
+            "title": "Has Data",
+            "type": "boolean"
+          },
+          "has_flag_data": {
+            "title": "Has Flag Data",
+            "type": "boolean"
+          },
+          "has_state_data": {
+            "title": "Has State Data",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/DashboardTradeFlagMonthOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "latest_complete_month": {
+            "title": "Latest Complete Month",
+            "type": "string"
+          },
+          "months_basis": {
+            "title": "Months Basis",
+            "type": "string"
+          },
+          "months_without_data": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Months Without Data",
+            "type": "array"
+          },
+          "series": {
+            "items": {
+              "$ref": "#/components/schemas/DashboardTradeFlagSeriesOut"
+            },
+            "title": "Series",
+            "type": "array"
+          },
+          "start_month": {
+            "title": "Start Month",
+            "type": "string"
+          },
+          "state_series": {
+            "items": {
+              "$ref": "#/components/schemas/DashboardTradeFlagSeriesOut"
+            },
+            "title": "State Series",
+            "type": "array"
+          },
+          "total_labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Total Labels",
+            "type": "object"
+          },
+          "window_months": {
+            "title": "Window Months",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "window_months",
+          "start_month",
+          "end_month",
+          "latest_complete_month",
+          "months_basis",
+          "definition_version",
+          "has_data",
+          "has_flag_data",
+          "has_state_data",
+          "series",
+          "state_series",
+          "total_labels",
+          "items",
+          "months_without_data"
+        ],
+        "title": "DashboardTradeFlagsOut",
+        "type": "object"
+      },
       "Error": {
         "additionalProperties": false,
         "description": "RFC 7807 问题详情 + 平台扩展字段（code/user_message/what_to_do/retryable/request_id/errors），对应 Content-Type: application/problem+json。",
@@ -11466,6 +11665,234 @@
           }
         },
         "summary": "Get Dashboard Endpoint",
+        "tags": [
+          "dashboard"
+        ],
+        "x-async": false,
+        "x-error-codes": [
+          "TOKEN_EXPIRED",
+          "TOKEN_REVOKED",
+          "MULTIPLE_CREDENTIALS",
+          "ADMIN_CANNOT_READ_TRADES",
+          "UNKNOWN_QUERY_PARAM",
+          "VALIDATION_ERROR"
+        ],
+        "x-idempotent": false,
+        "x-required-scope": "read"
+      }
+    },
+    "/api/v1/dashboard/trade-flags": {
+      "get": {
+        "description": "API-095：账单旗标月度聚合（最近 6/12/24 个完整月，只读）。",
+        "operationId": "getDashboardTradeFlags",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "months",
+            "required": false,
+            "schema": {
+              "default": 6,
+              "title": "Months",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-api-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "definition_version": "1.0",
+                  "end_month": "示例",
+                  "has_data": false,
+                  "has_flag_data": false,
+                  "has_state_data": false,
+                  "items": [
+                    {
+                      "buy_count": 1,
+                      "flags": [
+                        {
+                          "code": "MISSING_CASH_BALANCE",
+                          "count": 1
+                        }
+                      ],
+                      "label": "示例",
+                      "month": "示例",
+                      "sell_count": 1,
+                      "states": [
+                        {
+                          "code": "MISSING_CASH_BALANCE",
+                          "count": 1
+                        }
+                      ]
+                    }
+                  ],
+                  "latest_complete_month": "示例",
+                  "months_basis": "示例",
+                  "months_without_data": [
+                    "示例"
+                  ],
+                  "series": [
+                    {
+                      "code": "MISSING_CASH_BALANCE",
+                      "label_en": "示例",
+                      "label_zh": "示例",
+                      "lookahead": false,
+                      "side": "buy"
+                    }
+                  ],
+                  "start_month": "示例",
+                  "state_series": [
+                    {
+                      "code": "MISSING_CASH_BALANCE",
+                      "label_en": "示例",
+                      "label_zh": "示例",
+                      "lookahead": false,
+                      "side": "buy"
+                    }
+                  ],
+                  "total_labels": {
+                    "key": "示例"
+                  },
+                  "window_months": 1
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/DashboardTradeFlagsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "UNKNOWN_QUERY_PARAM",
+                  "detail": "请求包含未知参数。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 400,
+                  "title": "UNKNOWN_QUERY_PARAM",
+                  "type": "https://stock-analyze.local/errors/UNKNOWN_QUERY_PARAM",
+                  "user_message": "请求包含未知参数。",
+                  "what_to_do": "移除未知参数后重试。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "请求参数错误"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "TOKEN_EXPIRED",
+                  "detail": "访问凭证已过期。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 401,
+                  "title": "TOKEN_EXPIRED",
+                  "type": "https://stock-analyze.local/errors/TOKEN_EXPIRED",
+                  "user_message": "访问凭证已过期。",
+                  "what_to_do": "用 refresh_token 换新 access，或重建 PAT。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "未认证或凭证无效"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "ADMIN_CANNOT_READ_TRADES",
+                  "detail": "管理员账号不能查看交易明细。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 403,
+                  "title": "ADMIN_CANNOT_READ_TRADES",
+                  "type": "https://stock-analyze.local/errors/ADMIN_CANNOT_READ_TRADES",
+                  "user_message": "管理员账号不能查看交易明细。",
+                  "what_to_do": "用数据所有者账号访问。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "权限不足"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "example": {
+                  "code": "VALIDATION_ERROR",
+                  "detail": "请求参数有问题。",
+                  "errors": [
+                    {
+                      "code": "invalid",
+                      "field": "body.email",
+                      "message": "邮箱格式不正确。"
+                    }
+                  ],
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 422,
+                  "title": "VALIDATION_ERROR",
+                  "type": "https://stock-analyze.local/errors/VALIDATION_ERROR",
+                  "user_message": "请求参数有问题。",
+                  "what_to_do": "按 errors[] 修正字段后重试。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Dashboard Trade Flags Endpoint",
         "tags": [
           "dashboard"
         ],

@@ -59,7 +59,7 @@ def _status(results: list, code: str) -> str:
 
 def test_flag_codes_are_unique_and_ordered() -> None:
     assert len(TRADE_FLAG_CODES) == len(set(TRADE_FLAG_CODES))
-    assert TRADE_FLAG_CODES[0] == "addon_average"
+    assert TRADE_FLAG_CODES[0] == "first_entry"
 
 
 def test_buy_first_entry_marks_state_not_applicable() -> None:
@@ -67,6 +67,7 @@ def test_buy_first_entry_marks_state_not_applicable() -> None:
         _buy(), bars=_flat(30), calendar=CALENDAR, data_as_of=CALENDAR[-1]
     )
     statuses = _by_code(results)
+    assert statuses["first_entry"] == STATUS_HIT
     assert statuses["addon_average"] == STATUS_NOT_APPLICABLE
     assert statuses["addon_dip"] == STATUS_NOT_APPLICABLE
     assert statuses["addon_chase"] == STATUS_NOT_APPLICABLE
@@ -83,6 +84,7 @@ def test_buy_addon_average() -> None:
         calendar=CALENDAR,
         data_as_of=CALENDAR[-1],
     )
+    assert _status(results, "first_entry") == STATUS_MISS
     assert _status(results, "addon_average") == STATUS_HIT
     assert _status(results, "addon_dip") == STATUS_MISS
     assert _status(results, "addon_chase") == STATUS_MISS
@@ -125,6 +127,8 @@ def test_buy_without_cost_basis() -> None:
         calendar=CALENDAR,
         data_as_of=CALENDAR[-1],
     )
+    # 已有持仓但成本不可得：既非首次建仓，也不属于加仓三态（买侧残余）。
+    assert _status(results, "first_entry") == STATUS_MISS
     assert _status(results, "addon_average") == STATUS_NO_COST_BASIS
     assert _status(results, "addon_dip") == STATUS_NO_COST_BASIS
     assert _status(results, "addon_chase") == STATUS_NO_COST_BASIS
@@ -237,6 +241,45 @@ def test_sell_full_exit_replaces_reduction_states() -> None:
     assert _status(results, "reduce_profit") == STATUS_NOT_APPLICABLE
     assert _status(results, "reduce_loss") == STATUS_NOT_APPLICABLE
     assert _status(results, "full_exit") == STATUS_HIT
+    # 净卖价 == 均价：回本清仓命中，止盈/止损清仓不命中。
+    assert _status(results, "full_exit_breakeven") == STATUS_HIT
+    assert _status(results, "full_exit_profit") == STATUS_MISS
+    assert _status(results, "full_exit_loss") == STATUS_MISS
+
+
+def test_sell_full_exit_profit_and_loss_states() -> None:
+    args = {"quantity_before_units": 1000, "quantity_units": 1000, "avg_cost_units": PRICE}
+    profit = evaluate_trade_flags(
+        _sell(net_price_units=101_100_000, **args),
+        bars=_flat(30, price=110_000_000),
+        calendar=CALENDAR,
+        data_as_of=CALENDAR[-1],
+    )
+    assert _status(profit, "full_exit_profit") == STATUS_HIT
+    assert _status(profit, "full_exit_breakeven") == STATUS_MISS
+    assert _status(profit, "full_exit_loss") == STATUS_MISS
+    loss = evaluate_trade_flags(
+        _sell(net_price_units=98_900_000, **args),
+        bars=_flat(30, price=90_000_000),
+        calendar=CALENDAR,
+        data_as_of=CALENDAR[-1],
+    )
+    assert _status(loss, "full_exit_loss") == STATUS_HIT
+    assert _status(loss, "full_exit_breakeven") == STATUS_MISS
+    assert _status(loss, "full_exit_profit") == STATUS_MISS
+
+
+def test_sell_full_exit_without_cost_basis() -> None:
+    results = evaluate_trade_flags(
+        _sell(quantity_before_units=1000, quantity_units=1000, avg_cost_units=None),
+        bars=_flat(30),
+        calendar=CALENDAR,
+        data_as_of=CALENDAR[-1],
+    )
+    assert _status(results, "reduce_breakeven") == STATUS_NOT_APPLICABLE
+    assert _status(results, "full_exit") == STATUS_HIT
+    for code in ("full_exit_breakeven", "full_exit_profit", "full_exit_loss"):
+        assert _status(results, code) == STATUS_NO_COST_BASIS
 
 
 def test_sell_breakeven_reduction() -> None:
@@ -248,6 +291,8 @@ def test_sell_breakeven_reduction() -> None:
     )
     assert _status(results, "reduce_breakeven") == STATUS_HIT
     assert _status(results, "full_exit") == STATUS_MISS
+    for code in ("full_exit_breakeven", "full_exit_profit", "full_exit_loss"):
+        assert _status(results, code) == STATUS_NOT_APPLICABLE
 
 
 def test_sell_profit_and_loss_reductions() -> None:
@@ -277,6 +322,8 @@ def test_sell_without_position() -> None:
     )
     assert _status(results, "reduce_breakeven") == STATUS_NOT_APPLICABLE
     assert _status(results, "full_exit") == STATUS_MISS
+    for code in ("full_exit_breakeven", "full_exit_profit", "full_exit_loss"):
+        assert _status(results, code) == STATUS_NOT_APPLICABLE
 
 
 def test_sell_without_cost_basis() -> None:
@@ -288,6 +335,8 @@ def test_sell_without_cost_basis() -> None:
     )
     assert _status(results, "reduce_breakeven") == STATUS_NO_COST_BASIS
     assert _status(results, "full_exit") == STATUS_MISS
+    for code in ("full_exit_breakeven", "full_exit_profit", "full_exit_loss"):
+        assert _status(results, code) == STATUS_NOT_APPLICABLE
 
 
 def test_sell_stop_loss() -> None:

@@ -11,6 +11,7 @@ import type {
 import { api } from "../client";
 import { TrendChart } from "../charts/TrendChart";
 import { SectorBlock } from "./dashboard/SectorBlock";
+import { TradeFlagCharts } from "./dashboard/TradeFlagCharts";
 import { ProblemView } from "../ui/Problem";
 import { displayValue, signTone } from "../ui/format";
 import {
@@ -421,6 +422,8 @@ export function Dashboard(): ReactElement {
           <span>有效观测 {drawdown.n_obs} 天</span>
         </div>
       </section>
+
+      <TradeFlagCharts />
       </div>
 
       {/* 历史概览 + 持仓（板块级容器 history-overview） */}

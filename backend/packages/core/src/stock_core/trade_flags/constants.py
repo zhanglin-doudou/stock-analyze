@@ -7,7 +7,8 @@
 from __future__ import annotations
 
 # 词表/判定口径版本：随判定逻辑变化递增，参与幂等唯一键。
-DEFINITION_VERSION = "1.0"
+# 1.1（2026-11-09）：新增 `first_entry` 与三个清仓状态（`full_exit_*`）。
+DEFINITION_VERSION = "1.1"
 
 # 比例分母（1 bps = 1/10000）。
 BPS_DENOMINATOR = 10_000

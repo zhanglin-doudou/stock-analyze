@@ -26,10 +26,12 @@ from stock_core.trade_flags.constants import (
 from stock_core.trade_flags.definitions import (
     BUY_FLAG_CODES,
     SELL_FLAG_CODES,
+    STACKED_STATE_FLAG_CODES,
     TRADE_FLAG_BY_CODE,
     TRADE_FLAG_CODES,
     TRADE_FLAG_DEFINITIONS,
     TRADE_FLAG_LOOKAHEAD_CODES,
+    TREND_FLAG_CODES,
     TradeFlagDefinition,
 )
 from stock_core.trade_flags.engine import (
@@ -50,6 +52,7 @@ __all__ = [
     "NEAR_EQUAL_TOLERANCE_BPS",
     "SELL_FLAG_CODES",
     "SHORT_TERM_MARGIN_BPS",
+    "STACKED_STATE_FLAG_CODES",
     "STATUS_HIT",
     "STATUS_INSUFFICIENT_HISTORY",
     "STATUS_LABELS",
@@ -64,6 +67,7 @@ __all__ = [
     "TRADE_FLAG_CODES",
     "TRADE_FLAG_DEFINITIONS",
     "TRADE_FLAG_LOOKAHEAD_CODES",
+    "TREND_FLAG_CODES",
     "WINDOW_TRADING_DAYS",
     "BarPoint",
     "FlagResult",

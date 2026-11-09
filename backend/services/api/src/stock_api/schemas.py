@@ -908,6 +908,54 @@ class DashboardOut(StrictModel):
     inputs_hash: str
 
 
+class DashboardTradeFlagSeriesOut(StrictModel):
+    """看板图表的旗标系列（标签/方向/事后属性由后端提供，前端零口径）。"""
+
+    code: str
+    label_zh: str
+    label_en: str
+    side: Literal["buy", "sell"]
+    lookahead: bool
+
+
+class DashboardTradeFlagCountOut(StrictModel):
+    code: str
+    count: int
+
+
+class DashboardTradeFlagMonthOut(StrictModel):
+    """一个完整月的买卖笔数 + 折线趋势旗标 + 柱状图互斥状态旗标命中数。"""
+
+    month: str
+    label: str
+    buy_count: int
+    sell_count: int
+    flags: list[DashboardTradeFlagCountOut]
+    states: list[DashboardTradeFlagCountOut]
+
+
+class DashboardTradeFlagsOut(StrictModel):
+    """API-095：账单旗标月度聚合（最近 6/12/24 个完整月）。"""
+
+    window_months: int
+    start_month: str
+    end_month: str
+    latest_complete_month: str
+    months_basis: str
+    definition_version: str
+    has_data: bool
+    has_flag_data: bool
+    has_state_data: bool
+    series: list[DashboardTradeFlagSeriesOut]
+    # 柱状图口径：买卖两侧各三个互斥的加仓/减仓状态。
+    state_series: list[DashboardTradeFlagSeriesOut]
+    # 买卖笔数展示标签（side -> 文案），前端不再自造文案。
+    total_labels: dict[str, str]
+    items: list[DashboardTradeFlagMonthOut]
+    # 区间内没有任何旗标记录的月份（可能未运行 build-trade-flags，或当月无交易）。
+    months_without_data: list[str]
+
+
 # ── 板块（API-087/088，2026-10-31 sector-data）────────────────
 SectorTaxonomy = Literal["industry", "concept"]
 SectorStatus = Literal["ok", "degraded", "stale", "insufficient", "missing", "blocked"]

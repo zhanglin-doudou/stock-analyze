@@ -48,7 +48,7 @@
 - ETag `W/"<version>"`（列表含查询指纹），写响应返新 ETag；`If-Match` 不匹配 → 409 `VERSION_CONFLICT`（遵循 PRD FR-L4，不采用 412）。
 - 格式：金额**定点字符串 2 位** `"1234.56"`；价格 6 位、数量 4 位；比率十进制小数；时间 ISO 8601 UTC；业务日 `YYYY-MM-DD`（Asia/Shanghai）；`blocked` 时 `value` **字段缺省**。软删默认过滤 `deleted_at NULL`，`include_deleted=true` 仅本人；注销物理级联删除，审计留事件元数据。
 
-## §1 端点总表（93 个；API-089 预留不计数，API-090~094 已实现（2026-11-05）；Path 省略公共前缀 `/api/v1`，标注「根」者不在前缀下）
+## §1 端点总表（94 个；API-089 预留不计数，API-090~095 已实现（2026-11-05/09）；Path 省略公共前缀 `/api/v1`，标注「根」者不在前缀下）
 | API-ID | Method | Path | 用途 | FR | 认证/scope | 幂等 | 同步/异步 | 优先级 | 主要成功码 |
 |---|---|---|---|---|---|---|---|---|---|
 | API-001 | POST | `/auth/register` | 注册账号 | L2 | 公开 | 支持 | 同步 | P0 | 201 |
@@ -144,6 +144,7 @@
 | API-092 | GET | `/rounds/insights` | 回合洞察列表（理由/前瞻/波段/抄底卖飞/20D 表现排序） | R1/R8 | read | — | 同步 | P0 | 200 |
 | API-093 | GET | `/rounds/{round_id}/insights` | 单回合洞察详情（逐笔理由/5/10/20 日四口径） | R8 | read | — | 同步 | P1 | 200 |
 | API-094 | POST | `/rounds/insights/refresh` | 补算/失效重算前瞻收益（手动/后续自动化同函数） | R8 | write | 必需 | 同步/异步 | P1 | 200/202 |
+| API-095 | GET | `/dashboard/trade-flags` | 账单旗标月度聚合（最近 6/12/24 个完整月 × 旗标码 + 买卖笔数，看板图表数据源） | R1 | read | — | 同步 | P1 | 200 |
 
 
 
@@ -488,6 +489,20 @@
 - 错误码：VALIDATION_ERROR(422)、IDEMPOTENCY_KEY_REUSED(422)、IDEMPOTENCY_IN_PROGRESS(409)、JOB_ALREADY_RUNNING(409)、QUOTA_EXCEEDED(429)、ADMIN_CANNOT_READ_TRADES(403)。
 - 验收：同 key 重放同一结果；并发单飞；只读行情缓存不联网；`data_as_of` 用 daily_bar 最大日；202 时 job 可查。
 
+#### API-095 GET /dashboard/trade-flags
+- 用途：看板两张账单旗标图表的数据源；只读 `review.trade_flag`（当前 `definition_version`），不重算、不联网、不建 job；operationId `getDashboardTradeFlags`。
+- 请求 query：`months` ∈ `6|12|24`（默认 6）。
+- 口径：**完整月** = 服务端业务日（东八区）所在月之前、已自然结束的日历月；最新完整月固定为上一个月；区间连续 N 个月（升序，缺失月份显式 0）。
+- 响应 200：`{window_months,start_month,end_month,latest_complete_month,months_basis,definition_version,has_data,has_flag_data,has_state_data,series[],state_series[],total_labels,items[],months_without_data[]}`。
+  - `series[]`（折线口径）：`{code,label_zh,label_en,side,lookahead}`（买卖各 3 个：`chase/instant_bottom/short_term_win`、`stop_loss/instant_top/short_term_top`）。
+  - `state_series[]`（柱状图口径）：买卖两侧的**互斥**状态——买侧 4 个 `first_entry/addon_average/addon_dip/addon_chase`；卖侧 6 个 `reduce_breakeven/reduce_profit/reduce_loss/full_exit_breakeven/full_exit_profit/full_exit_loss`。
+  - `items[]`：`{month,label,buy_count,sell_count,flags[]{code,count},states[]{code,count}}`；`buy_count/sell_count` = 当月去重账单数；`flags[]`/`states[]` 的 `count` = 当月 `status='hit'` 的账单数（同一账单可命中多个趋势旗标，分别计数；`states[]` 每侧状态互斥）。
+  - **口径**：`definition_version` 当前为 `1.1`。买侧 `first_entry` 只在买入前持仓为 0 时命中；`addon_*` 只对非首次买入成立。卖侧清仓时 `reduce_*` 降为 `not_applicable/full_exit`，由 `full_exit_breakeven/profit/loss` 三选一接管，清仓与减仓互斥；`full_exit` 仍记录清仓事实，但不参与柱状图叠放。
+  - **残余口径**：两侧叠放合计理论上严格等于该侧笔数，唯一已知残余是「已有持仓但成本不可得」的买入（`addon_*=no_cost_basis`，既非首次建仓也非加仓三态）与「无持仓卖出」（`reduce_*=not_applicable/no_position`）；接口如实按原状态计数，禁止并入任一状态类别。
+  - `has_data` = 区间内有任何买卖笔数；`has_flag_data` = 任一月任一趋势旗标 count > 0；`has_state_data` = 任一月任一互斥状态 count > 0；图表按各自数据判空，不得画空白坐标轴。
+- 错误码：VALIDATION_ERROR(422，`months` 非 6/12/24)、ADMIN_CANNOT_READ_TRADES(403)。
+- 验收：`months=6/12/24` 月边界正确（跨年）；只返回本人数据；未构建月份显式 0 且列入 `months_without_data`；`states[]` 每侧状态互斥（买侧首次建仓与加仓互斥、卖侧清仓与减仓互斥）；只读（调用前后表行数不变）。
+
 
 ## §3 错误码总表
 
@@ -707,6 +722,7 @@ data: {"job_id":"job_01J9Z6","status":"succeeded","result_ref":"/api/v1/reports/
 | API-092 | round_insights_list（已实现） | 200；路由不被 `/{round_id}` 吞；筛选/排序白名单；`_pct/_display/label`；缺失 null 不 0；n<30 不排名；`bucket_basis` 透出且 fill/回合不相加；`security_type` 过滤后 items 与 summary 同源收敛、四类完备（四类之和 == 全量）、非法值 422；卖飞新增 abs+label 且原带符号字段不变；`flag_glossary` 覆盖 16 个枚举值且中英文说明非空；同日先卖后买不误判加仓（按 `line_no` 稳定序） | fx_round_insights | P0 |
 | API-093 | round_insights_detail（已实现） | 200；逐笔理由/5/10/20 四口径；fill 级 `holding_trading_days/bucket`；跨用户 404；不混旧/新持有天；`flag_glossary` 与列表同源同序 | fx_round_insights | P1 |
 | API-094 | round_insights_refresh（已实现） | 200/202+Location；Idempotency-Key 重放；单飞；data_as_of=DB max；GET 不写 | fx_round_insights | P1 |
+| API-095 | dashboard_trade_flags（已实现） | 200；months=6/12/24 月边界跨年正确；只本人数据；未构建月份显式 0；只读 | fx_round_insights | P1 |
 
 
 > **实现说明（API-090~094，2026-11-05）**：上述 5 行已实现并通过 `test_api_090_091_trade_reasons.py`、`test_api_092_094_round_insights.py`、`test_api_028_031_rounds.py`、契约与隔离矩阵；OpenAPI 示例与 SDK 已同步。既有 88 个端点的验收矩阵不变。

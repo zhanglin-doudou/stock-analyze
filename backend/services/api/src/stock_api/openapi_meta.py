@@ -709,6 +709,20 @@ OPERATION_META: dict[str, dict[str, Any]] = {
             "UNKNOWN_QUERY_PARAM",
         ],
     },
+    "getDashboardTradeFlags": {
+        "api_id": "API-095",
+        "scope": "read",
+        "idempotent": False,
+        "async": False,
+        "error_codes": [
+            "TOKEN_EXPIRED",
+            "TOKEN_REVOKED",
+            "MULTIPLE_CREDENTIALS",
+            "ADMIN_CANNOT_READ_TRADES",
+            "UNKNOWN_QUERY_PARAM",
+            "VALIDATION_ERROR",
+        ],
+    },
     "getSectorsOverview": {
         "api_id": "API-087",
         "scope": "read",

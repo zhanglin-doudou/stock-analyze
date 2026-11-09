@@ -23,6 +23,20 @@ class TradeFlagDefinition:
 TRADE_FLAG_DEFINITIONS: tuple[TradeFlagDefinition, ...] = (
     # ── 买入侧 ─────────────────────────────────────────────
     TradeFlagDefinition(
+        code="first_entry",
+        label_zh="首次建仓",
+        label_en="First entry",
+        description_zh=(
+            "买入前该标的持仓为 0，本笔建立新持仓。与「均价加仓」「抄底加仓」「追涨加仓」互斥；"
+            "「无持仓成本」的买入（已有持仓但成本不可得）不属于首次建仓。"
+        ),
+        description_en=(
+            "The position before the buy was zero, so this buy opens a new position. Mutually "
+            "exclusive with the three add-on states; buys with no cost basis are not first entries."
+        ),
+        side="buy",
+    ),
+    TradeFlagDefinition(
         code="addon_average",
         label_zh="均价加仓",
         label_en="Add-on at average cost",
@@ -152,11 +166,50 @@ TRADE_FLAG_DEFINITIONS: tuple[TradeFlagDefinition, ...] = (
         label_zh="清仓",
         label_en="Full exit",
         description_zh=(
-            "本笔卖出数量覆盖卖出前的全部持仓；此时不再给出「回本/止盈/止损减仓」，而记「清仓」。"
+            "本笔卖出数量覆盖卖出前的全部持仓；此时不再给出「回本/止盈/止损减仓」，"
+            "改由「回本清仓」「止盈清仓」「止损清仓」三态接管，且三者互斥。"
         ),
         description_en=(
             "The sold quantity covers the entire position before the sale; the break-even / "
-            "profit-taking / stop-loss reduction labels are then replaced by full exit."
+            "profit-taking / stop-loss reduction labels are then replaced by the three "
+            "full-exit states, which are mutually exclusive."
+        ),
+        side="sell",
+    ),
+    TradeFlagDefinition(
+        code="full_exit_breakeven",
+        label_zh="回本清仓",
+        label_en="Break-even full exit",
+        description_zh=(
+            "一次性清空持仓，且含费净卖价落在卖出前持仓含费均价的上下 1% 以内。"
+            "与「止盈清仓」「止损清仓」互斥，与减仓三态互斥。"
+        ),
+        description_en=(
+            "A full exit where the fee-inclusive net sell price is within ±1% of the position's "
+            "fee-inclusive average cost before the sale. Mutually exclusive with the other two "
+            "full-exit states and with the reduction states."
+        ),
+        side="sell",
+    ),
+    TradeFlagDefinition(
+        code="full_exit_profit",
+        label_zh="止盈清仓",
+        label_en="Profit-taking full exit",
+        description_zh=("一次性清空持仓，且含费净卖价高于卖出前持仓含费均价 1% 以上。"),
+        description_en=(
+            "A full exit where the fee-inclusive net sell price is more than 1% above the "
+            "position's fee-inclusive average cost before the sale."
+        ),
+        side="sell",
+    ),
+    TradeFlagDefinition(
+        code="full_exit_loss",
+        label_zh="止损清仓",
+        label_en="Loss-cutting full exit",
+        description_zh=("一次性清空持仓，且含费净卖价低于卖出前持仓含费均价 1% 以上。"),
+        description_en=(
+            "A full exit where the fee-inclusive net sell price is more than 1% below the "
+            "position's fee-inclusive average cost before the sale."
         ),
         side="sell",
     ),
@@ -220,4 +273,32 @@ BUY_FLAG_CODES: tuple[str, ...] = tuple(
 )
 SELL_FLAG_CODES: tuple[str, ...] = tuple(
     item.code for item in TRADE_FLAG_DEFINITIONS if item.side == "sell"
+)
+
+# 看板趋势口径：买卖各取三个代表性状态旗标（先买后卖，保持图表系列顺序）。
+# 只决定看板展示哪些码，不参与判定；13 码全量仍由 `TRADE_FLAG_CODES` 维护。
+TREND_FLAG_CODES: tuple[str, ...] = (
+    "chase",
+    "instant_bottom",
+    "short_term_win",
+    "stop_loss",
+    "instant_top",
+    "short_term_top",
+)
+
+# 看板柱状图口径：买卖两侧的互斥状态（先买后卖，保持堆叠顺序）。
+# 买侧 = 首次建仓 + 加仓三态；卖侧 = 减仓三态 + 清仓三态；清仓与减仓互斥。
+# 例外：已有持仓但成本不可得（no_cost_basis）的买入既非首次建仓也非加仓三态，
+# 会成为买侧残余，不并入任何一类；本元组只决定展示，不参与判定。
+STACKED_STATE_FLAG_CODES: tuple[str, ...] = (
+    "first_entry",
+    "addon_average",
+    "addon_dip",
+    "addon_chase",
+    "reduce_breakeven",
+    "reduce_profit",
+    "reduce_loss",
+    "full_exit_breakeven",
+    "full_exit_profit",
+    "full_exit_loss",
 )

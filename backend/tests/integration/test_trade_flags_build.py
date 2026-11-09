@@ -155,14 +155,16 @@ async def test_build_is_idempotent_and_hits_expected_flags(owner_engine: AsyncEn
         first = await _build(session, user_id)
         await session.commit()
     assert first.trades == 3
-    assert first.rows == 6 + 6 + 7  # 买入 6 项、卖出 7 项
+    assert first.rows == 7 + 7 + 10  # 买入 7 项（首次建仓 + 加仓三态 + 趋势三态）、卖出 10 项
 
     async with AsyncSession(owner_engine) as session:
         rows = list(await session.scalars(select(TradeFlag).where(TradeFlag.user_id == user_id)))
     assert len(rows) == first.rows
     hits = {(row.trade_date, row.flag_code) for row in rows if row.status == "hit"}
+    assert (date(2026, 9, 10), "first_entry") in hits
     assert (date(2026, 9, 11), "addon_average") in hits
     assert (date(2026, 9, 15), "full_exit") in hits
+    assert (date(2026, 9, 15), "full_exit_profit") in hits
     assert all(
         row.status == "not_applicable"
         for row in rows

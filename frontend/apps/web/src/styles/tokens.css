@@ -150,6 +150,21 @@
   --chart-band-line: rgba(168, 72, 58, 0.5);
   --chart-area: rgba(59, 95, 75, 0.1);
 
+  /* 看板账单旗标系列：买入=青蓝系，卖出=暖红系；同侧三状态由深到浅。 */
+  --chart-buy-total: #1f5f73;
+  --chart-buy-0: #cfe3e6;
+  --chart-buy-1: #2f7f8f;
+  --chart-buy-2: #6aa3ad;
+  --chart-buy-3: #a3c6cb;
+  --chart-sell-total: #8f3a2f;
+  --chart-sell-1: #b5604a;
+  --chart-sell-2: #cf8b6f;
+  --chart-sell-3: #e0b39a;
+  /* 清仓三态：卖侧暖红系里的玫红色块，与减仓三态区分。 */
+  --chart-sell-exit-1: #8f4a5c;
+  --chart-sell-exit-2: #b06a79;
+  --chart-sell-exit-3: #cd94a0;
+
   /* ── 层级 ────────────────────────────────────────── */
   --z-rail: 20;
   --z-topbar: 30;
@@ -239,6 +254,19 @@
   --chart-band: rgba(240, 113, 111, 0.12);
   --chart-band-line: rgba(240, 113, 111, 0.5);
   --chart-area: rgba(159, 191, 174, 0.14);
+
+  --chart-buy-total: #a8dbe4;
+  --chart-buy-0: #b9e3ea;
+  --chart-buy-1: #7fc4d1;
+  --chart-buy-2: #5aa3b3;
+  --chart-buy-3: #3f8392;
+  --chart-sell-total: #f0b09b;
+  --chart-sell-1: #e0876d;
+  --chart-sell-2: #c66a52;
+  --chart-sell-3: #a95540;
+  --chart-sell-exit-1: #ee9aa8;
+  --chart-sell-exit-2: #d97b8c;
+  --chart-sell-exit-3: #bb6374;
 }
 
 /* 对比度偏好：提高边框/次级文字对比（WCAG 2.2 AA 兜底） */

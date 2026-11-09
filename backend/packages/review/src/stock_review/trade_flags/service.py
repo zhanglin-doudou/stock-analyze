@@ -13,7 +13,7 @@ from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, distinct, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from stock_contracts.clock import Clock
 from stock_contracts.errors import ApiError, ErrorCode
@@ -21,9 +21,13 @@ from stock_core.insights.forward import ForwardTrade, price_net
 from stock_core.trade_flags import (
     DEFINITION_VERSION,
     DISPLAY_STATUSES,
+    STACKED_STATE_FLAG_CODES,
+    STATUS_HIT,
     STATUS_NO_COST_BASIS,
+    TRADE_FLAG_BY_CODE,
     TRADE_FLAG_CODES,
     TRADE_FLAG_DEFINITIONS,
+    TREND_FLAG_CODES,
     TradeContext,
     TradeFlagDefinition,
     evaluate_trade_flags,
@@ -262,10 +266,10 @@ async def build_trade_flags_for_user(
             )
 
     if not dry_run:
+        # 重建即覆盖：连同旧 definition_version 的行一起清掉，保证库内该月只有一套口径。
         await session.execute(
             delete(TradeFlag).where(
                 TradeFlag.user_id == user_id,
-                TradeFlag.definition_version == DEFINITION_VERSION,
                 TradeFlag.trade_date >= period.start,
                 TradeFlag.trade_date <= period.end,
             )
@@ -312,10 +316,179 @@ async def load_trade_flags(
     return grouped
 
 
+@dataclass(frozen=True, slots=True)
+class MonthlyFlagCount:
+    """一个完整月的账单总数 + 折线趋势旗标 + 柱状图互斥状态旗标命中数。"""
+
+    month: str
+    buy_count: int
+    sell_count: int
+    flag_counts: dict[str, int]
+    state_counts: dict[str, int]
+
+
+@dataclass(frozen=True, slots=True)
+class FlagSeries:
+    """看板图表的旗标系列元数据（标签/方向/事后属性由后端单点提供）。"""
+
+    code: str
+    label_zh: str
+    label_en: str
+    side: str
+    lookahead: bool
+
+
+@dataclass(frozen=True, slots=True)
+class TradeFlagMonthlySummary:
+    window_months: int
+    start_month: str
+    end_month: str
+    latest_complete_month: str
+    items: tuple[MonthlyFlagCount, ...]
+    series: tuple[FlagSeries, ...]
+    state_series: tuple[FlagSeries, ...]
+    months_without_data: tuple[str, ...]
+    has_data: bool
+    has_flag_data: bool
+    has_state_data: bool
+    definition_version: str
+
+
+def _shift_month(year: int, month: int, delta: int) -> tuple[int, int]:
+    total = year * 12 + (month - 1) + delta
+    return total // 12, total % 12 + 1
+
+
+def _complete_month_windows(today: date, window_months: int) -> list[tuple[str, date, date]]:
+    """最近 N 个「完整月」窗口（含起止日）。
+
+    「完整月」= 已自然结束的日历月；以服务端业务日（东八区）为准，
+    最新完整月固定是今天所在月的前一个月。区间按时间升序返回。
+    """
+    last_year, last_month = _shift_month(today.year, today.month, -1)
+    windows: list[tuple[str, date, date]] = []
+    for offset in range(window_months - 1, -1, -1):
+        year, month = _shift_month(last_year, last_month, -offset)
+        next_year, next_month = _shift_month(year, month, 1)
+        windows.append(
+            (
+                f"{year:04d}-{month:02d}",
+                date(year, month, 1),
+                date(next_year, next_month, 1) - timedelta(days=1),
+            )
+        )
+    return windows
+
+
+async def monthly_trade_flag_summary(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    window_months: int,
+    clock: Clock,
+) -> TradeFlagMonthlySummary:
+    """看板聚合：最近 N 个完整月的买卖笔数、趋势旗标与互斥状态旗标命中数。
+
+    口径：
+    * 只统计当前 `definition_version` 的落库结果（不做重算）；
+    * 买卖笔数 = 当月按 `trade_dedupe_key` 去重后的账单数；
+    * 旗标/状态数量 = 当月 `status='hit'` 的账单数（同一账单命中多个旗标会分别计数）；
+    * 折线口径 `TREND_FLAG_CODES`，柱状图口径 `STACKED_STATE_FLAG_CODES`；
+    * 没有旗标记录的月份显式 0，并在 `months_without_data` 中列出（可能未构建）。
+    """
+    if window_months not in (6, 12, 24):
+        raise ValueError(f"window_months 只支持 6/12/24，收到 {window_months}")
+    windows = _complete_month_windows(clock.today(), window_months)
+    period_start, period_end = windows[0][1], windows[-1][2]
+    month_expr = func.to_char(TradeFlag.trade_date, "YYYY-MM")
+
+    base_where = (
+        TradeFlag.user_id == user_id,
+        TradeFlag.definition_version == DEFINITION_VERSION,
+        TradeFlag.trade_date >= period_start,
+        TradeFlag.trade_date <= period_end,
+    )
+    total_rows = await session.execute(
+        select(month_expr, TradeFlag.side, func.count(distinct(TradeFlag.trade_dedupe_key)))
+        .where(*base_where)
+        .group_by(month_expr, TradeFlag.side)
+    )
+    totals: dict[tuple[str, str], int] = {
+        (str(month), str(side)): int(count) for month, side, count in total_rows.all()
+    }
+    flag_rows = await session.execute(
+        select(
+            month_expr,
+            TradeFlag.flag_code,
+            func.count(distinct(TradeFlag.trade_dedupe_key)),
+        )
+        .where(
+            *base_where,
+            TradeFlag.status == STATUS_HIT,
+            TradeFlag.flag_code.in_(TREND_FLAG_CODES + STACKED_STATE_FLAG_CODES),
+        )
+        .group_by(month_expr, TradeFlag.flag_code)
+    )
+    code_counts: dict[tuple[str, str], int] = {
+        (str(month), str(code)): int(count) for month, code, count in flag_rows.all()
+    }
+
+    items: list[MonthlyFlagCount] = []
+    months_without_data: list[str] = []
+    for month, _start, _end in windows:
+        buy_count = totals.get((month, "buy"), 0)
+        sell_count = totals.get((month, "sell"), 0)
+        if buy_count == 0 and sell_count == 0:
+            months_without_data.append(month)
+        items.append(
+            MonthlyFlagCount(
+                month=month,
+                buy_count=buy_count,
+                sell_count=sell_count,
+                flag_counts={code: code_counts.get((month, code), 0) for code in TREND_FLAG_CODES},
+                state_counts={
+                    code: code_counts.get((month, code), 0) for code in STACKED_STATE_FLAG_CODES
+                },
+            )
+        )
+
+    def _series(codes: tuple[str, ...]) -> tuple[FlagSeries, ...]:
+        return tuple(
+            FlagSeries(
+                code=code,
+                label_zh=definition.label_zh,
+                label_en=definition.label_en,
+                side=definition.side,
+                lookahead=definition.lookahead,
+            )
+            for code in codes
+            for definition in (TRADE_FLAG_BY_CODE[code],)
+        )
+
+    return TradeFlagMonthlySummary(
+        window_months=window_months,
+        start_month=windows[0][0],
+        end_month=windows[-1][0],
+        latest_complete_month=windows[-1][0],
+        items=tuple(items),
+        series=_series(TREND_FLAG_CODES),
+        state_series=_series(STACKED_STATE_FLAG_CODES),
+        months_without_data=tuple(months_without_data),
+        has_data=any(item.buy_count or item.sell_count for item in items),
+        has_flag_data=any(sum(item.flag_counts.values()) > 0 for item in items),
+        has_state_data=any(sum(item.state_counts.values()) > 0 for item in items),
+        definition_version=DEFINITION_VERSION,
+    )
+
+
 __all__ = [
     "BuildResult",
+    "FlagSeries",
+    "MonthlyFlagCount",
+    "TradeFlagMonthlySummary",
     "TradeFlagRecord",
     "build_trade_flags_for_user",
     "load_trade_flags",
+    "monthly_trade_flag_summary",
     "trade_flag_glossary",
 ]

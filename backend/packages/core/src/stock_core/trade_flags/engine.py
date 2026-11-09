@@ -131,49 +131,80 @@ def _future_closes(bars: Sequence[BarPoint], trade_date: date) -> list[int]:
     return closes[:WINDOW_TRADING_DAYS]
 
 
-def _state_flags(ctx: TradeContext) -> list[FlagResult]:
-    """买入侧「加仓状态」三选一。"""
-    codes = ("addon_average", "addon_dip", "addon_chase")
-    if ctx.quantity_before_units <= 0:
-        return [_result(code, STATUS_NOT_APPLICABLE, "first_buy") for code in codes]
-    avg = ctx.avg_cost_units
-    if avg is None or avg <= 0:
-        return [_result(code, STATUS_NO_COST_BASIS, "no_cost_basis") for code in codes]
-    price = ctx.net_price_units
+def _price_bucket(price: int, avg: int) -> str:
+    """含费净价相对持仓均价的桶：`above` / `below` / `near`（±1% 以内）。"""
     diff = price - avg
     if diff * BPS_DENOMINATOR > avg * NEAR_EQUAL_TOLERANCE_BPS:
+        return "above"
+    if diff * BPS_DENOMINATOR < -avg * NEAR_EQUAL_TOLERANCE_BPS:
+        return "below"
+    return "near"
+
+
+def _state_flags(ctx: TradeContext) -> list[FlagResult]:
+    """买入侧「首次建仓」+「加仓状态」三选一（四者互斥）。"""
+    codes = ("addon_average", "addon_dip", "addon_chase")
+    if ctx.quantity_before_units <= 0:
+        return [
+            _result("first_entry", STATUS_HIT),
+            *[_result(code, STATUS_NOT_APPLICABLE, "first_buy") for code in codes],
+        ]
+    first = _result("first_entry", STATUS_MISS)
+    avg = ctx.avg_cost_units
+    if avg is None or avg <= 0:
+        return [
+            first,
+            *[_result(code, STATUS_NO_COST_BASIS, "no_cost_basis") for code in codes],
+        ]
+    bucket = _price_bucket(ctx.net_price_units, avg)
+    if bucket == "above":
         statuses = (STATUS_MISS, STATUS_MISS, STATUS_HIT)
-    elif diff * BPS_DENOMINATOR < -avg * NEAR_EQUAL_TOLERANCE_BPS:
+    elif bucket == "below":
         statuses = (STATUS_MISS, STATUS_HIT, STATUS_MISS)
     else:
         statuses = (STATUS_HIT, STATUS_MISS, STATUS_MISS)
-    return [_result(code, status) for code, status in zip(codes, statuses, strict=True)]
+    return [first, *[_result(code, status) for code, status in zip(codes, statuses, strict=True)]]
+
+
+def _exit_statuses(bucket: str) -> tuple[str, str, str]:
+    """清仓三态（回本 / 止盈 / 止损）的命中组合。"""
+    if bucket == "above":
+        return (STATUS_MISS, STATUS_HIT, STATUS_MISS)
+    if bucket == "below":
+        return (STATUS_MISS, STATUS_MISS, STATUS_HIT)
+    return (STATUS_HIT, STATUS_MISS, STATUS_MISS)
 
 
 def _reduce_flags(ctx: TradeContext) -> list[FlagResult]:
-    """卖出侧「减仓状态」：清仓时三者不适用、只记 `full_exit`。"""
+    """卖出侧「减仓状态」与「清仓状态」互斥：清仓时减仓三态不适用。"""
     codes = ("reduce_breakeven", "reduce_profit", "reduce_loss")
+    exit_codes = ("full_exit_breakeven", "full_exit_profit", "full_exit_loss")
     full = ctx.quantity_before_units > 0 and ctx.quantity_units >= ctx.quantity_before_units
-    if full:
-        results = [_result(code, STATUS_NOT_APPLICABLE, "full_exit") for code in codes]
-        return [*results, _result("full_exit", STATUS_HIT)]
-    if ctx.quantity_before_units <= 0:
-        results = [_result(code, STATUS_NOT_APPLICABLE, "no_position") for code in codes]
-        return [*results, _result("full_exit", STATUS_MISS)]
     avg = ctx.avg_cost_units
+
+    if full:
+        reduced = [_result(code, STATUS_NOT_APPLICABLE, "full_exit") for code in codes]
+        if avg is None or avg <= 0:
+            exits = [_result(code, STATUS_NO_COST_BASIS, "no_cost_basis") for code in exit_codes]
+        else:
+            statuses = _exit_statuses(_price_bucket(ctx.net_price_units, avg))
+            exits = [
+                _result(code, status) for code, status in zip(exit_codes, statuses, strict=True)
+            ]
+        return [*reduced, _result("full_exit", STATUS_HIT), *exits]
+
+    exits = [_result(code, STATUS_NOT_APPLICABLE, "not_full_exit") for code in exit_codes]
+    if ctx.quantity_before_units <= 0:
+        reduced = [_result(code, STATUS_NOT_APPLICABLE, "no_position") for code in codes]
+        return [*reduced, _result("full_exit", STATUS_MISS), *exits]
     if avg is None or avg <= 0:
-        results = [_result(code, STATUS_NO_COST_BASIS, "no_cost_basis") for code in codes]
-        return [*results, _result("full_exit", STATUS_MISS)]
-    price = ctx.net_price_units
-    diff = price - avg
-    if diff * BPS_DENOMINATOR > avg * NEAR_EQUAL_TOLERANCE_BPS:
-        statuses = (STATUS_MISS, STATUS_HIT, STATUS_MISS)
-    elif diff * BPS_DENOMINATOR < -avg * NEAR_EQUAL_TOLERANCE_BPS:
-        statuses = (STATUS_MISS, STATUS_MISS, STATUS_HIT)
-    else:
-        statuses = (STATUS_HIT, STATUS_MISS, STATUS_MISS)
-    results = [_result(code, status) for code, status in zip(codes, statuses, strict=True)]
-    return [*results, _result("full_exit", STATUS_MISS)]
+        reduced = [_result(code, STATUS_NO_COST_BASIS, "no_cost_basis") for code in codes]
+        return [*reduced, _result("full_exit", STATUS_MISS), *exits]
+    bucket = _price_bucket(ctx.net_price_units, avg)
+    # 减仓与清仓的桶→三态映射一致：near→回本、above→止盈、below→止损。
+    statuses = _exit_statuses(bucket)
+    reduced = [_result(code, status) for code, status in zip(codes, statuses, strict=True)]
+    return [*reduced, _result("full_exit", STATUS_MISS), *exits]
 
 
 def _price_flag(code: str, status: str | None, hit: bool) -> FlagResult:

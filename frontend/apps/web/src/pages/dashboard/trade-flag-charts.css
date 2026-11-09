@@ -1,0 +1,172 @@
+/* 看板 · 账单旗标图表（颜色一律走 tokens.css；无裸 hex）。 */
+
+.tfc-range {
+  display: inline-flex;
+  gap: var(--s1);
+  padding: 2px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  background: var(--surface-2);
+}
+
+.tfc .dash-panel-head {
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.tfc .dash-panel-head h2 {
+  flex: 0 0 auto;
+}
+
+.tfc-range-btn {
+  min-height: 28px;
+  padding: 0 var(--s3);
+  border: 0;
+  border-radius: var(--r-pill);
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  transition: background var(--dur) var(--ease), color var(--dur) var(--ease);
+}
+
+.tfc-range-btn:hover {
+  color: var(--text);
+}
+
+.tfc-range-btn[aria-pressed="true"] {
+  background: var(--surface-raised);
+  color: var(--text);
+  box-shadow: var(--shadow-1);
+}
+
+.tfc-range-btn:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.tfc-basis,
+.tfc-unbuilt {
+  margin: var(--s2) 0 0;
+  font-size: var(--fs-sm);
+}
+
+.tfc-chart-block + .tfc-chart-block {
+  margin-top: var(--s5);
+}
+
+.tfc-chart-title {
+  margin: var(--s4) 0 var(--s2);
+  font-size: var(--fs-h3);
+  font-weight: var(--fw-semibold);
+  color: var(--text);
+}
+
+.tfc-chart {
+  width: 100%;
+}
+
+.tfc-chart-bar {
+  height: 320px;
+}
+
+.tfc-chart-line {
+  height: 300px;
+}
+
+/* 图例放在滚动容器外并自动换行，窄屏不裁切。 */
+.tfc-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s1) var(--s3);
+  margin: var(--s2) 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--fs-sm);
+  color: var(--text);
+}
+
+.tfc-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--s2);
+}
+
+.tfc-legend-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--r-pill);
+  flex: none;
+}
+
+@media (max-width: 640px) {
+  .tfc-legend {
+    font-size: var(--fs-xs);
+    gap: var(--s1) var(--s2);
+  }
+}
+
+.tfc-tooltip {
+  min-width: 120px;
+  padding: var(--s2) var(--s3);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface-raised);
+  color: var(--text);
+  box-shadow: var(--shadow-2);
+  font-size: var(--fs-sm);
+}
+
+.tfc-tooltip-head {
+  margin-bottom: var(--s1);
+  color: var(--muted);
+  font-size: var(--fs-xs);
+}
+
+.tfc-tooltip-row {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+}
+
+.tfc-tooltip-row b {
+  margin-left: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.tfc-tooltip-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--r-pill);
+  flex: none;
+}
+
+@media (max-width: 720px) {
+  .tfc .dash-panel-head h2 {
+    flex: 1 0 100%;
+  }
+
+  .tfc .dash-grow {
+    display: none;
+  }
+
+  .tfc-range {
+    margin-left: auto;
+    flex-wrap: wrap;
+  }
+
+  .tfc-range-btn {
+    white-space: nowrap;
+  }
+}
+
+@media (max-width: 640px) {
+  .tfc-chart-bar {
+    height: 280px;
+  }
+
+  .tfc-chart-line {
+    height: 260px;
+  }
+}

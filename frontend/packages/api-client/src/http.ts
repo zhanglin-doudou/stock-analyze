@@ -14,6 +14,7 @@ import type {
   CommitImportBody,
   CreateTokenBody,
   DashboardOut,
+  DashboardTradeFlagsOut,
   ErrorCatalogOut,
   HealthOut,
   ImportBatch,
@@ -814,6 +815,13 @@ export function createClient(options: ClientOptions) {
     /** API-084：Dashboard 两板块聚合（纯读；金额/比率全部后端格式化）。 */
     get() {
       return send<DashboardOut>({ path: "/dashboard" }).then((r) => r.data);
+    },
+    /** API-095：账单旗标月度聚合（最近 6/12/24 个完整月，纯读）。 */
+    tradeFlags(months: 6 | 12 | 24 = 6) {
+      return send<DashboardTradeFlagsOut>({
+        path: "/dashboard/trade-flags",
+        query: { months },
+      }).then((r) => r.data);
     },
   };
 
