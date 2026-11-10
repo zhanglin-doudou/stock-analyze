@@ -94,11 +94,11 @@ function BarChart({ data, palette }: BarChartProps) {
       theme={nivoTheme(palette)}
       tooltip={({ indexValue, data: row }) => (
         <div className="hdc-tooltip" role="tooltip">
-          <div className="hdc-tooltip-head">{indexValue}</div>
+          <div className="hdc-tooltip-head">{indexValue}（{row.count} 回合）</div>
           <div className="hdc-tooltip-row">
             <i style={{ background: row.color }} aria-hidden="true" />
             <span>
-              平均持有 {row.display} 个交易日（{row.count} 个回合）
+              {row.display}
             </span>
           </div>
         </div>

@@ -826,11 +826,6 @@ describe("Dashboard 看板", () => {
     expect(screen.getByTestId("dashboard-meta").textContent).toContain("2026-09-30");
     expect(screen.getByTestId("market-data-notice").textContent).toContain("收盘后同步");
 
-    expect(screen.getByTestId("link-reports").getAttribute("href")).toBe("/reports");
-    expect(screen.getByTestId("link-exports").getAttribute("href")).toBe("/exports");
-    expect(screen.getByTestId("link-attribution").getAttribute("href")).toBe(
-      "/attribution?period=2026-06",
-    );
     expect(screen.getByTestId("link-annual-metrics").getAttribute("href")).toBe(
       "/metrics?period=2026",
     );

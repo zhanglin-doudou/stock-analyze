@@ -20,7 +20,7 @@
 /* 字段网格：窄屏自动降列；min() 兜底避免单列比容器还宽。 */
 .filter-bar-fields {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(200px, 100%), 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr));
   gap: var(--s3) var(--s4);
   align-items: end;
   min-width: 0;

@@ -364,7 +364,7 @@ export default function TradeFlagChartsNivo({
                   key === "pos" ? palette.up : key === "neg" ? palette.down : palette.muted;
                 return (
                   <li className="tfc-legend-item" key={key}>
-                    <span className="tfc-legend-btn">
+                    <span className="tfc-legend-btn no-interactive">
                       <i
                         className="tfc-legend-dot"
                         style={{ background: color }}

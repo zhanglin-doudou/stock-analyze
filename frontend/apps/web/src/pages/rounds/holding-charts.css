@@ -8,12 +8,17 @@
   margin: 10px 0 12px;
 }
 
-/* 无表头两列表：标签 14px、数值 16px 加粗；总数行跨两列。 */
+/* 无表头两列表：标签 12px、数值 14px 加粗；总数行跨两列。 */
 .hdc-stats {
-  width: 100%;
+  width: 220px;
   border-collapse: collapse;
   font-size: var(--fs-body);
   color: var(--text-2);
+  border: 1px solid var(--line);
+  padding: 12px;
+  display: inline-block;
+  border-radius: 6px;
+  font-size: 12px;
 }
 
 .hdc-stats th {
@@ -21,6 +26,7 @@
   font-weight: 400;
   text-align: left;
   white-space: nowrap;
+  width: 100%;
 }
 
 .hdc-stats td {
@@ -32,7 +38,7 @@
 
 /* 16px 无对应字号 token，按数值字号需求固定；涨跌色仍由 .money-* 决定。 */
 .hdc-stats td strong {
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
@@ -51,7 +57,7 @@
   }
 
   .hdc-stats {
-    max-width: 320px;
+    width: 100%;
   }
 }
 

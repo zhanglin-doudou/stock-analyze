@@ -277,14 +277,11 @@ export function Dashboard(): ReactElement {
   return (
     <div className="dash">
       <header className="dash-head">
-        <div className="dash-eyebrow">
-          {data.as_of} · 全历史 · 数据截至 {data.data_as_of ?? "—"}
+        <div className="dash-eyebrow" data-testid="market-data-notice">
+          全历史 · 数据截至 <i>{data.data_as_of ?? "—"}</i> · 行情来自系统缓存（仅收盘后同步，盘中不拉取实时行情）· 口径：{data.definition_version}
         </div>
         <h1 className="dash-title">看板</h1>
         <p className="dash-sub">先看清自己，再看清市场。所有数值均为后端口径，本页只做呈现与下钻。</p>
-        <p className="dash-muted" data-testid="market-data-notice">
-          行情来自本地缓存（仅收盘后同步，盘中不拉取实时行情）；数据截至 {data.data_as_of ?? "—"}。
-        </p>
         <div className="dash-head-meta" data-testid="dashboard-meta">
           <span>
             构建状态 <StatusBadge status={data.build_state} kind="build" />
@@ -292,8 +289,6 @@ export function Dashboard(): ReactElement {
           <span>
             页面状态 <StatusBadge status={data.status} kind="data" />
           </span>
-          <span>数据截至 {data.data_as_of ?? "—"}</span>
-          <span>口径 {data.definition_version}</span>
           <button
             className="dash-btn dash-btn-ghost"
             type="button"
@@ -489,18 +484,6 @@ export function Dashboard(): ReactElement {
               </tbody>
             </table>
           )}
-          <div className="dash-links">
-            <Link to={data.links.assets}>资产明细</Link>
-            <Link to={data.links.exports} data-testid="link-exports">
-              导出（占位）
-            </Link>
-            <Link to={data.links.reports} data-testid="link-reports">
-              月报（占位）
-            </Link>
-            <Link to={data.links.attribution} data-testid="link-attribution">
-              归因（占位）
-            </Link>
-          </div>
         </section>
         <SectorBlock asOf={data.as_of} linkHref={data.links.sectors} />
       </div>

@@ -452,6 +452,20 @@ export function RoundInsights() {
             <option value="false">未标注理由</option>
           </select>
         </FilterField>
+        
+        <FilterField label="证券代码">
+          <input
+            type="text"
+            aria-label="证券代码"
+            value={codeDraft}
+            placeholder="如 600519"
+            onChange={(event) => setCodeDraft(event.target.value)}
+            onBlur={() => setParam("security_code", codeDraft)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") setParam("security_code", codeDraft);
+            }}
+          />
+        </FilterField>
         <FilterField label="证券类型">
           <span className="filter-field-options">
             {SECURITY_TYPE_OPTIONS.map((option) => (
@@ -465,19 +479,6 @@ export function RoundInsights() {
               </label>
             ))}
           </span>
-        </FilterField>
-        <FilterField label="证券代码">
-          <input
-            type="text"
-            aria-label="证券代码"
-            value={codeDraft}
-            placeholder="如 600519"
-            onChange={(event) => setCodeDraft(event.target.value)}
-            onBlur={() => setParam("security_code", codeDraft)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") setParam("security_code", codeDraft);
-            }}
-          />
         </FilterField>
         <FilterField label="排序">
           <select
