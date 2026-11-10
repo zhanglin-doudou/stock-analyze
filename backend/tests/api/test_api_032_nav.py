@@ -17,6 +17,7 @@ from datetime import date
 from decimal import Decimal
 
 import pytest
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from stock_contracts.errors import ErrorCode
 from stock_ledger.models import Trade
@@ -411,6 +412,142 @@ async def test_api_032_back_solved_anchor(client, account_factory, owner_engine)
     assert points["2026-06-01"]["prev_total_assets"] == "0.000"
     assert points["2026-06-01"]["daily_pnl"] == "0.000"
     assert points["2026-06-30"]["total_assets"] == "100620.000"
+
+
+async def _nav_dates(engine: AsyncEngine, *, user_id: uuid.UUID) -> set[date]:
+    """直读 nav_daily 的日期集合（owner 角色，绕过 RLS）。"""
+    async with engine.connect() as conn:
+        result = await conn.execute(
+            text('select trade_date from review."nav_daily" where user_id = :uid'),
+            {"uid": user_id},
+        )
+        return {row[0] for row in result}
+
+
+async def _seed_nav_row(
+    engine: AsyncEngine,
+    *,
+    user_id: uuid.UUID,
+    trade_date: date,
+    return_units: int = 0,
+) -> None:
+    """直插一条陈旧 nav_daily 行（模拟历史区间留下的合成行）。"""
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                'insert into review."nav_daily" (id, user_id, trade_date, nav_units, return_units,'
+                " total_value_units, cashflow_units, shares_units, status, blocked_reason,"
+                " rebuilt_at) values (:id, :uid, :d, 0, :ret, 0, 0, 0, 'ok', null, now())"
+            ),
+            {
+                "id": f"nav_stale_{uuid.uuid4().hex[:16]}",
+                "uid": user_id,
+                "d": trade_date,
+                "ret": return_units,
+            },
+        )
+
+
+@pytest.mark.asyncio
+async def test_api_032_first_day_trading_day_keeps_first_day_return(
+    client, account_factory, owner_engine
+):
+    """首日就是交易日：首日收益必须进入 TWR（锚点落在 period_start-1，且不落库）。"""
+    acc = await account_factory()
+    # 05-20 建仓 100 股（06-01 前最后余额 0）；06-01 再买 1 股使其成为区间交易日
+    await _seed_trade(
+        owner_engine,
+        user_id=acc.user_id,
+        trade_date=date(2026, 5, 20),
+        side="buy",
+        quantity_units=100_0000,
+        price_units=1700_930000,  # 05-29 收盘 1700.93
+        amount_units=-170_093_00,
+        cash_balance_units=0,
+        category="buy",
+    )
+    await _seed_trade(
+        owner_engine,
+        user_id=acc.user_id,
+        trade_date=date(2026, 6, 1),
+        side="buy",
+        quantity_units=1_0000,
+        price_units=1701_170000,
+        amount_units=-1_701_17,
+        cash_balance_units=None,
+        category="buy",
+    )
+
+    r = await client.get("/api/v1/nav", params={"period": "2026-06"}, headers=acc.headers)
+    assert r.status_code == 200, r.text
+    body = r.json()
+    points = {p["date"]: p for p in body["points"]}
+
+    # 锚点（05-31）只参与 TWR：不出现在响应、不落库
+    assert "2026-05-31" not in points
+    assert await _nav_dates(owner_engine, user_id=acc.user_id) == {
+        date(2026, 6, 1),
+        date(2026, 6, 30),
+    }
+    first = points["2026-06-01"]
+    # 06-01 涨跌：100 股 × (1701.17 − 1700.93) = 24.00
+    assert first["prev_total_assets"] == "170093.000"
+    assert first["daily_pnl"] == "24.000"
+    assert first["twr_daily"] == "0.00014110"
+    assert first["twr_daily_pct"] == "0.01%"
+    # 月度 TWR 含首日：170625.03（101 股 × 1706.20 − 1701.17）÷ 170093 − 1
+    expected = Decimal("170625.03") / Decimal("170093.00") - 1
+    assert abs(Decimal(body["summary"]["twr"]) - expected) <= Decimal("0.0001")
+
+
+@pytest.mark.asyncio
+async def test_api_032_wide_request_ignores_narrow_synthetic_rows(
+    client, account_factory, owner_engine
+):
+    """跨请求不回读：窄区间留下的合成行不得拼进宽区间响应（且被清理）。"""
+    acc = await account_factory()
+    await _seed_happy_chain(owner_engine, user_id=acc.user_id)
+
+    narrow = await client.get(
+        "/api/v1/nav",
+        params={"from": "2026-06-15", "to": "2026-06-30"},
+        headers=acc.headers,
+    )
+    assert narrow.status_code == 200, narrow.text
+    # 窄区间：06-15 是区间基准合成行
+    assert [p["date"] for p in narrow.json()["points"]] == ["2026-06-15", "2026-06-30"]
+    assert date(2026, 6, 15) in await _nav_dates(owner_engine, user_id=acc.user_id)
+
+    wide = await client.get("/api/v1/nav", params={"period": "2026-06"}, headers=acc.headers)
+    assert wide.status_code == 200, wide.text
+    body = wide.json()
+    assert [p["date"] for p in body["points"]] == ["2026-06-01", "2026-06-30"]
+    # 陈旧合成行已被同一事务清理
+    assert date(2026, 6, 15) not in await _nav_dates(owner_engine, user_id=acc.user_id)
+    # 点集复利 == summary.twr（响应自洽）
+    compounded = Decimal(1)
+    for point in body["points"]:
+        compounded *= Decimal(1) + Decimal(point["twr_daily"])
+    assert abs(Decimal(body["summary"]["twr"]) - (compounded - 1)) <= Decimal("0.0001")
+
+
+@pytest.mark.asyncio
+async def test_api_032_purges_stale_rows_inside_range(client, account_factory, owner_engine):
+    """写侧收敛：区间内不属于本次点集的陈旧行删除，区间外保留。"""
+    acc = await account_factory()
+    await _seed_happy_chain(owner_engine, user_id=acc.user_id)
+    await _seed_nav_row(
+        owner_engine, user_id=acc.user_id, trade_date=date(2026, 6, 13), return_units=12_345_678
+    )
+    await _seed_nav_row(owner_engine, user_id=acc.user_id, trade_date=date(2026, 5, 15))
+    await _seed_nav_row(owner_engine, user_id=acc.user_id, trade_date=date(2026, 7, 15))
+
+    r = await client.get("/api/v1/nav", params={"period": "2026-06"}, headers=acc.headers)
+    assert r.status_code == 200, r.text
+    assert "2026-06-13" not in [p["date"] for p in r.json()["points"]]
+    dates = await _nav_dates(owner_engine, user_id=acc.user_id)
+    assert date(2026, 6, 13) not in dates
+    assert date(2026, 5, 15) in dates and date(2026, 7, 15) in dates
 
 
 @pytest.mark.asyncio
