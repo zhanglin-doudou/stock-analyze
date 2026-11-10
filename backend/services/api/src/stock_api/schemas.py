@@ -900,6 +900,9 @@ class DashboardOut(StrictModel):
     status: DashboardStatus
     build_state: Literal["missing", "current", "stale", "blocked"]
     definition_version: str
+    # 只读构建摘要（与 `GET /assets` 的 build 块同源，additive）：看板据此判定 stale
+    # 并与资产页共用同一份跨页面去重指纹；不触发构建、不写库。
+    build: AssetBuildStateOut
     asset_overview: DashboardAssetOverviewOut
     history_overview: DashboardHistoryOverviewOut
     missing: list[DashboardMissingOut]

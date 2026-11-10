@@ -25,6 +25,7 @@ from stock_review.trade_flags import TradeFlagMonthlySummary, monthly_trade_flag
 from stock_api.deps import get_market_data, get_state, get_tenant
 from stock_api.routing import StrictQueryRoute
 from stock_api.schemas import (
+    AssetBuildStateOut,
     DashboardAssetOverviewOut,
     DashboardHistoryOverviewOut,
     DashboardHoldingOut,
@@ -114,6 +115,7 @@ def _to_out(result: Any) -> DashboardOut:
         status=result.status,
         build_state=result.build_state,
         definition_version=result.definition_version,
+        build=AssetBuildStateOut.model_validate(result.build, from_attributes=True),
         asset_overview=DashboardAssetOverviewOut(
             status=asset.status,
             holdings=[

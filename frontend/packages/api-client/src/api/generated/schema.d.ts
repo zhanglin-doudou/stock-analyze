@@ -1980,6 +1980,7 @@ export interface components {
             assumptions: {
                 [key: string]: string;
             };
+            build: components["schemas"]["AssetBuildStateOut"];
             /**
              * Build State
              * @enum {string}

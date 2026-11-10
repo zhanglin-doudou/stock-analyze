@@ -2444,6 +2444,9 @@
             "title": "Assumptions",
             "type": "object"
           },
+          "build": {
+            "$ref": "#/components/schemas/AssetBuildStateOut"
+          },
           "build_state": {
             "enum": [
               "missing",
@@ -2527,6 +2530,7 @@
           "status",
           "build_state",
           "definition_version",
+          "build",
           "asset_overview",
           "history_overview",
           "missing",
@@ -11457,6 +11461,21 @@
                     "cost_model": "moving_average",
                     "mdd": "longest_valid_segment",
                     "total_profit_basis": "full_history_bridge"
+                  },
+                  "build": {
+                    "assumption": null,
+                    "definition_version": "1.0",
+                    "has_new_market_data": false,
+                    "last_built_at": "2026-09-30T09:30:00Z",
+                    "last_built_through": "2026-09-30",
+                    "last_mode": "incremental",
+                    "last_rebuild_from": "2026-08-17",
+                    "last_rows_written": 45,
+                    "last_status": "ok",
+                    "rows_count": 125,
+                    "session_notice": null,
+                    "state": "current",
+                    "status_reason": null
                   },
                   "build_state": "current",
                   "data_as_of": "2026-09-30",

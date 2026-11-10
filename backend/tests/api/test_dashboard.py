@@ -350,6 +350,12 @@ async def test_api_084_happy_path_two_sections(
     assert body["metrics_period_end"] == "2026-07-01"
     assert body["missing"] == []
 
+    # build 只读摘要与 /assets 的 build 块同源（前端据此判定 stale 并跨页去重）。
+    build = body["build"]
+    assert build["state"] == body["build_state"] == "current"
+    assert build["last_built_through"] == "2026-07-01"
+    assert build["definition_version"] == body["definition_version"]
+
     asset = body["asset_overview"]
     assert asset["status"] == "ok"
     assert asset["market_value"] == "170643.00"
@@ -712,9 +718,21 @@ async def test_api_084_is_read_only(
     jobs_before = await _count(owner_engine, "select count(*) from platform.job")
     rows_before = await _count(owner_engine, "select count(*) from review.asset_daily")
 
+    # 先验证 stale 场景也纯读：时钟跨日 + 新流水 → build_state=stale，但不入队、不写表。
+    frozen_clock.advance(days=1)
+    await _seed_trade(
+        owner_engine,
+        user_id=acc.user_id,
+        trade_date=date(2026, 7, 2),
+        amount_units=-1_000_00,
+        cash_balance_units=-71_000_00,
+    )
     for _ in range(2):
         resp = await dashboard_client.get("/api/v1/dashboard", headers=acc.headers)
         assert resp.status_code == 200, resp.text
+        body = resp.json()
+        assert body["build_state"] == "stale"
+        assert body["build"]["state"] == "stale"
 
     assert await _count(owner_engine, "select count(*) from platform.job") == jobs_before
     assert await _count(owner_engine, "select count(*) from review.asset_daily") == rows_before

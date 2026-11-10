@@ -1581,6 +1581,21 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
             "status": "ok",
             "build_state": "current",
             "definition_version": "1.0",
+            "build": {
+                "state": "current",
+                "last_status": "ok",
+                "last_built_at": _DATETIME,
+                "last_built_through": _DATE,
+                "last_mode": "incremental",
+                "last_rebuild_from": "2026-08-17",
+                "last_rows_written": 45,
+                "rows_count": 125,
+                "assumption": None,
+                "status_reason": None,
+                "has_new_market_data": False,
+                "definition_version": "1.0",
+                "session_notice": None,
+            },
             "asset_overview": {
                 "status": "ok",
                 "holdings": [
