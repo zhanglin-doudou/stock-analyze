@@ -9,6 +9,7 @@ import type {
   MetricItem,
 } from "@sa/api-client";
 import { api } from "../client";
+import { useStaleAssetBuild } from "../lib/useStaleAssetBuild";
 import { TrendChart } from "../charts/TrendChart";
 import { SectorBlock } from "./dashboard/SectorBlock";
 import { TradeFlagCharts } from "./dashboard/TradeFlagCharts";
@@ -232,6 +233,16 @@ export function Dashboard(): ReactElement {
     staleTime: 60_000,
   });
 
+  // 资产表 stale 自动构建：与资产页共用同一 hook / 同一跨页去重真源。
+  // 判定只用后端 `build` 只读字段；构建完成后重拉看板与日线，文案全部来自后端。
+  const auto = useStaleAssetBuild({
+    build: data?.build,
+    onRefresh: async (): Promise<void> => {
+      await dashboardQuery.refetch();
+      await chartQuery.refetch();
+    },
+  });
+
   if (dashboardQuery.error != null) {
     return (
       <div>
@@ -294,7 +305,18 @@ export function Dashboard(): ReactElement {
         </div>
       </header>
 
-      {needsRebuild(data.build_state) ? (
+      {auto.status === "submitting" || auto.status === "running" ? (
+        <p className="dash-notice" data-testid="dashboard-auto-build">
+          检测到资产表待更新，正在自动更新…
+        </p>
+      ) : auto.status === "failed" ? (
+        <div className="dash-notice" data-testid="dashboard-auto-build-failed">
+          <ProblemView error={auto.error} />
+          <button className="dash-btn dash-btn-ghost" type="button" onClick={auto.retry}>
+            手动重试
+          </button>
+        </div>
+      ) : needsRebuild(data.build_state) ? (
         <p className="dash-notice">
           当前资产快照不是最新：请到 <Link to={data.links.assets}>资产页</Link> 构建/更新资产表。
         </p>

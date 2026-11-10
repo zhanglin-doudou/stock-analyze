@@ -1,15 +1,12 @@
-import { useCallback, useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
+import { useCallback, useEffect, useState, type ReactElement, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import {
-  newIdempotencyKey,
-  type AssetBuildAccepted,
   type AssetBuildState,
   type AssetPage,
   type AssetPoint,
-  type JobStatus,
-  type Problem,
 } from "@sa/api-client";
 import { api } from "../client";
+import { useStaleAssetBuild } from "../lib/useStaleAssetBuild";
 import { Cursor } from "../ui/Cursor";
 import { FilterBar } from "../ui/FilterBar";
 import { JobProgress } from "../ui/JobProgress";
@@ -90,23 +87,6 @@ export function buildNotice(
   return `资产表构建完成，数据截至 ${asOf}。`;
 }
 
-/** job failed 时若后端未给出 7807 错误体，用错误码兜底渲染。 */
-function jobFailureProblem(status: JobStatus): Problem {
-  return {
-    type: "about:blank",
-    title: "Build assets failed",
-    status: 0,
-    detail: `job status=${status}`,
-    code: "BUILD_ASSETS_FAILED",
-    user_message: `资产表构建未成功（${status}）。`,
-    what_to_do: "请稍后重试；若持续失败，请到任务页查看错误码或联系支持。",
-    retryable: true,
-    request_id: "",
-  };
-}
-
-const TERMINAL: ReadonlySet<JobStatus> = new Set<JobStatus>(["succeeded", "failed", "cancelled"]);
-
 interface BuildSummaryProps {
   page: AssetPage;
 }
@@ -174,10 +154,6 @@ export function Assets() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [notice, setNotice] = useState("");
-  const [activeJobId, setActiveJobId] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState(false);
-  /** 同一个 job 可能被 SSE done 与页面轮询各通知一次：只处理一次。 */
-  const handledJobRef = useRef<string | null>(null);
 
   const load = useCallback(async (cursor?: string): Promise<AssetPage | null> => {
     setLoading(true);
@@ -207,99 +183,18 @@ export function Assets() {
     void load();
   }, [load]);
 
-  // 进入页面接管在跑的 build_assets（刷新后不重复点击、不误报「未构建」）。
-  useEffect(() => {
-    let cancelled = false;
-    async function takeover(): Promise<void> {
-      try {
-        const jobs = await api.jobs.list({ status: "pending,running", limit: PAGE_LIMIT });
-        const active = jobs.items.find((item) => item.type === "build_assets");
-        if (active && !cancelled) {
-          handledJobRef.current = null;
-          setActiveJobId(active.job_id);
-        }
-      } catch {
-        // 任务列表只是辅助提示：失败不阻断资产表本身。
-      }
-    }
-    void takeover();
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  /** 构建成功后重拉列表并给出完成提示（文案全部来自后端 build 摘要）。 */
+  const refreshAfterBuild = useCallback(async (): Promise<void> => {
+    const fresh = await load();
+    if (fresh) setNotice(buildNotice(fresh.build, fresh.data_as_of));
+  }, [load]);
 
-  const finishJob = useCallback(
-    async (jobId: string, status: JobStatus, jobError?: unknown): Promise<void> => {
-      if (handledJobRef.current === jobId) return;
-      handledJobRef.current = jobId;
-      setActiveJobId((current) => (current === jobId ? null : current));
-      if (status === "succeeded") {
-        const fresh = await load();
-        if (fresh) setNotice(buildNotice(fresh.build, fresh.data_as_of));
-        return;
-      }
-      // 先重拉列表（load 会清 error），再展示失败原因，避免错误被覆盖。
-      await load();
-      setError(jobError ?? jobFailureProblem(status));
-      setNotice(`资产表构建未成功（${status}），可稍后重试。`);
-    },
-    [load],
-  );
-
-  // 页面级 setTimeout 轮询兜底：JobProgress 只负责 SSE（失败会重试 SSE 但不轮询）。
-  useEffect(() => {
-    if (!activeJobId) return;
-    const jobId = activeJobId;
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-
-    async function poll(): Promise<void> {
-      try {
-        const job = await api.jobs.get(jobId);
-        if (cancelled) return;
-        if (TERMINAL.has(job.status)) {
-          await finishJob(jobId, job.status, job.error ?? undefined);
-          return;
-        }
-      } catch (err) {
-        if (!cancelled) setError(err);
-      }
-      if (!cancelled) timer = setTimeout(() => void poll(), 800);
-    }
-
-    void poll();
-    return () => {
-      cancelled = true;
-      if (timer !== null) clearTimeout(timer);
-    };
-  }, [activeJobId, finishJob]);
-
-  const handleSseDone = useCallback(
-    (status: JobStatus) => {
-      if (!activeJobId) return;
-      void finishJob(activeJobId, status);
-    },
-    [activeJobId, finishJob],
-  );
-
-  const startBuild = useCallback(async (mode: 'auto' | 'full' = 'auto'): Promise<void> => {
-    setSubmitting(true);
-    setError(null);
-    setNotice("");
-    try {
-      const accepted: AssetBuildAccepted = await api.assets.build({ mode }, newIdempotencyKey());
-      handledJobRef.current = null;
-      setActiveJobId(accepted.job_id);
-    } catch (err) {
-      setError(err);
-    } finally {
-      setSubmitting(false);
-    }
-  }, []);
+  // 资产表 stale 自动构建：判定 / 触发 / 全局去重 / 轮询都在公共 hook 内（与看板同源）。
+  const auto = useStaleAssetBuild({ build: page?.build, onRefresh: refreshAfterBuild });
 
   const build = page?.build;
   const missing = build === undefined || build.state === "missing";
-  const executing = activeJobId !== null || submitting;
+  const executing = auto.status === "submitting" || auto.status === "running";
   const actionLabel = executing
     ? missing
       ? "构建中…"
@@ -432,7 +327,10 @@ export function Assets() {
               type="button"
               disabled={executing}
               aria-busy={executing}
-              onClick={() => void startBuild()}
+              onClick={() => {
+                setNotice("");
+                void auto.submit("auto");
+              }}
             >
               {actionLabel}
             </button>
@@ -459,7 +357,10 @@ export function Assets() {
             type="button"
             disabled={executing}
             aria-busy={executing}
-            onClick={() => void startBuild('full')}
+            onClick={() => {
+              setNotice("");
+              void auto.submit("full");
+            }}
           >
             强制重新构建
           </button>
@@ -467,15 +368,29 @@ export function Assets() {
       ) : null}
       <ProblemView error={error} onRetry={() => void load()} />
 
-      {activeJobId ? (
+      {auto.jobId ? (
         <div className="card" data-testid="assets-job-progress">
-          <JobProgress jobId={activeJobId} onDone={handleSseDone} />
+          <JobProgress jobId={auto.jobId} onDone={auto.handleJobDone} />
         </div>
       ) : null}
 
       {page ? (
         <>
           <BuildSummary page={page} />
+          {auto.status === "failed" ? (
+            <div className="notice-warn" data-testid="assets-auto-retry">
+              <ProblemView error={auto.error} />
+              <p>构建未成功，可稍后重试。</p>
+              <button
+                className="btn btn-text"
+                type="button"
+                disabled={executing}
+                onClick={auto.retry}
+              >
+                手动重试
+              </button>
+            </div>
+          ) : null}
           <DataTable
             caption="每日资产快照"
             columns={columns}

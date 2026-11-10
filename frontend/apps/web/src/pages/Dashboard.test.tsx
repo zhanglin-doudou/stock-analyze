@@ -1,26 +1,36 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { StrictMode } from "react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import {
+  type AssetBuildAccepted,
+  type AssetBuildState,
   type AssetChart,
+  type AssetPage,
   type DashboardOut,
   type DashboardRoundOut,
   type DashboardTradeFlagsOut,
+  type Job,
+  type JobEvent,
+  type JobPage,
   type MetricBatch,
   type SectorsOverview,
 } from "@sa/api-client";
+import { Assets } from "./Assets";
 import { Dashboard } from "./Dashboard";
 import { buildCharts } from "./dashboard/TradeFlagCharts";
 import dashboardSource from "./Dashboard.tsx?raw";
 import sectorBlockSource from "./dashboard/SectorBlock.tsx?raw";
+import { resetAutoBuildGuard } from "../lib/useStaleAssetBuild";
 import { api } from "../client";
 
 vi.mock("../client", () => ({
   api: {
     dashboard: { get: vi.fn(), tradeFlags: vi.fn() },
     metrics: { batch: vi.fn() },
-    assets: { chart: vi.fn() },
+    assets: { chart: vi.fn(), list: vi.fn(), build: vi.fn() },
+    jobs: { list: vi.fn(), get: vi.fn(), events: vi.fn() },
     sectors: { overview: vi.fn() },
   },
 }));
@@ -34,6 +44,11 @@ const getTradeFlags = vi.mocked(api.dashboard.tradeFlags);
 const batchMetrics = vi.mocked(api.metrics.batch);
 const getAssetChart = vi.mocked(api.assets.chart);
 const getSectorsOverview = vi.mocked(api.sectors.overview);
+const listAssets = vi.mocked(api.assets.list);
+const buildAssets = vi.mocked(api.assets.build);
+const listJobs = vi.mocked(api.jobs.list);
+const getJob = vi.mocked(api.jobs.get);
+const jobEvents = vi.mocked(api.jobs.events);
 
 function makeRound(overrides: Partial<DashboardRoundOut> = {}): DashboardRoundOut {
   return {
@@ -50,6 +65,24 @@ function makeRound(overrides: Partial<DashboardRoundOut> = {}): DashboardRoundOu
   };
 }
 
+function makeBuild(overrides: Partial<AssetBuildState> = {}): AssetBuildState {
+  return {
+    state: "current",
+    last_status: "ok",
+    last_built_at: "2026-09-30T08:00:00Z",
+    last_built_through: "2026-09-30",
+    last_mode: "incremental",
+    last_rebuild_from: "2026-08-17",
+    last_rows_written: 45,
+    rows_count: 125,
+    assumption: "back_solved",
+    status_reason: null,
+    has_new_market_data: false,
+    definition_version: "1.0",
+    ...overrides,
+  };
+}
+
 function makeDashboard(overrides: Partial<DashboardOut> = {}): DashboardOut {
   return {
     as_of: "2026-07-01",
@@ -60,6 +93,7 @@ function makeDashboard(overrides: Partial<DashboardOut> = {}): DashboardOut {
     metrics_period_end: "2026-07-01",
     status: "ok",
     build_state: "current",
+    build: makeBuild(),
     definition_version: "1.0",
     asset_overview: {
       status: "ok",
@@ -207,6 +241,7 @@ function missingDashboard(): DashboardOut {
   return makeDashboard({
     status: "missing",
     build_state: "missing",
+    build: makeBuild({ state: "missing", last_status: null, last_mode: null, rows_count: 0 }),
     data_as_of: null,
     asset_overview: {
       status: "missing",
@@ -588,8 +623,79 @@ function renderPage(): ReturnType<typeof render> {
   );
 }
 
+/** 看板 + 资产页同时挂载：验证跨页共用的模块级去重表只发一次 POST。 */
+function renderBoth(): ReturnType<typeof render> {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  return render(
+    <StrictMode>
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/dashboard"]}>
+          <Dashboard />
+          <Assets />
+        </MemoryRouter>
+      </QueryClientProvider>
+    </StrictMode>,
+  );
+}
+
+function makeAssetPage(build: AssetBuildState): AssetPage {
+  return {
+    items: [],
+    next_cursor: null,
+    has_more: false,
+    build,
+    definition_version: build.definition_version,
+    data_as_of: build.last_built_through,
+  };
+}
+
+function makeJob(overrides: Partial<Job> = {}): Job {
+  return {
+    job_id: "job_assets",
+    type: "build_assets",
+    status: "succeeded",
+    progress: 100,
+    stage: "done",
+    message: null,
+    result_ref: null,
+    error: null,
+    attempt: 1,
+    max_attempts: 3,
+    available_at: "2026-09-30T08:00:00Z",
+    heartbeat_at: null,
+    created_at: "2026-09-30T08:00:00Z",
+    started_at: "2026-09-30T08:00:01Z",
+    finished_at: "2026-09-30T08:00:05Z",
+    ...overrides,
+  };
+}
+
+function emptyJobs(): JobPage {
+  return { items: [], next_cursor: null, backlog: {} };
+}
+
+function accepted(): AssetBuildAccepted {
+  return {
+    job_id: "job_assets",
+    type: "build_assets",
+    status: "pending",
+    links: { self: "/api/v1/jobs/job_assets", events: "/api/v1/jobs/job_assets/events" },
+  };
+}
+
+/** 默认 SSE：不产生事件（JobProgress 的 for-await 直接结束，不再重试）。 */
+function noEvents(): AsyncGenerator<JobEvent, void, void> {
+  async function* generator(): AsyncGenerator<JobEvent, void, void> {
+    /* no-op */
+  }
+  return generator();
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
+  resetAutoBuildGuard();
   getDashboard.mockResolvedValue(makeDashboard());
   getTradeFlags.mockResolvedValue(makeTradeFlags());
   batchMetrics.mockResolvedValue(makeMetricBatch());
@@ -597,6 +703,12 @@ beforeEach(() => {
   getSectorsOverview.mockImplementation(async ({ taxonomy }) =>
     taxonomy === "concept" ? makeConceptOverview() : makeIndustryOverview(),
   );
+  // 资产表（跨页去重用）与 build job 的默认桩：未 stale 时不会走到 POST。
+  listAssets.mockResolvedValue(makeAssetPage(makeBuild()));
+  listJobs.mockResolvedValue(emptyJobs());
+  getJob.mockResolvedValue(makeJob());
+  buildAssets.mockResolvedValue(accepted());
+  jobEvents.mockImplementation(() => noEvents());
 });
 
 afterEach(cleanup);
@@ -720,6 +832,97 @@ describe("Dashboard 看板", () => {
     expect(item.getAttribute("data-code")).toBe("DASHBOARD_ASSET_MISSING");
     expect(item.textContent).toContain("到资产页构建资产表");
     expect(screen.getByTestId("kpi-max-drawdown").textContent).toContain("阻断");
+  });
+
+  it("FT-12 看板 stale 自动触发：恰好 1 次 POST，完成后重拉看板", async () => {
+    const staleBuild = makeBuild({ state: "stale", has_new_market_data: true });
+    getDashboard
+      .mockResolvedValueOnce(
+        makeDashboard({ status: "stale", build_state: "stale", build: staleBuild }),
+      )
+      .mockResolvedValue(makeDashboard());
+
+    // 可手动结算的 job 轮询：完成之前不重拉看板。
+    let finish: (job: Job) => void = () => undefined;
+    getJob.mockImplementation(
+      () =>
+        new Promise<Job>((resolve) => {
+          finish = resolve;
+        }),
+    );
+
+    renderPage();
+
+    await waitFor(() => expect(buildAssets).toHaveBeenCalledTimes(1));
+    expect(buildAssets.mock.calls[0][0]).toEqual({ mode: "auto" });
+    expect(buildAssets.mock.calls[0][1]).toBeTruthy();
+    // 简短状态行（不喧宾夺主），文案不引入第二套口径。
+    expect((await screen.findByTestId("dashboard-auto-build")).textContent).toContain(
+      "正在自动更新",
+    );
+
+    await waitFor(() => expect(getJob).toHaveBeenCalled());
+    expect(getDashboard).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      finish(makeJob({ status: "succeeded" }));
+    });
+
+    // 完成后重拉看板（首屏 1 次 + 完成后 1 次），状态行消失，且不重复 POST。
+    await waitFor(() => expect(getDashboard.mock.calls.length).toBeGreaterThanOrEqual(2));
+    await waitFor(() => expect(screen.queryByTestId("dashboard-auto-build")).toBeNull());
+    expect(buildAssets).toHaveBeenCalledTimes(1);
+  });
+
+  it("FT-13 跨页去重：/dashboard 与 /assets 同时挂载，同一 stale 代次全局只 1 次 POST", async () => {
+    const staleBuild = makeBuild({ state: "stale", has_new_market_data: true });
+    const staleDashboard = makeDashboard({
+      status: "stale",
+      build_state: "stale",
+      build: staleBuild,
+    });
+    const seq: string[] = [];
+
+    getDashboard.mockImplementation(async () => {
+      seq.push("GET /dashboard");
+      return staleDashboard;
+    });
+    listAssets.mockImplementation(async () => {
+      seq.push("GET /assets");
+      return makeAssetPage(staleBuild);
+    });
+    listJobs.mockImplementation(async () => {
+      seq.push("GET /jobs?status=pending,running");
+      return emptyJobs();
+    });
+    buildAssets.mockImplementation(async () => {
+      seq.push("POST /assets/build");
+      return accepted();
+    });
+    getJob.mockImplementation(async (jobId: string) => {
+      seq.push(`GET /jobs/${jobId}`);
+      return makeJob({ status: "running", progress: 20 });
+    });
+    jobEvents.mockImplementation(() => {
+      seq.push("GET /jobs/job_assets/events");
+      return noEvents();
+    });
+
+    renderBoth();
+
+    await waitFor(() => expect(buildAssets).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 80));
+    });
+
+    // 实测请求序列：两页各自 GET 数据，但同一 stale 代次全局只有 1 次 POST。
+    const posts = seq.filter((item) => item === "POST /assets/build");
+    expect(posts.length, seq.join(" → ")).toBe(1);
+    expect(buildAssets).toHaveBeenCalledTimes(1);
+
+    // 两页共用同一个 job：看板出状态行，资产页出进度条。
+    expect(screen.getByTestId("dashboard-auto-build")).toBeTruthy();
+    expect(screen.getByTestId("assets-job-progress")).toBeTruthy();
   });
 
   it("FT-03 年度指标自动加载：用 metrics_period 请求并原样展示 value", async () => {

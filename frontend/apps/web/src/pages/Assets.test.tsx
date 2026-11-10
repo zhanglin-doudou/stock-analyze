@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { StrictMode } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import {
@@ -14,6 +15,7 @@ import {
 } from "@sa/api-client";
 import { Assets } from "./Assets";
 import assetsSource from "./Assets.tsx?raw";
+import { resetAutoBuildGuard } from "../lib/useStaleAssetBuild";
 import { api } from "../client";
 
 vi.mock("../client", () => ({
@@ -216,8 +218,35 @@ function renderPage(): ReturnType<typeof render> {
   );
 }
 
+/** StrictMode 包裹：验证双挂载不会产生第二次自动 POST。 */
+function renderPageStrict(): ReturnType<typeof render> {
+  return render(
+    <StrictMode>
+      <MemoryRouter initialEntries={["/assets"]}>
+        <Assets />
+      </MemoryRouter>
+    </StrictMode>,
+  );
+}
+
+/** POST /assets/build 失败的后端文案（RFC 7807）。 */
+function buildProblem(): Problem {
+  return {
+    type: "about:blank",
+    title: "Quota Exceeded",
+    status: 429,
+    detail: "too many jobs",
+    code: "QUOTA_EXCEEDED",
+    user_message: "系统繁忙，自动更新未能启动。",
+    what_to_do: "请稍后手动重试。",
+    retryable: true,
+    request_id: "req_build_1",
+  };
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
+  resetAutoBuildGuard();
   listAssets.mockResolvedValue(makePage());
   listJobs.mockResolvedValue(emptyJobs());
   getJob.mockResolvedValue(makeJob());
@@ -299,9 +328,25 @@ describe("Assets 资产表页", () => {
     expect(await screen.findByText("资产表已是最新，无需更新。")).toBeTruthy();
   });
 
-  it("FT-03 stale 提示：build.state=stale → 「有新流水/新行情，建议更新」", async () => {
-    listAssets.mockResolvedValue(
-      makePage({ build: makeBuild({ state: "stale", has_new_market_data: true }) }),
+  it("FT-03 stale 提示 + 显式触发：读到 stale → 恰好 1 次 POST → 完成后重拉并展示提示", async () => {
+    const stale = makePage({ build: makeBuild({ state: "stale", has_new_market_data: true }) });
+    const fresh = makePage({
+      build: makeBuild({
+        state: "current",
+        last_built_at: "2026-10-01T08:00:00Z",
+        last_mode: "full",
+        last_rows_written: 125,
+      }),
+    });
+    listAssets.mockResolvedValueOnce(stale).mockResolvedValue(fresh);
+
+    // 用可手动结算的 job 轮询，验证「完成之前不重拉、完成后才重拉」。
+    let finish: (job: Job) => void = () => undefined;
+    getJob.mockImplementation(
+      () =>
+        new Promise<Job>((resolve) => {
+          finish = resolve;
+        }),
     );
 
     renderPage();
@@ -309,6 +354,55 @@ describe("Assets 资产表页", () => {
     expect(await screen.findByTestId("assets-stale")).toBeTruthy();
     expect(screen.getByText(/有新流水\/新行情，建议更新/)).toBeTruthy();
     expect(screen.getByText(/检测到新行情数据/)).toBeTruthy();
+
+    // 前端只在读到后端 stale 后发一次 POST（带 Idempotency-Key）。
+    await waitFor(() => expect(buildAssets).toHaveBeenCalledTimes(1));
+    expect(buildAssets.mock.calls[0][0]).toEqual({ mode: "auto" });
+    expect(buildAssets.mock.calls[0][1]).toBeTruthy();
+    await waitFor(() => expect(getJob).toHaveBeenCalled());
+    expect(listAssets).toHaveBeenCalledTimes(1);
+
+    // job 完成后再拉一次数据（首屏 1 次 + 完成后 1 次），且不重复 POST。
+    await act(async () => {
+      finish(makeJob({ status: "succeeded" }));
+    });
+    await waitFor(() => expect(listAssets.mock.calls.length).toBeGreaterThanOrEqual(2));
+    expect(buildAssets).toHaveBeenCalledTimes(1);
+    expect(await screen.findByTestId("assets-notice")).toBeTruthy();
+  });
+
+  it("FT-03b 自动触发防重：StrictMode 双挂载 + 卸载重挂都只 POST 一次", async () => {
+    listAssets.mockResolvedValue(makePage({ build: makeBuild({ state: "stale" }) }));
+    getJob.mockResolvedValue(makeJob({ status: "running", progress: 10 }));
+
+    const first = renderPageStrict();
+    await waitFor(() => expect(buildAssets).toHaveBeenCalledTimes(1));
+    first.unmount();
+
+    renderPage();
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(buildAssets).toHaveBeenCalledTimes(1);
+  });
+
+  it("FT-03e 自动触发失败：展示后端文案 + 手动重试按钮，且不自动重复 POST", async () => {
+    listAssets.mockResolvedValue(makePage({ build: makeBuild({ state: "stale" }) }));
+    buildAssets.mockRejectedValueOnce(new ApiProblemError(buildProblem()));
+
+    renderPage();
+
+    expect(await screen.findByTestId("assets-auto-retry")).toBeTruthy();
+    expect(screen.getByText("系统繁忙，自动更新未能启动。")).toBeTruthy();
+    expect(screen.getByText(/请稍后手动重试。/)).toBeTruthy();
+    expect(buildAssets).toHaveBeenCalledTimes(1);
+
+    // 手动重试：再发一次 POST，完成后重拉并清除失败提示。
+    listAssets.mockResolvedValue(makePage({ build: makeBuild({ state: "current" }) }));
+    fireEvent.click(screen.getByRole("button", { name: "手动重试" }));
+
+    await waitFor(() => expect(buildAssets).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByTestId("assets-auto-retry")).toBeNull());
   });
 
   it("FT-03c 未收盘提示：session_notice=market_open → 「当日还未收盘」", async () => {
