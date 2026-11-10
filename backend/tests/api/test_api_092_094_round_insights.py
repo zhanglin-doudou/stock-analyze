@@ -439,6 +439,39 @@ async def test_api_092_ac_s3_fill_pairs_not_added_to_rounds(
     assert summary["swing"]["closed"] != summary["fill_swing"]["pairs"]
 
 
+async def test_api_092_summary_holding_by_pnl_serialized(
+    client, api_prefix, user, sell_fly_scenario
+):
+    """`summary.holding_by_pnl`：亏损/保本/盈利恒定三条，容差与均值由后端给。
+
+    卖飞场景两回合：07-01 买 100 股 @10.00 → 07-10 卖 @100.00（盈利）；
+    07-13 买 100 股 @2000.00 → 07-14 卖 @1500.00（亏损）。无保本样本。
+    """
+    body = (await _list(client, api_prefix, user.headers, "?period=2026-07")).json()
+    summary = body["summary"]
+    holding = summary["holding_by_pnl"]
+    # 保本容差来自 stock_core 常量（默认 100.00 元），不由前端/调用方配置。
+    assert holding["flat_tolerance_display"] == "100.00"
+    classes = holding["classes"]
+    assert [row["code"] for row in classes] == ["loss", "flat", "win"]
+    assert [row["label"] for row in classes] == ["亏损", "保本", "盈利"]
+    by_code = {row["code"]: row for row in classes}
+    assert by_code["loss"]["count"] == 1
+    assert by_code["win"]["count"] == 1
+    # 无样本的类别仍返回，均值为 null（不显示 0，也不省略分类）。
+    assert by_code["flat"]["count"] == 0
+    assert by_code["flat"]["avg_holding_trading_days"] is None
+    assert by_code["flat"]["avg_holding_trading_days_x10"] is None
+    # 三类计数之和恒等于已平仓回合数；x10 定点与展示串同源。
+    assert sum(row["count"] for row in classes) == summary["swing"]["closed"]
+    for row in classes:
+        x10 = row["avg_holding_trading_days_x10"]
+        if x10 is None:
+            assert row["avg_holding_trading_days"] is None
+        else:
+            assert row["avg_holding_trading_days"] == f"{x10 // 10}.{x10 % 10}"
+
+
 async def test_api_092_reason_filters_follow_annotation(client, api_prefix, user, scenario):
     buy_id = scenario["trades"]["buy1"]
     put = await client.put(

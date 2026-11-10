@@ -37,6 +37,8 @@ from stock_api.schemas import (
     InsightAddonSummaryOut,
     InsightBucketSummaryOut,
     InsightFillSwingOut,
+    InsightPnlHoldingClassOut,
+    InsightPnlHoldingOut,
     InsightRankingOut,
     InsightReasonCoverageOut,
     InsightReasonShareOut,
@@ -334,6 +336,19 @@ def _summary_out(summary: Any) -> InsightsSummaryOut:
             avg_holding_trading_days=summary.fill_swing.avg_holding_trading_days,
             avg_pnl_display=summary.fill_swing.avg_pnl_display,
             total_pnl_display=summary.fill_swing.total_pnl_display,
+        ),
+        holding_by_pnl=InsightPnlHoldingOut(
+            flat_tolerance_display=summary.holding_by_pnl.flat_tolerance_display,
+            classes=[
+                InsightPnlHoldingClassOut(
+                    code=row.code,
+                    label=row.label,
+                    count=row.count,
+                    avg_holding_trading_days=row.avg_holding_trading_days,
+                    avg_holding_trading_days_x10=row.avg_holding_trading_days_x10,
+                )
+                for row in summary.holding_by_pnl.classes
+            ],
         ),
         reason_coverage=InsightReasonCoverageOut(
             annotated=summary.reason_coverage.annotated,

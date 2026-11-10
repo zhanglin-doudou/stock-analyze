@@ -1,9 +1,14 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { MemoryRouter, Route, RouterProvider, Routes, createMemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useRoutes } from "react-router-dom";
 import { Layout, RequireAuth, appRoutes } from "./router";
 import { pageMeta } from "./layout/navigation";
 import { clearSession, saveTokens } from "./store/session";
+
+/** 用同一份路由表在 MemoryRouter 下渲染（见下方 jsdom/AbortSignal 说明）。 */
+function AppRoutes() {
+  return useRoutes(appRoutes);
+}
 
 afterEach(() => {
   cleanup();
@@ -34,8 +39,14 @@ describe("router / Layout（FT-09 导航与登录保护）", () => {
 
   it("/rounds/insights 命中静态路由（不被 rounds/:roundId 吃掉）", async () => {
     saveTokens({ access_token: "access-token", refresh_token: "refresh-token" });
-    const memory = createMemoryRouter(appRoutes, { initialEntries: ["/rounds/insights"] });
-    render(<RouterProvider router={memory} />);
+    // 页面挂载后会把默认期间写回 `?period=`（replace 导航）。数据路由在 jsdom 下会
+    // 用 jsdom 的 AbortSignal 构造 node 的 Request 而抛未处理拒绝，这里用 MemoryRouter
+    // 渲染同一份 appRoutes，路由表与导航高亮的断言等价。
+    render(
+      <MemoryRouter initialEntries={["/rounds/insights"]}>
+        <AppRoutes />
+      </MemoryRouter>,
+    );
 
     expect(await screen.findByRole("heading", { name: "回合洞察" })).toBeTruthy();
     // 面包屑/标题不能被“回合详情”前缀规则误伤。

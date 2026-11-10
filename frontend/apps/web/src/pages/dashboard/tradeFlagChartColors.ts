@@ -37,6 +37,10 @@ const SERIES_TOKENS: Record<string, string> = {
   full_exit_breakeven: "--chart-sell-exit-1",
   full_exit_profit: "--chart-sell-exit-2",
   full_exit_loss: "--chart-sell-exit-3",
+  // 回合持有期分类（短线/波段/趋势）饼图三分色，沿用买入青蓝系由深到浅。
+  bucket_trend: "--chart-buy-1",
+  bucket_swing: "--chart-buy-2",
+  bucket_short: "--chart-buy-3",
 };
 
 function readVar(style: CSSStyleDeclaration, name: string): string {

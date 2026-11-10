@@ -63,6 +63,14 @@ export function bpLabel(bp: number): string {
   return `${(bp / 100).toFixed(2)}%`;
 }
 
+/** 交易日 × 10 定点整数 → 一位小数轴标签（35 → "3.5"）；纯展示，不做业务运算。 */
+export function daysX10Label(x10: number): string {
+  const rounded = Math.trunc(x10);
+  const sign = rounded < 0 ? "-" : "";
+  const abs = Math.abs(rounded);
+  return `${sign}${Math.floor(abs / 10)}.${abs % 10}`;
+}
+
 /** 线性映射；domain 退化（min===max）时返回固定中值，避免除零。 */
 export function scaleLinear(
   domainMin: number,

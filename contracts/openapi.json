@@ -3652,6 +3652,79 @@
         "title": "InsightFillSwingOut",
         "type": "object"
       },
+      "InsightPnlHoldingClassOut": {
+        "description": "单类盈亏的持有期（`code` 与文案均由后端给，前端不重复判定）。",
+        "properties": {
+          "avg_holding_trading_days": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Holding Trading Days"
+          },
+          "avg_holding_trading_days_x10": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Holding Trading Days X10"
+          },
+          "code": {
+            "enum": [
+              "loss",
+              "flat",
+              "win"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "count"
+        ],
+        "title": "InsightPnlHoldingClassOut",
+        "type": "object"
+      },
+      "InsightPnlHoldingOut": {
+        "description": "盈亏 × 持有期：亏损/保本/盈利三类恒定返回三条（计数为 0 时均值为 null）。",
+        "properties": {
+          "classes": {
+            "items": {
+              "$ref": "#/components/schemas/InsightPnlHoldingClassOut"
+            },
+            "title": "Classes",
+            "type": "array"
+          },
+          "flat_tolerance_display": {
+            "title": "Flat Tolerance Display",
+            "type": "string"
+          }
+        },
+        "required": [
+          "flat_tolerance_display",
+          "classes"
+        ],
+        "title": "InsightPnlHoldingOut",
+        "type": "object"
+      },
       "InsightRankingOut": {
         "properties": {
           "basis": {
@@ -3938,6 +4011,9 @@
           "fill_swing": {
             "$ref": "#/components/schemas/InsightFillSwingOut"
           },
+          "holding_by_pnl": {
+            "$ref": "#/components/schemas/InsightPnlHoldingOut"
+          },
           "pending": {
             "additionalProperties": {
               "type": "integer"
@@ -3961,6 +4037,7 @@
         "required": [
           "swing",
           "fill_swing",
+          "holding_by_pnl",
           "addon",
           "sell_fly",
           "reason_coverage",
@@ -17874,6 +17951,32 @@
                       "pairs": 1,
                       "total_pnl_display": "1234.56",
                       "win_rate_pct": "100.0%"
+                    },
+                    "holding_by_pnl": {
+                      "classes": [
+                        {
+                          "avg_holding_trading_days": null,
+                          "avg_holding_trading_days_x10": null,
+                          "code": "loss",
+                          "count": 0,
+                          "label": "亏损"
+                        },
+                        {
+                          "avg_holding_trading_days": null,
+                          "avg_holding_trading_days_x10": null,
+                          "code": "flat",
+                          "count": 0,
+                          "label": "保本"
+                        },
+                        {
+                          "avg_holding_trading_days": "12.0",
+                          "avg_holding_trading_days_x10": 120,
+                          "code": "win",
+                          "count": 1,
+                          "label": "盈利"
+                        }
+                      ],
+                      "flat_tolerance_display": "100.00"
                     },
                     "pending": {
                       "forward_recompute": 0,

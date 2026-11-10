@@ -1900,6 +1900,33 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
                     "avg_pnl_display": "1234.56",
                     "total_pnl_display": "1234.56",
                 },
+                # 2026-11-10：盈亏 × 持有期（保本容差由后端常量判定，三类恒返三条）。
+                "holding_by_pnl": {
+                    "flat_tolerance_display": "100.00",
+                    "classes": [
+                        {
+                            "code": "loss",
+                            "label": "亏损",
+                            "count": 0,
+                            "avg_holding_trading_days": None,
+                            "avg_holding_trading_days_x10": None,
+                        },
+                        {
+                            "code": "flat",
+                            "label": "保本",
+                            "count": 0,
+                            "avg_holding_trading_days": None,
+                            "avg_holding_trading_days_x10": None,
+                        },
+                        {
+                            "code": "win",
+                            "label": "盈利",
+                            "count": 1,
+                            "avg_holding_trading_days": "12.0",
+                            "avg_holding_trading_days_x10": 120,
+                        },
+                    ],
+                },
                 "addon": {
                     "count": 1,
                     "declined_after_addon": 0,

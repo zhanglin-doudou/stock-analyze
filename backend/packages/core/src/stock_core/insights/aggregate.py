@@ -14,6 +14,16 @@ SAMPLE_MIN_RAW = 10
 SWING_FILL_MIN = 2
 SWING_FILL_MAX = 20
 
+# 盈亏判定容差（Money scale=2 的标度整数）：|损益| ≤ 100.00 元计为「保本」。
+# 调容差只改这一处：API 原样透出 flat_tolerance_display，前端不重复判定。
+PNL_FLAT_TOLERANCE_UNITS = 100 * 100
+
+PNL_CLASS_LOSS = "loss"
+PNL_CLASS_FLAT = "flat"
+PNL_CLASS_WIN = "win"
+# 展示顺序：亏损 → 保本 → 盈利（柱状图从左到右）。
+PNL_CLASS_ORDER: tuple[str, ...] = (PNL_CLASS_LOSS, PNL_CLASS_FLAT, PNL_CLASS_WIN)
+
 
 def weighted_mean(pairs: Sequence[tuple[int | None, int]]) -> int | None:
     """`(value_units, weight_units)` 金额加权均值；无有效样本/权重为 0 → None。"""
@@ -88,3 +98,62 @@ def swing_fill_pairs(
         pnl_units=tuple(pnl for _, pnl in rows),
         holding_trading_days=tuple(held for held, _ in rows),
     )
+
+
+@dataclass(slots=True, frozen=True)
+class PnlHoldingStats:
+    """单类盈亏（亏损/保本/盈利）的回合数与平均持有交易日。
+
+    `avg_holding_trading_days_x10` 是「交易日 × 10」的定点整数（3.5 日 → 35），
+    与全仓其它标度整数一致，避免 float 进入契约。
+    """
+
+    code: str
+    count: int
+    avg_holding_trading_days_x10: int | None
+
+
+def pnl_class(
+    pnl_units: int,
+    *,
+    tolerance_units: int = PNL_FLAT_TOLERANCE_UNITS,
+) -> str:
+    """盈亏分类：`|pnl| ≤ tolerance` → 保本；容差边界含在内。"""
+    if pnl_units > tolerance_units:
+        return PNL_CLASS_WIN
+    if pnl_units < -tolerance_units:
+        return PNL_CLASS_LOSS
+    return PNL_CLASS_FLAT
+
+
+def holding_by_pnl(
+    rows: Sequence[tuple[int, int | None]],
+    *,
+    tolerance_units: int = PNL_FLAT_TOLERANCE_UNITS,
+) -> tuple[PnlHoldingStats, ...]:
+    """按盈亏分组统计平均持有交易日（设计：/rounds/insights 持有期分布图表）。
+
+    `rows` 为已平仓回合的 `(pnl_units, holding_trading_days)`；三类**恒定返回三条**
+    （无样本时 `count=0`、均值为 None，不省略分类，图表轴保持稳定）。
+    持有交易日缺失的回合计入 `count` 但不参与均值（不以 0 兜底）。
+    """
+    counts: dict[str, int] = dict.fromkeys(PNL_CLASS_ORDER, 0)
+    samples: dict[str, list[int]] = {code: [] for code in PNL_CLASS_ORDER}
+    for pnl_units, holding in rows:
+        code = pnl_class(pnl_units, tolerance_units=tolerance_units)
+        counts[code] += 1
+        if holding is not None:
+            samples[code].append(holding)
+    result: list[PnlHoldingStats] = []
+    for code in PNL_CLASS_ORDER:
+        values = samples[code]
+        # 四舍五入到一位小数：sum × 10 后整数除（交易日非负，无需处理负半边）。
+        avg_x10 = (sum(values) * 10 + len(values) // 2) // len(values) if values else None
+        result.append(
+            PnlHoldingStats(
+                code=code,
+                count=counts[code],
+                avg_holding_trading_days_x10=avg_x10,
+            )
+        )
+    return tuple(result)

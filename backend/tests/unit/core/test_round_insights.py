@@ -459,6 +459,48 @@ def test_swing_fill_pairs_range_and_no_additivity() -> None:
     assert agg.swing_fill_pairs([], CAL).pairs == 0
 
 
+def test_pnl_class_tolerance_boundary() -> None:
+    """保本容差取后端常量（100.00 元），边界含在内。"""
+    tol = agg.PNL_FLAT_TOLERANCE_UNITS
+    assert tol == 10_000
+    assert agg.pnl_class(0) == agg.PNL_CLASS_FLAT
+    assert agg.pnl_class(tol) == agg.PNL_CLASS_FLAT
+    assert agg.pnl_class(-tol) == agg.PNL_CLASS_FLAT
+    assert agg.pnl_class(tol + 1) == agg.PNL_CLASS_WIN
+    assert agg.pnl_class(-tol - 1) == agg.PNL_CLASS_LOSS
+    # 容差可调：仅供调用方显式覆盖，默认值不变。
+    assert agg.pnl_class(0, tolerance_units=0) == agg.PNL_CLASS_FLAT
+    assert agg.pnl_class(1, tolerance_units=0) == agg.PNL_CLASS_WIN
+
+
+def test_holding_by_pnl_groups_average_and_missing_holding() -> None:
+    """三类恒定三条：均值是「交易日 × 10」定点整数；缺持有日的回合计次不入均值。"""
+    rows = [
+        (15_000, 4),  # 盈利
+        (12_000, 5),  # 盈利
+        (0, 2),  # 保本
+        (-20_000, 10),  # 亏损
+        (-50_000, None),  # 亏损但缺持有交易日 → 计入 count，不参与均值
+    ]
+    groups = agg.holding_by_pnl(rows)
+    assert [group.code for group in groups] == ["loss", "flat", "win"]
+    by_code = {group.code: group for group in groups}
+    assert (by_code["loss"].count, by_code["loss"].avg_holding_trading_days_x10) == (2, 100)
+    assert (by_code["flat"].count, by_code["flat"].avg_holding_trading_days_x10) == (1, 20)
+    # (4 + 5) / 2 = 4.5 日 → 45
+    assert (by_code["win"].count, by_code["win"].avg_holding_trading_days_x10) == (2, 45)
+
+
+def test_holding_by_pnl_empty_keeps_three_groups() -> None:
+    groups = agg.holding_by_pnl([])
+    assert [group.code for group in groups] == ["loss", "flat", "win"]
+    assert [(group.count, group.avg_holding_trading_days_x10) for group in groups] == [
+        (0, None),
+        (0, None),
+        (0, None),
+    ]
+
+
 def test_flag_glossary_covers_every_enumerated_flag() -> None:
     """旗标词表必须覆盖全部枚举值，且每个值都带中英文标签与说明（API-092/093）。"""
     from stock_core.insights.flags import (

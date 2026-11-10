@@ -1809,9 +1809,30 @@ class InsightSellFlySummaryOut(BaseModel):
     share_pct: str | None = None
 
 
+class InsightPnlHoldingClassOut(BaseModel):
+    """单类盈亏的持有期（`code` 与文案均由后端给，前端不重复判定）。"""
+
+    code: Literal["loss", "flat", "win"]
+    label: str
+    count: int
+    # 一位小数展示串（如 "3.5"）；无可用样本为 null。
+    avg_holding_trading_days: str | None = None
+    # 交易日 × 10 的定点整数（35 → 3.5 日），供柱状图直接用，避免浮点到前端。
+    avg_holding_trading_days_x10: int | None = None
+
+
+class InsightPnlHoldingOut(BaseModel):
+    """盈亏 × 持有期：亏损/保本/盈利三类恒定返回三条（计数为 0 时均值为 null）。"""
+
+    # 「保本」容差展示串（默认 "100.00"，单位元），判定在 stock_core 常量。
+    flat_tolerance_display: str
+    classes: list[InsightPnlHoldingClassOut]
+
+
 class InsightsSummaryOut(BaseModel):
     swing: InsightBucketSummaryOut
     fill_swing: InsightFillSwingOut
+    holding_by_pnl: InsightPnlHoldingOut
     addon: InsightAddonSummaryOut
     sell_fly: InsightSellFlySummaryOut
     reason_coverage: InsightReasonCoverageOut

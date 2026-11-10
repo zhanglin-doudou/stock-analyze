@@ -13,6 +13,7 @@
   "dependencies": {
     "@nivo/bar": "0.99.0",
     "@nivo/line": "0.99.0",
+    "@nivo/pie": "0.99.0",
     "@sa/api-client": "workspace:*",
     "@tanstack/react-query": "^5.105.0",
     "react": "^18.3.1",

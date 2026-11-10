@@ -2442,6 +2442,35 @@ export interface components {
             /** Win Rate Pct */
             win_rate_pct?: string | null;
         };
+        /**
+         * InsightPnlHoldingClassOut
+         * @description 单类盈亏的持有期（`code` 与文案均由后端给，前端不重复判定）。
+         */
+        InsightPnlHoldingClassOut: {
+            /** Avg Holding Trading Days */
+            avg_holding_trading_days?: string | null;
+            /** Avg Holding Trading Days X10 */
+            avg_holding_trading_days_x10?: number | null;
+            /**
+             * Code
+             * @enum {string}
+             */
+            code: "loss" | "flat" | "win";
+            /** Count */
+            count: number;
+            /** Label */
+            label: string;
+        };
+        /**
+         * InsightPnlHoldingOut
+         * @description 盈亏 × 持有期：亏损/保本/盈利三类恒定返回三条（计数为 0 时均值为 null）。
+         */
+        InsightPnlHoldingOut: {
+            /** Classes */
+            classes: components["schemas"]["InsightPnlHoldingClassOut"][];
+            /** Flat Tolerance Display */
+            flat_tolerance_display: string;
+        };
         /** InsightRankingOut */
         InsightRankingOut: {
             /** Basis */
@@ -2530,6 +2559,7 @@ export interface components {
         InsightsSummaryOut: {
             addon: components["schemas"]["InsightAddonSummaryOut"];
             fill_swing: components["schemas"]["InsightFillSwingOut"];
+            holding_by_pnl: components["schemas"]["InsightPnlHoldingOut"];
             /** Pending */
             pending: {
                 [key: string]: number;
