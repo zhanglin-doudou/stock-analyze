@@ -71,7 +71,7 @@ export function TradeFlagCharts(): ReactElement {
   return (
     <section className="dash-panel tfc" data-testid="trade-flag-charts">
       <div className="dash-panel-head">
-        <h2>账单旗标月度分布</h2>
+        <h2>月度分析</h2>
         <span className="dash-panel-meta">按自然月聚合 · 后端计数</span>
         <div className="dash-grow" />
         <div className="tfc-range" role="group" aria-label="时间范围">

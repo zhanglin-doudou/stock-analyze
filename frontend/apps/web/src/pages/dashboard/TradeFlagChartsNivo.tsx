@@ -260,7 +260,7 @@ export default function TradeFlagChartsNivo({
         ) : (
           <>
             <div className="tfc-bar-scroll">
-              <div className="tfc-chart tfc-chart-bar" style={{ minWidth: `${months * 36}px` }}>
+              <div className="tfc-chart tfc-chart-bar" style={{ minWidth: `${months * 24}px` }}>
                 <ResponsiveBar
                   data={barData}
                   keys={barKeys.map((item) => item.key)}
@@ -298,7 +298,7 @@ export default function TradeFlagChartsNivo({
       </div>
 
       <div className="tfc-chart-block">
-        <h3 className="tfc-chart-title">状态旗标月度趋势</h3>
+        <h3 className="tfc-chart-title">操作分析趋势</h3>
         {lineSeries.length === 0 ? (
           <p className="dash-chart-empty">所选区间内暂无状态旗标命中。</p>
         ) : (
