@@ -5,6 +5,7 @@
 
 import type {
   AssetBuildAccepted,
+  AssetBuildFailed,
   AssetBuildIn,
   AssetChart,
   AssetPage,
@@ -800,9 +801,10 @@ export function createClient(options: ClientOptions) {
         query: { limit },
       }).then((r) => r.data);
     },
-    /** API-082：触发资产表构建（异步 202；body 缺省等价 `{"mode":"auto"}`）。 */
+    /** API-082：触发资产表构建（异步 202；body 缺省等价 `{"mode":"auto"}`）。
+     *  缺行情时返回 200 + `status:"failed"`（无 job，见 AssetBuildFailed）。 */
     build(body: AssetBuildIn, idempotencyKey: string) {
-      return send<AssetBuildAccepted>({
+      return send<AssetBuildAccepted | AssetBuildFailed>({
         path: "/assets/build",
         method: "POST",
         body,

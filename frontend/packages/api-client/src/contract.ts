@@ -126,6 +126,9 @@ export type AssetPageOut = ApiSchemas["AssetPageOut"];
 export type AssetBuildStateOut = ApiSchemas["AssetBuildStateOut"];
 export type AssetBuildIn = ApiSchemas["AssetBuildIn"];
 export type AssetBuildAccepted = ApiSchemas["AssetBuildAccepted"];
+// 200-失败（缺行情，未入队）：沿用 job 失败状态 + missing[] 提示
+export type AssetBuildMissingOut = ApiSchemas["AssetBuildMissingOut"];
+export type AssetBuildFailed = ApiSchemas["AssetBuildFailed"];
 // 2026-10-28：资产日线 chart-ready 视图（API-085）
 export type AssetChartPointOut = ApiSchemas["AssetChartPointOut"];
 export type AssetChartOut = ApiSchemas["AssetChartOut"];
@@ -496,6 +499,9 @@ export type AssertAssetBuildStateFields = Assert<
   >
 >;
 export type AssertAssetBuildAcceptedFields = Assert<FieldsPresent<AssetBuildAccepted, "job_id" | "type" | "status" | "links">>;
+export type AssertAssetBuildFailedFields = Assert<
+  FieldsPresent<AssetBuildFailed, "job_id" | "type" | "status" | "message" | "missing">
+>;
 /** 指标批量的 envelope 字段必须仍存在于契约（items 元素因 C-31 wrap 序列化器退化，
  * 由手工接口 MetricItem 承载，见上方注释；后端 test_metrics.py 钉住元素形状）。 */
 export type AssertMetricBatchFields = Assert<

@@ -56,6 +56,9 @@ export interface paths {
         /**
          * Build Assets Endpoint
          * @description API-082：入队构建/增量更新资产表（202）；单飞复用 / 异参 409。
+         *
+         *     缺行情（行情缓存完全没有覆盖资产表窗口）→ **200 + 失败构建状态 + 提示**，不入队
+         *     doomed job（自动触发路径据此静默跳过，等行情/条件变化后再试）。
          */
         post: operations["buildAssets"];
         delete?: never;
@@ -1162,6 +1165,32 @@ export interface components {
             type: "build_assets";
         };
         /**
+         * AssetBuildFailed
+         * @description API-082：200 专用响应——本次构建未执行（缺少行情数据），无 job 产生。
+         *
+         *     `status="failed"` 沿用 job 状态语义（不是网络/权限错误），`job_id=null` 表示未入队。
+         */
+        AssetBuildFailed: {
+            /** Job Id */
+            job_id?: null;
+            /** Message */
+            message: string;
+            /** Missing */
+            missing: components["schemas"]["AssetBuildMissingOut"][];
+            /**
+             * Status
+             * @default failed
+             * @constant
+             */
+            status: "failed";
+            /**
+             * Type
+             * @default build_assets
+             * @constant
+             */
+            type: "build_assets";
+        };
+        /**
          * AssetBuildIn
          * @description API-082：构建模式（`auto` 增量/自动判定全量；`full` 强制全量）。
          */
@@ -1172,6 +1201,27 @@ export interface components {
              * @enum {string}
              */
             mode: "auto" | "full";
+        };
+        /**
+         * AssetBuildMissingOut
+         * @description API-082：缺行情提示项（字段名沿用归因/看板的 `missing[]` 风格）。
+         */
+        AssetBuildMissingOut: {
+            /**
+             * Code
+             * @default MARKET_DATA_MISSING
+             * @constant
+             */
+            code: "MARKET_DATA_MISSING";
+            /**
+             * Field
+             * @default market_data
+             */
+            field: string;
+            /** Reason */
+            reason: string;
+            /** What To Do */
+            what_to_do: string;
         };
         /**
          * AssetBuildStateOut
@@ -4651,6 +4701,15 @@ export interface operations {
             };
         };
         responses: {
+            /** @description 本次构建未执行（缺少行情数据）：无 job 产生，沿用失败构建状态 + missing[] 提示 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssetBuildFailed"];
+                };
+            };
             /** @description Successful Response */
             202: {
                 headers: {

@@ -1,15 +1,17 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   newIdempotencyKey,
-  type AssetBuildAccepted,
+  type AssetBuildFailed,
   type AssetBuildState,
   type JobStatus,
   type Problem,
 } from "@sa/api-client";
 import { api } from "../client";
 
-/** 自动构建状态：idle（无需更新/已收敛）/ submitting（POST 中）/ running（job 执行中）/ failed（转手动重试）。 */
-export type AutoBuildStatus = "idle" | "submitting" | "running" | "failed";
+/** 自动构建状态：
+ *  idle（无需更新/已收敛）/ submitting（POST 中）/ running（job 执行中）/
+ *  failed（转手动重试）/ missing（200-失败：缺行情，本次未执行；自动路径静默）。 */
+export type AutoBuildStatus = "idle" | "submitting" | "running" | "failed" | "missing";
 
 export type AssetBuildMode = "auto" | "full";
 
@@ -75,6 +77,22 @@ function jobFailureProblem(status: JobStatus): Problem {
   };
 }
 
+/** 200-失败（缺行情，本次构建未执行）→ Problem：仅手动路径展示，自动路径静默。 */
+function missingMarketProblem(res: AssetBuildFailed): Problem {
+  const miss = res.missing[0];
+  return {
+    type: "about:blank",
+    title: "Asset build skipped",
+    status: 200,
+    detail: res.message,
+    code: miss?.code ?? "MARKET_DATA_MISSING",
+    user_message: res.message,
+    what_to_do: miss?.what_to_do ?? "",
+    retryable: false,
+    request_id: "",
+  };
+}
+
 /**
  * 资产表 stale 自动构建（前端检测 + 显式触发）。
  *
@@ -123,7 +141,14 @@ export function useStaleAssetBuild({
   const postBuild = useCallback(
     async (mode: AssetBuildMode): Promise<string | null> => {
       try {
-        const accepted: AssetBuildAccepted = await api.assets.build({ mode }, newIdempotencyKey());
+        const accepted = await api.assets.build({ mode }, newIdempotencyKey());
+        if (accepted.status === "failed") {
+          // 200-失败（缺行情）：本次构建未执行，不是网络错误。
+          // 自动路径静默（不弹 Problem、不重试），只记失败指纹；手动路径透出后端提示。
+          if (mode !== "auto") setError(missingMarketProblem(accepted));
+          setFailedKey(currentKey());
+          return null;
+        }
         handledJobRef.current = null;
         return accepted.job_id;
       } catch (err) {
@@ -251,8 +276,12 @@ export function useStaleAssetBuild({
     };
   }, [build, activeJobId, submitting, postBuild, currentKey]);
 
+  // failedKey 命中时再看 error：有 Problem = 真失败（转手动重试）；无 = 200-失败（缺行情，
+  // 本次未执行，自动路径静默，等 stale 指纹变化后再试）。
   const status: AutoBuildStatus = failedKey !== null
-    ? "failed"
+    ? error !== null
+      ? "failed"
+      : "missing"
     : activeJobId
       ? "running"
       : submitting

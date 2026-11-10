@@ -405,6 +405,35 @@ describe("Assets 资产表页", () => {
     await waitFor(() => expect(screen.queryByTestId("assets-auto-retry")).toBeNull());
   });
 
+  it("FT-03f 自动触发 200-失败（缺行情）：不展示错误、不重复 POST（等条件变化再试）", async () => {
+    listAssets.mockResolvedValue(makePage({ build: makeBuild({ state: "stale" }) }));
+    // 200 + 失败体：本次构建未执行（缺行情），不是网络错误。
+    buildAssets.mockResolvedValue({
+      job_id: null,
+      type: "build_assets",
+      status: "failed",
+      message: "缺少行情数据：本地行情缓存没有任何已同步的交易日，本次构建未执行。",
+      missing: [
+        {
+          field: "market_data",
+          code: "MARKET_DATA_MISSING",
+          reason: "缺少行情数据：本地行情缓存没有任何已同步的交易日，本次构建未执行。",
+          what_to_do: "请先同步行情数据（make sync-market），覆盖资产表窗口后再重新触发资产构建。",
+        },
+      ],
+    });
+
+    renderPage();
+
+    await waitFor(() => expect(buildAssets).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(buildAssets).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId("assets-auto-retry")).toBeNull();
+    expect(screen.queryByText(/缺少行情数据/)).toBeNull();
+  });
+
   it("FT-03c 未收盘提示：session_notice=market_open → 「当日还未收盘」", async () => {
     listAssets.mockResolvedValue(
       makePage({ build: makeBuild({ session_notice: "market_open" }) }),

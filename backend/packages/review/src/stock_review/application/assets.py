@@ -667,6 +667,58 @@ async def _market_as_of(session: AsyncSession, market_data: MarketDataSource, cl
     return market_data.as_of
 
 
+# 构建前置：行情缓存完全没有覆盖资产表窗口时，API-082 直接返回 200-失败（不入队）。
+@dataclass(frozen=True)
+class MarketDataMissing:
+    """缺行情提示（reason / what_to_do 由 API 边界原样透出，前端零口径）。"""
+
+    reason: str
+    what_to_do: str
+
+
+async def precheck_market_data(
+    session: AsyncSession,
+    *,
+    user_id: uuid.UUID,
+    clock: Clock,
+    market_data: MarketDataSource,
+) -> MarketDataMissing | None:
+    """构建前置检查：行情缓存没有任何覆盖资产表窗口的交易日 → 返回缺行情提示。
+
+    与 `build_assets` 的 `_market_as_of` 同源判定（`market.daily_bar` 最大交易日）：
+    - 仅对 live+本地缓存端口生效；replay / 纯透传端口没有本地缓存，缺个别标的属于
+      既有 blocked/degraded 行语义（设计 §4.1 AT-08），不在前置拦截；
+    - 无有效流水（构建=清空 + reset）或构建窗口为空（时钟回拨）→ 不算缺行情；
+    - 缓存最新交易日 ≥ 窗口起点 → 可建（个别日期/标的缺行情仍走既有降级语义）。
+    """
+    if getattr(market_data, "get_cached_bars", None) is None:
+        return None
+    repo = AssetRepository(session)
+    trades_all = await repo.load_trades_including_deleted(user_id)
+    live = [trade for trade in trades_all if trade.deleted_at is None]
+    if not live:
+        return None
+    start = min(trade.trade_date for trade in live)
+    end = valuation_end(clock)
+    if end < start:
+        return None
+    latest = await session.scalar(
+        select(func.max(DailyBar.trade_date)).where(DailyBar.trade_date <= clock.today())
+    )
+    if latest is not None and latest >= start:
+        return None
+    coverage = (
+        f"最新交易日 {latest.isoformat()}" if latest is not None else "没有任何已同步的交易日"
+    )
+    return MarketDataMissing(
+        reason=(
+            f"缺少行情数据：本地行情缓存{coverage}，未覆盖资产表窗口 "
+            f"{start.isoformat()}~{end.isoformat()}，本次构建未执行。"
+        ),
+        what_to_do="请先同步行情数据（make sync-market），覆盖资产表窗口后再重新触发资产构建。",
+    )
+
+
 async def build_assets(
     session: AsyncSession,
     *,
@@ -1255,11 +1307,13 @@ __all__ = [
     "AssetBuildState",
     "AssetBuildSummary",
     "AssetPoint",
+    "MarketDataMissing",
     "align_to_trading_day",
     "build_assets",
     "build_assets_job",
     "compute_daily_valuations",
     "last_trading_day",
     "list_assets",
+    "precheck_market_data",
     "valuation_end",
 ]

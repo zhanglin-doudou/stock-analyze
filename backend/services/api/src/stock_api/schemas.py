@@ -705,6 +705,28 @@ class AssetBuildAccepted(StrictModel):
     links: JobLinks
 
 
+class AssetBuildMissingOut(StrictModel):
+    """API-082：缺行情提示项（字段名沿用归因/看板的 `missing[]` 风格）。"""
+
+    field: str = "market_data"
+    code: Literal["MARKET_DATA_MISSING"] = "MARKET_DATA_MISSING"
+    reason: str
+    what_to_do: str
+
+
+class AssetBuildFailed(StrictModel):
+    """API-082：200 专用响应——本次构建未执行（缺少行情数据），无 job 产生。
+
+    `status="failed"` 沿用 job 状态语义（不是网络/权限错误），`job_id=null` 表示未入队。
+    """
+
+    job_id: None = None
+    type: Literal["build_assets"] = "build_assets"
+    status: Literal["failed"] = "failed"
+    message: str
+    missing: list[AssetBuildMissingOut]
+
+
 class AssetChartPointOut(StrictModel):
     """API-085：图表点（v 为后端归一化无量纲字符串，前端只做几何投影）。"""
 
