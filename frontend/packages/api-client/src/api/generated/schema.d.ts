@@ -1966,6 +1966,36 @@ export interface components {
             what_to_do: string;
         };
         /**
+         * DashboardMonthlyReturnOut
+         * @description 单月组合收益：资产日表逐日收益（TWR）自然月复利，展示字段全部由后端给出。
+         *
+         *     `value_bp` 为柱高（基点整数，2.35% → 235）；无可用日收益时显式 0（图上 0 高度），
+         *     同时 `available=false`、`pct/display=null`，避免把「无数据」伪装成 0 收益。
+         */
+        DashboardMonthlyReturnOut: {
+            /** Available */
+            available: boolean;
+            /** Days */
+            days: number;
+            /** Display */
+            display: string | null;
+            /** Month */
+            month: string;
+            /** Note */
+            note: string | null;
+            /** Partial */
+            partial: boolean;
+            /** Pct */
+            pct: string | null;
+            /**
+             * Sign
+             * @enum {string}
+             */
+            sign: "pos" | "neg" | "flat" | "none";
+            /** Value Bp */
+            value_bp: number;
+        };
+        /**
          * DashboardOut
          * @description API-084：Dashboard 两板块聚合（只读；金额/比率全部后端格式化）。
          */
@@ -2076,7 +2106,7 @@ export interface components {
         };
         /**
          * DashboardTradeFlagMonthOut
-         * @description 一个完整月的买卖笔数 + 折线趋势旗标 + 柱状图互斥状态旗标命中数。
+         * @description 一个完整月的买卖笔数 + 折线趋势旗标 + 柱状图互斥状态旗标命中数 + 单月收益。
          */
         DashboardTradeFlagMonthOut: {
             /** Buy Count */
@@ -2087,6 +2117,7 @@ export interface components {
             label: string;
             /** Month */
             month: string;
+            monthly_return: components["schemas"]["DashboardMonthlyReturnOut"];
             /** Sell Count */
             sell_count: number;
             /** States */
@@ -2124,6 +2155,8 @@ export interface components {
             has_data: boolean;
             /** Has Flag Data */
             has_flag_data: boolean;
+            /** Has Return Data */
+            has_return_data: boolean;
             /** Has State Data */
             has_state_data: boolean;
             /** Items */
@@ -2134,6 +2167,12 @@ export interface components {
             months_basis: string;
             /** Months Without Data */
             months_without_data: string[];
+            /** Return Basis */
+            return_basis: string;
+            /** Return Labels */
+            return_labels: {
+                [key: string]: string;
+            };
             /** Series */
             series: components["schemas"]["DashboardTradeFlagSeriesOut"][];
             /** Start Month */

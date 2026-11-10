@@ -3,10 +3,22 @@ import { useState } from "react";
 import { ResponsiveBar } from "@nivo/bar";
 import { ResponsiveLine, type LineSvgLayer } from "@nivo/line";
 
+import { bpLabel } from "../../charts/geometry";
+import { signedClass } from "../../lib/signed";
 import type { ChartPalette } from "./tradeFlagChartColors";
 
 /** 柱状图数据行：month + 「展示标签 → 计数」扁平字段（标签全部来自后端）。 */
 export type TradeFlagBarDatum = Record<string, string | number>;
+
+/** 单月收益行：柱高用后端基点整数，展示串/符号/说明也由后端给。 */
+export type MonthlyReturnBarDatum = {
+  month: string;
+  value_bp: number;
+  display: string;
+  sign: string;
+  note: string;
+  color: string;
+};
 
 export interface TradeFlagBarKey {
   key: string;
@@ -24,6 +36,10 @@ export interface TradeFlagChartsNivoProps {
   barKeys: TradeFlagBarKey[];
   lineSeries: TradeFlagLineSerie[];
   lineColors: string[];
+  returnData: MonthlyReturnBarDatum[];
+  hasReturnData: boolean;
+  returnBasis: string;
+  returnLabels: Record<string, string>;
   palette: ChartPalette;
 }
 
@@ -70,6 +86,21 @@ function BarTooltip({
         <span>{id}</span>
         <b>{value}</b>
       </div>
+    </div>
+  );
+}
+
+/** 单月收益 tooltip：展示串的正负着色复用 lib/signed.ts，说明文案来自后端。 */
+function ReturnTooltip({ datum }: { datum: MonthlyReturnBarDatum }) {
+  return (
+    <div className="tfc-tooltip" role="tooltip">
+      <div className="tfc-tooltip-head">{datum.month}</div>
+      <div className="tfc-tooltip-row">
+        <i className="tfc-tooltip-dot" style={{ background: datum.color }} aria-hidden="true" />
+        <span>单月收益</span>
+        <b className={signedClass(datum.display)}>{datum.display}</b>
+      </div>
+      {datum.note ? <div className="dash-muted">{datum.note}</div> : null}
     </div>
   );
 }
@@ -202,11 +233,17 @@ export default function TradeFlagChartsNivo({
   barKeys,
   lineSeries,
   lineColors,
+  returnData,
+  hasReturnData,
+  returnBasis,
+  returnLabels,
   palette,
 }: TradeFlagChartsNivoProps) {
   const theme = nivoTheme(palette);
   const tickLabels = barData.map((row) => String(row.month));
   const ticks = tickValues(months, tickLabels);
+  const returnTickLabels = returnData.map((row) => row.month);
+  const returnTicks = tickValues(months, returnTickLabels);
   const barColorByKey = new Map(barKeys.map((item) => [item.key, item.color]));
   const lineColorByKey = new Map(
     lineSeries.map((serie, index) => [serie.id, lineColors[index] ?? palette.muted]),
@@ -251,6 +288,80 @@ export default function TradeFlagChartsNivo({
 
   return (
     <div className="tfc-chart-container">
+      <div className="tfc-chart-block" style={{ gridColumn: "1 / -1" }}>
+        <h3 className="tfc-chart-title">单月收益（资产日收益 TWR 按月复利）</h3>
+        {!hasReturnData || returnData.length === 0 ? (
+          <p className="dash-chart-empty" data-testid="tfc-return-empty">
+            所选区间内暂无可用资产日收益；请先在资产页构建资产日表。
+          </p>
+        ) : (
+          <>
+            <p className="dash-muted" data-testid="tfc-return-basis">
+              {returnBasis}
+            </p>
+            <div className="tfc-bar-scroll">
+              <div className="tfc-chart tfc-chart-bar" style={{ minWidth: `${months * 24}px` }}>
+                <ResponsiveBar<MonthlyReturnBarDatum>
+                  data={returnData}
+                  keys={["value_bp"]}
+                  indexBy="month"
+                  margin={{ top: 12, right: 12, bottom: 64, left: 56 }}
+                  padding={0.28}
+                  valueScale={{ type: "linear", min: "auto", max: "auto" }}
+                  colors={(bar) => (bar.data as MonthlyReturnBarDatum).color}
+                  theme={theme}
+                  axisBottom={{
+                    tickSize: 0,
+                    tickPadding: 8,
+                    tickRotation: -45,
+                    tickValues: returnTicks,
+                  }}
+                  axisLeft={{
+                    tickSize: 0,
+                    tickPadding: 6,
+                    tickValues: 5,
+                    format: (value) => bpLabel(value as number),
+                  }}
+                  enableGridX={false}
+                  enableLabel={false}
+                  markers={[
+                    {
+                      axis: "y",
+                      value: 0,
+                      lineStyle: { stroke: palette.line, strokeWidth: 1 },
+                    },
+                  ]}
+                  animate={false}
+                  role="img"
+                  ariaLabel="单月收益柱状图（资产日收益 TWR 按月复利）"
+                  tooltip={({ data }) => (
+                    <ReturnTooltip datum={data as MonthlyReturnBarDatum} />
+                  )}
+                />
+              </div>
+            </div>
+            <ul className="tfc-legend" data-testid="tfc-return-legend">
+              {(["pos", "neg", "none"] as const).map((key) => {
+                const color =
+                  key === "pos" ? palette.up : key === "neg" ? palette.down : palette.muted;
+                return (
+                  <li className="tfc-legend-item" key={key}>
+                    <span className="tfc-legend-btn">
+                      <i
+                        className="tfc-legend-dot"
+                        style={{ background: color }}
+                        aria-hidden="true"
+                      />
+                      <span>{returnLabels[key] ?? key}</span>
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          </>
+        )}
+      </div>
+
       <div className="tfc-chart-block">
         <h3 className="tfc-chart-title">月度买卖状态（买侧建仓 / 加仓 · 卖侧减仓 / 清仓）</h3>
         {barData.length === 0 ? (

@@ -580,6 +580,17 @@ function makeTradeFlags(overrides: Partial<DashboardTradeFlagsOut> = {}): Dashbo
     sell_count: number,
     hits: number[],
     stateHits: number[] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    monthlyReturn: DashboardTradeFlagsOut["items"][number]["monthly_return"] = {
+      month: label,
+      value_bp: 0,
+      pct: null,
+      display: null,
+      sign: "none",
+      available: false,
+      days: 0,
+      partial: false,
+      note: "当月无可用资产日收益",
+    },
   ) => ({
     month: label,
     label,
@@ -587,6 +598,7 @@ function makeTradeFlags(overrides: Partial<DashboardTradeFlagsOut> = {}): Dashbo
     sell_count,
     flags: series.map((item, index) => ({ code: item.code, count: hits[index] ?? 0 })),
     states: stateSeries.map((item, index) => ({ code: item.code, count: stateHits[index] ?? 0 })),
+    monthly_return: monthlyReturn,
   });
   return {
     window_months: 6,
@@ -602,10 +614,33 @@ function makeTradeFlags(overrides: Partial<DashboardTradeFlagsOut> = {}): Dashbo
     state_series: stateSeries,
     total_labels: { buy: "买入笔数", sell: "卖出笔数" },
     items: [
-      month("2026-05", 1, 0, [0, 0, 0, 0, 0, 0]),
-      month("2026-06", 3, 2, [2, 1, 0, 1, 0, 1], [1, 1, 1, 0, 0, 1, 0, 1, 0, 0]),
+      month("2026-05", 1, 0, [0, 0, 0, 0, 0, 0], undefined, {
+        month: "2026-05",
+        value_bp: 125,
+        pct: "1.25%",
+        display: "+1.25%",
+        sign: "pos",
+        available: true,
+        days: 20,
+        partial: false,
+        note: null,
+      }),
+      month("2026-06", 3, 2, [2, 1, 0, 1, 0, 1], [1, 1, 1, 0, 0, 1, 0, 1, 0, 0], {
+        month: "2026-06",
+        value_bp: -42,
+        pct: "-0.42%",
+        display: "-0.42%",
+        sign: "neg",
+        available: true,
+        days: 21,
+        partial: false,
+        note: null,
+      }),
     ],
     months_without_data: ["2026-01", "2026-02", "2026-03", "2026-04"],
+    has_return_data: true,
+    return_basis: "单月收益 = 资产日表逐日收益（TWR，已剔除出入金）在自然月内复利。",
+    return_labels: { pos: "正收益", neg: "负收益", none: "无数据" },
     ...overrides,
   };
 }
@@ -1011,6 +1046,7 @@ describe("Dashboard 看板", () => {
         has_data: false,
         has_flag_data: false,
         has_state_data: false,
+        has_return_data: false,
         items: [],
         months_without_data: [],
       }),
@@ -1025,7 +1061,7 @@ describe("Dashboard 看板", () => {
 
   it("FT-09 有交易但无加仓/减仓状态命中：两张图都给空态，不画空白坐标轴", async () => {
     getTradeFlags.mockResolvedValue(
-      makeTradeFlags({ has_flag_data: false, has_state_data: false }),
+      makeTradeFlags({ has_flag_data: false, has_state_data: false, has_return_data: false }),
     );
     renderPage();
 
@@ -1037,6 +1073,52 @@ describe("Dashboard 看板", () => {
     expect(document.querySelector(".tfc-chart-bar")).toBeNull();
   });
 
+  it("FT-14 单月收益图：与两图共用范围切换器，切换只发一次请求，文案/符号来自后端", async () => {
+    renderPage();
+
+    const section = await screen.findByTestId("trade-flag-charts");
+    await waitFor(() => expect(getTradeFlags).toHaveBeenCalledTimes(1));
+    expect(getTradeFlags).toHaveBeenLastCalledWith(12);
+
+    expect(await screen.findByTestId("tfc-return-basis")).toBeTruthy();
+    expect(section.textContent).toContain("单月收益（资产日收益 TWR 按月复利）");
+    const legend = await screen.findByTestId("tfc-return-legend");
+    expect(legend.textContent).toContain("正收益");
+    expect(legend.textContent).toContain("负收益");
+    expect(legend.textContent).toContain("无数据");
+
+    fireEvent.click(screen.getByTestId("tfc-range-24"));
+    await waitFor(() => expect(getTradeFlags).toHaveBeenCalledTimes(2));
+    expect(getTradeFlags).toHaveBeenLastCalledWith(24);
+  });
+
+  it("FT-15 单月收益无数据：只显示收益空态，不渲染柱状图", async () => {
+    getTradeFlags.mockResolvedValue(
+      makeTradeFlags({
+        items: [
+          {
+            ...makeTradeFlags().items[0],
+            monthly_return: {
+              month: "2026-05",
+              value_bp: 0,
+              pct: null,
+              display: null,
+              sign: "none",
+              available: false,
+              days: 0,
+              partial: false,
+              note: "当月无可用资产日收益",
+            },
+          },
+        ],
+        has_return_data: false,
+      }),
+    );
+    renderPage();
+
+    expect(await screen.findByTestId("tfc-return-empty")).toBeTruthy();
+  });
+
   it("FT-10 图表数据投影：标签/计数原样透传，柱状系列先买后卖且配色按侧分组", () => {
     const palette = {
       text: "t",
@@ -1045,6 +1127,8 @@ describe("Dashboard 看板", () => {
       line: "l",
       surface: "s",
       selection: "sel",
+      up: "up",
+      down: "down",
       series: {
         buy: "buy-total",
         sell: "sell-total",
@@ -1112,6 +1196,25 @@ describe("Dashboard 看板", () => {
       "sell-1",
       "sell-2",
       "sell-3",
+    ]);
+    // 单月收益：柱高/展示串/符号原样透传，配色只按 sign 选 token。
+    expect(charts.returnData).toEqual([
+      {
+        month: "2026-05",
+        value_bp: 125,
+        display: "+1.25%",
+        sign: "pos",
+        note: "",
+        color: "up",
+      },
+      {
+        month: "2026-06",
+        value_bp: -42,
+        display: "-0.42%",
+        sign: "neg",
+        note: "",
+        color: "down",
+      },
     ]);
   });
 

@@ -9,6 +9,9 @@ export interface ChartPalette {
   surface: string;
   /** 选中态描边色（海洋蓝，`--chart-4`），浅/暗主题各一套。 */
   selection: string;
+  /** 收益正/负语义色（A 股红涨绿跌，跟随主题与 `data-trend` 偏好）。 */
+  up: string;
+  down: string;
   series: Record<string, string>;
 }
 
@@ -53,6 +56,8 @@ function readPalette(): ChartPalette {
     line: readVar(style, "--line"),
     surface: readVar(style, "--surface-raised"),
     selection: readVar(style, "--chart-4"),
+    up: readVar(style, "--up"),
+    down: readVar(style, "--down"),
     series,
   };
 }

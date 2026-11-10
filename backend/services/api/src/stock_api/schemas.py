@@ -926,8 +926,26 @@ class DashboardTradeFlagCountOut(StrictModel):
     count: int
 
 
+class DashboardMonthlyReturnOut(StrictModel):
+    """单月组合收益：资产日表逐日收益（TWR）自然月复利，展示字段全部由后端给出。
+
+    `value_bp` 为柱高（基点整数，2.35% → 235）；无可用日收益时显式 0（图上 0 高度），
+    同时 `available=false`、`pct/display=null`，避免把「无数据」伪装成 0 收益。
+    """
+
+    month: str
+    value_bp: int
+    pct: str | None
+    display: str | None
+    sign: Literal["pos", "neg", "flat", "none"]
+    available: bool
+    days: int
+    partial: bool
+    note: str | None
+
+
 class DashboardTradeFlagMonthOut(StrictModel):
-    """一个完整月的买卖笔数 + 折线趋势旗标 + 柱状图互斥状态旗标命中数。"""
+    """一个完整月的买卖笔数 + 折线趋势旗标 + 柱状图互斥状态旗标命中数 + 单月收益。"""
 
     month: str
     label: str
@@ -935,6 +953,7 @@ class DashboardTradeFlagMonthOut(StrictModel):
     sell_count: int
     flags: list[DashboardTradeFlagCountOut]
     states: list[DashboardTradeFlagCountOut]
+    monthly_return: DashboardMonthlyReturnOut
 
 
 class DashboardTradeFlagsOut(StrictModel):
@@ -957,6 +976,10 @@ class DashboardTradeFlagsOut(StrictModel):
     items: list[DashboardTradeFlagMonthOut]
     # 区间内没有任何旗标记录的月份（可能未运行 build-trade-flags，或当月无交易）。
     months_without_data: list[str]
+    # 单月收益（additive）：口径说明/图例文案由后端给，前端只渲染。
+    has_return_data: bool
+    return_basis: str
+    return_labels: dict[str, str]
 
 
 # ── 板块（API-087/088，2026-10-31 sector-data）────────────────

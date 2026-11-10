@@ -58,6 +58,11 @@ export function toNumber(value: string | null | undefined): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+/** 基点整数 → 百分比轴标签（235 → "2.35%"）；纯展示格式化，不参与业务口径。 */
+export function bpLabel(bp: number): string {
+  return `${(bp / 100).toFixed(2)}%`;
+}
+
 /** 线性映射；domain 退化（min===max）时返回固定中值，避免除零。 */
 export function scaleLinear(
   domainMin: number,

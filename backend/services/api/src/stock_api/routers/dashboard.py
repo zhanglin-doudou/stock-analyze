@@ -14,13 +14,18 @@
 
 from __future__ import annotations
 
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query, Request
 from stock_contracts.errors import ApiError, ErrorCode
 from stock_core.values import Money, Ratio, format_quantity
 from stock_platform.tenant import TenantContext
-from stock_review.trade_flags import TradeFlagMonthlySummary, monthly_trade_flag_summary
+from stock_review.trade_flags import (
+    MonthlyReturn,
+    TradeFlagMonthlySummary,
+    monthly_trade_flag_summary,
+)
 
 from stock_api.deps import get_market_data, get_state, get_tenant
 from stock_api.routing import StrictQueryRoute
@@ -32,6 +37,7 @@ from stock_api.schemas import (
     DashboardLinksOut,
     DashboardMaxDrawdownOut,
     DashboardMissingOut,
+    DashboardMonthlyReturnOut,
     DashboardOut,
     DashboardRoundOut,
     DashboardTradeCountOut,
@@ -49,6 +55,55 @@ MONTHS_BASIS = (
 )
 
 TOTAL_LABELS: dict[str, str] = {"buy": "买入笔数", "sell": "卖出笔数"}
+
+RETURN_BASIS = (
+    "单月收益 = 资产日表逐日收益（TWR，已剔除出入金）在自然月内复利；"
+    "无可用日收益的月份显式 0 高度、数值为 null（不伪造 0 收益）。"
+)
+
+RETURN_LABELS: dict[str, str] = {"pos": "正收益", "neg": "负收益", "none": "无数据"}
+
+
+def _bp(ratio_units: int) -> int:
+    """比率标度整数（scale=8）→ 基点整数（四舍五入到 1bp，供图表柱高）。"""
+    return int((Decimal(ratio_units) / Decimal(10_000)).to_integral_value(rounding=ROUND_HALF_UP))
+
+
+def _bp_pct_text(bp: int) -> str:
+    """基点整数 → 百分比定点串（"2.35%" / "-1.20%" / "0.00%"）。"""
+    sign = "-" if bp < 0 else ""
+    magnitude = abs(bp)
+    return f"{sign}{magnitude // 100}.{magnitude % 100:02d}%"
+
+
+def _monthly_return_out(item: MonthlyReturn) -> DashboardMonthlyReturnOut:
+    """review DTO → API 边界模型：符号/百分比/展示串/说明全部在服务端生成。"""
+    if item.value_units is None:
+        return DashboardMonthlyReturnOut(
+            month=item.month,
+            value_bp=0,
+            pct=None,
+            display=None,
+            sign="none",
+            available=False,
+            days=item.days,
+            partial=False,
+            note="当月无可用资产日收益",
+        )
+    bp = _bp(item.value_units)
+    sign = "pos" if bp > 0 else "neg" if bp < 0 else "flat"
+    pct = _bp_pct_text(bp)
+    return DashboardMonthlyReturnOut(
+        month=item.month,
+        value_bp=bp,
+        pct=pct,
+        display=pct if bp <= 0 else f"+{pct}",
+        sign=sign,
+        available=True,
+        days=item.days,
+        partial=item.partial,
+        note="资产表未覆盖整月，收益为已覆盖区间" if item.partial else None,
+    )
 
 
 def _pct_2dp(ratio_units: int | None) -> str | None:
@@ -270,6 +325,8 @@ def _to_flags_out(result: TradeFlagMonthlySummary) -> DashboardTradeFlagsOut:
             for item in items
         ]
 
+    returns_by_month = {item.month: item for item in result.returns}
+
     return DashboardTradeFlagsOut(
         window_months=result.window_months,
         start_month=result.start_month,
@@ -297,10 +354,14 @@ def _to_flags_out(result: TradeFlagMonthlySummary) -> DashboardTradeFlagsOut:
                     DashboardTradeFlagCountOut(code=code, count=count)
                     for code, count in item.state_counts.items()
                 ],
+                monthly_return=_monthly_return_out(returns_by_month[item.month]),
             )
             for item in result.items
         ],
         months_without_data=list(result.months_without_data),
+        has_return_data=result.has_return_data,
+        return_basis=RETURN_BASIS,
+        return_labels=dict(RETURN_LABELS),
     )
 
 

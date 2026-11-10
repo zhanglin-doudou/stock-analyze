@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from stock_contracts.clock import Clock
 from stock_contracts.errors import ApiError, ErrorCode
 from stock_core.insights.forward import ForwardTrade, price_net
+from stock_core.metrics.portfolio_index import compound_index
 from stock_core.trade_flags import (
     DEFINITION_VERSION,
     DISPLAY_STATUSES,
@@ -38,7 +39,8 @@ from stock_platform.ports import Bar, MarketDataSource
 
 from stock_review.metrics.context import Period
 from stock_review.metrics.datasets import DEFAULT_BENCHMARK, benchmark_fetch_symbol
-from stock_review.models import TradeFlag
+from stock_review.models import AssetDaily, TradeFlag
+from stock_review.repositories.assets import AssetRepository
 
 # 取数窗口：目标月前后各留 45 个自然日，覆盖 5 个行情日 + 长假。
 _BUILD_WINDOW_PADDING = timedelta(days=45)
@@ -339,6 +341,20 @@ class FlagSeries:
 
 
 @dataclass(frozen=True, slots=True)
+class MonthlyReturn:
+    """一个完整月的组合 TWR（资产日表逐日收益按月复利，scale=8）。
+
+    `value_units is None` 表示当月没有任何可用日收益（不是 0 收益）；调用方据此显式
+    渲染 0 高度并标注「无数据」，禁止用 0 冒充。
+    """
+
+    month: str
+    value_units: int | None
+    days: int
+    partial: bool
+
+
+@dataclass(frozen=True, slots=True)
 class TradeFlagMonthlySummary:
     window_months: int
     start_month: str
@@ -352,6 +368,8 @@ class TradeFlagMonthlySummary:
     has_flag_data: bool
     has_state_data: bool
     definition_version: str
+    returns: tuple[MonthlyReturn, ...]
+    has_return_data: bool
 
 
 def _shift_month(year: int, month: int, delta: int) -> tuple[int, int]:
@@ -380,6 +398,13 @@ def _complete_month_windows(today: date, window_months: int) -> list[tuple[str, 
     return windows
 
 
+def _last_weekday(day: date) -> date:
+    """自然月最后一天 → 最后一个工作日（资产表按工作日逐日落行）。"""
+    while day.weekday() >= 5:
+        day -= timedelta(days=1)
+    return day
+
+
 async def monthly_trade_flag_summary(
     session: AsyncSession,
     user_id: uuid.UUID,
@@ -387,13 +412,15 @@ async def monthly_trade_flag_summary(
     window_months: int,
     clock: Clock,
 ) -> TradeFlagMonthlySummary:
-    """看板聚合：最近 N 个完整月的买卖笔数、趋势旗标与互斥状态旗标命中数。
+    """看板聚合：最近 N 个完整月的买卖笔数、趋势旗标、互斥状态旗标命中数与单月收益。
 
     口径：
     * 只统计当前 `definition_version` 的落库结果（不做重算）；
     * 买卖笔数 = 当月按 `trade_dedupe_key` 去重后的账单数；
     * 旗标/状态数量 = 当月 `status='hit'` 的账单数（同一账单命中多个旗标会分别计数）；
     * 折线口径 `TREND_FLAG_CODES`，柱状图口径 `STACKED_STATE_FLAG_CODES`；
+    * 单月收益 = 当前资产口径版本的 `asset_daily.daily_return_units` 在自然月内复利
+      （TWR，出入金已剔除）；无可用日收益的月份 `value_units=None`，由 API 层显式 0 高度；
     * 没有旗标记录的月份显式 0，并在 `months_without_data` 中列出（可能未构建）。
     """
     if window_months not in (6, 12, 24):
@@ -433,6 +460,26 @@ async def monthly_trade_flag_summary(
         (str(month), str(code)): int(count) for month, code, count in flag_rows.all()
     }
 
+    asset_state = await AssetRepository(session).get_state(user_id)
+    daily_returns: dict[str, list[int]] = defaultdict(list)
+    if asset_state is not None:
+        asset_rows = await session.execute(
+            select(AssetDaily.trade_date, AssetDaily.daily_return_units)
+            .where(
+                AssetDaily.user_id == user_id,
+                AssetDaily.definition_version == asset_state.definition_version,
+                AssetDaily.trade_date >= period_start,
+                AssetDaily.trade_date <= period_end,
+                AssetDaily.status.in_(("ok", "degraded")),
+                AssetDaily.daily_return_units.is_not(None),
+            )
+            .order_by(AssetDaily.trade_date)
+        )
+        for trade_date, return_units in asset_rows.all():
+            if return_units is None:  # SQL 已过滤，显式收窄供 mypy
+                continue
+            daily_returns[trade_date.strftime("%Y-%m")].append(int(return_units))
+
     items: list[MonthlyFlagCount] = []
     months_without_data: list[str] = []
     for month, _start, _end in windows:
@@ -465,6 +512,21 @@ async def monthly_trade_flag_summary(
             for definition in (TRADE_FLAG_BY_CODE[code],)
         )
 
+    returns: list[MonthlyReturn] = []
+    for month, _start, month_end in windows:
+        values = daily_returns.get(month, [])
+        covered_through = asset_state.last_built_through if asset_state is not None else None
+        returns.append(
+            MonthlyReturn(
+                month=month,
+                value_units=compound_index(values) if values else None,
+                days=len(values),
+                partial=bool(values)
+                and covered_through is not None
+                and covered_through < _last_weekday(month_end),
+            )
+        )
+
     return TradeFlagMonthlySummary(
         window_months=window_months,
         start_month=windows[0][0],
@@ -478,6 +540,8 @@ async def monthly_trade_flag_summary(
         has_flag_data=any(sum(item.flag_counts.values()) > 0 for item in items),
         has_state_data=any(sum(item.state_counts.values()) > 0 for item in items),
         definition_version=DEFINITION_VERSION,
+        returns=tuple(returns),
+        has_return_data=any(item.value_units is not None for item in returns),
     )
 
 
@@ -485,6 +549,7 @@ __all__ = [
     "BuildResult",
     "FlagSeries",
     "MonthlyFlagCount",
+    "MonthlyReturn",
     "TradeFlagMonthlySummary",
     "TradeFlagRecord",
     "build_trade_flags_for_user",

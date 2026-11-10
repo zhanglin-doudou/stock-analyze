@@ -2425,6 +2425,88 @@
         "title": "DashboardMissingOut",
         "type": "object"
       },
+      "DashboardMonthlyReturnOut": {
+        "additionalProperties": false,
+        "description": "单月组合收益：资产日表逐日收益（TWR）自然月复利，展示字段全部由后端给出。\n\n`value_bp` 为柱高（基点整数，2.35% → 235）；无可用日收益时显式 0（图上 0 高度），\n同时 `available=false`、`pct/display=null`，避免把「无数据」伪装成 0 收益。",
+        "properties": {
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "days": {
+            "title": "Days",
+            "type": "integer"
+          },
+          "display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display"
+          },
+          "month": {
+            "title": "Month",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "partial": {
+            "title": "Partial",
+            "type": "boolean"
+          },
+          "pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pct"
+          },
+          "sign": {
+            "enum": [
+              "pos",
+              "neg",
+              "flat",
+              "none"
+            ],
+            "title": "Sign",
+            "type": "string"
+          },
+          "value_bp": {
+            "title": "Value Bp",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "month",
+          "value_bp",
+          "pct",
+          "display",
+          "sign",
+          "available",
+          "days",
+          "partial",
+          "note"
+        ],
+        "title": "DashboardMonthlyReturnOut",
+        "type": "object"
+      },
       "DashboardOut": {
         "additionalProperties": false,
         "description": "API-084：Dashboard 两板块聚合（只读；金额/比率全部后端格式化）。",
@@ -2697,7 +2779,7 @@
       },
       "DashboardTradeFlagMonthOut": {
         "additionalProperties": false,
-        "description": "一个完整月的买卖笔数 + 折线趋势旗标 + 柱状图互斥状态旗标命中数。",
+        "description": "一个完整月的买卖笔数 + 折线趋势旗标 + 柱状图互斥状态旗标命中数 + 单月收益。",
         "properties": {
           "buy_count": {
             "title": "Buy Count",
@@ -2718,6 +2800,9 @@
             "title": "Month",
             "type": "string"
           },
+          "monthly_return": {
+            "$ref": "#/components/schemas/DashboardMonthlyReturnOut"
+          },
           "sell_count": {
             "title": "Sell Count",
             "type": "integer"
@@ -2736,7 +2821,8 @@
           "buy_count",
           "sell_count",
           "flags",
-          "states"
+          "states",
+          "monthly_return"
         ],
         "title": "DashboardTradeFlagMonthOut",
         "type": "object"
@@ -2800,6 +2886,10 @@
             "title": "Has Flag Data",
             "type": "boolean"
           },
+          "has_return_data": {
+            "title": "Has Return Data",
+            "type": "boolean"
+          },
           "has_state_data": {
             "title": "Has State Data",
             "type": "boolean"
@@ -2825,6 +2915,17 @@
             },
             "title": "Months Without Data",
             "type": "array"
+          },
+          "return_basis": {
+            "title": "Return Basis",
+            "type": "string"
+          },
+          "return_labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Return Labels",
+            "type": "object"
           },
           "series": {
             "items": {
@@ -2870,7 +2971,10 @@
           "state_series",
           "total_labels",
           "items",
-          "months_without_data"
+          "months_without_data",
+          "has_return_data",
+          "return_basis",
+          "return_labels"
         ],
         "title": "DashboardTradeFlagsOut",
         "type": "object"
@@ -11757,6 +11861,7 @@
                   "end_month": "示例",
                   "has_data": false,
                   "has_flag_data": false,
+                  "has_return_data": false,
                   "has_state_data": false,
                   "items": [
                     {
@@ -11769,6 +11874,17 @@
                       ],
                       "label": "示例",
                       "month": "示例",
+                      "monthly_return": {
+                        "available": false,
+                        "days": 1,
+                        "display": "示例",
+                        "month": "示例",
+                        "note": "示例备注",
+                        "partial": false,
+                        "pct": "示例",
+                        "sign": "pos",
+                        "value_bp": 1
+                      },
                       "sell_count": 1,
                       "states": [
                         {
@@ -11783,6 +11899,10 @@
                   "months_without_data": [
                     "示例"
                   ],
+                  "return_basis": "示例",
+                  "return_labels": {
+                    "key": "示例"
+                  },
                   "series": [
                     {
                       "code": "MISSING_CASH_BALANCE",
