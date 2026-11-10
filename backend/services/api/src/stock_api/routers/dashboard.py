@@ -57,11 +57,15 @@ MONTHS_BASIS = (
 TOTAL_LABELS: dict[str, str] = {"buy": "买入笔数", "sell": "卖出笔数"}
 
 RETURN_BASIS = (
-    "单月收益 = 资产日表逐日收益（TWR，已剔除出入金）在自然月内复利；"
+    "单月收益 = 资产日表逐日收益（TWR）在自然月内复利；金额 = 当月每日盈亏累加。"
+    "两者均已剔除出入金（银证转账），分红/打新等投资损益仍计入；"
     "无可用日收益的月份显式 0 高度、数值为 null（不伪造 0 收益）。"
 )
 
 RETURN_LABELS: dict[str, str] = {"pos": "正收益", "neg": "负收益", "none": "无数据"}
+
+# tooltip 只放指标名；「已剔出入金」的口径说明统一放在图表上方（return_basis）。
+RETURN_METRIC_LABELS: dict[str, str] = {"return": "收益率", "amount": "金额"}
 
 
 def _bp(ratio_units: int) -> int:
@@ -89,6 +93,8 @@ def _monthly_return_out(item: MonthlyReturn) -> DashboardMonthlyReturnOut:
             days=item.days,
             partial=False,
             note="当月无可用资产日收益",
+            amount=None,
+            amount_display=None,
         )
     bp = _bp(item.value_units)
     sign = "pos" if bp > 0 else "neg" if bp < 0 else "flat"
@@ -102,7 +108,9 @@ def _monthly_return_out(item: MonthlyReturn) -> DashboardMonthlyReturnOut:
         available=True,
         days=item.days,
         partial=item.partial,
-        note="资产表未覆盖整月，收益为已覆盖区间" if item.partial else None,
+        note=("资产表未覆盖整月，收益与金额均为已覆盖区间" if item.partial else None),
+        amount=_money(item.amount_units),
+        amount_display=_money_display(item.amount_units),
     )
 
 
@@ -362,6 +370,7 @@ def _to_flags_out(result: TradeFlagMonthlySummary) -> DashboardTradeFlagsOut:
         has_return_data=result.has_return_data,
         return_basis=RETURN_BASIS,
         return_labels=dict(RETURN_LABELS),
+        return_metric_labels=dict(RETURN_METRIC_LABELS),
     )
 
 

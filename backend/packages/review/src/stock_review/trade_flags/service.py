@@ -342,14 +342,19 @@ class FlagSeries:
 
 @dataclass(frozen=True, slots=True)
 class MonthlyReturn:
-    """一个完整月的组合 TWR（资产日表逐日收益按月复利，scale=8）。
+    """一个完整月的组合 TWR（资产日表逐日收益按月复利，scale=8）+ 当月收益额（scale=2）。
 
     `value_units is None` 表示当月没有任何可用日收益（不是 0 收益）；调用方据此显式
     渲染 0 高度并标注「无数据」，禁止用 0 冒充。
+
+    `amount_units` = 当月每日 `daily_pnl_units` 的累加（**已剔除出入金**：资产日表的
+    daily_pnl 只剔除银证转账，分红/打新等投资损益仍计入）；无数据时同样为 None。
+    这与 `value_units` 同源同日行，partial 月只累加已覆盖日期，不会跨缺口放大。
     """
 
     month: str
     value_units: int | None
+    amount_units: int | None
     days: int
     partial: bool
 
@@ -462,9 +467,14 @@ async def monthly_trade_flag_summary(
 
     asset_state = await AssetRepository(session).get_state(user_id)
     daily_returns: dict[str, list[int]] = defaultdict(list)
+    monthly_amount: dict[str, int] = defaultdict(int)
     if asset_state is not None:
         asset_rows = await session.execute(
-            select(AssetDaily.trade_date, AssetDaily.daily_return_units)
+            select(
+                AssetDaily.trade_date,
+                AssetDaily.daily_return_units,
+                AssetDaily.daily_pnl_units,
+            )
             .where(
                 AssetDaily.user_id == user_id,
                 AssetDaily.definition_version == asset_state.definition_version,
@@ -475,10 +485,14 @@ async def monthly_trade_flag_summary(
             )
             .order_by(AssetDaily.trade_date)
         )
-        for trade_date, return_units in asset_rows.all():
+        for trade_date, return_units, pnl_units in asset_rows.all():
             if return_units is None:  # SQL 已过滤，显式收窄供 mypy
                 continue
-            daily_returns[trade_date.strftime("%Y-%m")].append(int(return_units))
+            month_key = trade_date.strftime("%Y-%m")
+            daily_returns[month_key].append(int(return_units))
+            if pnl_units is not None:
+                # 收益额 = 逐日 daily_pnl 累加；daily_pnl 已剔除银证转账出入金。
+                monthly_amount[month_key] += int(pnl_units)
 
     items: list[MonthlyFlagCount] = []
     months_without_data: list[str] = []
@@ -520,6 +534,7 @@ async def monthly_trade_flag_summary(
             MonthlyReturn(
                 month=month,
                 value_units=compound_index(values) if values else None,
+                amount_units=monthly_amount.get(month) if values else None,
                 days=len(values),
                 partial=bool(values)
                 and covered_through is not None

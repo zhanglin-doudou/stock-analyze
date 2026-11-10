@@ -2427,8 +2427,30 @@
       },
       "DashboardMonthlyReturnOut": {
         "additionalProperties": false,
-        "description": "单月组合收益：资产日表逐日收益（TWR）自然月复利，展示字段全部由后端给出。\n\n`value_bp` 为柱高（基点整数，2.35% → 235）；无可用日收益时显式 0（图上 0 高度），\n同时 `available=false`、`pct/display=null`，避免把「无数据」伪装成 0 收益。",
+        "description": "单月组合收益：资产日表逐日收益（TWR）自然月复利，展示字段全部由后端给出。\n\n`value_bp` 为柱高（基点整数，2.35% → 235）；无可用日收益时显式 0（图上 0 高度），\n同时 `available=false`、`pct/display=null`，避免把「无数据」伪装成 0 收益。\n\n`amount` 为当月收益额（每日盈亏累加，**已剔除出入金**，含分红/打新等投资损益），\n与收益率同源；无数据时为 `null`。`amount_display` 为千分位展示串。",
         "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount"
+          },
+          "amount_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount Display"
+          },
           "available": {
             "title": "Available",
             "type": "boolean"
@@ -2502,7 +2524,9 @@
           "available",
           "days",
           "partial",
-          "note"
+          "note",
+          "amount",
+          "amount_display"
         ],
         "title": "DashboardMonthlyReturnOut",
         "type": "object"
@@ -2927,6 +2951,13 @@
             "title": "Return Labels",
             "type": "object"
           },
+          "return_metric_labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Return Metric Labels",
+            "type": "object"
+          },
           "series": {
             "items": {
               "$ref": "#/components/schemas/DashboardTradeFlagSeriesOut"
@@ -2974,7 +3005,8 @@
           "months_without_data",
           "has_return_data",
           "return_basis",
-          "return_labels"
+          "return_labels",
+          "return_metric_labels"
         ],
         "title": "DashboardTradeFlagsOut",
         "type": "object"
@@ -11875,6 +11907,8 @@
                       "label": "示例",
                       "month": "示例",
                       "monthly_return": {
+                        "amount": "1234.56",
+                        "amount_display": "示例",
                         "available": false,
                         "days": 1,
                         "display": "示例",
@@ -11901,6 +11935,9 @@
                   ],
                   "return_basis": "示例",
                   "return_labels": {
+                    "key": "示例"
+                  },
+                  "return_metric_labels": {
                     "key": "示例"
                   },
                   "series": [

@@ -590,6 +590,8 @@ function makeTradeFlags(overrides: Partial<DashboardTradeFlagsOut> = {}): Dashbo
       days: 0,
       partial: false,
       note: "当月无可用资产日收益",
+      amount: null,
+      amount_display: null,
     },
   ) => ({
     month: label,
@@ -624,6 +626,8 @@ function makeTradeFlags(overrides: Partial<DashboardTradeFlagsOut> = {}): Dashbo
         days: 20,
         partial: false,
         note: null,
+        amount: "1250.00",
+        amount_display: "1,250.00",
       }),
       month("2026-06", 3, 2, [2, 1, 0, 1, 0, 1], [1, 1, 1, 0, 0, 1, 0, 1, 0, 0], {
         month: "2026-06",
@@ -635,12 +639,15 @@ function makeTradeFlags(overrides: Partial<DashboardTradeFlagsOut> = {}): Dashbo
         days: 21,
         partial: false,
         note: null,
+        amount: "-80.00",
+        amount_display: "-80.00",
       }),
     ],
     months_without_data: ["2026-01", "2026-02", "2026-03", "2026-04"],
     has_return_data: true,
     return_basis: "单月收益 = 资产日表逐日收益（TWR，已剔除出入金）在自然月内复利。",
     return_labels: { pos: "正收益", neg: "负收益", none: "无数据" },
+    return_metric_labels: { return: "收益率", amount: "金额" },
     ...overrides,
   };
 }
@@ -1108,6 +1115,8 @@ describe("Dashboard 看板", () => {
               days: 0,
               partial: false,
               note: "当月无可用资产日收益",
+              amount: null,
+              amount_display: null,
             },
           },
         ],
@@ -1197,12 +1206,13 @@ describe("Dashboard 看板", () => {
       "sell-2",
       "sell-3",
     ]);
-    // 单月收益：柱高/展示串/符号原样透传，配色只按 sign 选 token。
+    // 单月收益：柱高/展示串/符号/金额全部原样透传，配色只按 sign 选 token。
     expect(charts.returnData).toEqual([
       {
         month: "2026-05",
         value_bp: 125,
         display: "+1.25%",
+        amountDisplay: "1,250.00",
         sign: "pos",
         note: "",
         color: "up",
@@ -1211,6 +1221,7 @@ describe("Dashboard 看板", () => {
         month: "2026-06",
         value_bp: -42,
         display: "-0.42%",
+        amountDisplay: "-80.00",
         sign: "neg",
         note: "",
         color: "down",

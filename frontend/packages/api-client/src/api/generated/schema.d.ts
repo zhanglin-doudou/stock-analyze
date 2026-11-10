@@ -1971,8 +1971,15 @@ export interface components {
          *
          *     `value_bp` 为柱高（基点整数，2.35% → 235）；无可用日收益时显式 0（图上 0 高度），
          *     同时 `available=false`、`pct/display=null`，避免把「无数据」伪装成 0 收益。
+         *
+         *     `amount` 为当月收益额（每日盈亏累加，**已剔除出入金**，含分红/打新等投资损益），
+         *     与收益率同源；无数据时为 `null`。`amount_display` 为千分位展示串。
          */
         DashboardMonthlyReturnOut: {
+            /** Amount */
+            amount: string | null;
+            /** Amount Display */
+            amount_display: string | null;
             /** Available */
             available: boolean;
             /** Days */
@@ -2171,6 +2178,10 @@ export interface components {
             return_basis: string;
             /** Return Labels */
             return_labels: {
+                [key: string]: string;
+            };
+            /** Return Metric Labels */
+            return_metric_labels: {
                 [key: string]: string;
             };
             /** Series */

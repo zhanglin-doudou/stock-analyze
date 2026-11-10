@@ -61,6 +61,7 @@ export function buildCharts(
       month: item.label,
       value_bp: monthly.value_bp,
       display: monthly.display ?? "—",
+      amountDisplay: monthly.amount_display ?? "—",
       sign: monthly.sign,
       note: monthly.note ?? "",
       color,
@@ -151,6 +152,7 @@ export function TradeFlagCharts(): ReactElement {
                 hasReturnData={data.has_return_data}
                 returnBasis={data.return_basis}
                 returnLabels={data.return_labels}
+                returnMetricLabels={data.return_metric_labels}
                 palette={palette}
               />
             ) : null}

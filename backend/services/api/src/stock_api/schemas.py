@@ -931,6 +931,9 @@ class DashboardMonthlyReturnOut(StrictModel):
 
     `value_bp` 为柱高（基点整数，2.35% → 235）；无可用日收益时显式 0（图上 0 高度），
     同时 `available=false`、`pct/display=null`，避免把「无数据」伪装成 0 收益。
+
+    `amount` 为当月收益额（每日盈亏累加，**已剔除出入金**，含分红/打新等投资损益），
+    与收益率同源；无数据时为 `null`。`amount_display` 为千分位展示串。
     """
 
     month: str
@@ -942,6 +945,8 @@ class DashboardMonthlyReturnOut(StrictModel):
     days: int
     partial: bool
     note: str | None
+    amount: str | None
+    amount_display: str | None
 
 
 class DashboardTradeFlagMonthOut(StrictModel):
@@ -980,6 +985,8 @@ class DashboardTradeFlagsOut(StrictModel):
     has_return_data: bool
     return_basis: str
     return_labels: dict[str, str]
+    # tooltip 口径标注：`return` = 收益（剔出入金），`amount` = 金额（含出入金）。
+    return_metric_labels: dict[str, str]
 
 
 # ── 板块（API-087/088，2026-10-31 sector-data）────────────────

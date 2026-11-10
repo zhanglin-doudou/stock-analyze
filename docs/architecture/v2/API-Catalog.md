@@ -500,10 +500,10 @@
   - **口径**：`definition_version` 当前为 `1.1`。买侧 `first_entry` 只在买入前持仓为 0 时命中；`addon_*` 只对非首次买入成立。卖侧清仓时 `reduce_*` 降为 `not_applicable/full_exit`，由 `full_exit_breakeven/profit/loss` 三选一接管，清仓与减仓互斥；`full_exit` 仍记录清仓事实，但不参与柱状图叠放。
   - **残余口径**：两侧叠放合计理论上严格等于该侧笔数，唯一已知残余是「已有持仓但成本不可得」的买入（`addon_*=no_cost_basis`，既非首次建仓也非加仓三态）与「无持仓卖出」（`reduce_*=not_applicable/no_position`）；接口如实按原状态计数，禁止并入任一状态类别。
   - `has_data` = 区间内有任何买卖笔数；`has_flag_data` = 任一月任一趋势旗标 count > 0；`has_state_data` = 任一月任一互斥状态 count > 0；图表按各自数据判空，不得画空白坐标轴。
-  - **单月收益（additive，2026-11-10）**：`items[].monthly_return = {month,value_bp,pct,display,sign,available,days,partial,note}`。口径 = 当前资产口径版本（`asset_build_state.definition_version`）的 `asset_daily.daily_return_units` 在自然月内复利（TWR，已剔除出入金）；`value_bp` 为基点整数（2.35% → 235，供图表柱高）；`pct`/`display` 为后端定点串（`2.35%`/`+2.35%`）；`sign ∈ pos|neg|flat|none`。**无可用日收益的月份显式 `value_bp=0`（图上 0 高度）且 `available=false`、`pct/display=null`、`sign=none`，禁止用 0 冒充 0% 收益**；`partial=true` 表示资产表未覆盖整月（按已覆盖区间复利），`note` 为后端说明文案。顶层 `has_return_data`、`return_basis`（口径说明）、`return_labels`（`pos/neg/none` 图例文案）均由后端给出。
+  - **单月收益（additive，2026-11-10）**：`items[].monthly_return = {month,value_bp,pct,display,sign,available,days,partial,note,amount,amount_display}`。口径 = 当前资产口径版本（`asset_build_state.definition_version`）的 `asset_daily.daily_return_units` 在自然月内复利（TWR，已剔除出入金）；`value_bp` 为基点整数（2.35% → 235，供图表柱高）；`pct`/`display` 为后端定点串（`2.35%`/`+2.35%`）；`sign ∈ pos|neg|flat|none`。**无可用日收益的月份显式 `value_bp=0`（图上 0 高度）且 `available=false`、`pct/display=null`、`sign=none`、`amount/amount_display=null`，禁止用 0 冒充 0% 收益或 0 金额**；`partial=true` 表示资产表未覆盖整月（按已覆盖区间复利），`note` 为后端说明文案。**金额（additive，2026-11-10）**：`amount` = 当月每日 `asset_daily.daily_pnl_units` 的累加（**已剔除出入金**：daily_pnl 只剔除银证转账，分红/打新等投资损益仍计入），两位小数定点串；`amount_display` 为千分位展示串；与收益率同源同日行，blocked 行与非当前口径版本行不参与累加。顶层 `has_return_data`、`return_basis`（口径说明，前端展示在图表上方：两者均已剔除出入金）、`return_labels`（`pos/neg/none` 图例文案）、`return_metric_labels`（tooltip 指标名：`return`=收益率、`amount`=金额）均由后端给出。
   - **为什么不复用 `/nav` 月度 TWR**：`nav_daily` 是 `GET /nav` 的派生缓存——只覆盖被请求过的日期（按月稀疏），每次请求都会按本次区间重建点集、并在同事务内清理区间内不属于本次点集的陈旧行，点集随请求区间变化，因此不能作为稳定的月度收益序列数据源（该理由取决于派生缓存的写入方式，不依赖 `/nav` 的收益口径是否正确，口径修复后仍成立）；指标目录（18 项）不含月度收益率指标。资产日表逐日收益是看板回撤族已使用的 TWR 数据源，按月复利结果唯一。
 - 错误码：VALIDATION_ERROR(422，`months` 非 6/12/24)、ADMIN_CANNOT_READ_TRADES(403)。
-- 验收：`months=6/12/24` 月边界正确（跨年）；只返回本人数据；未构建月份显式 0 且列入 `months_without_data`；`states[]` 每侧状态互斥（买侧首次建仓与加仓互斥、卖侧清仓与减仓互斥）；只读（调用前后表行数不变）；单月收益按日收益复利且符号/展示串由后端给出，无资产行月份 `available=false`+`value_bp=0`，blocked/旧口径版本行不参与复利，覆盖不足标 `partial`。
+- 验收：`months=6/12/24` 月边界正确（跨年）；只返回本人数据；未构建月份显式 0 且列入 `months_without_data`；`states[]` 每侧状态互斥（买侧首次建仓与加仓互斥、卖侧清仓与减仓互斥）；只读（调用前后表行数不变）；单月收益按日收益复利且符号/展示串由后端给出，无资产行月份 `available=false`+`value_bp=0`+`amount=null`，blocked/旧口径版本行不参与复利与金额累加，覆盖不足标 `partial`；金额为 `daily_pnl` 当月累加（已剔出入金，含分红/打新损益）。
 
 
 ## §3 错误码总表
@@ -724,7 +724,7 @@ data: {"job_id":"job_01J9Z6","status":"succeeded","result_ref":"/api/v1/reports/
 | API-092 | round_insights_list（已实现） | 200；路由不被 `/{round_id}` 吞；筛选/排序白名单；`_pct/_display/label`；缺失 null 不 0；n<30 不排名；`bucket_basis` 透出且 fill/回合不相加；`security_type` 过滤后 items 与 summary 同源收敛、四类完备（四类之和 == 全量）、非法值 422；卖飞新增 abs+label 且原带符号字段不变；`flag_glossary` 覆盖 16 个枚举值且中英文说明非空；同日先卖后买不误判加仓（按 `line_no` 稳定序） | fx_round_insights | P0 |
 | API-093 | round_insights_detail（已实现） | 200；逐笔理由/5/10/20 四口径；fill 级 `holding_trading_days/bucket`；跨用户 404；不混旧/新持有天；`flag_glossary` 与列表同源同序 | fx_round_insights | P1 |
 | API-094 | round_insights_refresh（已实现） | 200/202+Location；Idempotency-Key 重放；单飞；data_as_of=DB max；GET 不写 | fx_round_insights | P1 |
-| API-095 | dashboard_trade_flags（已实现） | 200；months=6/12/24 月边界跨年正确；只本人数据；未构建月份显式 0；单月收益=资产日表日收益按月复利（value_bp/pct/display/sign 后端给），无资产行月份 available=false+value_bp=0，blocked/旧版本行不参与，覆盖不足 partial；只读 | fx_round_insights | P1 |
+| API-095 | dashboard_trade_flags（已实现） | 200；months=6/12/24 月边界跨年正确；只本人数据；未构建月份显式 0；单月收益=资产日表日收益按月复利（value_bp/pct/display/sign 后端给），无资产行月份 available=false+value_bp=0+amount=null，blocked/旧版本行不参与，覆盖不足 partial；金额=daily_pnl 当月累加（已剔出入金，含分红/打新）；只读 | fx_round_insights | P1 |
 
 
 > **实现说明（API-090~094，2026-11-05）**：上述 5 行已实现并通过 `test_api_090_091_trade_reasons.py`、`test_api_092_094_round_insights.py`、`test_api_028_031_rounds.py`、契约与隔离矩阵；OpenAPI 示例与 SDK 已同步。既有 88 个端点的验收矩阵不变。

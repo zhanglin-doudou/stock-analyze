@@ -41,7 +41,7 @@ insert into review.asset_daily (
     prev_total_assets_units, daily_pnl_units, daily_return_units,
     status, status_reason, definition_version, rebuilt_at
 ) values (
-    :id, :uid, :d, 0, :total, :total, 0, 0, 1, 0,
+    :id, :uid, :d, 0, :total, :total, 0, 0, 1, :cashflow,
     :prev, :pnl, :ret, :status, :reason, :version, now()
 )
 """
@@ -122,11 +122,15 @@ def _state_counts(item: dict[str, Any]) -> dict[str, int]:
 async def _seed_asset_days(
     engine: AsyncEngine,
     user_id: uuid.UUID,
-    rows: list[tuple[date, int | None, str, str]],
+    rows: list[tuple[date, int | None, int, int | None, str, str]],
 ) -> None:
-    """直插资产日行：rows=(trade_date, daily_return_units, status, definition_version)。"""
+    """直插资产日行。
+
+    rows=(trade_date, daily_return_units, cashflow_units, daily_pnl_units, status, version)。
+    `daily_pnl_units` 为 None 表示 blocked 行（无资产值）。
+    """
     async with engine.begin() as conn:
-        for trade_date, return_units, status, version in rows:
+        for trade_date, return_units, cashflow_units, pnl_units, status, version in rows:
             await conn.execute(
                 text(_INSERT_ASSET_DAILY_SQL),
                 {
@@ -135,8 +139,9 @@ async def _seed_asset_days(
                     "d": trade_date,
                     "total": 10_000_000,
                     "prev": None if return_units is None else 10_000_000,
-                    "pnl": None if return_units is None else return_units // 100,
+                    "pnl": pnl_units,
                     "ret": return_units,
+                    "cashflow": cashflow_units,
                     "status": status,
                     "reason": "测试阻断" if status == "blocked" else None,
                     "version": version,
@@ -303,6 +308,7 @@ async def test_api_095_happy_path_monthly_counts(
     # 单月收益 additive：没有资产行时显式 0 高度，但 available=false（不伪造 0 收益）。
     assert body["has_return_data"] is False
     assert body["return_labels"] == {"pos": "正收益", "neg": "负收益", "none": "无数据"}
+    assert body["return_metric_labels"] == {"return": "收益率", "amount": "金额"}
     assert body["return_basis"]
     assert all(item["monthly_return"]["value_bp"] == 0 for item in body["items"])
     assert all(item["monthly_return"]["available"] is False for item in body["items"])
@@ -446,8 +452,8 @@ async def test_api_095_monthly_return_compounds_daily_twr(
         owner_engine,
         account.user_id,
         [
-            (date(2026, 6, 1), 1_000_000, "ok", _ASSET_DEFINITION_VERSION),
-            (date(2026, 6, 2), 1_000_000, "ok", _ASSET_DEFINITION_VERSION),
+            (date(2026, 6, 1), 1_000_000, 0, 10_000, "ok", _ASSET_DEFINITION_VERSION),
+            (date(2026, 6, 2), 1_000_000, 0, 10_000, "ok", _ASSET_DEFINITION_VERSION),
         ],
     )
     await _seed_asset_state(owner_engine, account.user_id, through=date(2026, 6, 30), rows=2)
@@ -470,15 +476,19 @@ async def test_api_095_monthly_return_compounds_daily_twr(
         "days": 2,
         "partial": False,
         "note": None,
+        "amount": "200.00",
+        "amount_display": "200.00",
     }
 
-    # 无资产行月份：柱高显式 0，但数值为 null、sign=none（禁止伪装成 0 收益）。
+    # 无资产行月份：柱高显式 0，但数值为 null、sign=none（禁止伪装成 0 收益/0 金额）。
     may = _item(body, "2026-05")["monthly_return"]
     assert may["value_bp"] == 0
     assert may["available"] is False
     assert may["pct"] is None
     assert may["display"] is None
     assert may["sign"] == "none"
+    assert may["amount"] is None
+    assert may["amount_display"] is None
     assert may["note"] == "当月无可用资产日收益"
 
 
@@ -493,10 +503,10 @@ async def test_api_095_monthly_return_negative_excludes_blocked_and_other_versio
         owner_engine,
         account.user_id,
         [
-            (date(2026, 6, 1), -2_000_000, "ok", _ASSET_DEFINITION_VERSION),
-            (date(2026, 6, 2), 1_000_000, "ok", _ASSET_DEFINITION_VERSION),
-            (date(2026, 6, 3), None, "blocked", _ASSET_DEFINITION_VERSION),
-            (date(2026, 6, 4), 50_000_000, "ok", "0.9"),
+            (date(2026, 6, 1), -2_000_000, 0, -20_000, "ok", _ASSET_DEFINITION_VERSION),
+            (date(2026, 6, 2), 1_000_000, 0, 10_000, "ok", _ASSET_DEFINITION_VERSION),
+            (date(2026, 6, 3), None, 0, None, "blocked", _ASSET_DEFINITION_VERSION),
+            (date(2026, 6, 4), 50_000_000, 0, 500_000, "ok", "0.9"),
         ],
     )
     await _seed_asset_state(owner_engine, account.user_id, through=date(2026, 6, 15), rows=4)
@@ -512,7 +522,52 @@ async def test_api_095_monthly_return_negative_excludes_blocked_and_other_versio
     assert june["sign"] == "neg"
     assert june["available"] is True
     assert june["partial"] is True
-    assert june["note"] == "资产表未覆盖整月，收益为已覆盖区间"
+    # blocked 行与非当前口径版本行不参与金额累加，只剩两个可用日：-200.00 + 100.00。
+    assert june["amount"] == "-100.00"
+    assert june["amount_display"] == "-100.00"
+    assert june["note"] == "资产表未覆盖整月，收益与金额均为已覆盖区间"
+
+
+async def test_api_095_monthly_return_amount_excludes_cashflow(
+    flags_client: httpx.AsyncClient,
+    owner_engine: AsyncEngine,
+    account_factory: Any,
+) -> None:
+    """收益额 = 每日盈亏累加（已剔除出入金），分红等投资损益仍计入；无数据月为 null。"""
+    account = await account_factory()
+    await _seed_asset_days(
+        owner_engine,
+        account.user_id,
+        [
+            # 2026-06：收益 +1% / 0%；当日入金 5000.00 必须被剔除 → 金额仅 300.00。
+            (date(2026, 6, 1), 1_000_000, 500_000, 10_000, "ok", _ASSET_DEFINITION_VERSION),
+            (date(2026, 6, 2), 0, -200_000, 20_000, "ok", _ASSET_DEFINITION_VERSION),
+            # 2026-05：收益 +5%，当日大额出金 30000.00 同样不影响金额。
+            (date(2026, 5, 8), 5_000_000, -3_000_000, 5_000, "ok", _ASSET_DEFINITION_VERSION),
+        ],
+    )
+    await _seed_asset_state(owner_engine, account.user_id, through=date(2026, 6, 30), rows=3)
+
+    resp = await flags_client.get(f"{API_PREFIX}/dashboard/trade-flags", headers=account.headers)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+
+    june = _item(body, "2026-06")["monthly_return"]
+    assert june["display"] == "+1.00%"
+    assert june["sign"] == "pos"
+    assert june["amount"] == "300.00"
+    assert june["amount_display"] == "300.00"
+    # 若把出入金混入金额，这里会是 3300.00（说明断言确实覆盖了剔除口径）。
+    assert june["amount"] != "3300.00"
+
+    may = _item(body, "2026-05")["monthly_return"]
+    assert may["display"] == "+5.00%"
+    assert may["amount"] == "50.00"
+    assert may["amount_display"] == "50.00"
+
+    # 无资产行月份金额为 null（不是 0）。
+    assert _item(body, "2026-04")["monthly_return"]["amount"] is None
+    assert _item(body, "2026-04")["monthly_return"]["amount_display"] is None
 
 
 async def test_api_095_monthly_return_without_build_state_is_unavailable(
@@ -525,7 +580,7 @@ async def test_api_095_monthly_return_without_build_state_is_unavailable(
     await _seed_asset_days(
         owner_engine,
         account.user_id,
-        [(date(2026, 6, 1), 10_000_000, "ok", _ASSET_DEFINITION_VERSION)],
+        [(date(2026, 6, 1), 10_000_000, 0, 100_000, "ok", _ASSET_DEFINITION_VERSION)],
     )
 
     resp = await flags_client.get(f"{API_PREFIX}/dashboard/trade-flags", headers=account.headers)

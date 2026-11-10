@@ -10,11 +10,13 @@ import type { ChartPalette } from "./tradeFlagChartColors";
 /** 柱状图数据行：month + 「展示标签 → 计数」扁平字段（标签全部来自后端）。 */
 export type TradeFlagBarDatum = Record<string, string | number>;
 
-/** 单月收益行：柱高用后端基点整数，展示串/符号/说明也由后端给。 */
+/** 单月收益行：柱高用后端基点整数，展示串/符号/说明/金额也由后端给。 */
 export type MonthlyReturnBarDatum = {
   month: string;
   value_bp: number;
   display: string;
+  /** 当月收益额（已剔出入金）的千分位展示串；无数据为 "—"。 */
+  amountDisplay: string;
   sign: string;
   note: string;
   color: string;
@@ -40,6 +42,8 @@ export interface TradeFlagChartsNivoProps {
   hasReturnData: boolean;
   returnBasis: string;
   returnLabels: Record<string, string>;
+  /** tooltip 指标名（收益率 / 金额），口径说明在图表上方 returnBasis，文案由后端给。 */
+  returnMetricLabels: Record<string, string>;
   palette: ChartPalette;
 }
 
@@ -90,15 +94,25 @@ function BarTooltip({
   );
 }
 
-/** 单月收益 tooltip：展示串的正负着色复用 lib/signed.ts，说明文案来自后端。 */
-function ReturnTooltip({ datum }: { datum: MonthlyReturnBarDatum }) {
+/** 单月收益 tooltip：展示收益率与金额；「已剔出入金」口径说明放在图表上方。 */
+function ReturnTooltip({
+  datum,
+  labels,
+}: {
+  datum: MonthlyReturnBarDatum;
+  labels: Record<string, string>;
+}) {
   return (
     <div className="tfc-tooltip" role="tooltip">
       <div className="tfc-tooltip-head">{datum.month}</div>
       <div className="tfc-tooltip-row">
         <i className="tfc-tooltip-dot" style={{ background: datum.color }} aria-hidden="true" />
-        <span>单月收益</span>
+        <span>{labels.return}</span>
         <b className={signedClass(datum.display)}>{datum.display}</b>
+      </div>
+      <div className="tfc-tooltip-row">
+        <span className="tfc-tooltip-indent">{labels.amount}</span>
+        <b className={signedClass(datum.amountDisplay)}>{datum.amountDisplay}</b>
       </div>
       {datum.note ? <div className="dash-muted">{datum.note}</div> : null}
     </div>
@@ -237,6 +251,7 @@ export default function TradeFlagChartsNivo({
   hasReturnData,
   returnBasis,
   returnLabels,
+  returnMetricLabels,
   palette,
 }: TradeFlagChartsNivoProps) {
   const theme = nivoTheme(palette);
@@ -335,7 +350,10 @@ export default function TradeFlagChartsNivo({
                   role="img"
                   ariaLabel="单月收益柱状图（资产日收益 TWR 按月复利）"
                   tooltip={({ data }) => (
-                    <ReturnTooltip datum={data as MonthlyReturnBarDatum} />
+                    <ReturnTooltip
+                      datum={data as MonthlyReturnBarDatum}
+                      labels={returnMetricLabels}
+                    />
                   )}
                 />
               </div>
