@@ -127,8 +127,9 @@ def test_every_2xx_has_example(spec: dict[str, Any]) -> None:
                 else:
                     text_count += 1
     # 62 个 operation：2 个文本响应（SSE / Prometheus），204 无 body 若干；
-    # 其余 55 个 2xx JSON 响应必须各带确定性示例（新增端点漏示例即失败）。
-    assert json_count == 55
+    # 其余 56 个 2xx JSON 响应必须各带确定性示例（新增端点漏示例即失败）。
+    # 56 = 55 + POST /assets/build 的 200（缺行情时返回失败状态与 missing[]）。
+    assert json_count == 56
     assert text_count == 2  # SSE（API-063）+ Prometheus 文本（API-074）
     stream = _find_operation(spec, "streamJobEvents")["responses"]["200"]["content"]
     assert "text/event-stream" in stream

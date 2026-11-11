@@ -705,6 +705,28 @@ class AssetBuildAccepted(StrictModel):
     links: JobLinks
 
 
+class AssetBuildMissingOut(StrictModel):
+    """API-082：缺行情提示项（字段名沿用归因/看板的 `missing[]` 风格）。"""
+
+    field: str = "market_data"
+    code: Literal["MARKET_DATA_MISSING"] = "MARKET_DATA_MISSING"
+    reason: str
+    what_to_do: str
+
+
+class AssetBuildFailed(StrictModel):
+    """API-082：200 专用响应——本次构建未执行（缺少行情数据），无 job 产生。
+
+    `status="failed"` 沿用 job 状态语义（不是网络/权限错误），`job_id=null` 表示未入队。
+    """
+
+    job_id: None = None
+    type: Literal["build_assets"] = "build_assets"
+    status: Literal["failed"] = "failed"
+    message: str
+    missing: list[AssetBuildMissingOut]
+
+
 class AssetChartPointOut(StrictModel):
     """API-085：图表点（v 为后端归一化无量纲字符串，前端只做几何投影）。"""
 
@@ -900,6 +922,9 @@ class DashboardOut(StrictModel):
     status: DashboardStatus
     build_state: Literal["missing", "current", "stale", "blocked"]
     definition_version: str
+    # 只读构建摘要（与 `GET /assets` 的 build 块同源，additive）：看板据此判定 stale
+    # 并与资产页共用同一份跨页面去重指纹；不触发构建、不写库。
+    build: AssetBuildStateOut
     asset_overview: DashboardAssetOverviewOut
     history_overview: DashboardHistoryOverviewOut
     missing: list[DashboardMissingOut]
@@ -923,8 +948,31 @@ class DashboardTradeFlagCountOut(StrictModel):
     count: int
 
 
+class DashboardMonthlyReturnOut(StrictModel):
+    """单月组合收益：资产日表逐日收益（TWR）自然月复利，展示字段全部由后端给出。
+
+    `value_bp` 为柱高（基点整数，2.35% → 235）；无可用日收益时显式 0（图上 0 高度），
+    同时 `available=false`、`pct/display=null`，避免把「无数据」伪装成 0 收益。
+
+    `amount` 为当月收益额（每日盈亏累加，**已剔除出入金**，含分红/打新等投资损益），
+    与收益率同源；无数据时为 `null`。`amount_display` 为千分位展示串。
+    """
+
+    month: str
+    value_bp: int
+    pct: str | None
+    display: str | None
+    sign: Literal["pos", "neg", "flat", "none"]
+    available: bool
+    days: int
+    partial: bool
+    note: str | None
+    amount: str | None
+    amount_display: str | None
+
+
 class DashboardTradeFlagMonthOut(StrictModel):
-    """一个完整月的买卖笔数 + 折线趋势旗标 + 柱状图互斥状态旗标命中数。"""
+    """一个完整月的买卖笔数 + 折线趋势旗标 + 柱状图互斥状态旗标命中数 + 单月收益。"""
 
     month: str
     label: str
@@ -932,6 +980,7 @@ class DashboardTradeFlagMonthOut(StrictModel):
     sell_count: int
     flags: list[DashboardTradeFlagCountOut]
     states: list[DashboardTradeFlagCountOut]
+    monthly_return: DashboardMonthlyReturnOut
 
 
 class DashboardTradeFlagsOut(StrictModel):
@@ -954,6 +1003,12 @@ class DashboardTradeFlagsOut(StrictModel):
     items: list[DashboardTradeFlagMonthOut]
     # 区间内没有任何旗标记录的月份（可能未运行 build-trade-flags，或当月无交易）。
     months_without_data: list[str]
+    # 单月收益（additive）：口径说明/图例文案由后端给，前端只渲染。
+    has_return_data: bool
+    return_basis: str
+    return_labels: dict[str, str]
+    # tooltip 口径标注：`return` = 收益（剔出入金），`amount` = 金额（含出入金）。
+    return_metric_labels: dict[str, str]
 
 
 # ── 板块（API-087/088，2026-10-31 sector-data）────────────────
@@ -1754,9 +1809,30 @@ class InsightSellFlySummaryOut(BaseModel):
     share_pct: str | None = None
 
 
+class InsightPnlHoldingClassOut(BaseModel):
+    """单类盈亏的持有期（`code` 与文案均由后端给，前端不重复判定）。"""
+
+    code: Literal["loss", "flat", "win"]
+    label: str
+    count: int
+    # 一位小数展示串（如 "3.5"）；无可用样本为 null。
+    avg_holding_trading_days: str | None = None
+    # 交易日 × 10 的定点整数（35 → 3.5 日），供柱状图直接用，避免浮点到前端。
+    avg_holding_trading_days_x10: int | None = None
+
+
+class InsightPnlHoldingOut(BaseModel):
+    """盈亏 × 持有期：亏损/保本/盈利三类恒定返回三条（计数为 0 时均值为 null）。"""
+
+    # 「保本」容差展示串（默认 "100.00"，单位元），判定在 stock_core 常量。
+    flat_tolerance_display: str
+    classes: list[InsightPnlHoldingClassOut]
+
+
 class InsightsSummaryOut(BaseModel):
     swing: InsightBucketSummaryOut
     fill_swing: InsightFillSwingOut
+    holding_by_pnl: InsightPnlHoldingOut
     addon: InsightAddonSummaryOut
     sell_fly: InsightSellFlySummaryOut
     reason_coverage: InsightReasonCoverageOut

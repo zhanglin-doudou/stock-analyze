@@ -8,6 +8,7 @@ import {
   type RoundInsightsRefreshOut,
 } from "@sa/api-client";
 import { api } from "../client";
+import { currentYearToken } from "../lib/date";
 import { signedClass } from "../lib/signed";
 import { Cursor } from "../ui/Cursor";
 import { FilterBar, FilterField } from "../ui/FilterBar";
@@ -15,6 +16,7 @@ import { FlagGlossary } from "../ui/FlagGlossary";
 import { PeriodInput } from "../ui/PeriodInput";
 import { ProblemView } from "../ui/Problem";
 import { DataTable, type DataTableColumn } from "../ui/DataTable";
+import { HoldingCharts } from "./rounds/HoldingCharts";
 
 /** 设计 §6.3 的 `flag` 词表（前端只做筛选选择，不参与计算）。 */
 const FLAG_OPTIONS = [
@@ -154,7 +156,10 @@ function flagLabel(flag: string): string {
 /** 回合洞察（/rounds/insights）：事后统计，只渲染后端产出字符串（前端零口径）。 */
 export function RoundInsights() {
   const [search, setSearch] = useSearchParams();
-  const period = search.get("period") ?? "";
+  const periodParam = search.get("period") ?? "";
+  // 默认期间 = 今年全年（`YYYY` token）；补进 URL 而不是只做内存兜底，
+  // 这样刷新/切走再回来仍按同一区间查询，用户选过的期间不会被默认值重置。
+  const period = periodParam || currentYearToken();
   const bucket = search.get("bucket") ?? "";
   const flag = search.get("flag") ?? "";
   const hasReason = search.get("has_reason") ?? "";
@@ -183,6 +188,14 @@ export function RoundInsights() {
     },
     [search, setSearch],
   );
+
+  // URL 缺 period 时把默认年度补进去（只补空缺，不覆盖用户已选区间）。
+  useEffect(() => {
+    if (periodParam) return;
+    const next = new URLSearchParams(search);
+    next.set("period", currentYearToken());
+    setSearch(next, { replace: true });
+  }, [periodParam, search, setSearch]);
 
   const load = useCallback(
     async (cursor?: string) => {
@@ -439,6 +452,20 @@ export function RoundInsights() {
             <option value="false">未标注理由</option>
           </select>
         </FilterField>
+        
+        <FilterField label="证券代码">
+          <input
+            type="text"
+            aria-label="证券代码"
+            value={codeDraft}
+            placeholder="如 600519"
+            onChange={(event) => setCodeDraft(event.target.value)}
+            onBlur={() => setParam("security_code", codeDraft)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter") setParam("security_code", codeDraft);
+            }}
+          />
+        </FilterField>
         <FilterField label="证券类型">
           <span className="filter-field-options">
             {SECURITY_TYPE_OPTIONS.map((option) => (
@@ -452,19 +479,6 @@ export function RoundInsights() {
               </label>
             ))}
           </span>
-        </FilterField>
-        <FilterField label="证券代码">
-          <input
-            type="text"
-            aria-label="证券代码"
-            value={codeDraft}
-            placeholder="如 600519"
-            onChange={(event) => setCodeDraft(event.target.value)}
-            onBlur={() => setParam("security_code", codeDraft)}
-            onKeyDown={(event) => {
-              if (event.key === "Enter") setParam("security_code", codeDraft);
-            }}
-          />
         </FilterField>
         <FilterField label="排序">
           <select
@@ -485,26 +499,7 @@ export function RoundInsights() {
         <div className="cards">
           <div className="card">
             <h3>持有期分布</h3>
-            <p className="muted">
-              已平仓 {summary.swing.closed} · {BUCKET_LABELS.short} {summary.swing.short} · {BUCKET_LABELS.swing} {summary.swing.swing} ·
-              {BUCKET_LABELS.trend} {summary.swing.trend}
-            </p>
-            <div className="kv">
-              <span>平均持有交易日</span>
-              <strong>{text(summary.swing.avg_holding_trading_days)}</strong>
-              <span>胜率</span>
-              <strong>{text(summary.swing.win_rate_pct)}</strong>
-            </div>
-            <div className="kv">
-              <span>平均盈亏</span>
-              <strong className={signedClass(summary.swing.avg_pnl_display)}>
-                {text(summary.swing.avg_pnl_display)}
-              </strong>
-              <span>合计盈亏</span>
-              <strong className={signedClass(summary.swing.total_pnl_display)}>
-                {text(summary.swing.total_pnl_display)}
-              </strong>
-            </div>
+            <HoldingCharts summary={summary} />
             <p className="muted" data-testid="fill-swing">
               配对（fill 级）{summary.fill_swing.pairs} 笔 · 胜率{" "}
               {text(summary.fill_swing.win_rate_pct)} · 平均持有{" "}

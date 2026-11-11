@@ -56,6 +56,9 @@ export interface paths {
         /**
          * Build Assets Endpoint
          * @description API-082：入队构建/增量更新资产表（202）；单飞复用 / 异参 409。
+         *
+         *     缺行情（行情缓存完全没有覆盖资产表窗口）→ **200 + 失败构建状态 + 提示**，不入队
+         *     doomed job（自动触发路径据此静默跳过，等行情/条件变化后再试）。
          */
         post: operations["buildAssets"];
         delete?: never;
@@ -1162,6 +1165,32 @@ export interface components {
             type: "build_assets";
         };
         /**
+         * AssetBuildFailed
+         * @description API-082：200 专用响应——本次构建未执行（缺少行情数据），无 job 产生。
+         *
+         *     `status="failed"` 沿用 job 状态语义（不是网络/权限错误），`job_id=null` 表示未入队。
+         */
+        AssetBuildFailed: {
+            /** Job Id */
+            job_id?: null;
+            /** Message */
+            message: string;
+            /** Missing */
+            missing: components["schemas"]["AssetBuildMissingOut"][];
+            /**
+             * Status
+             * @default failed
+             * @constant
+             */
+            status: "failed";
+            /**
+             * Type
+             * @default build_assets
+             * @constant
+             */
+            type: "build_assets";
+        };
+        /**
          * AssetBuildIn
          * @description API-082：构建模式（`auto` 增量/自动判定全量；`full` 强制全量）。
          */
@@ -1172,6 +1201,27 @@ export interface components {
              * @enum {string}
              */
             mode: "auto" | "full";
+        };
+        /**
+         * AssetBuildMissingOut
+         * @description API-082：缺行情提示项（字段名沿用归因/看板的 `missing[]` 风格）。
+         */
+        AssetBuildMissingOut: {
+            /**
+             * Code
+             * @default MARKET_DATA_MISSING
+             * @constant
+             */
+            code: "MARKET_DATA_MISSING";
+            /**
+             * Field
+             * @default market_data
+             */
+            field: string;
+            /** Reason */
+            reason: string;
+            /** What To Do */
+            what_to_do: string;
         };
         /**
          * AssetBuildStateOut
@@ -1966,6 +2016,43 @@ export interface components {
             what_to_do: string;
         };
         /**
+         * DashboardMonthlyReturnOut
+         * @description 单月组合收益：资产日表逐日收益（TWR）自然月复利，展示字段全部由后端给出。
+         *
+         *     `value_bp` 为柱高（基点整数，2.35% → 235）；无可用日收益时显式 0（图上 0 高度），
+         *     同时 `available=false`、`pct/display=null`，避免把「无数据」伪装成 0 收益。
+         *
+         *     `amount` 为当月收益额（每日盈亏累加，**已剔除出入金**，含分红/打新等投资损益），
+         *     与收益率同源；无数据时为 `null`。`amount_display` 为千分位展示串。
+         */
+        DashboardMonthlyReturnOut: {
+            /** Amount */
+            amount: string | null;
+            /** Amount Display */
+            amount_display: string | null;
+            /** Available */
+            available: boolean;
+            /** Days */
+            days: number;
+            /** Display */
+            display: string | null;
+            /** Month */
+            month: string;
+            /** Note */
+            note: string | null;
+            /** Partial */
+            partial: boolean;
+            /** Pct */
+            pct: string | null;
+            /**
+             * Sign
+             * @enum {string}
+             */
+            sign: "pos" | "neg" | "flat" | "none";
+            /** Value Bp */
+            value_bp: number;
+        };
+        /**
          * DashboardOut
          * @description API-084：Dashboard 两板块聚合（只读；金额/比率全部后端格式化）。
          */
@@ -1980,6 +2067,7 @@ export interface components {
             assumptions: {
                 [key: string]: string;
             };
+            build: components["schemas"]["AssetBuildStateOut"];
             /**
              * Build State
              * @enum {string}
@@ -2075,7 +2163,7 @@ export interface components {
         };
         /**
          * DashboardTradeFlagMonthOut
-         * @description 一个完整月的买卖笔数 + 折线趋势旗标 + 柱状图互斥状态旗标命中数。
+         * @description 一个完整月的买卖笔数 + 折线趋势旗标 + 柱状图互斥状态旗标命中数 + 单月收益。
          */
         DashboardTradeFlagMonthOut: {
             /** Buy Count */
@@ -2086,6 +2174,7 @@ export interface components {
             label: string;
             /** Month */
             month: string;
+            monthly_return: components["schemas"]["DashboardMonthlyReturnOut"];
             /** Sell Count */
             sell_count: number;
             /** States */
@@ -2123,6 +2212,8 @@ export interface components {
             has_data: boolean;
             /** Has Flag Data */
             has_flag_data: boolean;
+            /** Has Return Data */
+            has_return_data: boolean;
             /** Has State Data */
             has_state_data: boolean;
             /** Items */
@@ -2133,6 +2224,16 @@ export interface components {
             months_basis: string;
             /** Months Without Data */
             months_without_data: string[];
+            /** Return Basis */
+            return_basis: string;
+            /** Return Labels */
+            return_labels: {
+                [key: string]: string;
+            };
+            /** Return Metric Labels */
+            return_metric_labels: {
+                [key: string]: string;
+            };
             /** Series */
             series: components["schemas"]["DashboardTradeFlagSeriesOut"][];
             /** Start Month */
@@ -2341,6 +2442,35 @@ export interface components {
             /** Win Rate Pct */
             win_rate_pct?: string | null;
         };
+        /**
+         * InsightPnlHoldingClassOut
+         * @description 单类盈亏的持有期（`code` 与文案均由后端给，前端不重复判定）。
+         */
+        InsightPnlHoldingClassOut: {
+            /** Avg Holding Trading Days */
+            avg_holding_trading_days?: string | null;
+            /** Avg Holding Trading Days X10 */
+            avg_holding_trading_days_x10?: number | null;
+            /**
+             * Code
+             * @enum {string}
+             */
+            code: "loss" | "flat" | "win";
+            /** Count */
+            count: number;
+            /** Label */
+            label: string;
+        };
+        /**
+         * InsightPnlHoldingOut
+         * @description 盈亏 × 持有期：亏损/保本/盈利三类恒定返回三条（计数为 0 时均值为 null）。
+         */
+        InsightPnlHoldingOut: {
+            /** Classes */
+            classes: components["schemas"]["InsightPnlHoldingClassOut"][];
+            /** Flat Tolerance Display */
+            flat_tolerance_display: string;
+        };
         /** InsightRankingOut */
         InsightRankingOut: {
             /** Basis */
@@ -2429,6 +2559,7 @@ export interface components {
         InsightsSummaryOut: {
             addon: components["schemas"]["InsightAddonSummaryOut"];
             fill_swing: components["schemas"]["InsightFillSwingOut"];
+            holding_by_pnl: components["schemas"]["InsightPnlHoldingOut"];
             /** Pending */
             pending: {
                 [key: string]: number;
@@ -4600,6 +4731,15 @@ export interface operations {
             };
         };
         responses: {
+            /** @description 本次构建未执行（缺少行情数据）：无 job 产生，沿用失败构建状态 + missing[] 提示 */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AssetBuildFailed"];
+                };
+            };
             /** @description Successful Response */
             202: {
                 headers: {

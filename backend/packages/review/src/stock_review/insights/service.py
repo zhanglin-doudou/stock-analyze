@@ -64,6 +64,13 @@ SECURITY_TYPES: tuple[str, ...] = (
     SECURITY_TYPE_OTHER,
 )
 
+# 盈亏分类标签（图表图例/坐标轴文案由后端给，前端不维护同义文案）。
+PNL_CLASS_LABELS: dict[str, str] = {
+    agg.PNL_CLASS_LOSS: "亏损",
+    agg.PNL_CLASS_FLAT: "保本",
+    agg.PNL_CLASS_WIN: "盈利",
+}
+
 
 @dataclass(slots=True)
 class ForwardView:
@@ -161,6 +168,29 @@ class FillSwingBucket:
 
 
 @dataclass(slots=True)
+class PnlHoldingClass:
+    """单类盈亏的持有期（标签/容差由后端给，前端只渲染）。"""
+
+    code: str
+    label: str
+    count: int
+    avg_holding_trading_days: str | None
+    avg_holding_trading_days_x10: int | None
+
+
+@dataclass(slots=True)
+class PnlHoldingSummary:
+    """盈亏 × 持有期（`/rounds/insights` 持有期分布图表的数据源）。
+
+    「保本」判定容差在后端常量 `agg.PNL_FLAT_TOLERANCE_UNITS`（默认 100.00 元），
+    原样透出 `flat_tolerance_display`，避免前端重复判定口径。
+    """
+
+    flat_tolerance_display: str
+    classes: list[PnlHoldingClass]
+
+
+@dataclass(slots=True)
 class RankingSummary:
     n_sample: int
     n_eligible: int
@@ -222,6 +252,7 @@ class SellFlySummary:
 class InsightsSummary:
     swing: SummaryBucket
     fill_swing: FillSwingBucket
+    holding_by_pnl: PnlHoldingSummary
     addon: AddonSummary
     sell_fly: SellFlySummary
     reason_coverage: ReasonCoverage
@@ -308,6 +339,11 @@ def _pct(units: int | None) -> str | None:
 
 def _money(units: int | None) -> str | None:
     return None if units is None else str(Money(units))
+
+
+def _days_x10_display(x10: int | None) -> str | None:
+    """交易日 × 10 定点整数 → 一位小数展示串（整数拆分，不引入 float）。"""
+    return None if x10 is None else f"{x10 // 10}.{x10 % 10}"
 
 
 def _missed_presentation(units: int | None) -> tuple[str | None, str | None, str | None]:
@@ -1053,6 +1089,21 @@ def _summary(
         total_pnl_display=_money(sum(pnls) if pnls else None),
     )
     fill_pnls = fill_stats.pnl_units
+    holding_by_pnl = PnlHoldingSummary(
+        flat_tolerance_display=str(Money(agg.PNL_FLAT_TOLERANCE_UNITS)),
+        classes=[
+            PnlHoldingClass(
+                code=group.code,
+                label=PNL_CLASS_LABELS[group.code],
+                count=group.count,
+                avg_holding_trading_days=_days_x10_display(group.avg_holding_trading_days_x10),
+                avg_holding_trading_days_x10=group.avg_holding_trading_days_x10,
+            )
+            for group in agg.holding_by_pnl(
+                [(item.pnl_units, item.holding_trading_days) for item in closed]
+            )
+        ],
+    )
     fill_swing = FillSwingBucket(
         pairs=fill_stats.pairs,
         win_rate_pct=(
@@ -1152,6 +1203,7 @@ def _summary(
     return InsightsSummary(
         swing=swing,
         fill_swing=fill_swing,
+        holding_by_pnl=holding_by_pnl,
         addon=addon_summary,
         sell_fly=sell_fly_summary,
         reason_coverage=ReasonCoverage(

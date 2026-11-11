@@ -659,3 +659,60 @@ async def test_api_082_no_anchor_is_blocked(
     assert body["build"]["last_status"] == "blocked"
     assert body["build"]["status_reason"]
     assert await _count_asset_rows(owner_engine, user_id=acc.user_id) == 0
+
+
+# ── 缺行情：200 + 失败构建状态 + 提示（不入队）─────────────────
+
+
+class _CachedEmptyMarket:
+    """live+本地缓存行情端口的替身：具备 `get_cached_bars` 能力，但缓存里没有日线。"""
+
+    async def get_cached_bars(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+        return {}
+
+
+async def test_api_082_missing_market_data_returns_200_failed(
+    settings: Any,
+    frozen_clock: FrozenClock,
+    account_factory: Any,
+    owner_engine: AsyncEngine,
+) -> None:
+    """缺行情：触发构建返回 200 + `status=failed` + `missing[]=MARKET_DATA_MISSING`，不建 job。"""
+    acc = await account_factory()
+    await _seed_trade(
+        owner_engine,
+        user_id=acc.user_id,
+        trade_date=date(2026, 6, 1),
+        side="buy",
+        cash_balance_units=100_000_00,
+    )
+    # 其他用例可能写过 market.*：显式清空，保证「行情缓存完全没有覆盖窗口」。
+    async with owner_engine.begin() as conn:
+        await conn.execute(text("delete from market.daily_bar"))
+
+    app = create_app(settings, clock=frozen_clock)
+    app.state.sa.market_data = _CachedEmptyMarket()  # type: ignore[assignment]
+    transport = httpx.ASGITransport(app=app, raise_app_exceptions=False)
+    async with httpx.AsyncClient(transport=transport, base_url="http://testserver") as client:
+        resp = await _post_build(client, acc.headers)
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["type"] == "build_assets"
+    assert body["status"] == "failed"
+    assert body["job_id"] is None, "缺行情不应产生 job"
+    assert "缺少行情数据" in body["message"]
+    miss = body["missing"][0]
+    assert body["message"] == miss["reason"]
+    assert miss["field"] == "market_data"
+    assert miss["code"] == "MARKET_DATA_MISSING"
+    assert miss["what_to_do"]
+
+    async with owner_engine.begin() as conn:
+        created = await conn.execute(
+            text(
+                "select count(*) from platform.job where user_id = :uid and kind = 'build_assets'"
+            ),
+            {"uid": acc.user_id},
+        )
+        assert created.scalar_one() == 0, "缺行情前置失败不应入队 build_assets job"

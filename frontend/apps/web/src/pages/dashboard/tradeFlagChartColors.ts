@@ -9,6 +9,9 @@ export interface ChartPalette {
   surface: string;
   /** 选中态描边色（海洋蓝，`--chart-4`），浅/暗主题各一套。 */
   selection: string;
+  /** 收益正/负语义色（A 股红涨绿跌，跟随主题与 `data-trend` 偏好）。 */
+  up: string;
+  down: string;
   series: Record<string, string>;
 }
 
@@ -34,6 +37,10 @@ const SERIES_TOKENS: Record<string, string> = {
   full_exit_breakeven: "--chart-sell-exit-1",
   full_exit_profit: "--chart-sell-exit-2",
   full_exit_loss: "--chart-sell-exit-3",
+  // 回合持有期分类（短线/波段/趋势）饼图三分色，沿用买入青蓝系由深到浅。
+  bucket_trend: "--chart-buy-1",
+  bucket_swing: "--chart-buy-2",
+  bucket_short: "--chart-buy-3",
 };
 
 function readVar(style: CSSStyleDeclaration, name: string): string {
@@ -53,6 +60,8 @@ function readPalette(): ChartPalette {
     line: readVar(style, "--line"),
     surface: readVar(style, "--surface-raised"),
     selection: readVar(style, "--chart-4"),
+    up: readVar(style, "--up"),
+    down: readVar(style, "--down"),
     series,
   };
 }

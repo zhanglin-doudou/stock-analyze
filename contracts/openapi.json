@@ -56,6 +56,45 @@
         "title": "AssetBuildAccepted",
         "type": "object"
       },
+      "AssetBuildFailed": {
+        "additionalProperties": false,
+        "description": "API-082：200 专用响应——本次构建未执行（缺少行情数据），无 job 产生。\n\n`status=\"failed\"` 沿用 job 状态语义（不是网络/权限错误），`job_id=null` 表示未入队。",
+        "properties": {
+          "job_id": {
+            "title": "Job Id",
+            "type": "null"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          },
+          "missing": {
+            "items": {
+              "$ref": "#/components/schemas/AssetBuildMissingOut"
+            },
+            "title": "Missing",
+            "type": "array"
+          },
+          "status": {
+            "const": "failed",
+            "default": "failed",
+            "title": "Status",
+            "type": "string"
+          },
+          "type": {
+            "const": "build_assets",
+            "default": "build_assets",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message",
+          "missing"
+        ],
+        "title": "AssetBuildFailed",
+        "type": "object"
+      },
       "AssetBuildIn": {
         "additionalProperties": false,
         "description": "API-082：构建模式（`auto` 增量/自动判定全量；`full` 强制全量）。",
@@ -71,6 +110,37 @@
           }
         },
         "title": "AssetBuildIn",
+        "type": "object"
+      },
+      "AssetBuildMissingOut": {
+        "additionalProperties": false,
+        "description": "API-082：缺行情提示项（字段名沿用归因/看板的 `missing[]` 风格）。",
+        "properties": {
+          "code": {
+            "const": "MARKET_DATA_MISSING",
+            "default": "MARKET_DATA_MISSING",
+            "title": "Code",
+            "type": "string"
+          },
+          "field": {
+            "default": "market_data",
+            "title": "Field",
+            "type": "string"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "what_to_do": {
+            "title": "What To Do",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason",
+          "what_to_do"
+        ],
+        "title": "AssetBuildMissingOut",
         "type": "object"
       },
       "AssetBuildStateOut": {
@@ -2425,6 +2495,112 @@
         "title": "DashboardMissingOut",
         "type": "object"
       },
+      "DashboardMonthlyReturnOut": {
+        "additionalProperties": false,
+        "description": "单月组合收益：资产日表逐日收益（TWR）自然月复利，展示字段全部由后端给出。\n\n`value_bp` 为柱高（基点整数，2.35% → 235）；无可用日收益时显式 0（图上 0 高度），\n同时 `available=false`、`pct/display=null`，避免把「无数据」伪装成 0 收益。\n\n`amount` 为当月收益额（每日盈亏累加，**已剔除出入金**，含分红/打新等投资损益），\n与收益率同源；无数据时为 `null`。`amount_display` 为千分位展示串。",
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount"
+          },
+          "amount_display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount Display"
+          },
+          "available": {
+            "title": "Available",
+            "type": "boolean"
+          },
+          "days": {
+            "title": "Days",
+            "type": "integer"
+          },
+          "display": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Display"
+          },
+          "month": {
+            "title": "Month",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "partial": {
+            "title": "Partial",
+            "type": "boolean"
+          },
+          "pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pct"
+          },
+          "sign": {
+            "enum": [
+              "pos",
+              "neg",
+              "flat",
+              "none"
+            ],
+            "title": "Sign",
+            "type": "string"
+          },
+          "value_bp": {
+            "title": "Value Bp",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "month",
+          "value_bp",
+          "pct",
+          "display",
+          "sign",
+          "available",
+          "days",
+          "partial",
+          "note",
+          "amount",
+          "amount_display"
+        ],
+        "title": "DashboardMonthlyReturnOut",
+        "type": "object"
+      },
       "DashboardOut": {
         "additionalProperties": false,
         "description": "API-084：Dashboard 两板块聚合（只读；金额/比率全部后端格式化）。",
@@ -2443,6 +2619,9 @@
             },
             "title": "Assumptions",
             "type": "object"
+          },
+          "build": {
+            "$ref": "#/components/schemas/AssetBuildStateOut"
           },
           "build_state": {
             "enum": [
@@ -2527,6 +2706,7 @@
           "status",
           "build_state",
           "definition_version",
+          "build",
           "asset_overview",
           "history_overview",
           "missing",
@@ -2693,7 +2873,7 @@
       },
       "DashboardTradeFlagMonthOut": {
         "additionalProperties": false,
-        "description": "一个完整月的买卖笔数 + 折线趋势旗标 + 柱状图互斥状态旗标命中数。",
+        "description": "一个完整月的买卖笔数 + 折线趋势旗标 + 柱状图互斥状态旗标命中数 + 单月收益。",
         "properties": {
           "buy_count": {
             "title": "Buy Count",
@@ -2714,6 +2894,9 @@
             "title": "Month",
             "type": "string"
           },
+          "monthly_return": {
+            "$ref": "#/components/schemas/DashboardMonthlyReturnOut"
+          },
           "sell_count": {
             "title": "Sell Count",
             "type": "integer"
@@ -2732,7 +2915,8 @@
           "buy_count",
           "sell_count",
           "flags",
-          "states"
+          "states",
+          "monthly_return"
         ],
         "title": "DashboardTradeFlagMonthOut",
         "type": "object"
@@ -2796,6 +2980,10 @@
             "title": "Has Flag Data",
             "type": "boolean"
           },
+          "has_return_data": {
+            "title": "Has Return Data",
+            "type": "boolean"
+          },
           "has_state_data": {
             "title": "Has State Data",
             "type": "boolean"
@@ -2821,6 +3009,24 @@
             },
             "title": "Months Without Data",
             "type": "array"
+          },
+          "return_basis": {
+            "title": "Return Basis",
+            "type": "string"
+          },
+          "return_labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Return Labels",
+            "type": "object"
+          },
+          "return_metric_labels": {
+            "additionalProperties": {
+              "type": "string"
+            },
+            "title": "Return Metric Labels",
+            "type": "object"
           },
           "series": {
             "items": {
@@ -2866,7 +3072,11 @@
           "state_series",
           "total_labels",
           "items",
-          "months_without_data"
+          "months_without_data",
+          "has_return_data",
+          "return_basis",
+          "return_labels",
+          "return_metric_labels"
         ],
         "title": "DashboardTradeFlagsOut",
         "type": "object"
@@ -3442,6 +3652,79 @@
         "title": "InsightFillSwingOut",
         "type": "object"
       },
+      "InsightPnlHoldingClassOut": {
+        "description": "单类盈亏的持有期（`code` 与文案均由后端给，前端不重复判定）。",
+        "properties": {
+          "avg_holding_trading_days": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Holding Trading Days"
+          },
+          "avg_holding_trading_days_x10": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Avg Holding Trading Days X10"
+          },
+          "code": {
+            "enum": [
+              "loss",
+              "flat",
+              "win"
+            ],
+            "title": "Code",
+            "type": "string"
+          },
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "label",
+          "count"
+        ],
+        "title": "InsightPnlHoldingClassOut",
+        "type": "object"
+      },
+      "InsightPnlHoldingOut": {
+        "description": "盈亏 × 持有期：亏损/保本/盈利三类恒定返回三条（计数为 0 时均值为 null）。",
+        "properties": {
+          "classes": {
+            "items": {
+              "$ref": "#/components/schemas/InsightPnlHoldingClassOut"
+            },
+            "title": "Classes",
+            "type": "array"
+          },
+          "flat_tolerance_display": {
+            "title": "Flat Tolerance Display",
+            "type": "string"
+          }
+        },
+        "required": [
+          "flat_tolerance_display",
+          "classes"
+        ],
+        "title": "InsightPnlHoldingOut",
+        "type": "object"
+      },
       "InsightRankingOut": {
         "properties": {
           "basis": {
@@ -3728,6 +4011,9 @@
           "fill_swing": {
             "$ref": "#/components/schemas/InsightFillSwingOut"
           },
+          "holding_by_pnl": {
+            "$ref": "#/components/schemas/InsightPnlHoldingOut"
+          },
           "pending": {
             "additionalProperties": {
               "type": "integer"
@@ -3751,6 +4037,7 @@
         "required": [
           "swing",
           "fill_swing",
+          "holding_by_pnl",
           "addon",
           "sell_fly",
           "reason_coverage",
@@ -9965,7 +10252,7 @@
     },
     "/api/v1/assets/build": {
       "post": {
-        "description": "API-082：入队构建/增量更新资产表（202）；单飞复用 / 异参 409。",
+        "description": "API-082：入队构建/增量更新资产表（202）；单飞复用 / 异参 409。\n\n缺行情（行情缓存完全没有覆盖资产表窗口）→ **200 + 失败构建状态 + 提示**，不入队\ndoomed job（自动触发路径据此静默跳过，等行情/条件变化后再试）。",
         "operationId": "buildAssets",
         "parameters": [
           {
@@ -10030,6 +10317,30 @@
           }
         },
         "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "job_id": null,
+                  "message": "处理中",
+                  "missing": [
+                    {
+                      "code": "MARKET_DATA_MISSING",
+                      "field": "market_data",
+                      "reason": "示例原因",
+                      "what_to_do": "示例"
+                    }
+                  ],
+                  "status": "failed",
+                  "type": "build_assets"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/AssetBuildFailed"
+                }
+              }
+            },
+            "description": "本次构建未执行（缺少行情数据）：无 job 产生，沿用失败构建状态 + missing[] 提示"
+          },
           "202": {
             "content": {
               "application/json": {
@@ -11458,6 +11769,21 @@
                     "mdd": "longest_valid_segment",
                     "total_profit_basis": "full_history_bridge"
                   },
+                  "build": {
+                    "assumption": null,
+                    "definition_version": "1.0",
+                    "has_new_market_data": false,
+                    "last_built_at": "2026-09-30T09:30:00Z",
+                    "last_built_through": "2026-09-30",
+                    "last_mode": "incremental",
+                    "last_rebuild_from": "2026-08-17",
+                    "last_rows_written": 45,
+                    "last_status": "ok",
+                    "rows_count": 125,
+                    "session_notice": null,
+                    "state": "current",
+                    "status_reason": null
+                  },
                   "build_state": "current",
                   "data_as_of": "2026-09-30",
                   "definition_version": "1.0",
@@ -11738,6 +12064,7 @@
                   "end_month": "示例",
                   "has_data": false,
                   "has_flag_data": false,
+                  "has_return_data": false,
                   "has_state_data": false,
                   "items": [
                     {
@@ -11750,6 +12077,19 @@
                       ],
                       "label": "示例",
                       "month": "示例",
+                      "monthly_return": {
+                        "amount": "1234.56",
+                        "amount_display": "示例",
+                        "available": false,
+                        "days": 1,
+                        "display": "示例",
+                        "month": "示例",
+                        "note": "示例备注",
+                        "partial": false,
+                        "pct": "示例",
+                        "sign": "pos",
+                        "value_bp": 1
+                      },
                       "sell_count": 1,
                       "states": [
                         {
@@ -11764,6 +12104,13 @@
                   "months_without_data": [
                     "示例"
                   ],
+                  "return_basis": "示例",
+                  "return_labels": {
+                    "key": "示例"
+                  },
+                  "return_metric_labels": {
+                    "key": "示例"
+                  },
                   "series": [
                     {
                       "code": "MISSING_CASH_BALANCE",
@@ -17604,6 +17951,32 @@
                       "pairs": 1,
                       "total_pnl_display": "1234.56",
                       "win_rate_pct": "100.0%"
+                    },
+                    "holding_by_pnl": {
+                      "classes": [
+                        {
+                          "avg_holding_trading_days": null,
+                          "avg_holding_trading_days_x10": null,
+                          "code": "loss",
+                          "count": 0,
+                          "label": "亏损"
+                        },
+                        {
+                          "avg_holding_trading_days": null,
+                          "avg_holding_trading_days_x10": null,
+                          "code": "flat",
+                          "count": 0,
+                          "label": "保本"
+                        },
+                        {
+                          "avg_holding_trading_days": "12.0",
+                          "avg_holding_trading_days_x10": 120,
+                          "code": "win",
+                          "count": 1,
+                          "label": "盈利"
+                        }
+                      ],
+                      "flat_tolerance_display": "100.00"
                     },
                     "pending": {
                       "forward_recompute": 0,

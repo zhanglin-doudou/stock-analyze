@@ -16,10 +16,10 @@ from __future__ import annotations
 import hashlib
 import uuid
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import delete
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from stock_contracts.clock import Clock
@@ -88,6 +88,19 @@ from stock_review.models import NavDaily
 
 
 @dataclass(slots=True)
+class NavRow:
+    """区间内某日的净值点（响应直接用本次计算结果，不回读数据库）。"""
+
+    trade_date: date
+    nav_units: int
+    return_units: int
+    total_value_units: int
+    cashflow_units: int
+    status: str
+    blocked_reason: str | None
+
+
+@dataclass(slots=True)
 class NavComputeResult:
     """一次 NAV 计算的结果（落库前的内存表示）。"""
 
@@ -100,6 +113,8 @@ class NavComputeResult:
     # 月度首日的「昨日资产」= 期初现金 + 期初持仓按上一交易日收盘价估值（scale=2）；
     # 仅用于 API 展示首日昨日资产/日收益额，不进入 TWR 序列；行情不足时为 None。
     prev_day_value_units: int | None = None
+    # 本次计算的区间内日点（按日期升序）：响应唯一数据源，禁止再回读 nav_daily。
+    rows: list[NavRow] = field(default_factory=list)
 
 
 @dataclass(slots=True)
@@ -274,6 +289,14 @@ async def compute_nav_points(
 
     # 6b. 期初基准点：区间首日之前的总资产（现金 + 货基 + 期初持仓按市价）。
     #     没有它，TWR 只能从首个交易日算起，整段收益会漏掉首日涨跌。
+    #     首日锚点恒取 period_start-1（值 = 上一交易日收盘估值，6a 已算好），只参与 TWR，
+    #     不落库、不进响应——否则首日（无论当天有无成交）的涨跌会被吞掉：
+    #       * 首日有成交 → 序列首点就是首日，其 return 会被 build_nav_series 强制为 0；
+    #       * 首日无成交 → 下面的 period_start 基准点用的是首日收盘价，同样漏掉首日涨跌。
+    anchor_date = period_start - timedelta(days=1)
+    if prev_day_value_units is not None:
+        points.append((anchor_date, prev_day_value_units, 0))
+
     baseline_date = period_start
     if trade_dates[0] > period_start:
         (
@@ -314,6 +337,22 @@ async def compute_nav_points(
             baseline_date,
             code_names,
             bond_divisors=bond_divisors,
+        )
+    elif prev_day_value_units is None:
+        # 首日即交易日，但上一交易日估值缺行情 → 无法锚定首日涨跌，整段阻断。
+        return (
+            [],
+            [
+                (
+                    anchor_date,
+                    _blocked_reason("缺期初行情数据", prev_day_missing, market_causes),
+                )
+            ],
+            [],
+            degraded,
+            {},
+            assumption,
+            prev_day_value_units,
         )
 
     # 7. 逐日推演
@@ -484,9 +523,11 @@ async def compute_and_store_nav(
 
     rebuilt_at = clock.now()
     rows: list[dict[str, object]] = []
+    views: list[NavRow] = []
 
     if blocked_reasons:
         # 全局阻断：用 period_end 作为唯一 blocked 行（API 层据此返回 blocked 状态）
+        global_reason = "; ".join(blocked_reasons)
         rows.append(
             {
                 "id": _nav_id(user_id, period_end),
@@ -498,16 +539,18 @@ async def compute_and_store_nav(
                 "cashflow_units": 0,
                 "shares_units": 0,
                 "status": "blocked",
-                "blocked_reason": "; ".join(blocked_reasons),
+                "blocked_reason": global_reason,
                 "rebuilt_at": rebuilt_at,
             }
         )
+        views.append(NavRow(period_end, 0, 0, 0, 0, "blocked", global_reason))
         series: NavSeries | None = None
         mwr_units = 0
     else:
         series = build_nav_series(points) if points else None
         cashflow_points = investor_cashflows(series) if series is not None else []
         mwr_units = compute_xirr(cashflow_points) if cashflow_points else 0
+        point_status = "degraded" if degraded else "ok"
 
         # 逐日阻断行（不计入 TWR）
         for blocked_date, reason in blocked_points:
@@ -526,8 +569,12 @@ async def compute_and_store_nav(
                     "rebuilt_at": rebuilt_at,
                 }
             )
+            views.append(NavRow(blocked_date, 0, 0, 0, 0, "blocked", reason[:256]))
 
         for p in series.points if series else []:
+            # 首日前锚点只参与 TWR：不落库（避免覆盖真实日期行）、不进响应。
+            if p.trade_date < period_start:
+                continue
             rows.append(
                 {
                     "id": _nav_id(user_id, p.trade_date),
@@ -538,11 +585,36 @@ async def compute_and_store_nav(
                     "total_value_units": p.total_value_units,
                     "cashflow_units": p.cashflow_units,
                     "shares_units": p.shares_units,
-                    "status": "degraded" if degraded else "ok",
+                    "status": point_status,
                     "blocked_reason": None,
                     "rebuilt_at": rebuilt_at,
                 }
             )
+            views.append(
+                NavRow(
+                    p.trade_date,
+                    p.nav_units,
+                    p.return_units,
+                    p.total_value_units,
+                    p.cashflow_units,
+                    point_status,
+                    None,
+                )
+            )
+        views.sort(key=lambda row: row.trade_date)
+
+    # 写侧收敛：同一事务内先删掉区间内不属于本次点集的陈旧行（纯派生缓存），
+    # 否则窄区间留下的合成行/旧结果会被后续宽区间请求拼回去。
+    write_dates = sorted({row.trade_date for row in views})
+    stale_stmt = delete(NavDaily).where(
+        NavDaily.user_id == user_id,
+        NavDaily.trade_date >= period_start,
+        NavDaily.trade_date <= period_end,
+    )
+    if write_dates:
+        stale_stmt = stale_stmt.where(NavDaily.trade_date.notin_(write_dates))
+    await session.execute(stale_stmt)
+
     # UPSERT（on conflict (id) do update）
     if rows:
         stmt = pg_insert(NavDaily).values(rows)
@@ -569,6 +641,7 @@ async def compute_and_store_nav(
             holdings_by_date={},
             assumption=None,
             prev_day_value_units=None,
+            rows=views,
         )
     return NavComputeResult(
         series=series,
@@ -578,24 +651,5 @@ async def compute_and_store_nav(
         holdings_by_date=holdings_by_date,
         assumption=assumption,
         prev_day_value_units=prev_day_value_units,
+        rows=views,
     )
-
-
-async def fetch_nav_for_period(
-    session: AsyncSession,
-    *,
-    user_id: uuid.UUID,
-    period_start: date,
-    period_end: date,
-) -> list[NavDaily]:
-    """读取区间内已落库的 NAV 日点（按日期升序）。"""
-    stmt = (
-        select(NavDaily)
-        .where(
-            NavDaily.user_id == user_id,
-            NavDaily.trade_date >= period_start,
-            NavDaily.trade_date <= period_end,
-        )
-        .order_by(NavDaily.trade_date.asc())
-    )
-    return list(await session.scalars(stmt))

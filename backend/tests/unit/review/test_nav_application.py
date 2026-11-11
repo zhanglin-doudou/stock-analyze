@@ -231,20 +231,20 @@ async def test_missing_market_data_blocks_day_not_raise() -> None:
     assert reasons == []
     assert blocked, "缺行情应产生逐日阻断"
     assert series is not None
-    # 期初基准点仅含现金（无持仓），仍可计算
-    assert series.points[0].trade_date == PERIOD_START
+    # 首日前锚点 + 期初基准点（仅含现金、无持仓），两者都可算
+    assert [p.trade_date for p in series.points] == [date(2025, 12, 31), PERIOD_START]
 
 
 @pytest.mark.asyncio
 async def test_baseline_point_on_period_start() -> None:
-    """首个点必须是区间首日基准，否则整段 TWR 漏掉首日前的持仓涨跌。"""
+    """首个可见点必须是区间首日基准，否则整段 TWR 漏掉首日前的持仓涨跌。"""
     trades = _base_trades()
     points, _, _, _, _, _, _ = await compute_nav_points(
         trades, PERIOD_START, PERIOD_END, _rising_market("1500.00")
     )
-    assert points[0][0] == PERIOD_START
-    assert points[0][1] == cents("100000.00")
-    assert points[0][2] == 0
+    # points[0] 是 period_start-1 的内存锚点（不落库），基准点仍是区间首日
+    assert points[0] == (date(2025, 12, 31), cents("100000.00"), 0)
+    assert points[1] == (PERIOD_START, cents("100000.00"), 0)
 
 
 @pytest.mark.asyncio
@@ -278,9 +278,61 @@ async def test_first_day_prev_assets_uses_previous_trading_close() -> None:
         trades, date(2026, 1, 5), date(2026, 1, 31), market
     )
 
-    # 首日基准 = 100 股 × 01-05 收盘 1100 = 110000；昨日资产 = 100 × 12-31 收盘 1000
-    assert points[0] == (date(2026, 1, 5), cents("110000.00"), 0)
+    # 首日锚点 = 100 股 × 12-31 收盘 1000；首日基准 = 100 股 × 01-05 收盘 1100
+    assert points[0] == (date(2026, 1, 4), cents("100000.00"), 0)
+    assert points[1] == (date(2026, 1, 5), cents("110000.00"), 0)
     assert prev_day == cents("100000.00")
+
+
+@pytest.mark.asyncio
+async def test_anchor_point_when_first_day_is_trading_day() -> None:
+    """首日即交易日：补 period_start-1 内存锚点，首日涨跌必须进入 TWR（不再被首点 ret=0 吃掉）。"""
+    trades = [
+        _trade(
+            trade_date=date(2025, 12, 20),
+            category="transfer",
+            amount_units=cents("200000.00"),
+            cash_balance_units=cents("200000.00"),
+            security_code="CASH",
+        ),
+        _trade(
+            trade_date=date(2025, 12, 20),
+            category="buy",
+            amount_units=-cents("100000.00"),
+            cash_balance_units=cents("100000.00"),
+            quantity_units=shares("100"),
+            price_units=price("1000.00"),
+        ),
+        # 区间首日（01-05）有交易 → 旧逻辑会把该点 return 强制为 0
+        _trade(
+            trade_date=date(2026, 1, 5),
+            category="buy",
+            amount_units=-cents("1100.00"),
+            quantity_units=shares("1"),
+            price_units=price("1100.00"),
+        ),
+    ]
+    market = StubMarket(
+        [
+            _bar("600519", date(2025, 12, 31), "1000.00"),
+            _bar("600519", date(2026, 1, 5), "1100.00"),
+            _bar("600519", date(2026, 1, 31), "1100.00"),
+        ]
+    )
+    points, blocked, reasons, _, _, _, prev_day = await compute_nav_points(
+        trades, date(2026, 1, 5), date(2026, 1, 31), market
+    )
+    series = build_nav_series(points)
+
+    assert blocked == [] and reasons == []
+    # 锚点：期初现金 100000 + 100 股 × 12-31 收盘 1000
+    assert prev_day == cents("200000.00")
+    assert points[0] == (date(2026, 1, 4), cents("200000.00"), 0)
+    # 01-05：现金 98900 + 101 股 × 1100 = 210000，相对锚点 +5%
+    assert points[1] == (date(2026, 1, 5), cents("210000.00"), 0)
+    assert series.points[1].return_units == 5_000_000  # 5.00000000
+    assert series.twr_units == 5_000_000
+    assert series.points[1].trade_date == date(2026, 1, 5)
 
 
 @pytest.mark.asyncio
@@ -387,8 +439,9 @@ async def test_anchor_back_solved_from_first_balance_inside_period() -> None:
 
     assert reasons == [] and blocked == []
     assert assumption == "back_solved"
-    # 期初基准点：反推现金 0、无持仓 → 总资产 0
-    assert points[0] == (period_start, 0, 0)
+    # 首日前锚点：反推现金 0、无持仓 → 总资产 0；首日基准点同为 0
+    assert points[0] == (date(2025, 12, 31), 0, 0)
+    assert points[1] == (period_start, 0, 0)
     # 01-05 入金到账：现金 100000、无持仓
     assert (date(2026, 1, 5), cents("100000.00"), cents("100000.00")) in points
     # 01-10：现金 70000 + 市值 30×1000 = 100000（buy 非外部现金流）
@@ -404,8 +457,9 @@ async def test_anchor_next_month_falls_back_to_statement() -> None:
     )
     assert reasons == []
     assert assumption == "statement"
-    # 期初现金 70000（01-10 余额行）+ 持仓 30 股 × 01-10 收盘 1000 = 100000
-    assert points[0] == (date(2026, 2, 1), cents("100000.00"), 0)
+    # 首日前锚点与首日基准点同值：期初现金 70000 + 持仓 30 股 × 01-10 收盘 1000 = 100000
+    assert points[0] == (date(2026, 1, 31), cents("100000.00"), 0)
+    assert points[1] == (date(2026, 2, 1), cents("100000.00"), 0)
 
 
 # ── 行情失败类别 → blocked_reason（D2=A：不新增错误码，只细化自由文本）─────

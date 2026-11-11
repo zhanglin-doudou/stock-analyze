@@ -111,6 +111,10 @@ input[type="checkbox"] {
   border-color: var(--accent);
 }
 
+.no-interactive {
+  cursor: default !important;
+}
+
 /* table（消费 tokens 的 --table-* 组，与 DataTable 观感一致） */
 .table {
   width: 100%;

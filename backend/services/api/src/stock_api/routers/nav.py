@@ -122,10 +122,7 @@ async def get_nav(
     market_data = get_market_data(request)
     start, end, label = _resolve_range(period, date_from, date_to)
 
-    from stock_review.application.nav import (
-        compute_and_store_nav,
-        fetch_nav_for_period,
-    )
+    from stock_review.application.nav import compute_and_store_nav
 
     async with state.db.session(user_id=user_id, begin=True) as session:
         result = await compute_and_store_nav(
@@ -136,10 +133,10 @@ async def get_nav(
             market_data=market_data,
             clock=state.clock,
         )
-        rows = await fetch_nav_for_period(
-            session, user_id=user_id, period_start=start, period_end=end
-        )
         await session.commit()
+
+    # 响应只使用本次计算结果（不回读 nav_daily，避免与历史区间的合成行拼接）
+    rows = result.rows
 
     # 构造响应
     points: list[NavPointOut] = []

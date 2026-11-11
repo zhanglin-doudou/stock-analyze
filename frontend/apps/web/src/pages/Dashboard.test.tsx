@@ -1,26 +1,36 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { StrictMode } from "react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { MemoryRouter } from "react-router-dom";
 import {
+  type AssetBuildAccepted,
+  type AssetBuildState,
   type AssetChart,
+  type AssetPage,
   type DashboardOut,
   type DashboardRoundOut,
   type DashboardTradeFlagsOut,
+  type Job,
+  type JobEvent,
+  type JobPage,
   type MetricBatch,
   type SectorsOverview,
 } from "@sa/api-client";
+import { Assets } from "./Assets";
 import { Dashboard } from "./Dashboard";
 import { buildCharts } from "./dashboard/TradeFlagCharts";
 import dashboardSource from "./Dashboard.tsx?raw";
 import sectorBlockSource from "./dashboard/SectorBlock.tsx?raw";
+import { resetAutoBuildGuard } from "../lib/useStaleAssetBuild";
 import { api } from "../client";
 
 vi.mock("../client", () => ({
   api: {
     dashboard: { get: vi.fn(), tradeFlags: vi.fn() },
     metrics: { batch: vi.fn() },
-    assets: { chart: vi.fn() },
+    assets: { chart: vi.fn(), list: vi.fn(), build: vi.fn() },
+    jobs: { list: vi.fn(), get: vi.fn(), events: vi.fn() },
     sectors: { overview: vi.fn() },
   },
 }));
@@ -34,6 +44,11 @@ const getTradeFlags = vi.mocked(api.dashboard.tradeFlags);
 const batchMetrics = vi.mocked(api.metrics.batch);
 const getAssetChart = vi.mocked(api.assets.chart);
 const getSectorsOverview = vi.mocked(api.sectors.overview);
+const listAssets = vi.mocked(api.assets.list);
+const buildAssets = vi.mocked(api.assets.build);
+const listJobs = vi.mocked(api.jobs.list);
+const getJob = vi.mocked(api.jobs.get);
+const jobEvents = vi.mocked(api.jobs.events);
 
 function makeRound(overrides: Partial<DashboardRoundOut> = {}): DashboardRoundOut {
   return {
@@ -50,6 +65,24 @@ function makeRound(overrides: Partial<DashboardRoundOut> = {}): DashboardRoundOu
   };
 }
 
+function makeBuild(overrides: Partial<AssetBuildState> = {}): AssetBuildState {
+  return {
+    state: "current",
+    last_status: "ok",
+    last_built_at: "2026-09-30T08:00:00Z",
+    last_built_through: "2026-09-30",
+    last_mode: "incremental",
+    last_rebuild_from: "2026-08-17",
+    last_rows_written: 45,
+    rows_count: 125,
+    assumption: "back_solved",
+    status_reason: null,
+    has_new_market_data: false,
+    definition_version: "1.0",
+    ...overrides,
+  };
+}
+
 function makeDashboard(overrides: Partial<DashboardOut> = {}): DashboardOut {
   return {
     as_of: "2026-07-01",
@@ -60,6 +93,7 @@ function makeDashboard(overrides: Partial<DashboardOut> = {}): DashboardOut {
     metrics_period_end: "2026-07-01",
     status: "ok",
     build_state: "current",
+    build: makeBuild(),
     definition_version: "1.0",
     asset_overview: {
       status: "ok",
@@ -207,6 +241,7 @@ function missingDashboard(): DashboardOut {
   return makeDashboard({
     status: "missing",
     build_state: "missing",
+    build: makeBuild({ state: "missing", last_status: null, last_mode: null, rows_count: 0 }),
     data_as_of: null,
     asset_overview: {
       status: "missing",
@@ -545,6 +580,19 @@ function makeTradeFlags(overrides: Partial<DashboardTradeFlagsOut> = {}): Dashbo
     sell_count: number,
     hits: number[],
     stateHits: number[] = [0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+    monthlyReturn: DashboardTradeFlagsOut["items"][number]["monthly_return"] = {
+      month: label,
+      value_bp: 0,
+      pct: null,
+      display: null,
+      sign: "none",
+      available: false,
+      days: 0,
+      partial: false,
+      note: "当月无可用资产日收益",
+      amount: null,
+      amount_display: null,
+    },
   ) => ({
     month: label,
     label,
@@ -552,6 +600,7 @@ function makeTradeFlags(overrides: Partial<DashboardTradeFlagsOut> = {}): Dashbo
     sell_count,
     flags: series.map((item, index) => ({ code: item.code, count: hits[index] ?? 0 })),
     states: stateSeries.map((item, index) => ({ code: item.code, count: stateHits[index] ?? 0 })),
+    monthly_return: monthlyReturn,
   });
   return {
     window_months: 6,
@@ -567,10 +616,38 @@ function makeTradeFlags(overrides: Partial<DashboardTradeFlagsOut> = {}): Dashbo
     state_series: stateSeries,
     total_labels: { buy: "买入笔数", sell: "卖出笔数" },
     items: [
-      month("2026-05", 1, 0, [0, 0, 0, 0, 0, 0]),
-      month("2026-06", 3, 2, [2, 1, 0, 1, 0, 1], [1, 1, 1, 0, 0, 1, 0, 1, 0, 0]),
+      month("2026-05", 1, 0, [0, 0, 0, 0, 0, 0], undefined, {
+        month: "2026-05",
+        value_bp: 125,
+        pct: "1.25%",
+        display: "+1.25%",
+        sign: "pos",
+        available: true,
+        days: 20,
+        partial: false,
+        note: null,
+        amount: "1250.00",
+        amount_display: "1,250.00",
+      }),
+      month("2026-06", 3, 2, [2, 1, 0, 1, 0, 1], [1, 1, 1, 0, 0, 1, 0, 1, 0, 0], {
+        month: "2026-06",
+        value_bp: -42,
+        pct: "-0.42%",
+        display: "-0.42%",
+        sign: "neg",
+        available: true,
+        days: 21,
+        partial: false,
+        note: null,
+        amount: "-80.00",
+        amount_display: "-80.00",
+      }),
     ],
     months_without_data: ["2026-01", "2026-02", "2026-03", "2026-04"],
+    has_return_data: true,
+    return_basis: "单月收益 = 资产日表逐日收益（TWR，已剔除出入金）在自然月内复利。",
+    return_labels: { pos: "正收益", neg: "负收益", none: "无数据" },
+    return_metric_labels: { return: "收益率", amount: "金额" },
     ...overrides,
   };
 }
@@ -588,8 +665,79 @@ function renderPage(): ReturnType<typeof render> {
   );
 }
 
+/** 看板 + 资产页同时挂载：验证跨页共用的模块级去重表只发一次 POST。 */
+function renderBoth(): ReturnType<typeof render> {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+  });
+  return render(
+    <StrictMode>
+      <QueryClientProvider client={client}>
+        <MemoryRouter initialEntries={["/dashboard"]}>
+          <Dashboard />
+          <Assets />
+        </MemoryRouter>
+      </QueryClientProvider>
+    </StrictMode>,
+  );
+}
+
+function makeAssetPage(build: AssetBuildState): AssetPage {
+  return {
+    items: [],
+    next_cursor: null,
+    has_more: false,
+    build,
+    definition_version: build.definition_version,
+    data_as_of: build.last_built_through,
+  };
+}
+
+function makeJob(overrides: Partial<Job> = {}): Job {
+  return {
+    job_id: "job_assets",
+    type: "build_assets",
+    status: "succeeded",
+    progress: 100,
+    stage: "done",
+    message: null,
+    result_ref: null,
+    error: null,
+    attempt: 1,
+    max_attempts: 3,
+    available_at: "2026-09-30T08:00:00Z",
+    heartbeat_at: null,
+    created_at: "2026-09-30T08:00:00Z",
+    started_at: "2026-09-30T08:00:01Z",
+    finished_at: "2026-09-30T08:00:05Z",
+    ...overrides,
+  };
+}
+
+function emptyJobs(): JobPage {
+  return { items: [], next_cursor: null, backlog: {} };
+}
+
+function accepted(): AssetBuildAccepted {
+  return {
+    job_id: "job_assets",
+    type: "build_assets",
+    status: "pending",
+    links: { self: "/api/v1/jobs/job_assets", events: "/api/v1/jobs/job_assets/events" },
+  };
+}
+
+/** 默认 SSE：不产生事件（JobProgress 的 for-await 直接结束，不再重试）。 */
+function noEvents(): AsyncGenerator<JobEvent, void, void> {
+  async function* generator(): AsyncGenerator<JobEvent, void, void> {
+    /* no-op */
+  }
+  return generator();
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
+  resetAutoBuildGuard();
   getDashboard.mockResolvedValue(makeDashboard());
   getTradeFlags.mockResolvedValue(makeTradeFlags());
   batchMetrics.mockResolvedValue(makeMetricBatch());
@@ -597,6 +745,12 @@ beforeEach(() => {
   getSectorsOverview.mockImplementation(async ({ taxonomy }) =>
     taxonomy === "concept" ? makeConceptOverview() : makeIndustryOverview(),
   );
+  // 资产表（跨页去重用）与 build job 的默认桩：未 stale 时不会走到 POST。
+  listAssets.mockResolvedValue(makeAssetPage(makeBuild()));
+  listJobs.mockResolvedValue(emptyJobs());
+  getJob.mockResolvedValue(makeJob());
+  buildAssets.mockResolvedValue(accepted());
+  jobEvents.mockImplementation(() => noEvents());
 });
 
 afterEach(cleanup);
@@ -669,14 +823,10 @@ describe("Dashboard 看板", () => {
 
     expect(screen.getByTestId("dashboard-meta").textContent).toContain("最新");
     expect(screen.getByTestId("dashboard-meta").textContent).toContain("正常");
-    expect(screen.getByTestId("dashboard-meta").textContent).toContain("2026-09-30");
+    // 数据截至从 dashboard-meta 移到顶部 eyebrow（同一份 data_as_of），断言跟随布局。
+    expect(screen.getByTestId("market-data-notice").textContent).toContain("2026-09-30");
     expect(screen.getByTestId("market-data-notice").textContent).toContain("收盘后同步");
 
-    expect(screen.getByTestId("link-reports").getAttribute("href")).toBe("/reports");
-    expect(screen.getByTestId("link-exports").getAttribute("href")).toBe("/exports");
-    expect(screen.getByTestId("link-attribution").getAttribute("href")).toBe(
-      "/attribution?period=2026-06",
-    );
     expect(screen.getByTestId("link-annual-metrics").getAttribute("href")).toBe(
       "/metrics?period=2026",
     );
@@ -720,6 +870,97 @@ describe("Dashboard 看板", () => {
     expect(item.getAttribute("data-code")).toBe("DASHBOARD_ASSET_MISSING");
     expect(item.textContent).toContain("到资产页构建资产表");
     expect(screen.getByTestId("kpi-max-drawdown").textContent).toContain("阻断");
+  });
+
+  it("FT-12 看板 stale 自动触发：恰好 1 次 POST，完成后重拉看板", async () => {
+    const staleBuild = makeBuild({ state: "stale", has_new_market_data: true });
+    getDashboard
+      .mockResolvedValueOnce(
+        makeDashboard({ status: "stale", build_state: "stale", build: staleBuild }),
+      )
+      .mockResolvedValue(makeDashboard());
+
+    // 可手动结算的 job 轮询：完成之前不重拉看板。
+    let finish: (job: Job) => void = () => undefined;
+    getJob.mockImplementation(
+      () =>
+        new Promise<Job>((resolve) => {
+          finish = resolve;
+        }),
+    );
+
+    renderPage();
+
+    await waitFor(() => expect(buildAssets).toHaveBeenCalledTimes(1));
+    expect(buildAssets.mock.calls[0][0]).toEqual({ mode: "auto" });
+    expect(buildAssets.mock.calls[0][1]).toBeTruthy();
+    // 简短状态行（不喧宾夺主），文案不引入第二套口径。
+    expect((await screen.findByTestId("dashboard-auto-build")).textContent).toContain(
+      "正在自动更新",
+    );
+
+    await waitFor(() => expect(getJob).toHaveBeenCalled());
+    expect(getDashboard).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      finish(makeJob({ status: "succeeded" }));
+    });
+
+    // 完成后重拉看板（首屏 1 次 + 完成后 1 次），状态行消失，且不重复 POST。
+    await waitFor(() => expect(getDashboard.mock.calls.length).toBeGreaterThanOrEqual(2));
+    await waitFor(() => expect(screen.queryByTestId("dashboard-auto-build")).toBeNull());
+    expect(buildAssets).toHaveBeenCalledTimes(1);
+  });
+
+  it("FT-13 跨页去重：/dashboard 与 /assets 同时挂载，同一 stale 代次全局只 1 次 POST", async () => {
+    const staleBuild = makeBuild({ state: "stale", has_new_market_data: true });
+    const staleDashboard = makeDashboard({
+      status: "stale",
+      build_state: "stale",
+      build: staleBuild,
+    });
+    const seq: string[] = [];
+
+    getDashboard.mockImplementation(async () => {
+      seq.push("GET /dashboard");
+      return staleDashboard;
+    });
+    listAssets.mockImplementation(async () => {
+      seq.push("GET /assets");
+      return makeAssetPage(staleBuild);
+    });
+    listJobs.mockImplementation(async () => {
+      seq.push("GET /jobs?status=pending,running");
+      return emptyJobs();
+    });
+    buildAssets.mockImplementation(async () => {
+      seq.push("POST /assets/build");
+      return accepted();
+    });
+    getJob.mockImplementation(async (jobId: string) => {
+      seq.push(`GET /jobs/${jobId}`);
+      return makeJob({ status: "running", progress: 20 });
+    });
+    jobEvents.mockImplementation(() => {
+      seq.push("GET /jobs/job_assets/events");
+      return noEvents();
+    });
+
+    renderBoth();
+
+    await waitFor(() => expect(buildAssets).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 80));
+    });
+
+    // 实测请求序列：两页各自 GET 数据，但同一 stale 代次全局只有 1 次 POST。
+    const posts = seq.filter((item) => item === "POST /assets/build");
+    expect(posts.length, seq.join(" → ")).toBe(1);
+    expect(buildAssets).toHaveBeenCalledTimes(1);
+
+    // 两页共用同一个 job：看板出状态行，资产页出进度条。
+    expect(screen.getByTestId("dashboard-auto-build")).toBeTruthy();
+    expect(screen.getByTestId("assets-job-progress")).toBeTruthy();
   });
 
   it("FT-03 年度指标自动加载：用 metrics_period 请求并原样展示 value", async () => {
@@ -808,6 +1049,7 @@ describe("Dashboard 看板", () => {
         has_data: false,
         has_flag_data: false,
         has_state_data: false,
+        has_return_data: false,
         items: [],
         months_without_data: [],
       }),
@@ -822,7 +1064,7 @@ describe("Dashboard 看板", () => {
 
   it("FT-09 有交易但无加仓/减仓状态命中：两张图都给空态，不画空白坐标轴", async () => {
     getTradeFlags.mockResolvedValue(
-      makeTradeFlags({ has_flag_data: false, has_state_data: false }),
+      makeTradeFlags({ has_flag_data: false, has_state_data: false, has_return_data: false }),
     );
     renderPage();
 
@@ -834,6 +1076,54 @@ describe("Dashboard 看板", () => {
     expect(document.querySelector(".tfc-chart-bar")).toBeNull();
   });
 
+  it("FT-14 单月收益图：与两图共用范围切换器，切换只发一次请求，文案/符号来自后端", async () => {
+    renderPage();
+
+    const section = await screen.findByTestId("trade-flag-charts");
+    await waitFor(() => expect(getTradeFlags).toHaveBeenCalledTimes(1));
+    expect(getTradeFlags).toHaveBeenLastCalledWith(12);
+
+    expect(await screen.findByTestId("tfc-return-basis")).toBeTruthy();
+    expect(section.textContent).toContain("单月收益（资产日收益 TWR 按月复利）");
+    const legend = await screen.findByTestId("tfc-return-legend");
+    expect(legend.textContent).toContain("正收益");
+    expect(legend.textContent).toContain("负收益");
+    expect(legend.textContent).toContain("无数据");
+
+    fireEvent.click(screen.getByTestId("tfc-range-24"));
+    await waitFor(() => expect(getTradeFlags).toHaveBeenCalledTimes(2));
+    expect(getTradeFlags).toHaveBeenLastCalledWith(24);
+  });
+
+  it("FT-15 单月收益无数据：只显示收益空态，不渲染柱状图", async () => {
+    getTradeFlags.mockResolvedValue(
+      makeTradeFlags({
+        items: [
+          {
+            ...makeTradeFlags().items[0],
+            monthly_return: {
+              month: "2026-05",
+              value_bp: 0,
+              pct: null,
+              display: null,
+              sign: "none",
+              available: false,
+              days: 0,
+              partial: false,
+              note: "当月无可用资产日收益",
+              amount: null,
+              amount_display: null,
+            },
+          },
+        ],
+        has_return_data: false,
+      }),
+    );
+    renderPage();
+
+    expect(await screen.findByTestId("tfc-return-empty")).toBeTruthy();
+  });
+
   it("FT-10 图表数据投影：标签/计数原样透传，柱状系列先买后卖且配色按侧分组", () => {
     const palette = {
       text: "t",
@@ -842,6 +1132,8 @@ describe("Dashboard 看板", () => {
       line: "l",
       surface: "s",
       selection: "sel",
+      up: "up",
+      down: "down",
       series: {
         buy: "buy-total",
         sell: "sell-total",
@@ -909,6 +1201,27 @@ describe("Dashboard 看板", () => {
       "sell-1",
       "sell-2",
       "sell-3",
+    ]);
+    // 单月收益：柱高/展示串/符号/金额全部原样透传，配色只按 sign 选 token。
+    expect(charts.returnData).toEqual([
+      {
+        month: "2026-05",
+        value_bp: 125,
+        display: "+1.25%",
+        amountDisplay: "1,250.00",
+        sign: "pos",
+        note: "",
+        color: "up",
+      },
+      {
+        month: "2026-06",
+        value_bp: -42,
+        display: "-0.42%",
+        amountDisplay: "-80.00",
+        sign: "neg",
+        note: "",
+        color: "down",
+      },
     ]);
   });
 

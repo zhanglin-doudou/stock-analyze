@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import type { RoundInsightsPage } from "@sa/api-client";
 import { RoundInsights } from "./RoundInsights";
+import { currentYearToken } from "../lib/date";
 import { api } from "../client";
 
 vi.mock("../client", () => ({
@@ -12,6 +13,15 @@ vi.mock("../client", () => ({
       refreshInsights: vi.fn(),
     },
   },
+}));
+
+// 图表体积大且与口径无关：只验证「懒加载挂载 + 数据来自后端」，nivo 本身用桩替代。
+vi.mock("@nivo/pie", () => ({
+  ResponsivePie: () => <div data-testid="nivo-pie" />,
+}));
+
+vi.mock("@nivo/bar", () => ({
+  ResponsiveBar: () => <div data-testid="nivo-bar" />,
 }));
 
 const listInsights = vi.mocked(api.rounds.insights);
@@ -86,6 +96,32 @@ function makePage(overrides: Partial<RoundInsightsPage> = {}): RoundInsightsPage
         avg_pnl_display: "-325.00",
         total_pnl_display: "-650.00",
       },
+      holding_by_pnl: {
+        flat_tolerance_display: "100.00",
+        classes: [
+          {
+            code: "loss",
+            label: "亏损",
+            count: 1,
+            avg_holding_trading_days: "14.0",
+            avg_holding_trading_days_x10: 140,
+          },
+          {
+            code: "flat",
+            label: "保本",
+            count: 0,
+            avg_holding_trading_days: null,
+            avg_holding_trading_days_x10: null,
+          },
+          {
+            code: "win",
+            label: "盈利",
+            count: 0,
+            avg_holding_trading_days: null,
+            avg_holding_trading_days_x10: null,
+          },
+        ],
+      },
       addon: {
         count: 1,
         rounds: 1,
@@ -133,9 +169,9 @@ function makePage(overrides: Partial<RoundInsightsPage> = {}): RoundInsightsPage
   };
 }
 
-function renderPage(): ReturnType<typeof render> {
+function renderPage(entry = "/rounds/insights"): ReturnType<typeof render> {
   return render(
-    <MemoryRouter initialEntries={["/rounds/insights"]}>
+    <MemoryRouter initialEntries={[entry]}>
       <RoundInsights />
     </MemoryRouter>,
   );
@@ -186,8 +222,10 @@ describe("RoundInsights 回合洞察页", () => {
     for (const node of screen.getAllByText("0.40%")) {
       expect(node.className).toBe("money money-pos");
     }
-    // 零值（胜率 0.00%）中性，不染涨跌色。
-    expect(screen.getByText("0.00%").className).not.toMatch(/money-(pos|neg)/);
+    // 零值（胜率 0.00%，列表 + 统计块）中性，不染涨跌色。
+    for (const node of screen.getAllByText("0.00%")) {
+      expect(node.className).not.toMatch(/money-(pos|neg)/);
+    }
     // 缺失值（卖飞少赚 null → —）同样中性。
     expect(screen.getAllByText("—").some((node) => node.className === "money")).toBe(true);
   });
@@ -290,6 +328,84 @@ describe("RoundInsights 回合洞察页", () => {
       );
     });
     expect(await screen.findByText(/已提交后台刷新任务（job_1）/)).toBeTruthy();
+  });
+
+  it("期间默认今年全年并写进 URL；URL 已有 period 时不覆盖", async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(listInsights).toHaveBeenCalledWith(
+        expect.objectContaining({ period: currentYearToken() }),
+      );
+    });
+
+    cleanup();
+    listInsights.mockClear();
+    renderPage("/rounds/insights?period=2026-06");
+    await waitFor(() => {
+      expect(listInsights).toHaveBeenCalledWith(expect.objectContaining({ period: "2026-06" }));
+    });
+    // 只补空缺：用户选过的期间不会被默认年度重置。
+    expect(listInsights.mock.calls.every((call) => call[0]?.period === "2026-06")).toBe(true);
+  });
+
+  it("持有期分布：饼图/柱状图懒加载，计数与保本容差全部来自后端", async () => {
+    renderPage();
+
+    // 两张图都走 lazy + Suspense，异步挂载。
+    expect(await screen.findByTestId("nivo-pie")).toBeTruthy();
+    expect(screen.getByTestId("nivo-bar")).toBeTruthy();
+    // 图例只渲染后端计数（短线 0 / 波段 1 / 趋势 0）；限定在图例内，避开同名 Tab 与统计块。
+    const legend = within(screen.getByTestId("holding-legend"));
+    expect(legend.getByText("短线")).toBeTruthy();
+    expect(legend.getByText("波段")).toBeTruthy();
+    expect(legend.getByText("趋势")).toBeTruthy();
+    expect(legend.getByText("1")).toBeTruthy();
+    // 保本容差说明由后端 flat_tolerance_display 渲染，前端不写死 100。
+    expect(screen.getByText(/计为保本/).textContent).toContain("100.00");
+  });
+
+  it("持有统计表：数值全部来自后端 summary.swing，前端只排版", async () => {
+    renderPage();
+
+    await screen.findByTestId("nivo-pie");
+    const stats = within(screen.getByTestId("holding-stats"));
+    // 旧的一处重复统计已删除：整页只保留与图表同行的这一份。
+    expect(screen.getAllByTestId("holding-stats")).toHaveLength(1);
+    expect(screen.getAllByText("平均持有交易日")).toHaveLength(1);
+    expect(stats.getByText("平均持有交易日")).toBeTruthy();
+    expect(stats.getByText("14.00")).toBeTruthy();
+    expect(stats.getByText("胜率")).toBeTruthy();
+    expect(stats.getByText("0.00%")).toBeTruthy();
+    // 盈亏两行共用后端串，不改小数位、不重算。
+    expect(stats.getByText("平均盈亏")).toBeTruthy();
+    expect(stats.getByText("合计盈亏")).toBeTruthy();
+    expect(stats.getAllByText("-650.00")).toHaveLength(2);
+    // 合计行跨两列：回合总数同样来自后端。
+    expect(stats.getByText("共计")).toBeTruthy();
+    expect(stats.getByText("1")).toBeTruthy();
+    expect(stats.getByText("个回合")).toBeTruthy();
+  });
+
+  it("持有期分布空态：无已平仓回合时不渲染图表、不伪造 0 天", async () => {
+    const page = makePage();
+    if (page.summary) {
+      page.summary.swing = { ...page.summary.swing, closed: 0, short: 0, swing: 0, trend: 0 };
+      page.summary.holding_by_pnl = {
+        flat_tolerance_display: "100.00",
+        classes: page.summary.holding_by_pnl.classes.map((row) => ({
+          ...row,
+          count: 0,
+          avg_holding_trading_days: null,
+          avg_holding_trading_days_x10: null,
+        })),
+      };
+    }
+    listInsights.mockResolvedValue(page);
+    renderPage();
+
+    expect(await screen.findByText(/暂无可绘制的持有期分布/)).toBeTruthy();
+    expect(screen.queryByTestId("nivo-pie")).toBeNull();
+    expect(screen.queryByTestId("nivo-bar")).toBeNull();
   });
 });
 

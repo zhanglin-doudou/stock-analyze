@@ -31,6 +31,7 @@ from stock_review.application.assets import (
     STATE_BLOCKED,
     STATE_MISSING,
     STATE_STALE,
+    AssetBuildState,
     get_asset_build_state,
 )
 from stock_review.application.bond_alias import build_bond_alias, canonical_code
@@ -202,6 +203,9 @@ class DashboardResult:
     status: str
     build_state: str
     definition_version: str
+    # 只读构建摘要（与 `GET /assets` 的 build 块同源）：前端跨页去重用同一份指纹字段。
+    build: AssetBuildState
+
     asset: DashboardAssetOverview
     history: DashboardHistoryOverview
     missing: list[DashboardMissing]
@@ -887,6 +891,7 @@ async def build_dashboard(
         status=overall,
         build_state=build_view.state,
         definition_version=definition_version,
+        build=build_view,
         asset=DashboardAssetOverview(
             status=asset_status,
             holdings=holdings,

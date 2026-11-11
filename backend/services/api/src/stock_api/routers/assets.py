@@ -6,6 +6,8 @@
 * `POST /assets/build`（`buildAssets`）：长任务 → `build_assets` job → 202 + Location/
   Retry-After；`Idempotency-Key` 必填（request_hash 基于**解析默认值后**的规范 body）；
   同参单飞复用同一 job（`X-Job-Reused`），异参 → 409；幂等重放带 `Idempotency-Replayed`。
+  缺行情（行情缓存完全没有覆盖资产表窗口）→ **200 + `status:"failed"` + `missing[]`**
+  （无 job，不占用幂等键），供前端自动触发路径静默跳过。
 
 写作用域：本文件只依赖 `stock_review.application.assets` 的冻结签名（impl-contract §2.4），
 **延迟 import** 以保证 review 包尚未落盘时 app 仍可装配（endpoint 调用时才需要）。
@@ -30,7 +32,9 @@ from stock_api.deps import get_market_data, get_state, get_tenant
 from stock_api.routing import StrictQueryRoute
 from stock_api.schemas import (
     AssetBuildAccepted,
+    AssetBuildFailed,
     AssetBuildIn,
+    AssetBuildMissingOut,
     AssetBuildStateOut,
     AssetChartOut,
     AssetChartPointOut,
@@ -224,6 +228,12 @@ async def get_assets_chart_endpoint(
     status_code=202,
     response_model=AssetBuildAccepted,
     operation_id="buildAssets",
+    responses={
+        200: {
+            "model": AssetBuildFailed,
+            "description": "本次构建未执行（缺少行情数据）：无 job 产生，沿用失败构建状态 + missing[] 提示",
+        }
+    },
 )
 async def build_assets_endpoint(
     request: Request,
@@ -232,7 +242,11 @@ async def build_assets_endpoint(
     payload: Annotated[AssetBuildIn, Body()] = AssetBuildIn(),
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
 ) -> AssetBuildAccepted | JSONResponse:
-    """API-082：入队构建/增量更新资产表（202）；单飞复用 / 异参 409。"""
+    """API-082：入队构建/增量更新资产表（202）；单飞复用 / 异参 409。
+
+    缺行情（行情缓存完全没有覆盖资产表窗口）→ **200 + 失败构建状态 + 提示**，不入队
+    doomed job（自动触发路径据此静默跳过，等行情/条件变化后再试）。
+    """
     ctx.forbid_admin_trades()
     user_id = ctx.require_write()
     state = get_state(request)
@@ -248,6 +262,21 @@ async def build_assets_endpoint(
     # 必须视为同一请求（否则前端省略 body 的重试会误报 422 IDEMPOTENCY_KEY_REUSED）。
     body_json = json.dumps(payload.model_dump(mode="json"), sort_keys=True, separators=(",", ":"))
     request_hash = hashlib.sha256(body_json.encode("utf-8")).hexdigest()
+
+    # 缺行情前置：先于幂等 begin 判定（不占用幂等键、不创建 job），见 API-Catalog API-082。
+    from stock_review.application.assets import precheck_market_data
+
+    market_data = get_market_data(request)
+    async with state.db.session(user_id=user_id, begin=True) as session:
+        missing = await precheck_market_data(
+            session, user_id=user_id, clock=state.clock, market_data=market_data
+        )
+    if missing is not None:
+        failed = AssetBuildFailed(
+            message=missing.reason,
+            missing=[AssetBuildMissingOut(reason=missing.reason, what_to_do=missing.what_to_do)],
+        )
+        return JSONResponse(status_code=200, content=failed.model_dump(mode="json"))
 
     async with state.db.session(user_id=user_id, begin=True) as session:
         try:

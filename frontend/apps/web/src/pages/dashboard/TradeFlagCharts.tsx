@@ -3,7 +3,12 @@ import { useQuery } from "@tanstack/react-query";
 import type { DashboardTradeFlagsOut } from "@sa/api-client";
 import { api } from "../../client";
 import { useChartPalette } from "./tradeFlagChartColors";
-import type { TradeFlagBarDatum, TradeFlagBarKey, TradeFlagLineSerie } from "./TradeFlagChartsNivo";
+import type {
+  MonthlyReturnBarDatum,
+  TradeFlagBarDatum,
+  TradeFlagBarKey,
+  TradeFlagLineSerie,
+} from "./TradeFlagChartsNivo";
 import "./trade-flag-charts.css";
 
 /** nivo 只在图表子组件里加载：看板首屏不背图表框架的体积。 */
@@ -47,7 +52,23 @@ export function buildCharts(
   }));
   const lineColors = data.series.map((serie) => colorOf(serie.code));
 
-  return { barData, barKeys, lineSeries, lineColors };
+  // 单月收益：柱高/符号/展示串/说明全部来自后端；这里只按 sign 映射语义色。
+  const returnData: MonthlyReturnBarDatum[] = data.items.map((item) => {
+    const monthly = item.monthly_return;
+    const color =
+      monthly.sign === "pos" ? palette.up : monthly.sign === "neg" ? palette.down : palette.muted;
+    return {
+      month: item.label,
+      value_bp: monthly.value_bp,
+      display: monthly.display ?? "—",
+      amountDisplay: monthly.amount_display ?? "—",
+      sign: monthly.sign,
+      note: monthly.note ?? "",
+      color,
+    };
+  });
+
+  return { barData, barKeys, lineSeries, lineColors, returnData };
 }
 
 /**
@@ -66,12 +87,14 @@ export function TradeFlagCharts(): ReactElement {
   });
   const data = query.data;
 
-  const charts = data && data.has_data ? buildCharts(data, palette) : null;
+  const charts = data ? buildCharts(data, palette) : null;
+  // 旗标与单月收益各自判空：只有收益数据时也要渲染单月收益图，不能整块显示空态。
+  const hasAnyChart = data != null && (data.has_data || data.has_return_data);
 
   return (
     <section className="dash-panel tfc" data-testid="trade-flag-charts">
       <div className="dash-panel-head">
-        <h2>账单旗标月度分布</h2>
+        <h2>月度分析</h2>
         <span className="dash-panel-meta">按自然月聚合 · 后端计数</span>
         <div className="dash-grow" />
         <div className="tfc-range" role="group" aria-label="时间范围">
@@ -102,7 +125,7 @@ export function TradeFlagCharts(): ReactElement {
         <p className="dash-chart-empty" data-testid="tfc-error">
           账单旗标加载失败，其他看板内容不受影响。
         </p>
-      ) : data == null || !data.has_data ? (
+      ) : data == null || !hasAnyChart ? (
         <div className="dash-chart-empty" data-testid="tfc-empty">
           <p>最近 {months} 个完整月没有账单旗标数据。</p>
           <p className="dash-muted">
@@ -125,6 +148,11 @@ export function TradeFlagCharts(): ReactElement {
                 barKeys={charts.barKeys}
                 lineSeries={data.has_flag_data ? charts.lineSeries : []}
                 lineColors={charts.lineColors}
+                returnData={charts.returnData}
+                hasReturnData={data.has_return_data}
+                returnBasis={data.return_basis}
+                returnLabels={data.return_labels}
+                returnMetricLabels={data.return_metric_labels}
                 palette={palette}
               />
             ) : null}

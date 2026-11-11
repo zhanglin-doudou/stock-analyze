@@ -612,3 +612,64 @@ async def test_api_081_stale_after_new_day_then_current(
     assert body["build"]["last_built_through"] == "2026-07-02"
     assert body["build"]["last_mode"] == "incremental"
     assert body["items"][0]["date"] == "2026-07-02"
+
+
+# ── AT-25 读路径纯只读（stale 也不入队 / 不写库）─────────────
+
+
+async def _count_jobs(engine: AsyncEngine, *, user_id: uuid.UUID) -> int:
+    async with engine.begin() as conn:
+        return int(
+            await conn.scalar(
+                text("select count(*) from platform.job where user_id = :uid"),
+                {"uid": user_id},
+            )
+            or 0
+        )
+
+
+async def _build_state_version(engine: AsyncEngine, *, user_id: uuid.UUID) -> int | None:
+    async with engine.begin() as conn:
+        return await conn.scalar(
+            text("select version from review.asset_build_state where user_id = :uid"),
+            {"uid": user_id},
+        )
+
+
+async def test_api_081_stale_get_is_read_only(
+    assets_client: Any,
+    account_factory: Any,
+    owner_engine: AsyncEngine,
+    settings: Any,
+    frozen_clock: FrozenClock,
+) -> None:
+    """GET /assets 纯读：stale 时也不建 job、不写 asset_daily / asset_build_state。"""
+    acc = await account_factory()
+    await _seed_happy_chain(owner_engine, user_id=acc.user_id)
+    await _build_and_drain(assets_client, settings, acc.headers, frozen_clock, owner_engine)
+
+    # 时钟跨日 + 新流水 → stale（但不是读路径负责更新）。
+    frozen_clock.advance(days=1)
+    await _seed_trade(
+        owner_engine,
+        user_id=acc.user_id,
+        trade_date=date(2026, 7, 2),
+        side="buy",
+        cash_balance_units=-70_000_00,
+        category="other",
+    )
+
+    jobs_before = await _count_jobs(owner_engine, user_id=acc.user_id)
+    rows_before = await _count_rows(owner_engine, user_id=acc.user_id)
+    version_before = await _build_state_version(owner_engine, user_id=acc.user_id)
+
+    for _ in range(3):
+        resp = await assets_client.get("/api/v1/assets", headers=acc.headers)
+        assert resp.status_code == 200, resp.text
+        build = resp.json()["build"]
+        assert build["state"] == "stale"
+        assert "auto_update" not in build
+
+    assert await _count_jobs(owner_engine, user_id=acc.user_id) == jobs_before
+    assert await _count_rows(owner_engine, user_id=acc.user_id) == rows_before
+    assert await _build_state_version(owner_engine, user_id=acc.user_id) == version_before

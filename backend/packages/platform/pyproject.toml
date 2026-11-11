@@ -13,6 +13,10 @@ dependencies = [
     "structlog>=24.4",
     "prometheus-client>=0.21",
     "pydantic-settings>=2.6",
+    # sector_live 模块级导入（被 sector_source / stock_api.app 直接引用），
+    # 不能只挂在 live extra 下，否则 replay 模式的部署与 CI 都无法启动。
+    "requests>=2.32",
+    "beautifulsoup4>=4.12",
 ]
 
 # ── 可选依赖：akshare 行情适配器（仅 MARKET_MODE=live 需要）────
