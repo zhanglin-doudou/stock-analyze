@@ -823,7 +823,8 @@ describe("Dashboard 看板", () => {
 
     expect(screen.getByTestId("dashboard-meta").textContent).toContain("最新");
     expect(screen.getByTestId("dashboard-meta").textContent).toContain("正常");
-    expect(screen.getByTestId("dashboard-meta").textContent).toContain("2026-09-30");
+    // 数据截至从 dashboard-meta 移到顶部 eyebrow（同一份 data_as_of），断言跟随布局。
+    expect(screen.getByTestId("market-data-notice").textContent).toContain("2026-09-30");
     expect(screen.getByTestId("market-data-notice").textContent).toContain("收盘后同步");
 
     expect(screen.getByTestId("link-annual-metrics").getAttribute("href")).toBe(
