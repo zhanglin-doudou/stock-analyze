@@ -177,7 +177,7 @@ export function TrendChart({
                 }`}
                 cx={marker.point.x}
                 cy={marker.point.y}
-                r="4.2"
+                r="3.2"
               />
             ))}
           </g>

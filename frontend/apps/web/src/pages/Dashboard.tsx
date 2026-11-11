@@ -438,8 +438,8 @@ export function Dashboard(): ReactElement {
               {asset.holdings.length} 只 · 市值 {displayValue(asset.market_value)}
             </span>
             <div className="dash-grow" />
-            <Link className="dash-link" to={data.links.assets}>
-              资产明细
+            <Link className="dash-link" to="/rounds">
+              历史持仓
             </Link>
           </div>
           {asset.holdings.length === 0 ? (
