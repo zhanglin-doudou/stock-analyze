@@ -170,11 +170,20 @@ def _chart_point_out(point: Any, *, lo: int, hi: int) -> AssetChartPointOut:
     # 四舍五入到 1bp：((value-lo)*10000 + span/2) // span
     v_bp = 5000 if span <= 0 else ((point.total_assets_units - lo) * 10000 + span // 2) // span
     v = f"{v_bp // 10000}.{v_bp % 10000:04d}"
+    cashflow_units = point.cashflow_units
+    if cashflow_units > 0:
+        cashflow_direction = "in"
+    elif cashflow_units < 0:
+        cashflow_direction = "out"
+    else:
+        cashflow_direction = "none"
     return AssetChartPointOut(
         date=point.trade_date,
         v=v,
         label=point.trade_date.strftime("%m-%d"),
         amount_label=str(Money(point.total_assets_units)),
+        cashflow=str(Money(cashflow_units)),
+        cashflow_direction=cashflow_direction,
     )
 
 

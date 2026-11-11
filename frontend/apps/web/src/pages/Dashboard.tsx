@@ -157,10 +157,6 @@ function AnnualMetrics({
           指标详情
         </Link>
       </div>
-      <p className="dash-muted">
-        低频操作者月度样本常不足，看板改用年度口径（今年年初 → 最新收盘日）；数值由后端计算，
-        本页只展示（含 n / 可信度）。
-      </p>
       {error != null ? <ProblemView error={error} /> : null}
       {loading && !batch ? <p className="dash-muted">加载中…</p> : null}
       {batch ? (
@@ -272,6 +268,9 @@ export function Dashboard(): ReactElement {
     label: point.label,
     value: point.v,
     display: point.amount_label,
+    date: point.date,
+    cashflow: point.cashflow,
+    cashflowDirection: point.cashflow_direction,
   }));
 
   return (
@@ -362,11 +361,6 @@ export function Dashboard(): ReactElement {
               {displayValue(shown(asset.initial_capital_display, asset.initial_capital))}
             </span>
           </div>
-          <p className="dash-hero-note">
-            银证转账峰值转入成本{" "}
-            {displayValue(shown(asset.max_invested_cost_display, asset.max_invested_cost))} · 总费用{" "}
-            {displayValue(shown(asset.total_fees_display, asset.total_fees))}
-          </p>
         </div>
         <div className="dash-mini">
           <Kpi
@@ -444,8 +438,8 @@ export function Dashboard(): ReactElement {
               {asset.holdings.length} 只 · 市值 {displayValue(asset.market_value)}
             </span>
             <div className="dash-grow" />
-            <Link className="dash-link" to={data.links.assets}>
-              资产明细
+            <Link className="dash-link" to="/rounds">
+              历史持仓
             </Link>
           </div>
           {asset.holdings.length === 0 ? (
@@ -485,23 +479,6 @@ export function Dashboard(): ReactElement {
             </table>
           )}
         </section>
-        <SectorBlock asOf={data.as_of} linkHref={data.links.sectors} />
-      </div>
-
-      <TradeFlagCharts />
-      </div>
-
-      {/* 历史概览 + 持仓（板块级容器 history-overview） */}
-      <div data-board="history-overview">
-      <div className="dash-grid">
-        <AnnualMetrics
-          period={data.metrics_period}
-          start={data.metrics_period_start}
-          end={data.metrics_period_end}
-          batch={metricsQuery.data ?? null}
-          loading={metricsQuery.isLoading}
-          error={metricsQuery.error}
-        />
         <section className="dash-panel" data-testid="history-overview">
           <div className="dash-panel-head">
             <h2>历史概览</h2>
@@ -573,6 +550,24 @@ export function Dashboard(): ReactElement {
             </div>
           </div>
         </section>
+      </div>
+      <SectorBlock asOf={data.as_of} linkHref={data.links.sectors} />
+
+      <TradeFlagCharts />
+      </div>
+
+      {/* 历史概览 + 持仓（板块级容器 history-overview） */}
+      <div data-board="history-overview">
+      <div className="dash-grid">
+        <AnnualMetrics
+          period={data.metrics_period}
+          start={data.metrics_period_start}
+          end={data.metrics_period_end}
+          batch={metricsQuery.data ?? null}
+          loading={metricsQuery.isLoading}
+          error={metricsQuery.error}
+        />
+        
       </div>
 
       {/* 最赚 / 最亏 */}

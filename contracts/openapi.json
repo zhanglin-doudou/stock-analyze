@@ -343,10 +343,23 @@
       },
       "AssetChartPointOut": {
         "additionalProperties": false,
-        "description": "API-085：图表点（v 为后端归一化无量纲字符串，前端只做几何投影）。",
+        "description": "API-085：图表点（v 为后端归一化无量纲字符串，前端只做几何投影）。\n\ncashflow 为当日银证转账净额（定点字符串，正数=净转入、负数=净转出）；\ncashflow_direction 是后端判定的展示方向，前端不解析符号、不做金额运算。",
         "properties": {
           "amount_label": {
             "title": "Amount Label",
+            "type": "string"
+          },
+          "cashflow": {
+            "title": "Cashflow",
+            "type": "string"
+          },
+          "cashflow_direction": {
+            "enum": [
+              "in",
+              "out",
+              "none"
+            ],
+            "title": "Cashflow Direction",
             "type": "string"
           },
           "date": {
@@ -367,7 +380,9 @@
           "date",
           "v",
           "label",
-          "amount_label"
+          "amount_label",
+          "cashflow",
+          "cashflow_direction"
         ],
         "title": "AssetChartPointOut",
         "type": "object"
@@ -8358,6 +8373,26 @@
         "title": "SectorPreferenceOut",
         "type": "object"
       },
+      "SectorRowHoldingOut": {
+        "additionalProperties": false,
+        "description": "概念行下的持仓标的（多归属：同一标的会出现在多个概念行，各自计数）。",
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "symbol": {
+            "title": "Symbol",
+            "type": "string"
+          }
+        },
+        "required": [
+          "symbol",
+          "name"
+        ],
+        "title": "SectorRowHoldingOut",
+        "type": "object"
+      },
       "SectorRowOut": {
         "additionalProperties": false,
         "description": "板块行：industry 用 weight/active_weight；concept 用 exposure（其余为 null）。",
@@ -8447,6 +8482,20 @@
           "holding_count": {
             "title": "Holding Count",
             "type": "integer"
+          },
+          "holdings": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SectorRowHoldingOut"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Holdings"
           },
           "level": {
             "title": "Level",
@@ -10563,12 +10612,16 @@
                   "points": [
                     {
                       "amount_label": "100000.00",
+                      "cashflow": "10000.00",
+                      "cashflow_direction": "in",
                       "date": "2026-06-29",
                       "label": "06-29",
                       "v": "0.0000"
                     },
                     {
                       "amount_label": "100620.00",
+                      "cashflow": "0.00",
+                      "cashflow_direction": "none",
                       "date": "2026-06-30",
                       "label": "06-30",
                       "v": "1.0000"
@@ -19571,6 +19624,12 @@
                       "exposure": "0.123",
                       "exposure_pct": "80.00%",
                       "holding_count": 1,
+                      "holdings": [
+                        {
+                          "name": "示例名称",
+                          "symbol": "示例"
+                        }
+                      ],
                       "level": 1,
                       "market_value": "示例",
                       "market_value_display": "示例",

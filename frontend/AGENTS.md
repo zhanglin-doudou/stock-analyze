@@ -118,7 +118,7 @@ export default defineConfig({
 - **主题**：`<html data-theme="light|dark" data-density="cozy|compact" data-trend="red-up|green-up">`；默认 `light + cozy + red-up`（A 股红涨绿跌），深色由同名 token 覆盖（Phase 5，Settings 可切）。
 - **数字排版**：金额/比率列右对齐 + `font-variant-numeric: tabular-nums`；格式（千分位/小数位/符号）一律来自后端字符串，前端不补零/不四舍五入。
 - **状态语义**：`build_state` 与 `data_status` 两轴共用一组 status token；禁止只用颜色表达状态（WCAG 2.2 1.4.1），必须带文案与形状。
-- **图表**：Phase 1 先自研 SVG，几何投影收敛到 `src/charts/geometry.ts`（唯一允许 `Number()` 的模块，配 golden `path d` 测试）；Phase 2 起后端 `GET /views/*` 返回归一化序列为主路径。
+- **图表**：Phase 1 先自研 SVG，几何投影收敛到 `src/charts/geometry.ts`（唯一允许 `Number()` 的模块，配 golden `path d` 测试）；Phase 2 起后端 `GET /views/*` 返回归一化序列为主路径。总资产图上的银证净转入/转出圆环由 API-085 的 `cashflow_direction` 驱动，金额用后端 `cashflow` 定点串，前端不解析符号/不做金额运算。
 - **键盘**：`⌘K`/`Ctrl+K` 命令面板；`Esc` 关闭面板。
 - **菜单**：一级分组为「核心 / 分析 / 数据」（2026-11-07 由「概览」改名「核心」，分组 id `core`）；手风琴互斥展开（默认当前路由组，根路径默认第一组）；大屏显示图标+中文，中屏仅图标（hover 文字、点击二级 flyout）；`/rounds/insights` 不得被 `/rounds` 前缀误命中。大屏右边界中点提供手动收起/展开按钮（持久化 `sa.nav.collapsed`）；底部设置区用 `margin-top:auto`，不再使用空 flex 占位节点；高度不足时导航区滚动并把当前项滚入可视区。
 - **菜单图标**：`ui/icons.tsx` 自研线性图标，18 个图标**形状必须两两不同**（分组图标不得复用任一二级项图标；历史上「概览」=「看板」都是 grid、「数据」=「资产」都是 assets，已修）。新增/改图标后 `layout/navigation.test.tsx` 会做同名去重 + 渲染形状去重双重校验，撞形即失败。
@@ -148,7 +148,7 @@ export default defineConfig({
 | `apps/web/src/charts/geometry.ts` | Phase 1 图表像素投影（零口径唯一白名单） |
 | `apps/web/src/ui/status.ts` | Phase 1 两轴状态语义（文案/色调/优先级） |
 | `apps/web/src/ui/format.ts` | Phase 1 符号/空值展示辅助（只读后端字符串） |
-| `apps/web/src/charts/TrendChart.tsx` | Phase 1c 总资产趋势图（自研 SVG，数据来自 /assets） |
+| `apps/web/src/charts/TrendChart.tsx` | 总资产趋势图（自研 SVG；API-085 银证净转入/转出圆环 + hover/focus tooltip + 可展开数据表） |
 | `apps/web/src/pages/dashboard/SectorBlock.tsx` | Dashboard 板块子块（4 KPI + 偏好 + 概念警示 + 深链，`data-board-member`） |
 | `apps/web/src/pages/Sectors.tsx` | `/sectors` 详情页（行业三级下钻 / 概念暴露，深链与 `keepPreviousData`） |
 | `apps/web/src/pages/sectors/SectorTable.tsx` | 板块明细表（行业含基准/主动列；概念含暴露/多归属列） |

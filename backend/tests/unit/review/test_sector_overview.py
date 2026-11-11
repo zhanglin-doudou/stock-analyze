@@ -434,6 +434,9 @@ async def test_concept_golden_hand_calc() -> None:
     assert rows["BK0999"].overlap is True
     assert rows["BK1010"].overlap is True
     assert rows["BK0999"].holding_count == 2
+    # 概念 × 持仓明细：按市值降序；同一标的可出现在多个概念。
+    assert [ref.symbol for ref in rows["BK0999"].holdings] == ["600001", "600002"]
+    assert [ref.symbol for ref in rows["BK1010"].holdings] == ["600001", "600004"]
     assert block.top1_concept is not None
     assert block.top1_concept.sector_code == "BK0999"
     assert {item.sector_code for item in block.top5_concepts} == {"BK0999", "BK1010"}

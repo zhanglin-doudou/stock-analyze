@@ -22,6 +22,7 @@ import { Dashboard } from "./Dashboard";
 import { buildCharts } from "./dashboard/TradeFlagCharts";
 import dashboardSource from "./Dashboard.tsx?raw";
 import sectorBlockSource from "./dashboard/SectorBlock.tsx?raw";
+import sectorConceptChartSource from "./dashboard/SectorConceptChartNivo.tsx?raw";
 import { resetAutoBuildGuard } from "../lib/useStaleAssetBuild";
 import { api } from "../client";
 
@@ -338,12 +339,16 @@ function makeAssetChart(): AssetChart {
         v: "0.0000",
         label: "06-29",
         amount_label: "100000.00",
+        cashflow: "10000.00",
+        cashflow_direction: "in",
       },
       {
         date: "2026-06-30",
         v: "1.0000",
         label: "06-30",
         amount_label: "100620.00",
+        cashflow: "-5000.00",
+        cashflow_direction: "out",
       },
     ],
     n_points: 2,
@@ -501,6 +506,7 @@ function makeConceptOverview(overrides: Partial<SectorsOverview> = {}): SectorsO
         exposure: "1.00000000",
         exposure_pct: "100.00%",
         overlap: true,
+        holdings: [{ symbol: "600519", name: "贵州茅台" }],
       },
     ],
     others: null,
@@ -763,7 +769,10 @@ describe("Dashboard 看板", () => {
     expect(screen.getByTestId("history-overview")).toBeTruthy();
     // Phase 1c：总资产日线来自 /assets（真实数据，几何由 charts/geometry 完成）
     expect(await screen.findByRole("img", { name: /总资产曲线/ })).toBeTruthy();
-    // Phase 4c：图表提供可展开数据表替代
+    // 银证净转入/转出圆环由 /assets/chart 的 cashflow_direction 驱动
+    expect(screen.getByRole("button", { name: /2026-06-29.*净转入/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /2026-06-30.*净转出/ })).toBeTruthy();
+    // 图表提供可展开数据表替代
     expect(screen.getByText(/查看数据表/)).toBeTruthy();
 
     for (const testId of [
@@ -836,7 +845,12 @@ describe("Dashboard 看板", () => {
     expect(sectorBlock.getAttribute("data-board-member")).toBe("asset-overview");
     expect(document.querySelectorAll("[data-board]")).toHaveLength(2);
     expect(screen.getByTestId("sector-kpi-hhi").textContent).toContain("1.00000000");
-    expect(screen.getByTestId("sector-kpi-concept-coverage").textContent).toContain("100.00%");
+    // 概念覆盖度/多标签/重叠合计三块已移除；概念侧改为持仓分布图（图例来自后端明细）。
+    expect(screen.queryByTestId("sector-kpi-concept-coverage")).toBeNull();
+    expect(screen.queryByTestId("sector-kpi-concept")).toBeNull();
+    expect((await screen.findByTestId("sector-concept-legend")).textContent).toContain("贵州茅台");
+    // 只有一根柱子时不制造注释编号。
+    expect(screen.queryByTestId("sector-concept-annotations")).toBeNull();
     expect(screen.getByTestId("sector-pref-801120.SI").textContent).toContain("70.00%");
     expect(screen.getByTestId("link-sectors").getAttribute("href")).toBe(
       "/sectors?taxonomy=industry&level=1&as_of=2026-07-01",
@@ -975,7 +989,7 @@ describe("Dashboard 看板", () => {
   });
 
   it("FT-04 零口径：源码不含 Number/parseFloat/parseInt/toFixed", () => {
-    for (const source of [dashboardSource, sectorBlockSource]) {
+    for (const source of [dashboardSource, sectorBlockSource, sectorConceptChartSource]) {
       expect(source).not.toMatch(/\bNumber\s*\(/);
       expect(source).not.toMatch(/\bparseFloat\b/);
       expect(source).not.toMatch(/\bparseInt\b/);
@@ -996,7 +1010,7 @@ describe("Dashboard 看板", () => {
     expect(block.textContent).toContain("组合权重 Top3");
     expect(screen.getByTestId("sector-weight-801120.SI").textContent).toContain("100.00%");
     expect(screen.queryByTestId("sector-pref-801120.SI")).toBeNull();
-    expect(screen.getByTestId("sector-kpi-concept").textContent).toContain("不可加总");
+    expect((await screen.findByTestId("sector-concept-hint")).textContent).toContain("每个概念");
   });
 
   it("FT-06 missing/blocked：板块子块不展示金额/百分比", async () => {
@@ -1027,6 +1041,66 @@ describe("Dashboard 看板", () => {
     await screen.findByTestId("sector-kpi-hhi");
     expect(screen.getByTestId("sector-kpi-hhi").textContent).toContain("—");
     expect(block.textContent ?? "").not.toMatch(/\d+\.\d{2}%/);
+  });
+
+  it("FT-06b 概念合并：持股集合完全相同合并一柱，概念数 ≥3 用注释编号并集中解释", async () => {
+    const row = (
+      code: string,
+      name: string,
+      symbols: { symbol: string; name: string }[],
+    ) => ({
+      sector_code: code,
+      sector_name: name,
+      level: 0,
+      parent_code: null,
+      market_value: null,
+      market_value_display: null,
+      weight: null,
+      weight_pct: null,
+      holding_count: symbols.length,
+      benchmark_weight: null,
+      benchmark_weight_pct: null,
+      active_weight: null,
+      active_weight_pct: null,
+      direction: null,
+      exposure: "1.00000000",
+      exposure_pct: "100.00%",
+      overlap: true,
+      holdings: symbols,
+    });
+    const YANGJIE = { symbol: "300373", name: "扬杰科技" };
+    const ZHONGRONG = { symbol: "301031", name: "中熔电气" };
+    const ZIGUANG = { symbol: "000938", name: "紫光股份" };
+    const ANJI = { symbol: "688019", name: "安集科技" };
+    getSectorsOverview.mockImplementation(async ({ taxonomy }) =>
+      taxonomy === "concept"
+        ? makeConceptOverview({
+            sectors: [
+              // 两只股票的同一集合，概念数 3 → 注释1
+              row("B1", "比亚迪概念", [YANGJIE, ZHONGRONG]),
+              row("B2", "充电桩", [YANGJIE, ZHONGRONG]),
+              row("B3", "高压", [YANGJIE, ZHONGRONG]),
+              // 一只股票的同一集合，概念数 3 → 注释2
+              row("A1", "6G概念", [ZIGUANG]),
+              row("A2", "车联网", [ZIGUANG]),
+              row("A3", "动数西算", [ZIGUANG]),
+              // 概念数 2 → 不进注释，直接用概念名
+              row("C1", "半导体", [ANJI]),
+              row("C2", "光刻胶", [ANJI]),
+            ],
+          })
+        : makeIndustryOverview(),
+    );
+    renderPage();
+
+    const annotations = await screen.findByTestId("sector-concept-annotations");
+    expect(annotations.querySelectorAll("li")).toHaveLength(2);
+    expect(annotations.textContent).toContain(
+      "注释1：比亚迪概念、充电桩、高压 —— 【扬杰科技、中熔电气】",
+    );
+    expect(annotations.textContent).toContain(
+      "注释2：6G概念、车联网、动数西算 —— 【紫光股份】",
+    );
   });
 
   it("FT-07 账单旗标图：默认请求 12 个月，切换范围改请求参数，月份口径来自后端", async () => {

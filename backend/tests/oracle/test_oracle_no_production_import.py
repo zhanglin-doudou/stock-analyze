@@ -35,7 +35,8 @@ def test_oracle_only_stdlib() -> None:
 
     violations: list[str] = []
     for path in files:
-        if path.name == Path(__file__).name:
+        # 本文件即守卫本身；conftest.py 是测试夹具（需 import pytest），不属于 oracle 参考实现。
+        if path.name in {Path(__file__).name, "conftest.py"}:
             continue
         for root in _imported_roots(path):
             if root.startswith(FORBIDDEN_PREFIX):

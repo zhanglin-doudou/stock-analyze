@@ -728,13 +728,20 @@ class AssetBuildFailed(StrictModel):
 
 
 class AssetChartPointOut(StrictModel):
-    """API-085：图表点（v 为后端归一化无量纲字符串，前端只做几何投影）。"""
+    """API-085：图表点（v 为后端归一化无量纲字符串，前端只做几何投影）。
+
+    cashflow 为当日银证转账净额（定点字符串，正数=净转入、负数=净转出）；
+    cashflow_direction 是后端判定的展示方向，前端不解析符号、不做金额运算。
+    """
 
     date: date
     # 归一化 [0,1]，4 位定点字符串（如 "0.4000"）；不是金额/业务比率。
     v: str
     label: str
     amount_label: str
+    # 当日净银证转账（分→元定点字符串）；无转账为 "0.00"。
+    cashflow: str
+    cashflow_direction: Literal["in", "out", "none"]
 
 
 class AssetChartOut(StrictModel):
@@ -1068,6 +1075,13 @@ class SectorPortfolioOut(StrictModel):
     classified_holding_count: int
 
 
+class SectorRowHoldingOut(StrictModel):
+    """概念行下的持仓标的（多归属：同一标的会出现在多个概念行，各自计数）。"""
+
+    symbol: str
+    name: str
+
+
 class SectorRowOut(StrictModel):
     """板块行：industry 用 weight/active_weight；concept 用 exposure（其余为 null）。"""
 
@@ -1088,6 +1102,8 @@ class SectorRowOut(StrictModel):
     exposure: str | None = None
     exposure_pct: str | None = None
     overlap: bool | None = None
+    # 概念行专属（additive）：该概念下的持仓标的明细，按市值降序；行业行为 null。
+    holdings: list[SectorRowHoldingOut] | None = None
 
 
 class SectorOthersOut(StrictModel):

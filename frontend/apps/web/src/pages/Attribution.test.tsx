@@ -1,11 +1,12 @@
+import { StrictMode, type ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, useSearchParams } from "react-router-dom";
 import type { Attribution } from "@sa/api-client";
 import { AttributionPage } from "./Attribution";
 import pageSource from "./Attribution.tsx?raw";
-import { latestCompletedMonth } from "../lib/date";
+import { currentDate, currentYearToken, latestCompletedMonth } from "../lib/date";
 import { api } from "../client";
 
 vi.mock("../client", () => ({
@@ -196,15 +197,64 @@ function attribution(overrides: Partial<Attribution> = {}): Attribution {
   };
 }
 
-function renderPage(initialEntry = "/attribution?period=2026-06") {
+/** blocked 响应：不输出任何金额，只保留质量卡与 data_as_of。 */
+function blockedAttribution(overrides: Partial<Attribution> = {}): Attribution {
+  return attribution({
+    status: "blocked",
+    total_pnl: null,
+    summary: null,
+    base_capital: null,
+    residual: null,
+    residual_ratio: null,
+    residual_breakdown: null,
+    residual_reconciliation: null,
+    coverage: null,
+    factors: (FACTORS ?? []).map((factor) => ({
+      ...factor,
+      amount: null,
+      ratio: null,
+      share: null,
+      conclusion: null,
+      presentation: {
+        bar_pct: null,
+        ratio_pct: null,
+        tone: "flat",
+        sector_bar_fallback: false,
+      },
+    })),
+    missing: [
+      {
+        code: "ASSET_ROW_BLOCKED",
+        field: "period_start",
+        severity: "blocker",
+        reason: "期初资产行不可信（blocked）。",
+        what_to_do: "请先在资产页处理阻断行后重试。",
+      },
+    ],
+    ...overrides,
+  });
+}
+
+/** 把当前 URL 的 period 暴露为可断言文本。 */
+function PeriodProbe(): ReactElement {
+  const [params] = useSearchParams();
+  return <div data-testid="period-param">{params.get("period") ?? ""}</div>;
+}
+
+function renderPage(
+  initialEntry = "/attribution?period=2026-06",
+  { strict = false }: { strict?: boolean } = {},
+) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(
+  const tree = (
     <QueryClientProvider client={client}>
       <MemoryRouter initialEntries={[initialEntry]}>
         <AttributionPage />
+        <PeriodProbe />
       </MemoryRouter>
-    </QueryClientProvider>,
+    </QueryClientProvider>
   );
+  return render(strict ? <StrictMode>{tree}</StrictMode> : tree);
 }
 
 beforeEach(() => {
@@ -363,6 +413,102 @@ describe("AttributionPage", () => {
     expect(screen.getByTestId("attr-missing").textContent).toContain("期初资产行不可信");
     expect(screen.getByTestId("attr-period-end").textContent).toContain("2026-06-30");
     expect(screen.queryByTestId("attr-pnl-bar")).toBeNull();
+  });
+
+  it("blocked 兜底：默认区间 + 有 data_as_of 时用其作期末自动重试一次，并写回 URL", async () => {
+    const start = `${currentYearToken()}-01-01`;
+    const defaultPeriod = `${start}..${currentDate()}`;
+    const retriedPeriod = `${start}..2026-09-30`;
+    getAttribution
+      .mockResolvedValueOnce(blockedAttribution({ data_as_of: "2026-09-30" }))
+      .mockResolvedValueOnce(
+        attribution({
+          period: retriedPeriod,
+          period_start: start,
+          period_end: "2026-09-30",
+        }),
+      );
+
+    // StrictMode 双挂载下也只能有「首发 + 兜底」两次请求。
+    renderPage("/attribution", { strict: true });
+
+    await waitFor(() =>
+      expect(screen.getByTestId("period-param").textContent).toBe(retriedPeriod),
+    );
+    await waitFor(() => expect(getAttribution).toHaveBeenCalledTimes(2));
+    expect(getAttribution).toHaveBeenNthCalledWith(1, {
+      period: defaultPeriod,
+      classification_lookahead: "deny",
+    });
+    expect(getAttribution).toHaveBeenNthCalledWith(2, {
+      period: retriedPeriod,
+      classification_lookahead: "deny",
+    });
+
+    // 区间同时反映到 PeriodInput（自定义区间）。
+    expect((screen.getByLabelText("开始日期") as HTMLInputElement).value).toBe(start);
+    expect((screen.getByLabelText("结束日期") as HTMLInputElement).value).toBe("2026-09-30");
+  });
+
+  it("blocked 兜底：URL 自带 period 时不触发自动重试", async () => {
+    getAttribution.mockResolvedValue(blockedAttribution({ data_as_of: "2026-06-30" }));
+
+    renderPage("/attribution?period=2026-01-01..2026-06-30");
+
+    await screen.findByTestId("attr-quality");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(getAttribution).toHaveBeenCalledTimes(1);
+    expect(getAttribution).toHaveBeenCalledWith({
+      period: "2026-01-01..2026-06-30",
+      classification_lookahead: "deny",
+    });
+    expect(screen.getByTestId("period-param").textContent).toBe("2026-01-01..2026-06-30");
+  });
+
+  it("blocked 兜底：二次仍 blocked 时不再继续重试", async () => {
+    const start = `${currentYearToken()}-01-01`;
+    const retriedPeriod = `${start}..2026-09-30`;
+    getAttribution
+      .mockResolvedValueOnce(blockedAttribution({ data_as_of: "2026-09-30" }))
+      // 第二次再 blocked 且 data_as_of 变了：若守卫失效会拼出第三个区间。
+      .mockResolvedValueOnce(blockedAttribution({ data_as_of: "2026-10-31" }));
+
+    renderPage("/attribution");
+
+    await waitFor(() =>
+      expect(screen.getByTestId("period-param").textContent).toBe(retriedPeriod),
+    );
+    await waitFor(() => expect(getAttribution).toHaveBeenCalledTimes(2));
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(getAttribution).toHaveBeenCalledTimes(2);
+    expect(screen.getByTestId("period-param").textContent).toBe(retriedPeriod);
+  });
+
+  it("blocked 兜底：没有 data_as_of 时不触发自动重试", async () => {
+    getAttribution.mockResolvedValue(blockedAttribution({ data_as_of: null }));
+
+    renderPage("/attribution");
+
+    await screen.findByTestId("attr-quality");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(getAttribution).toHaveBeenCalledTimes(1);
+    expect(screen.getByTestId("period-param").textContent).toBe("");
+  });
+
+  it("blocked 兜底：data_as_of 早于默认起点时不重试、也不改 URL", async () => {
+    const start = `${currentYearToken()}-01-01`;
+    getAttribution.mockResolvedValue(blockedAttribution({ data_as_of: "2025-12-31" }));
+
+    renderPage("/attribution");
+
+    await screen.findByTestId("attr-quality");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(getAttribution).toHaveBeenCalledTimes(1);
+    expect(getAttribution).toHaveBeenCalledWith({
+      period: `${start}..${currentDate()}`,
+      classification_lookahead: "deny",
+    });
+    expect(screen.getByTestId("period-param").textContent).toBe("");
   });
 
   it("insufficient：金额照给，结论区用后端样本不足句（不在前端写死）", async () => {

@@ -555,6 +555,7 @@ export type AssertSectorRowFields = Assert<
     | "exposure"
     | "exposure_pct"
     | "overlap"
+    | "holdings"
     | "parent_code"
   >
 >;

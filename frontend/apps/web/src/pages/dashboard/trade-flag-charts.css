@@ -63,9 +63,10 @@
 
 .tfc-chart-title {
   margin: var(--s4) 0 var(--s2);
+  font-family: var(--font-display);
   font-size: var(--fs-h3);
   font-weight: var(--fw-semibold);
-  color: var(--text);
+  color: var(--text-2);
 }
 
 .tfc-chart {
