@@ -1,4 +1,11 @@
-import { Fragment, type CSSProperties, type ReactElement } from 'react';
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useRef,
+  type CSSProperties,
+  type ReactElement,
+} from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 import { keepPreviousData, useQuery } from '@tanstack/react-query';
 import type {
@@ -637,7 +644,12 @@ function QualityCard({ data }: { data: Attribution }): ReactElement {
 
 export function AttributionPage(): ReactElement {
   const [params, setParams] = useSearchParams();
-  const period = params.get('period') ?? yearToDateRange();
+  const periodParam = params.get('period');
+  const period = periodParam ?? yearToDateRange();
+  // 首次渲染实际使用的区间（无参数时即默认「年初至今」），兜底重试沿用它作起点。
+  const initialPeriodRef = useRef(period);
+  // 只自动重试一次：置位后同一响应的重复 effect / StrictMode 二次挂载都不会再发请求。
+  const autoRetriedRef = useRef(false);
   // 与归因设计 §4.3 一致：lookahead 必须显式请求，默认 deny（不得默认回溯未来信息）。
   const allowLookahead = (params.get('lookahead') ?? 'deny') === 'allow';
 
@@ -651,12 +663,31 @@ export function AttributionPage(): ReactElement {
     placeholderData: keepPreviousData,
   });
 
-  const updatePeriod = (next: string): void => {
-    const draft = new URLSearchParams(params);
-    if (next) draft.set('period', next);
-    else draft.delete('period');
-    setParams(draft, { replace: true });
-  };
+  const updatePeriod = useCallback(
+    (next: string): void => {
+      const draft = new URLSearchParams(params);
+      if (next) draft.set('period', next);
+      else draft.delete('period');
+      setParams(draft, { replace: true });
+    },
+    [params, setParams],
+  );
+
+  // blocked 兜底（四条同时满足才触发）：URL 无 period（默认区间）+ 后端 status=blocked
+  // + 有 data_as_of + data_as_of 不早于默认起点。用 data_as_of 作期末、默认起点作起点
+  // 再请求一次，并把实际区间写回 URL（PeriodInput 与刷新后的请求都按同一区间走，
+  // 因此之后不会再触发重试）。URL 一旦带上 period（含用户切换筛选）即不再兜底。
+  useEffect(() => {
+    if (periodParam != null || autoRetriedRef.current) return;
+    const data = query.data;
+    if (data?.status !== 'blocked') return;
+    const [start = ''] = initialPeriodRef.current.split('..');
+    const end = data.data_as_of;
+    // 期末为空或早于起点会拼出反向区间：不请求、不改 URL，留给用户手动刷新。
+    if (!start || !end || end < start) return;
+    autoRetriedRef.current = true;
+    updatePeriod(`${start}..${end}`);
+  }, [periodParam, query.data, updatePeriod]);
 
   const updateLookahead = (next: boolean): void => {
     const draft = new URLSearchParams(params);
