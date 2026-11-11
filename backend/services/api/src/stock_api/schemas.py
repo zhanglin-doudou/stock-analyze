@@ -1075,6 +1075,13 @@ class SectorPortfolioOut(StrictModel):
     classified_holding_count: int
 
 
+class SectorRowHoldingOut(StrictModel):
+    """概念行下的持仓标的（多归属：同一标的会出现在多个概念行，各自计数）。"""
+
+    symbol: str
+    name: str
+
+
 class SectorRowOut(StrictModel):
     """板块行：industry 用 weight/active_weight；concept 用 exposure（其余为 null）。"""
 
@@ -1095,6 +1102,8 @@ class SectorRowOut(StrictModel):
     exposure: str | None = None
     exposure_pct: str | None = None
     overlap: bool | None = None
+    # 概念行专属（additive）：该概念下的持仓标的明细，按市值降序；行业行为 null。
+    holdings: list[SectorRowHoldingOut] | None = None
 
 
 class SectorOthersOut(StrictModel):

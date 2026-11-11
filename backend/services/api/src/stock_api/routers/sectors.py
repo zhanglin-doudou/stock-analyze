@@ -48,6 +48,7 @@ from stock_api.schemas import (
     SectorPortfolioOut,
     SectorPreferenceItemOut,
     SectorPreferenceOut,
+    SectorRowHoldingOut,
     SectorRowOut,
     SectorUnclassifiedOut,
 )
@@ -157,6 +158,11 @@ def _row_out(row: SectorRow, *, concept: bool) -> SectorRowOut:
         exposure=_ratio(row.exposure_units) if concept else None,
         exposure_pct=_pct(row.exposure_units) if concept else None,
         overlap=row.overlap if concept else None,
+        holdings=(
+            [SectorRowHoldingOut(symbol=ref.symbol, name=ref.name) for ref in row.holdings]
+            if concept
+            else None
+        ),
     )
 
 

@@ -236,6 +236,8 @@ async def test_api_087_industry_happy(
         assert row["holding_count"] == 0
         assert row["direction"] == "under"
         assert row["active_weight"] == "-" + row["benchmark_weight"]
+    # 行业行不携带概念持仓明细（additive 字段仅概念 taxonomy 填充）。
+    assert all(row["holdings"] is None for row in rows)
 
     concentration = body["concentration"]
     assert concentration["method"] == "industry_single_membership"
@@ -331,6 +333,15 @@ async def test_api_087_concept_taxonomy(
         assert row["active_weight"] is None
         assert row["direction"] is None
     assert all(item["overlap"] is True for item in body["sectors"])
+
+    # 概念 × 持仓明细（additive）：600519 同属两个概念 → 两行各列一次，合计 2 > 持仓数 1。
+    holdings_by_concept = {row["sector_code"]: row["holdings"] for row in body["sectors"]}
+    assert all(refs for refs in holdings_by_concept.values())
+    assert {ref["symbol"] for refs in holdings_by_concept.values() for ref in refs} == {"600519"}
+    assert {ref["name"] for refs in holdings_by_concept.values() for ref in refs} == {"600519"}
+    assert sum(len(refs) for refs in holdings_by_concept.values()) == 2
+    assert sum(row["holding_count"] for row in body["sectors"]) == 2
+    assert body["portfolio"]["holding_count"] == 1
 
 
 # ── 越权 / 身份 ─────────────────────────────────────────────

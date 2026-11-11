@@ -4114,6 +4114,16 @@ export interface components {
             top_underweight: components["schemas"]["SectorPreferenceItemOut"][];
         };
         /**
+         * SectorRowHoldingOut
+         * @description 概念行下的持仓标的（多归属：同一标的会出现在多个概念行，各自计数）。
+         */
+        SectorRowHoldingOut: {
+            /** Name */
+            name: string;
+            /** Symbol */
+            symbol: string;
+        };
+        /**
          * SectorRowOut
          * @description 板块行：industry 用 weight/active_weight；concept 用 exposure（其余为 null）。
          */
@@ -4134,6 +4144,8 @@ export interface components {
             exposure_pct?: string | null;
             /** Holding Count */
             holding_count: number;
+            /** Holdings */
+            holdings?: components["schemas"]["SectorRowHoldingOut"][] | null;
             /** Level */
             level: number;
             /** Market Value */

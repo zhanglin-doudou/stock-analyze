@@ -134,6 +134,14 @@ class SectorPortfolio:
 
 
 @dataclass(slots=True, frozen=True)
+class HoldingRef:
+    """概念行下的持仓标的（symbol + 展示名；同一标的可出现在多个概念）。"""
+
+    symbol: str
+    name: str
+
+
+@dataclass(slots=True, frozen=True)
 class SectorRow:
     sector_code: str
     sector_name: str
@@ -147,6 +155,7 @@ class SectorRow:
     direction: str | None = None
     exposure_units: int | None = None
     overlap: bool = False
+    holdings: tuple[HoldingRef, ...] = ()
 
 
 @dataclass(slots=True, frozen=True)
@@ -593,6 +602,11 @@ async def build_sector_overview(
             continue
         if classify_symbol(item.security_code) == CLASS_STOCK:
             stock_mv[item.security_code] = item.market_value_units
+    stock_names = {
+        item.security_code: item.security_name
+        for item in holdings
+        if item.security_code in stock_mv
+    }
     equity_units = sum(stock_mv.values())
     holding_mv = latest.market_value_units
     total_assets = latest.total_assets_units
@@ -683,6 +697,7 @@ async def build_sector_overview(
                 db_taxonomy=db_taxonomy,
                 catalog=catalog,
                 stock_mv=stock_mv,
+                stock_names=stock_names,
                 equity_units=equity_units,
                 total_assets=total_assets,
                 holding_mv=holding_mv,
@@ -979,6 +994,7 @@ async def _concept_overview(
     db_taxonomy: str,
     catalog: Sequence[SectorInfo],
     stock_mv: Mapping[str, int],
+    stock_names: Mapping[str, str] | None = None,
     equity_units: int,
     total_assets: int | None,
     holding_mv: int | None,
@@ -993,6 +1009,7 @@ async def _concept_overview(
 ) -> _Body:
     missing: list[SectorMissing] = []
     names = _names(catalog)
+    display_names = stock_names or {}
     memberships = _concept_memberships(
         await sector_data.get_memberships(db_taxonomy, as_of=snapshot)
     )
@@ -1001,6 +1018,7 @@ async def _concept_overview(
     mv_by_concept: dict[str, int] = {}
     count_by_concept: dict[str, int] = {}
     overlap_concept: dict[str, bool] = {}
+    holdings_by_concept: dict[str, list[HoldingRef]] = {}
     tagged_mv = 0
     multi_tag_mv = 0
     for symbol, value in stock_mv.items():
@@ -1014,6 +1032,11 @@ async def _concept_overview(
             mv_by_concept[code] = mv_by_concept.get(code, 0) + value
             count_by_concept[code] = count_by_concept.get(code, 0) + 1
             overlap_concept[code] = overlap_concept.get(code, False) or len(tags) >= 2
+            holdings_by_concept.setdefault(code, []).append(
+                HoldingRef(symbol=symbol, name=display_names.get(symbol, symbol))
+            )
+    for refs in holdings_by_concept.values():
+        refs.sort(key=lambda ref: (-stock_mv[ref.symbol], ref.symbol))
 
     portfolio = SectorPortfolio(
         total_assets_units=total_assets,
@@ -1073,6 +1096,7 @@ async def _concept_overview(
             holding_count=count_by_concept.get(code, 0),
             exposure_units=concept.exposure.get(code),
             overlap=overlap_concept.get(code, False),
+            holdings=tuple(holdings_by_concept.get(code, ())),
         )
         for code, value in mv_by_concept.items()
     ]
@@ -1327,6 +1351,7 @@ __all__ = [
     "TAXONOMY_CONCEPT",
     "TAXONOMY_INDUSTRY",
     "ConceptBlock",
+    "HoldingRef",
     "PreferenceItem",
     "SectorCatalogItem",
     "SectorCatalogResult",

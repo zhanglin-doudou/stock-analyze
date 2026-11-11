@@ -8373,6 +8373,26 @@
         "title": "SectorPreferenceOut",
         "type": "object"
       },
+      "SectorRowHoldingOut": {
+        "additionalProperties": false,
+        "description": "概念行下的持仓标的（多归属：同一标的会出现在多个概念行，各自计数）。",
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "symbol": {
+            "title": "Symbol",
+            "type": "string"
+          }
+        },
+        "required": [
+          "symbol",
+          "name"
+        ],
+        "title": "SectorRowHoldingOut",
+        "type": "object"
+      },
       "SectorRowOut": {
         "additionalProperties": false,
         "description": "板块行：industry 用 weight/active_weight；concept 用 exposure（其余为 null）。",
@@ -8462,6 +8482,20 @@
           "holding_count": {
             "title": "Holding Count",
             "type": "integer"
+          },
+          "holdings": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/SectorRowHoldingOut"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Holdings"
           },
           "level": {
             "title": "Level",
@@ -19590,6 +19624,12 @@
                       "exposure": "0.123",
                       "exposure_pct": "80.00%",
                       "holding_count": 1,
+                      "holdings": [
+                        {
+                          "name": "示例名称",
+                          "symbol": "示例"
+                        }
+                      ],
                       "level": 1,
                       "market_value": "示例",
                       "market_value_display": "示例",
