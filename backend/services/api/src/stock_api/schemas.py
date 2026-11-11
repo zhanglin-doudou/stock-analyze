@@ -728,13 +728,20 @@ class AssetBuildFailed(StrictModel):
 
 
 class AssetChartPointOut(StrictModel):
-    """API-085：图表点（v 为后端归一化无量纲字符串，前端只做几何投影）。"""
+    """API-085：图表点（v 为后端归一化无量纲字符串，前端只做几何投影）。
+
+    cashflow 为当日银证转账净额（定点字符串，正数=净转入、负数=净转出）；
+    cashflow_direction 是后端判定的展示方向，前端不解析符号、不做金额运算。
+    """
 
     date: date
     # 归一化 [0,1]，4 位定点字符串（如 "0.4000"）；不是金额/业务比率。
     v: str
     label: str
     amount_label: str
+    # 当日净银证转账（分→元定点字符串）；无转账为 "0.00"。
+    cashflow: str
+    cashflow_direction: Literal["in", "out", "none"]
 
 
 class AssetChartOut(StrictModel):

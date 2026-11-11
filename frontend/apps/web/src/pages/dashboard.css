@@ -783,3 +783,161 @@
   color: var(--text-2);
 }
 
+
+/* 总资产曲线：银证净转入/转出标记 */
+.dash-trend {
+  position: relative;
+}
+
+.dash-trend-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+  padding: 0 4px var(--s2);
+}
+
+.dash-trend-legend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--s3);
+  color: var(--muted);
+  font-size: var(--fs-micro);
+  font-variant-numeric: tabular-nums;
+}
+
+.dash-trend-legend > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.dash-trend-legend-dot {
+  width: 7px;
+  height: 7px;
+  border: 1.5px solid currentColor;
+  border-radius: 50%;
+  background: var(--surface);
+  display: inline-block;
+}
+
+.dash-trend-legend .is-in {
+  color: var(--up);
+}
+
+.dash-trend-legend .is-out {
+  color: var(--down);
+}
+
+.dash-trend-legend-count,
+.dash-trend-hint {
+  color: var(--faint);
+}
+
+.dash-trend-hint {
+  font-size: var(--fs-micro);
+  white-space: nowrap;
+}
+
+.dash-trend-plot {
+  position: relative;
+}
+
+.dash-trend-marker-ring {
+  fill: var(--surface);
+  stroke-width: 1.8;
+}
+
+.dash-trend-marker-ring.is-in {
+  stroke: var(--up);
+}
+
+.dash-trend-marker-ring.is-out {
+  stroke: var(--down);
+}
+
+.dash-trend-marker-ring.is-active {
+  stroke-width: 3;
+}
+
+.dash-trend-marker-layer {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.dash-trend-marker-hit {
+  position: absolute;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  transform: translate(-50%, -50%);
+  pointer-events: auto;
+  cursor: pointer;
+}
+
+.dash-trend-marker-hit:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.dash-trend-tooltip {
+  position: absolute;
+  z-index: 4;
+  min-width: 188px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 9px 12px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  background: var(--surface);
+  box-shadow: var(--shadow-2);
+  color: var(--text);
+  font-size: var(--fs-xs);
+  line-height: 1.45;
+  pointer-events: none;
+}
+
+.dash-trend-tooltip-date {
+  color: var(--faint);
+  font-size: var(--fs-micro);
+  letter-spacing: 0.04em;
+}
+
+.dash-trend-tooltip-row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--s3);
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.dash-trend-tooltip-row strong {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.dash-trend-tooltip-row.is-in strong {
+  color: var(--up);
+}
+
+.dash-trend-tooltip-row.is-out strong {
+  color: var(--down);
+}
+
+@media (max-width: 767px) {
+  .dash-trend-top {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: var(--s1);
+  }
+
+  .dash-trend-hint {
+    display: none;
+  }
+}

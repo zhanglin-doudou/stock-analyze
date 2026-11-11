@@ -1289,10 +1289,20 @@ export interface components {
         /**
          * AssetChartPointOut
          * @description API-085：图表点（v 为后端归一化无量纲字符串，前端只做几何投影）。
+         *
+         *     cashflow 为当日银证转账净额（定点字符串，正数=净转入、负数=净转出）；
+         *     cashflow_direction 是后端判定的展示方向，前端不解析符号、不做金额运算。
          */
         AssetChartPointOut: {
             /** Amount Label */
             amount_label: string;
+            /** Cashflow */
+            cashflow: string;
+            /**
+             * Cashflow Direction
+             * @enum {string}
+             */
+            cashflow_direction: "in" | "out" | "none";
             /**
              * Date
              * Format: date

@@ -338,12 +338,16 @@ function makeAssetChart(): AssetChart {
         v: "0.0000",
         label: "06-29",
         amount_label: "100000.00",
+        cashflow: "10000.00",
+        cashflow_direction: "in",
       },
       {
         date: "2026-06-30",
         v: "1.0000",
         label: "06-30",
         amount_label: "100620.00",
+        cashflow: "-5000.00",
+        cashflow_direction: "out",
       },
     ],
     n_points: 2,
@@ -763,7 +767,10 @@ describe("Dashboard 看板", () => {
     expect(screen.getByTestId("history-overview")).toBeTruthy();
     // Phase 1c：总资产日线来自 /assets（真实数据，几何由 charts/geometry 完成）
     expect(await screen.findByRole("img", { name: /总资产曲线/ })).toBeTruthy();
-    // Phase 4c：图表提供可展开数据表替代
+    // 银证净转入/转出圆环由 /assets/chart 的 cashflow_direction 驱动
+    expect(screen.getByRole("button", { name: /2026-06-29.*净转入/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /2026-06-30.*净转出/ })).toBeTruthy();
+    // 图表提供可展开数据表替代
     expect(screen.getByText(/查看数据表/)).toBeTruthy();
 
     for (const testId of [

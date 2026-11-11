@@ -31,11 +31,13 @@ async def _insert_asset_points(
     engine: AsyncEngine,
     *,
     user_id: uuid.UUID,
-    points: list[tuple[date, int, str]],
+    points: list[tuple[date, int, str] | tuple[date, int, str, int]],
 ) -> None:
-    """直插资产日线：points=(trade_date, total_assets_units, status)。"""
+    """直插资产日线：points=(trade_date, total_assets_units, status[, cashflow_units])。"""
     async with engine.begin() as conn:
-        for trade_date, total_units, status in points:
+        for point in points:
+            trade_date, total_units, status = point[:3]
+            cashflow_units = point[3] if len(point) > 3 else 0
             await conn.execute(
                 text(
                     "insert into review.asset_daily "
@@ -43,7 +45,7 @@ async def _insert_asset_points(
                     " total_assets_units, holding_cost_units, unrealized_pnl_units, "
                     " holding_count, cashflow_units, status, status_reason, "
                     " definition_version, rebuilt_at) "
-                    "values (:id, :uid, :d, 0, :total, :total, 0, 0, 1, 0, :status, "
+                    "values (:id, :uid, :d, 0, :total, :total, 0, 0, 1, :cashflow, :status, "
                     "        :reason, :version, now())"
                 ),
                 {
@@ -51,6 +53,7 @@ async def _insert_asset_points(
                     "uid": user_id,
                     "d": trade_date,
                     "total": total_units,
+                    "cashflow": cashflow_units,
                     "status": status,
                     "reason": "测试阻断" if status == "blocked" else None,
                     "version": _ASSET_DEFINITION_VERSION,
@@ -122,6 +125,37 @@ async def test_api_085_happy_returns_normalized_ascending_points(
     assert body["points"][-1]["amount_label"] == "105000.00"
     for point in body["points"]:
         assert _V_RE.match(point["v"]), point
+        assert point["cashflow"] == "0.00"
+        assert point["cashflow_direction"] == "none"
+
+
+@pytest.mark.asyncio
+async def test_api_085_cashflow_direction_and_display(
+    client: httpx.AsyncClient,
+    user: Any,
+    owner_engine: AsyncEngine,
+) -> None:
+    """净转入/净转出由后端给方向 + 定点字符串，前端不解析符号。"""
+    points = [
+        (date(2026, 6, 28), 10_000_000, "ok", 0),
+        (date(2026, 6, 29), 10_200_000, "ok", 1_000_000),
+        (date(2026, 6, 30), 10_500_000, "ok", -500_000),
+    ]
+    await _insert_asset_points(owner_engine, user_id=user.user_id, points=points)
+    await _insert_build_state(
+        owner_engine, user_id=user.user_id, data_as_of=date(2026, 6, 30), rows_count=3
+    )
+
+    resp = await client.get(f"{API_PREFIX}/assets/chart", headers=user.headers)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    by_date = {point["date"]: point for point in body["points"]}
+    assert by_date["2026-06-28"]["cashflow"] == "0.00"
+    assert by_date["2026-06-28"]["cashflow_direction"] == "none"
+    assert by_date["2026-06-29"]["cashflow"] == "10000.00"
+    assert by_date["2026-06-29"]["cashflow_direction"] == "in"
+    assert by_date["2026-06-30"]["cashflow"] == "-5000.00"
+    assert by_date["2026-06-30"]["cashflow_direction"] == "out"
 
 
 @pytest.mark.asyncio

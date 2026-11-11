@@ -135,7 +135,7 @@
 | API-082 | POST | `/assets/build` | 构建/增量更新资产表 | D1 | write | 必需 | 异步 | P0 | 202/200 |
 | API-083 | POST | `/jobs/rebuild-period` | 按月一键编排（rounds→assets→nav→metrics） | R2/D1 | write | 必需 | 异步 | P0 | 202 |
 | API-084 | GET | `/dashboard` | Dashboard 两板块聚合（资产概览 + 历史概览） | D1 | read | — | 同步 | P0 | 200 |
-| API-085 | GET | `/assets/chart` | 资产日线 chart-ready 视图（归一化序列+展示标签） | D1 | read | — | 同步 | P0 | 200 |
+| API-085 | GET | `/assets/chart` | 资产日线 chart-ready 视图（归一化序列+展示标签+每日银证净转账方向） | D1 | read | — | 同步 | P0 | 200 |
 | API-086 | GET | `/metrics/catalog` | 18 个指标口径说明书（定义/方向/窗口/经验区间/版本） | D3/R8 | read | — | 同步 | P0 | 200 |
 | API-087 | GET | `/sectors/overview` | 板块概览（行业三级/概念暴露+集中度+偏好） | D1 | read | — | 同步 | P0 | 200 |
 | API-088 | GET | `/sectors` | 板块目录树（行业多级/概念列表，供筛选与钻取） | D1 | read | — | 同步 | P1 | 200 |
@@ -718,7 +718,7 @@ data: {"job_id":"job_01J9Z6","status":"succeeded","result_ref":"/api/v1/reports/
 | API-082 | assets_build_incremental | 202+Location/Retry-After 且 type=build_assets；同 key 重放同一 job_id+Idempotency-Replayed；同参 X-Job-Reused、异参 409；drain 后 build.last_mode=incremental 且 last_rows_written==窗口天数<rows_count；无锚点 build.last_status=blocked | fx_round30 | P0 |
 | API-083 | rebuild_period_orchestration | 202+Location 且 type=rebuild_period；同 key 重放 Idempotency-Replayed、同参 X-Job-Reused、异参 409；drain 后 job.result 四阶段键齐全、metric_result 该 period 恰核心 10 行（include_exploratory=true 则 18 行含 M1）；阶段 rounds→assets→nav→metrics 顺序与 progress 单调；运行中异参 409、可 cancel；缺 key/坏 period 422、read PAT/admin 403；年度 token 落该年 10/18 行、自定义区间 persisted=0 且不落库 | fx_round30 | P0 |
 | API-084 | dashboard_two_sections | 200 且两板块字段齐全；最新资产日=headline、全历史=计数/最赚最亏/回撤；`metrics_period` 为 as_of 所在自然年、`metrics_period_start`=1/1、`metrics_period_end`=as_of（as_of=次年初 → 年度翻到该年）；`links.metrics` 指向年度 token；未构建 asset_overview 全 null+build_state=missing；blocked 快照不输出 0；`build` 为只读构建摘要（与 API-081 的 `build` 同源 additive：state/last_built_at/last_built_through/rows_count/definition_version 等），供前端判定 stale 并与资产页共用去重指纹；跨用户 404、admin 403；无写副作用（不建 job/不写表） | fx_round30 | P0 |
-| API-085 | assets_chart_view | 200 且 points 按日期升序、v∈[0,1] 字符串、amount_label 为后端定点串；blocked 行不进入序列；未构建 n_points=0；跨用户空序列、admin 403、无 token 401；limit 0/501→422；只读无副作用 | fx_round30 | P0 |
+| API-085 | assets_chart_view | 200 且 points 按日期升序、v∈[0,1] 字符串、amount_label 为后端定点串；cashflow 为带符号定点串且 cashflow_direction ∈ in/out/none（正=净转入、负=净转出、0=none），前端零解析；blocked 行不进入序列；未构建 n_points=0；跨用户空序列、admin 403、无 token 401；limit 0/501→422；只读无副作用 | fx_round30 | P0 |
 | API-087 | sectors_overview | 200 且行业 `Σ market_value + unclassified == equity_market_value`、`Σ weight ≈ 1`；hhi/effective_n/top1/top3 与 golden 一致；概念 `Σ exposure>1` 时 caveat 非空 + weight_mode=overlapping；未同步 200+missing 全 null；coverage<0.90→insufficient+hhi=null；未来 as_of/level/taxonomy→422；benchmark=nope→422 UNKNOWN_BENCHMARK；limit=501→422；admin 403、无 token 401、B 账号隔离；If-None-Match→304 空 body；只读无副作用 | fx_sector | P0 |
 | API-088 | sectors_catalog | 200 且 items 按 (level,sector_code) 升序、L3 path 恰 3 层、L1/L2 member_count 为后代去重求和；未同步 200+items=[]+catalog_version=null+SECTOR_DATA_MISSING；is_active=false 默认不返回；损坏 cursor→400 INVALID_CURSOR；taxonomy/level 非法→422；admin 403、无 token 401 | fx_sector | P1 |
 | API-090 | trade_reason_upsert（已实现） | 201/200；If-Match 旧值 409；跨用户 404；理由写入后 ETag 变化；审计无明文 | fx_round_insights | P0 |

@@ -268,6 +268,9 @@ export function Dashboard(): ReactElement {
     label: point.label,
     value: point.v,
     display: point.amount_label,
+    date: point.date,
+    cashflow: point.cashflow,
+    cashflowDirection: point.cashflow_direction,
   }));
 
   return (
