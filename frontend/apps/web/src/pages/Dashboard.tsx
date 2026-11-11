@@ -479,23 +479,6 @@ export function Dashboard(): ReactElement {
             </table>
           )}
         </section>
-        <SectorBlock asOf={data.as_of} linkHref={data.links.sectors} />
-      </div>
-
-      <TradeFlagCharts />
-      </div>
-
-      {/* 历史概览 + 持仓（板块级容器 history-overview） */}
-      <div data-board="history-overview">
-      <div className="dash-grid">
-        <AnnualMetrics
-          period={data.metrics_period}
-          start={data.metrics_period_start}
-          end={data.metrics_period_end}
-          batch={metricsQuery.data ?? null}
-          loading={metricsQuery.isLoading}
-          error={metricsQuery.error}
-        />
         <section className="dash-panel" data-testid="history-overview">
           <div className="dash-panel-head">
             <h2>历史概览</h2>
@@ -567,6 +550,24 @@ export function Dashboard(): ReactElement {
             </div>
           </div>
         </section>
+      </div>
+      <SectorBlock asOf={data.as_of} linkHref={data.links.sectors} />
+
+      <TradeFlagCharts />
+      </div>
+
+      {/* 历史概览 + 持仓（板块级容器 history-overview） */}
+      <div data-board="history-overview">
+      <div className="dash-grid">
+        <AnnualMetrics
+          period={data.metrics_period}
+          start={data.metrics_period_start}
+          end={data.metrics_period_end}
+          batch={metricsQuery.data ?? null}
+          loading={metricsQuery.isLoading}
+          error={metricsQuery.error}
+        />
+        
       </div>
 
       {/* 最赚 / 最亏 */}
