@@ -157,10 +157,6 @@ function AnnualMetrics({
           指标详情
         </Link>
       </div>
-      <p className="dash-muted">
-        低频操作者月度样本常不足，看板改用年度口径（今年年初 → 最新收盘日）；数值由后端计算，
-        本页只展示（含 n / 可信度）。
-      </p>
       {error != null ? <ProblemView error={error} /> : null}
       {loading && !batch ? <p className="dash-muted">加载中…</p> : null}
       {batch ? (
@@ -362,11 +358,6 @@ export function Dashboard(): ReactElement {
               {displayValue(shown(asset.initial_capital_display, asset.initial_capital))}
             </span>
           </div>
-          <p className="dash-hero-note">
-            银证转账峰值转入成本{" "}
-            {displayValue(shown(asset.max_invested_cost_display, asset.max_invested_cost))} · 总费用{" "}
-            {displayValue(shown(asset.total_fees_display, asset.total_fees))}
-          </p>
         </div>
         <div className="dash-mini">
           <Kpi

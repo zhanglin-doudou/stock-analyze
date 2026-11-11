@@ -505,7 +505,7 @@ function ResidualCard({ data }: { data: Attribution }): ReactElement {
       {unattributed.length > 0 ? (
         <details className="attr-unattributed-details">
           <summary className="muted">
-            未归因标的明细（按金额降序
+            未归因标的明细（{unattributed.length} 条）（按金额降序
             {data.residual_reconciliation
               ? `，最多 ${data.residual_reconciliation.display_limit} 只`
               : ''}
@@ -692,13 +692,12 @@ export function AttributionPage(): ReactElement {
       aria-busy={query.isFetching}
     >
       <header className="dash-head">
-        <div className="dash-eyebrow">归因口径 · 五因子</div>
         <h1 className="dash-title">收益归因</h1>
-        <p className="dash-sub">
-          {data
-            ? `${data.period_start} ~ ${data.period_end} · 模型 ${data.model}`
-            : '选择期间查看五因子收益拆解；所有数值均为后端口径，本页只做呈现。'}
-        </p>
+        {!data && (
+          <p className="dash-sub">
+            选择期间查看五因子收益拆解；所有数值均为后端口径，本页只做呈现。
+          </p>
+        )}
         {query.isFetching && query.isPlaceholderData ? (
           <p className="attr-updating" data-testid="attr-updating">
             正在更新…当前展示的是上一区间数据
