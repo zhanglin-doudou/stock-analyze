@@ -163,9 +163,7 @@ async def test_api_092_summary_addon_serialized(client, api_prefix, user, addon_
 
     买入侧判定落在「本回合最后一笔买入」（有加仓时即加仓笔）：本场景最后一笔是
     06-01 的 100 股 @50.00（开仓笔是同日 50 股 @1800.00），因此
-    `continued_decline` 按 50.00 这笔评估（价格后续上涨 → 不命中），
-    `avg_dip_pct` 也取这笔的 20 日 B2。
-    `missed_profit_*` 只统计 `profit_take_fly`，本场景是止损反弹 → 必须为 null。
+    `continued_decline` 按 50.00 这笔评估（价格后续上涨 → 不命中）。
     """
     resp = await _list(client, api_prefix, user.headers, "?period=2026-06")
     assert resp.status_code == 200, resp.text
@@ -198,9 +196,6 @@ async def test_api_092_summary_addon_serialized(client, api_prefix, user, addon_
     assert addon["rounds"] == 1  # 兼容字段，与 count 同值
     assert addon["declined_after_addon"] == 0
     assert addon["declined_pct"] == "0.00%"
-    # 加仓笔 B2 = (1705.96 − 50.00) / 50.00 = +3311.92%
-    assert addon["avg_dip_pct"] == "3311.92%"
-    assert addon["avg_dip_coverage"] == "1/1"
     assert addon["share_pct"] == "100.00%"  # 1/1 个平仓回合
 
     sell_fly = body["summary"]["sell_fly"]
@@ -210,17 +205,10 @@ async def test_api_092_summary_addon_serialized(client, api_prefix, user, addon_
     assert sell_fly["fly_pct"] == "0.00%"  # 只算止盈卖飞
     assert sell_fly["rounds"] == 0
     assert sell_fly["share_pct"] == "0.00%"
-    # 止损反弹不并入 missed_profit（只有止盈卖飞才统计）
-    assert sell_fly["missed_profit_worst_display"] is None
-    assert sell_fly["missed_profit_end_display"] is None
-    assert sell_fly["missed_profit_worst_abs_display"] is None
-    assert sell_fly["missed_profit_worst_label"] is None
-    assert sell_fly["missed_profit_end_abs_display"] is None
-    assert sell_fly["missed_profit_end_label"] is None
 
 
 async def test_api_092_summary_sell_fly_serialized(client, api_prefix, user, sell_fly_scenario):
-    """`summary.sell_fly`：分母是全部卖出回合，分子只算止盈卖飞；金额只并止盈卖飞。"""
+    """`summary.sell_fly`：分母是全部卖出回合，分子只算止盈卖飞。"""
     resp = await _list(client, api_prefix, user.headers, "?period=2026-07")
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -236,28 +224,14 @@ async def test_api_092_summary_sell_fly_serialized(client, api_prefix, user, sel
     assert sell_fly["fly_pct"] == "50.00%"  # 1/2，只算止盈卖飞
     assert sell_fly["rounds"] == 1
     assert sell_fly["share_pct"] == "50.00%"
-    # 只统计止盈卖飞那 1 笔：100 股 ×(1712.75 − 100.00) = 161275.00
-    assert sell_fly["missed_profit_worst_display"] == "161275.00"
-    assert sell_fly["missed_profit_end_display"] == "161275.00"
-    # additive：正数 → 少赚；绝对值串与原有带符号串同值。
-    assert sell_fly["missed_profit_worst_abs_display"] == "161275.00"
-    assert sell_fly["missed_profit_worst_label"] == "少赚"
-    assert sell_fly["missed_profit_worst_label_en"] == "missed gain"
-    assert sell_fly["missed_profit_end_abs_display"] == "161275.00"
-    assert sell_fly["missed_profit_end_label"] == "少赚"
-    # 逐项同样带标签，便于前端直接渲染。
-    fly_item = next(item for item in body["items"] if "profit_sold_early" in item["flags"])
-    assert fly_item["missed_profit_end_label"] == "少赚"
-    assert fly_item["missed_profit_worst_abs_display"] == fly_item["missed_profit_worst_display"]
 
     addon = body["summary"]["addon"]
     assert addon["count"] == 0
-    assert addon["avg_dip_pct"] is None
-    assert addon["avg_dip_coverage"] == "0/0"
+    assert addon["declined_pct"] is None
 
 
 async def test_api_092_summary_addon_empty_when_no_addon(client, api_prefix, user, scenario):
-    """无加仓时 `count=0`、百分比为 null、覆盖度 `0/0`（不伪造 0%）。"""
+    """无加仓时 `count=0`、百分比为 null（不伪造 0%）。"""
     resp = await _list(client, api_prefix, user.headers, "?period=2026-06")
     assert resp.status_code == 200, resp.text
     summary = resp.json()["summary"]
@@ -266,8 +240,6 @@ async def test_api_092_summary_addon_empty_when_no_addon(client, api_prefix, use
         "count": 0,
         "declined_after_addon": 0,
         "declined_pct": None,
-        "avg_dip_pct": None,
-        "avg_dip_coverage": "0/0",
         "rounds": 0,
         "share_pct": "0.00%",
     }

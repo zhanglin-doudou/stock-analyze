@@ -271,15 +271,12 @@ dip_sequence = 同持仓在 60 交易日内 ≥2 次 add-on 且净买价逐次�
 - **“后续继续下跌”**（默认）：
   - `B2_20 ≤ −3%` **或** `worst_close_20 ≤ P_net_buy × (1−5%)`；
   - `worst_close_20` = `(d0,d20]` 最低收盘；**不是 intraday low**，字段名不得叫 MAE；
-  - `decline_after_addon` 只在 `status=ok` 样本上统计；分母 n 显式；
-  - 金额影响：
-    - `additional_loss_end_20 = qty × (C20 − P_net_buy)`（期末实际，负=浮亏）；
-    - `additional_loss_worst_20 = qty × (worst_close_20 − P_net_buy)`（事后最低收盘，**理论上限/不可实现**）。
+  - `decline_after_addon` 只在 `status=ok` 样本上统计；分母 n 显式。
 - **“越跌越买”**：逐次更低净买价 + 同持仓 + 窗口内 ≥2 次；首次建仓不算；部分卖出后重新买入是否算“同一持仓”由 `position_epoch` 判定（仓位归零则新 epoch）。
 - **与既有指标关系**：`is_addon/below_avg/dip_depth` 复用抽出后的 core 分类器；`behavior.averaging_down` 只算聚合率/深度，本设计补后验结果；不改旧指标。
 - **成本基座警示**：若 d0 前公司行动导致股息未扣，`cost_basis_warning=true`；标签只展示并标注口径，**不计入“失败率/排序”分母**；P1 total-return 成本。
 
-**聚合**：加仓笔数/金额占比、摊平占比/深度、序列数/长度、后续下跌率、平均/中位 B2 5/10/20、金额影响、理由交叉表（`bottom_fish/add_on` vs 识别）。
+**聚合**：加仓笔数/金额占比、摊平占比/深度、序列数/长度、后续下跌率、平均/中位 B2 5/10/20、理由交叉表（`bottom_fish/add_on` vs 识别）。
 
 ### 3.6 止盈卖飞 / 越涨越卖（卖出侧）
 
@@ -294,13 +291,11 @@ max_close_20 = max(close in (d0,d20])
 sold_too_early = max_close_20 > P_net_sell × (1+3%)      # 单一主口径
 profit_take_fly = is_profit_taking AND sold_too_early
 stop_loss_rebound = (NOT is_profit_taking) AND sold_too_early
-missed_profit_worst = qty × (max_close_20 − P_net_sell)  # 理论上限
-missed_profit_end   = qty × (C20 − P_net_sell)           # 期末可实现口径
 ```
 
 - **删除“或 B2>5%”**：因为 `C20 > 1.05P ⇒ max_close_20 ≥ C20 > 1.05P > 1.03P`，B2>5% 已被主条件包含，OR 是死条件；只保留 `max_close` 阈值（可配 3%）。
 - **与 `timing.fly` 的关系**：`timing.fly` 用 **gross 卖价**、20 根自身 bar，无盈利过滤；本设计用 **net 卖价**，并拆 `profit_take_fly`/`stop_loss_rebound`。两者只做方向性对账，**不声称同一分母**。
-- **部分卖出/清仓**：`is_full_exit = 卖出后持仓=0`；同一回合多次卖出分别计算，`missed_profit` 只乘该笔卖出数量，不重复乘整仓。
+- **部分卖出/清仓**：`is_full_exit = 卖出后持仓=0`；同一回合多次卖出分别计算。
 - **止损后反弹**：单独 `stop_loss_rebound`，**不算卖飞**；页面解释“纪律卖出后反弹是正常成本，不等于错误”。
 - **越涨越卖** 是行为模式（多次逐高），与 `sold_too_early`（结果）分列；不等于“止盈卖飞”。
 - **分母**：`sold_too_early_rate` 可给“全部卖出”和“止盈卖出”两个分母；页面标清楚。
@@ -670,8 +665,7 @@ quadrant = sign(buy_excess_20), sign(sell_avoid_20)  # 双正/买正卖负/买�
   "rank": 3, "quadrant": "双正",
   "flags": ["bottom_buy", "profit_sold_early", "drawdown"],
   "status_counts": {"bottom_buy": 2, "stop_loss_sold_early": 0, "profit_sold_early": 1},
-  "quality": ["forward_complete"],
-  "missed_profit_worst_display": "0.00", "missed_profit_end_display": "0.00"
+  "quality": ["forward_complete"]
 }
 ```
 
@@ -991,14 +985,11 @@ PageHeader：期间（年/月/自定义，默认年）+ 数据截至 + “手动
 - 20 日内最低收盘 8.30，期末 8.60。
 - `B2_20 = 8.60/9.02−1 = −4.656%`（≤−3%）→ `decline_after_addon=true`。
 - `worst_close_20 = 8.30/9.02−1 = −7.98%`（≤−5%）。
-- `additional_loss_end = 800×(8.60−9.02) = −336 元`；`additional_loss_worst = 800×(8.30−9.02) = −576 元`（**理论上限**，不是可实现亏损）。
 
 **A.3 止盈卖飞（净价含费，单一主口径）**
 
 - 卖出 500 股，毛价 20.00，费用 10.00 → `P_net_sell=19.98`。
-- 20 日内最高收盘 22.00，期末 21.00；`19.98×1.03=20.5794` → `max_close 22.00 > 20.5794` → `sold_too_early=true`。
-- `missed_profit_worst = 500×(22.00−19.98) = 1,010 元`（理论最高，不可实现）。
-- `missed_profit_end = 500×(21.00−19.98) = 510 元`（期末可实现口径）。
+- 20 日内最高收盘 22.00；`19.98×1.03=20.5794` → `max_close 22.00 > 20.5794` → `sold_too_early=true`。
 - 若卖出前均价 21.00（亏损卖出）→ `is_profit_taking=false`，标记 `stop_loss_rebound`，**不算止盈卖飞**。
 - 不再使用 `B2>5%` 作为并列条件（已逻辑包含）。
 

@@ -1,4 +1,4 @@
-"""回合洞察展示层：卖飞金额符号 → 措辞，以及证券类型筛选口径。"""
+"""回合洞察展示层：证券类型筛选口径与持仓推演。"""
 
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ from typing import Any
 
 from stock_review.insights.service import (
     SECURITY_TYPES,
-    _missed_presentation,
     _position_states,
     _security_type,
     _trade_order_key,
@@ -41,22 +40,6 @@ def _trade(
         stamp_tax_units=0,
         other_fee_units=0,
     )
-
-
-def test_missed_presentation_positive_is_missed_gain() -> None:
-    """正数 = 本该赚到却没赚到 → 少赚，展示绝对值串。"""
-    assert _missed_presentation(5_206_21) == ("5206.21", "少赚", "missed gain")
-
-
-def test_missed_presentation_negative_is_extra_gain() -> None:
-    """负数 = 卖后继续下跌、卖出反而多赚 → 多赚，展示绝对值串。"""
-    assert _missed_presentation(-21_965_03) == ("21965.03", "多赚", "extra gain")
-
-
-def test_missed_presentation_zero_and_none() -> None:
-    """零归入「少赚」侧；None 三项全空（前端只渲染「—」，不拼措辞）。"""
-    assert _missed_presentation(0) == ("0.00", "少赚", "missed gain")
-    assert _missed_presentation(None) == (None, None, None)
 
 
 def test_security_type_classification() -> None:

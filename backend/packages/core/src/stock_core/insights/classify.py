@@ -168,9 +168,3 @@ def continued_decline(
         and price_net_buy_units > 0
         and worst_close_20_units * 100 <= price_net_buy_units * WORST_CLOSE_DROP
     )
-
-
-def additional_loss_units(quantity_units: int, price_a_units: int, price_b_units: int) -> int:
-    """`qty × (price_b − price_a)` 的金额影响（scale 2 分）；调用方决定 a/b。"""
-    # Qty(4) × Price(6) → Money(2)：除以 1e8
-    return quantity_units * (price_b_units - price_a_units) // 10**8

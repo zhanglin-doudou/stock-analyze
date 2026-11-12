@@ -271,22 +271,6 @@ def _item_out(item: Any) -> RoundInsightItemOut:
         flags=item.flags,
         quality=list(dict.fromkeys(item.quality)),
         status_counts=item.status_counts,
-        missed_profit_worst_display=(
-            str(Money(item.missed_profit_worst_units))
-            if item.missed_profit_worst_units is not None
-            else None
-        ),
-        missed_profit_end_display=(
-            str(Money(item.missed_profit_end_units))
-            if item.missed_profit_end_units is not None
-            else None
-        ),
-        missed_profit_worst_abs_display=item.missed_profit_worst_abs_display,
-        missed_profit_worst_label=item.missed_profit_worst_label,
-        missed_profit_worst_label_en=item.missed_profit_worst_label_en,
-        missed_profit_end_abs_display=item.missed_profit_end_abs_display,
-        missed_profit_end_label=item.missed_profit_end_label,
-        missed_profit_end_label_en=item.missed_profit_end_label_en,
     )
 
 
@@ -312,8 +296,6 @@ def _summary_out(summary: Any) -> InsightsSummaryOut:
             count=summary.addon.count,
             declined_after_addon=summary.addon.declined_after_addon,
             declined_pct=summary.addon.declined_pct,
-            avg_dip_pct=summary.addon.avg_dip_pct,
-            avg_dip_coverage=summary.addon.avg_dip_coverage,
             rounds=summary.addon.rounds,
             share_pct=summary.addon.share_pct,
         ),
@@ -322,14 +304,6 @@ def _summary_out(summary: Any) -> InsightsSummaryOut:
             profit_take_fly=summary.sell_fly.profit_take_fly,
             stop_loss_rebound=summary.sell_fly.stop_loss_rebound,
             fly_pct=summary.sell_fly.fly_pct,
-            missed_profit_worst_display=summary.sell_fly.missed_profit_worst_display,
-            missed_profit_end_display=summary.sell_fly.missed_profit_end_display,
-            missed_profit_worst_abs_display=summary.sell_fly.missed_profit_worst_abs_display,
-            missed_profit_worst_label=summary.sell_fly.missed_profit_worst_label,
-            missed_profit_worst_label_en=summary.sell_fly.missed_profit_worst_label_en,
-            missed_profit_end_abs_display=summary.sell_fly.missed_profit_end_abs_display,
-            missed_profit_end_label=summary.sell_fly.missed_profit_end_label,
-            missed_profit_end_label_en=summary.sell_fly.missed_profit_end_label_en,
             rounds=summary.sell_fly.rounds,
             share_pct=summary.sell_fly.share_pct,
         ),

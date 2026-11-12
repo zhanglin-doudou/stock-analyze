@@ -116,22 +116,12 @@ interface AddonSummary {
   count: number;
   declined_after_addon: number;
   declined_pct?: string | null;
-  avg_dip_pct?: string | null;
-  /** 形如 "3/9"：avg_dip_pct 的有效样本占全部加仓笔次，避免只看到百分比而误读样本量。 */
-  avg_dip_coverage?: string | null;
 }
 interface SellFlySummary {
   sell_count: number;
   profit_take_fly: number;
   stop_loss_rebound: number;
   fly_pct?: string | null;
-  missed_profit_worst_display?: string | null;
-  missed_profit_end_display?: string | null;
-  /** 后端给好的绝对值串 + 措辞（少赚/多赚）；前端只渲染，不判符号、不做 abs。 */
-  missed_profit_worst_abs_display?: string | null;
-  missed_profit_worst_label?: string | null;
-  missed_profit_end_abs_display?: string | null;
-  missed_profit_end_label?: string | null;
 }
 interface RankingSummary {
   n_sample: number;
@@ -529,9 +519,7 @@ export function RoundInsights() {
             {addon ? (
               <p className="muted">
                 加仓 {addon.count} 个回合（按回合计，不等同于抄底），后续下跌{" "}
-                {addon.declined_after_addon} 个回合；下跌占比 {text(addon.declined_pct)}；
-                平均回撤 {text(addon.avg_dip_pct)}
-                {addon.avg_dip_coverage ? `（${addon.avg_dip_coverage}）` : ""}。
+                {addon.declined_after_addon} 个回合；下跌占比 {text(addon.declined_pct)}。
               </p>
             ) : (
               <p className="muted">—</p>
@@ -542,16 +530,7 @@ export function RoundInsights() {
                 卖出 {sellFly.sell_count} 个回合；20 日卖飞（仅平仓笔）{" "}
                 {sellFly.profit_take_fly}（止盈）/ {sellFly.stop_loss_rebound}
                 （止损后反弹）；止盈卖飞占卖出回合 {sellFly.profit_take_fly}/
-                {sellFly.sell_count} = {text(sellFly.fly_pct)}；最差
-                {sellFly.missed_profit_worst_label ?? ""}{" "}
-                <span className={signedClass(sellFly.missed_profit_worst_abs_display)}>
-                  {text(sellFly.missed_profit_worst_abs_display)}
-                </span>
-                ，期末{sellFly.missed_profit_end_label ?? ""}{" "}
-                <span className={signedClass(sellFly.missed_profit_end_abs_display)}>
-                  {text(sellFly.missed_profit_end_abs_display)}
-                </span>
-                。
+                {sellFly.sell_count} = {text(sellFly.fly_pct)}。
               </p>
             ) : (
               <p className="muted">—</p>

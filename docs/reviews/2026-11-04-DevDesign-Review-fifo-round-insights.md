@@ -49,7 +49,6 @@
 | 类别 | 处置 |
 |---|---|
 | MAE/MFE 术语 | 改为 `worst_close_20`/`max_close_20`，明示 close-only；不再用 intraday 术语 |
-| 反事实金额 | 拆 `missed_profit_worst`（理论最高，不可实现）与 `missed_profit_end`（期末可实现）；抄底同理 |
 | 分页/汇总/排序 | 汇总与 cursor 解耦；`sort` 白名单；`sample_status`/`basis`/`n` 显式；`sort` 回退写死 |
 | 基准/β/风格 | 页面写“相对 ETF 基准”，不称“择时能力”；P1 β/行业分层；敏感性说明 |
 | 与评分卡命名冲突 | 本设计叫“买卖后表现排序”；评分卡叫“行为健康度过程分”；两者不混 |

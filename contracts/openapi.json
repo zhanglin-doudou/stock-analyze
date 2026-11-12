@@ -3471,23 +3471,8 @@
         "type": "object"
       },
       "InsightAddonSummaryOut": {
-        "description": "加仓统计（设计 §6.3）：`count` 与兼容字段 `rounds` 同值。\n\n`avg_dip_pct` 是加仓笔次 20 日 B2 均值，仅对 `status=ok` 样本取均值；\n`avg_dip_coverage` 形如 `\"3/9\"`，0 个有效样本时 `avg_dip_pct=null`。",
+        "description": "加仓统计（设计 §6.3）：`count` 与兼容字段 `rounds` 同值。",
         "properties": {
-          "avg_dip_coverage": {
-            "title": "Avg Dip Coverage",
-            "type": "string"
-          },
-          "avg_dip_pct": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Avg Dip Pct"
-          },
           "count": {
             "title": "Count",
             "type": "integer"
@@ -3526,7 +3511,6 @@
         "required": [
           "count",
           "declined_after_addon",
-          "avg_dip_coverage",
           "rounds"
         ],
         "title": "InsightAddonSummaryOut",
@@ -3916,94 +3900,6 @@
               }
             ],
             "title": "Fly Pct"
-          },
-          "missed_profit_end_abs_display": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Missed Profit End Abs Display"
-          },
-          "missed_profit_end_display": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Missed Profit End Display"
-          },
-          "missed_profit_end_label": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Missed Profit End Label"
-          },
-          "missed_profit_end_label_en": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Missed Profit End Label En"
-          },
-          "missed_profit_worst_abs_display": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Missed Profit Worst Abs Display"
-          },
-          "missed_profit_worst_display": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Missed Profit Worst Display"
-          },
-          "missed_profit_worst_label": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Missed Profit Worst Label"
-          },
-          "missed_profit_worst_label_en": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Missed Profit Worst Label En"
           },
           "profit_take_fly": {
             "title": "Profit Take Fly",
@@ -6875,94 +6771,6 @@
               }
             ],
             "title": "Holding Trading Days"
-          },
-          "missed_profit_end_abs_display": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Missed Profit End Abs Display"
-          },
-          "missed_profit_end_display": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Missed Profit End Display"
-          },
-          "missed_profit_end_label": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Missed Profit End Label"
-          },
-          "missed_profit_end_label_en": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Missed Profit End Label En"
-          },
-          "missed_profit_worst_abs_display": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Missed Profit Worst Abs Display"
-          },
-          "missed_profit_worst_display": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Missed Profit Worst Display"
-          },
-          "missed_profit_worst_label": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Missed Profit Worst Label"
-          },
-          "missed_profit_worst_label_en": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Missed Profit Worst Label En"
           },
           "open_date": {
             "format": "date",
@@ -17959,14 +17767,6 @@
                       ],
                       "holding_days_legacy": 16,
                       "holding_trading_days": 12,
-                      "missed_profit_end_abs_display": "510.00",
-                      "missed_profit_end_display": "510.00",
-                      "missed_profit_end_label": "少赚",
-                      "missed_profit_end_label_en": "missed gain",
-                      "missed_profit_worst_abs_display": "1010.00",
-                      "missed_profit_worst_display": "1010.00",
-                      "missed_profit_worst_label": "少赚",
-                      "missed_profit_worst_label_en": "missed gain",
                       "open_date": "2026-11-02",
                       "pnl": "1234.56",
                       "quadrant": null,
@@ -18044,7 +17844,6 @@
                   "ranking_as_of": "2026-09-30",
                   "summary": {
                     "addon": {
-                      "avg_dip_pct": "-2.10%",
                       "count": 1,
                       "declined_after_addon": 0,
                       "declined_pct": "0.0%"
@@ -18149,14 +17948,6 @@
                     },
                     "sell_fly": {
                       "fly_pct": "100.0%",
-                      "missed_profit_end_abs_display": "510.00",
-                      "missed_profit_end_display": "510.00",
-                      "missed_profit_end_label": "少赚",
-                      "missed_profit_end_label_en": "missed gain",
-                      "missed_profit_worst_abs_display": "1010.00",
-                      "missed_profit_worst_display": "1010.00",
-                      "missed_profit_worst_label": "少赚",
-                      "missed_profit_worst_label_en": "missed gain",
                       "profit_take_fly": 1,
                       "sell_count": 1,
                       "stop_loss_rebound": 0

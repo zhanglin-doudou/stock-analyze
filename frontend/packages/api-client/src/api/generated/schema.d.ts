@@ -2392,15 +2392,8 @@ export interface components {
         /**
          * InsightAddonSummaryOut
          * @description 加仓统计（设计 §6.3）：`count` 与兼容字段 `rounds` 同值。
-         *
-         *     `avg_dip_pct` 是加仓笔次 20 日 B2 均值，仅对 `status=ok` 样本取均值；
-         *     `avg_dip_coverage` 形如 `"3/9"`，0 个有效样本时 `avg_dip_pct=null`。
          */
         InsightAddonSummaryOut: {
-            /** Avg Dip Coverage */
-            avg_dip_coverage: string;
-            /** Avg Dip Pct */
-            avg_dip_pct?: string | null;
             /** Count */
             count: number;
             /** Declined After Addon */
@@ -2552,22 +2545,6 @@ export interface components {
         InsightSellFlySummaryOut: {
             /** Fly Pct */
             fly_pct?: string | null;
-            /** Missed Profit End Abs Display */
-            missed_profit_end_abs_display?: string | null;
-            /** Missed Profit End Display */
-            missed_profit_end_display?: string | null;
-            /** Missed Profit End Label */
-            missed_profit_end_label?: string | null;
-            /** Missed Profit End Label En */
-            missed_profit_end_label_en?: string | null;
-            /** Missed Profit Worst Abs Display */
-            missed_profit_worst_abs_display?: string | null;
-            /** Missed Profit Worst Display */
-            missed_profit_worst_display?: string | null;
-            /** Missed Profit Worst Label */
-            missed_profit_worst_label?: string | null;
-            /** Missed Profit Worst Label En */
-            missed_profit_worst_label_en?: string | null;
             /** Profit Take Fly */
             profit_take_fly: number;
             /** Rounds */
@@ -3646,22 +3623,6 @@ export interface components {
             holding_days_legacy: number;
             /** Holding Trading Days */
             holding_trading_days?: number | null;
-            /** Missed Profit End Abs Display */
-            missed_profit_end_abs_display?: string | null;
-            /** Missed Profit End Display */
-            missed_profit_end_display?: string | null;
-            /** Missed Profit End Label */
-            missed_profit_end_label?: string | null;
-            /** Missed Profit End Label En */
-            missed_profit_end_label_en?: string | null;
-            /** Missed Profit Worst Abs Display */
-            missed_profit_worst_abs_display?: string | null;
-            /** Missed Profit Worst Display */
-            missed_profit_worst_display?: string | null;
-            /** Missed Profit Worst Label */
-            missed_profit_worst_label?: string | null;
-            /** Missed Profit Worst Label En */
-            missed_profit_worst_label_en?: string | null;
             /**
              * Open Date
              * Format: date

@@ -1732,15 +1732,6 @@ class RoundInsightItemOut(BaseModel):
     quality: list[str] = Field(default_factory=list)
     # 计数型状态：bottom_buy / stop_loss_sold_early / profit_sold_early 固定三键（可为 0）。
     status_counts: dict[str, int] = Field(default_factory=dict)
-    missed_profit_worst_display: str | None = None
-    missed_profit_end_display: str | None = None
-    # additive：绝对值展示串 + 符号语义标签（少赚/多赚），前端只渲染不判符号。
-    missed_profit_worst_abs_display: str | None = None
-    missed_profit_worst_label: str | None = None
-    missed_profit_worst_label_en: str | None = None
-    missed_profit_end_abs_display: str | None = None
-    missed_profit_end_label: str | None = None
-    missed_profit_end_label_en: str | None = None
 
 
 class InsightBucketSummaryOut(BaseModel):
@@ -1793,17 +1784,11 @@ class InsightFillSwingOut(BaseModel):
 
 
 class InsightAddonSummaryOut(BaseModel):
-    """加仓统计（设计 §6.3）：`count` 与兼容字段 `rounds` 同值。
-
-    `avg_dip_pct` 是加仓笔次 20 日 B2 均值，仅对 `status=ok` 样本取均值；
-    `avg_dip_coverage` 形如 `"3/9"`，0 个有效样本时 `avg_dip_pct=null`。
-    """
+    """加仓统计（设计 §6.3）：`count` 与兼容字段 `rounds` 同值。"""
 
     count: int
     declined_after_addon: int
     declined_pct: str | None = None
-    avg_dip_pct: str | None = None
-    avg_dip_coverage: str
     rounds: int
     share_pct: str | None = None
 
@@ -1815,15 +1800,6 @@ class InsightSellFlySummaryOut(BaseModel):
     profit_take_fly: int
     stop_loss_rebound: int
     fly_pct: str | None = None
-    missed_profit_worst_display: str | None = None
-    missed_profit_end_display: str | None = None
-    # additive：绝对值展示串 + 符号语义标签（少赚/多赚），前端只渲染不判符号。
-    missed_profit_worst_abs_display: str | None = None
-    missed_profit_worst_label: str | None = None
-    missed_profit_worst_label_en: str | None = None
-    missed_profit_end_abs_display: str | None = None
-    missed_profit_end_label: str | None = None
-    missed_profit_end_label_en: str | None = None
     rounds: int
     share_pct: str | None = None
 

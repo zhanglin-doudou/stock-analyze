@@ -132,8 +132,6 @@ function makePage(overrides: Partial<RoundInsightsPage> = {}): RoundInsightsPage
         declined_after_addon: 1,
         declined_pct: "100.00%",
         share_pct: "50.00%",
-        avg_dip_pct: "-4.20%",
-        avg_dip_coverage: "1/1",
       },
       sell_fly: {
         sell_count: 1,
@@ -141,8 +139,6 @@ function makePage(overrides: Partial<RoundInsightsPage> = {}): RoundInsightsPage
         profit_take_fly: 0,
         stop_loss_rebound: 0,
         fly_pct: null,
-        missed_profit_worst_display: null,
-        missed_profit_end_display: null,
       },
       reason_coverage: {
         annotated: 1,
@@ -190,24 +186,6 @@ function renderPage(entry = "/rounds/insights"): ReturnType<typeof render> {
       <RoundInsights />
     </MemoryRouter>,
   );
-}
-
-/** 卖飞金额带符号：正 → 少赚、负 → 多赚，前端只拼后端串与标签。 */
-function makePageWithMissedProfit(): RoundInsightsPage {
-  const page = makePage();
-  if (page.summary) {
-    page.summary.sell_fly = {
-      ...page.summary.sell_fly,
-      profit_take_fly: 1,
-      missed_profit_worst_display: "5206.21",
-      missed_profit_end_display: "-21965.03",
-      missed_profit_worst_abs_display: "5206.21",
-      missed_profit_worst_label: "少赚",
-      missed_profit_end_abs_display: "21965.03",
-      missed_profit_end_label: "多赚",
-    };
-  }
-  return page;
 }
 
 beforeEach(() => {
@@ -293,25 +271,6 @@ describe("RoundInsights 回合洞察页", () => {
         expect.objectContaining({ bucket: "position" }),
       );
     });
-  });
-
-  it("卖飞金额：正数少赚、负数多赚（后端给绝对值串与标签，前端不判符号）", async () => {
-    listInsights.mockResolvedValue(makePageWithMissedProfit());
-    renderPage();
-
-    await screen.findByText(/以下为事后统计/);
-    const bodyText = document.body.textContent?.replace(/\s+/g, "") ?? "";
-    expect(bodyText).toContain("最差少赚5206.21，期末多赚21965.03");
-    expect(bodyText).not.toContain("-21965.03");
-  });
-
-  it("卖飞金额缺失：只渲染 —，不出现「多赚 —」组合", async () => {
-    renderPage();
-
-    await screen.findByText(/以下为事后统计/);
-    const bodyText = document.body.textContent?.replace(/\s+/g, "") ?? "";
-    expect(bodyText).toContain("最差—，期末—");
-    expect(bodyText).not.toContain("多赚—");
   });
 
   it("证券类型默认只选股票；勾选基金后按多选请求后端", async () => {
@@ -515,6 +474,17 @@ describe("RoundInsights 回合洞察页", () => {
     expect(bodyText).toContain("20日卖飞（仅平仓笔）");
     expect(bodyText).toContain("止盈卖飞占卖出回合0/1=—");
     expect(bodyText).toContain("加仓1个回合（按回合计，不等同于抄底）");
+  });
+
+  it("已删除的三个指标不再渲染，也不残留口径说明", async () => {
+    renderPage();
+
+    await screen.findByText(/以下为事后统计/);
+    expect(screen.queryAllByLabelText(/说明：/)).toHaveLength(0);
+    const bodyText = document.body.textContent?.replace(/\s+/g, "") ?? "";
+    expect(bodyText).not.toContain("平均回撤");
+    expect(bodyText).not.toContain("最差");
+    expect(bodyText).not.toContain("期末");
   });
 });
 

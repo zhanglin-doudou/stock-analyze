@@ -150,16 +150,6 @@ class InsightItem:
     status_counts: dict[str, int]
     # 仅内部汇总使用（加仓/加仓后下跌/止盈卖飞/止损后反弹），不序列化。
     summary_flags: set[str]
-    missed_profit_worst_units: int | None
-    missed_profit_end_units: int | None
-    missed_profit_worst_abs_display: str | None = None
-    missed_profit_worst_label: str | None = None
-    missed_profit_worst_label_en: str | None = None
-    missed_profit_end_abs_display: str | None = None
-    missed_profit_end_label: str | None = None
-    missed_profit_end_label_en: str | None = None
-    # 非序列化：加仓笔的 20 日 B2（仅 status=ok 时非空），供 `summary.addon` 取均值。
-    addon_b2_units: int | None = None
 
 
 @dataclass(slots=True)
@@ -232,17 +222,11 @@ class ReasonCoverage:
 
 @dataclass(slots=True)
 class AddonSummary:
-    """加仓（含补仓/抄底）统计（设计 §6.3）。
-
-    `count` 与兼容字段 `rounds` 同值；`avg_dip_pct` 是加仓笔次 20 日 B2 的均值，
-    只对有 `status=ok` 的样本取均值，`avg_dip_coverage` 显式给出「有效/总数」。
-    """
+    """加仓（含补仓/抄底）统计（设计 §6.3）：`count` 与兼容字段 `rounds` 同值。"""
 
     count: int
     declined_after_addon: int
     declined_pct: str | None
-    avg_dip_pct: str | None
-    avg_dip_coverage: str
     rounds: int
     share_pct: str | None
 
@@ -255,16 +239,8 @@ class SellFlySummary:
     profit_take_fly: int
     stop_loss_rebound: int
     fly_pct: str | None
-    missed_profit_worst_display: str | None
-    missed_profit_end_display: str | None
     rounds: int
     share_pct: str | None
-    missed_profit_worst_abs_display: str | None = None
-    missed_profit_worst_label: str | None = None
-    missed_profit_worst_label_en: str | None = None
-    missed_profit_end_abs_display: str | None = None
-    missed_profit_end_label: str | None = None
-    missed_profit_end_label_en: str | None = None
 
 
 @dataclass(slots=True)
@@ -375,19 +351,6 @@ def _money(units: int | None) -> str | None:
 def _days_x10_display(x10: int | None) -> str | None:
     """交易日 × 10 定点整数 → 一位小数展示串（整数拆分，不引入 float）。"""
     return None if x10 is None else f"{x10 // 10}.{x10 % 10}"
-
-
-def _missed_presentation(units: int | None) -> tuple[str | None, str | None, str | None]:
-    """卖飞金额 → (绝对值展示串, 中文措辞, 英文措辞)。
-
-    符号 → 措辞（与归因 `factor_conclusion` 同思路）：非负表示「本该赚到却没赚到」→
-    少赚；负值表示卖后下跌、卖出反而避免了回撤 → 多赚。零归入「少赚」侧（零既不是
-    额外收益，也不宜渲染成「多赚」，取保守措辞）。`None` 三项全空，前端只渲染「—」。
-    """
-    if units is None:
-        return None, None, None
-    label, label_en = ("少赚", "missed gain") if units >= 0 else ("多赚", "extra gain")
-    return str(Money(abs(units))), label, label_en
 
 
 def _price_6dp(units: int | None) -> str | None:
@@ -906,11 +869,8 @@ def _side_view(
 class _RoundFlagResult:
     flags: list[str]
     quality: list[str]
-    missed_worst: int | None
-    missed_end: int | None
     status_counts: dict[str, int]
     summary_flags: set[str]
-    addon_b2_units: int | None = None
 
 
 def _round_flags(
@@ -931,12 +891,8 @@ def _round_flags(
     quality: list[str] = []
     status_counts = dict.fromkeys(STATUS_COUNT_CODES, 0)
     summary_flags: set[str] = set()
-    missed_worst: int | None = None
-    missed_end: int | None = None
     if buy is None or sell is None:
-        return _RoundFlagResult(
-            flags, quality, missed_worst, missed_end, status_counts, summary_flags
-        )
+        return _RoundFlagResult(flags, quality, status_counts, summary_flags)
 
     round_buys = _round_buy_trades(round_row, ordered_trades, order_index)
     round_sells = _round_sell_trades(round_row, ordered_trades, order_index)
@@ -1044,18 +1000,8 @@ def _round_flags(
             buy_fwd20.ret_b2_units, buy_fwd20.min_close_units, net
         ):
             summary_flags.add("continued_decline")
-        if buy_fwd20.cn_units is not None and net is not None:
-            missed_worst = classify.additional_loss_units(
-                buy_eval.quantity_units, net, buy_fwd20.min_close_units or net
-            )
-            missed_end = classify.additional_loss_units(
-                buy_eval.quantity_units, net, buy_fwd20.cn_units
-            )
     if buy_fwd20.price_jump_review:
         quality.append("price_jump_review")
-    addon_b2_units = (
-        buy_fwd20.ret_b2_units if is_addon and buy_fwd20.status == ForwardReturnStatus.OK else None
-    )
 
     sell_state = states.get(sell.id)
     avg_before = sell_state.avg_cost_before if sell_state else None
@@ -1076,14 +1022,6 @@ def _round_flags(
     if sell_net is not None and classify.sold_too_early(sell_fwd20.max_close_units, sell_net):
         if profit:
             summary_flags.add("profit_take_fly")
-            if sell_fwd20.max_close_units is not None:
-                missed_worst = classify.additional_loss_units(
-                    sell.quantity_units, sell_net, sell_fwd20.max_close_units
-                )
-            if sell_fwd20.cn_units is not None:
-                missed_end = classify.additional_loss_units(
-                    sell.quantity_units, sell_net, sell_fwd20.cn_units
-                )
         else:
             summary_flags.add("stop_loss_rebound")
 
@@ -1104,15 +1042,7 @@ def _round_flags(
         flags.append("intraday_rebalance_out")
     if rebalance_in:
         flags.append("intraday_rebalance_in")
-    return _RoundFlagResult(
-        flags,
-        quality,
-        missed_worst,
-        missed_end,
-        status_counts,
-        summary_flags,
-        addon_b2_units,
-    )
+    return _RoundFlagResult(flags, quality, status_counts, summary_flags)
 
 
 def _round_bucket(round_row: Round, holding: int | None) -> str:
@@ -1153,7 +1083,6 @@ def _build_item(
         corporate=corporate,
     )
     flags, quality = flag_result.flags, flag_result.quality
-    missed_worst, missed_end = flag_result.missed_worst, flag_result.missed_end
     buy_view = _side_view(
         buy,
         reason_map=reasons_map,
@@ -1181,8 +1110,6 @@ def _build_item(
             else -sell_view.forward[20].ret_b3_units
         )
     combined = agg.combined_20(buy_excess, sell_avoid)
-    worst_abs, worst_label, worst_label_en = _missed_presentation(missed_worst)
-    end_abs, end_label, end_label_en = _missed_presentation(missed_end)
     item = InsightItem(
         round_id=round_row.id,
         security_code=round_row.security_code,
@@ -1206,15 +1133,6 @@ def _build_item(
         quality=quality,
         status_counts=flag_result.status_counts,
         summary_flags=flag_result.summary_flags,
-        missed_profit_worst_units=missed_worst,
-        missed_profit_end_units=missed_end,
-        missed_profit_worst_abs_display=worst_abs,
-        missed_profit_worst_label=worst_label,
-        missed_profit_worst_label_en=worst_label_en,
-        missed_profit_end_abs_display=end_abs,
-        missed_profit_end_label=end_label,
-        missed_profit_end_label_en=end_label_en,
-        addon_b2_units=flag_result.addon_b2_units,
     )
     for side in (buy_view, sell_view):
         if side is not None:
@@ -1321,44 +1239,20 @@ def _summary(
     rebound_items = [item for item in items if "stop_loss_rebound" in item.summary_flags]
     sell_items = [item for item in items if item.sell_trade is not None]
     declined_addon = sum(1 for item in addon_items if "continued_decline" in item.summary_flags)
-    # avg_dip：取加仓笔（本回合最后一笔买入）status=ok 的 20 日 B2；缺样本时显式 null + 覆盖度。
-    dip_samples = [item.addon_b2_units for item in addon_items if item.addon_b2_units is not None]
     addon_summary = AddonSummary(
         count=len(addon_items),
         declined_after_addon=declined_addon,
         declined_pct=(f"{declined_addon * 100 / len(addon_items):.2f}%" if addon_items else None),
-        avg_dip_pct=_pct(agg.weighted_mean([(value, 1) for value in dip_samples])),
-        avg_dip_coverage=f"{len(dip_samples)}/{len(addon_items)}",
         rounds=len(addon_items),
         share_pct=f"{len(addon_items) * 100 / len(closed):.2f}%" if closed else None,
     )
-    worst_units = (
-        sum(item.missed_profit_worst_units or 0 for item in sell_fly_items)
-        if sell_fly_items
-        else None
-    )
-    end_units = (
-        sum(item.missed_profit_end_units or 0 for item in sell_fly_items)
-        if sell_fly_items
-        else None
-    )
-    worst_abs, worst_label, worst_label_en = _missed_presentation(worst_units)
-    end_abs, end_label, end_label_en = _missed_presentation(end_units)
     sell_fly_summary = SellFlySummary(
         sell_count=len(sell_items),
         profit_take_fly=len(sell_fly_items),
         stop_loss_rebound=len(rebound_items),
         fly_pct=f"{len(sell_fly_items) * 100 / len(sell_items):.2f}%" if sell_items else None,
-        missed_profit_worst_display=_money(worst_units),
-        missed_profit_end_display=_money(end_units),
         rounds=len(sell_fly_items),
         share_pct=f"{len(sell_fly_items) * 100 / len(closed):.2f}%" if closed else None,
-        missed_profit_worst_abs_display=worst_abs,
-        missed_profit_worst_label=worst_label,
-        missed_profit_worst_label_en=worst_label_en,
-        missed_profit_end_abs_display=end_abs,
-        missed_profit_end_label=end_label,
-        missed_profit_end_label_en=end_label_en,
     )
     combined_values = [item.combined_units for item in items if item.combined_units is not None]
     ranked = sorted(combined_values)

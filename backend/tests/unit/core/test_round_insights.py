@@ -468,13 +468,6 @@ def test_continued_decline_thresholds() -> None:
     assert classify.continued_decline(0, 9_000_000, 0) is False  # 净价缺失不做阈值
 
 
-def test_additional_loss_units() -> None:
-    # 800 股 × (860.00 − 902.00) = −33,600.00 → Money 标度 2 = −3,360,000
-    assert classify.additional_loss_units(8_000_000, 902_000_000, 860_000_000) == -3_360_000
-    # 800 股 × (830.00 − 902.00) = −57,600.00
-    assert classify.additional_loss_units(8_000_000, 902_000_000, 830_000_000) == -5_760_000
-
-
 # ── aggregate ───────────────────────────────────────────────
 
 
