@@ -37,6 +37,7 @@ from stock_api.schemas import (
     InsightAddonSummaryOut,
     InsightBucketSummaryOut,
     InsightFillSwingOut,
+    InsightFlagRoundCountOut,
     InsightPnlHoldingClassOut,
     InsightPnlHoldingOut,
     InsightRankingOut,
@@ -377,6 +378,10 @@ def _summary_out(summary: Any) -> InsightsSummaryOut:
             basis=summary.ranking.basis,
             definition_version=summary.ranking.definition_version,
         ),
+        flag_round_counts=[
+            InsightFlagRoundCountOut(flag=row.flag, count=row.count)
+            for row in summary.flag_round_counts
+        ],
         pending=summary.pending,
     )
 

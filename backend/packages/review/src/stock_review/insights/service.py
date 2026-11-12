@@ -29,7 +29,7 @@ from stock_contracts.errors import ApiError, ErrorCode
 from stock_core.insights import DEFINITION_VERSION, classify
 from stock_core.insights import aggregate as agg
 from stock_core.insights import calendar as cal
-from stock_core.insights.flags import FLAG_DEFINITIONS, FlagDefinition
+from stock_core.insights.flags import FLAG_DEFINITIONS, ITEM_FLAG_CODES, FlagDefinition
 from stock_core.insights.forward import ForwardResult, ForwardTrade, compute_forward, price_net
 from stock_core.trade_flags import TradeFlagDefinition
 from stock_core.trade_flags.constants import STATUS_HIT
@@ -268,6 +268,14 @@ class SellFlySummary:
 
 
 @dataclass(slots=True)
+class FlagRoundCount:
+    """按计数型回合旗标聚合的回合数（同一回合只计一次，不累加旗标次数）。"""
+
+    flag: str
+    count: int
+
+
+@dataclass(slots=True)
 class InsightsSummary:
     swing: SummaryBucket
     fill_swing: FillSwingBucket
@@ -276,6 +284,9 @@ class InsightsSummary:
     sell_fly: SellFlySummary
     reason_coverage: ReasonCoverage
     ranking: RankingSummary
+    # 按回合旗标（v1.2 词表全部 `item_flag`）统计的回合数，口径是筛选后的全量回合，
+    # 与分页无关，供前端柱状图使用。
+    flag_round_counts: list[FlagRoundCount]
     pending: dict[str, Any]
 
 
@@ -1238,6 +1249,20 @@ def _assign_ranks(items: list[InsightItem], *, sort: str) -> tuple[list[InsightI
     return eligible + remainder, len(eligible)
 
 
+def _flag_round_counts(items: Sequence[InsightItem]) -> list[FlagRoundCount]:
+    """按回合旗标统计命中的回合数（同一回合只计一次，不累加次数）。
+
+    覆盖 v1.2 词表的全部 `item_flag`，顺序沿用词表定义顺序；`items[].flags` 已把
+    计数型旗标投影为「是否命中」，因此直接按旗标存在与否计数，与 `status_counts` 同源。
+    """
+    counts = dict.fromkeys(ITEM_FLAG_CODES, 0)
+    for item in items:
+        for code in item.flags:
+            if code in counts:
+                counts[code] += 1
+    return [FlagRoundCount(flag=code, count=counts[code]) for code in ITEM_FLAG_CODES]
+
+
 def _summary(
     items: Sequence[InsightItem],
     *,
@@ -1395,6 +1420,7 @@ def _summary(
             quadrant_counts=dict(quadrant_counts),
             per_stock=stock_rows,
         ),
+        flag_round_counts=_flag_round_counts(items),
         pending={
             "status_pending": sum(
                 1

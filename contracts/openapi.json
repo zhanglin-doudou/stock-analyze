@@ -3672,6 +3672,25 @@
         "title": "InsightFillSwingOut",
         "type": "object"
       },
+      "InsightFlagRoundCountOut": {
+        "description": "按回合旗标统计的回合数（v1.2 词表全部 item_flag）。\n\n口径是筛选后的全量回合（与分页无关），同一回合只计一次，不累加旗标次数。",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "flag": {
+            "title": "Flag",
+            "type": "string"
+          }
+        },
+        "required": [
+          "flag",
+          "count"
+        ],
+        "title": "InsightFlagRoundCountOut",
+        "type": "object"
+      },
       "InsightPnlHoldingClassOut": {
         "description": "单类盈亏的持有期（`code` 与文案均由后端给，前端不重复判定）。",
         "properties": {
@@ -4030,6 +4049,13 @@
           },
           "fill_swing": {
             "$ref": "#/components/schemas/InsightFillSwingOut"
+          },
+          "flag_round_counts": {
+            "items": {
+              "$ref": "#/components/schemas/InsightFlagRoundCountOut"
+            },
+            "title": "Flag Round Counts",
+            "type": "array"
           },
           "holding_by_pnl": {
             "$ref": "#/components/schemas/InsightPnlHoldingOut"
@@ -18031,6 +18057,40 @@
                       "total_pnl_display": "1234.56",
                       "win_rate_pct": "100.0%"
                     },
+                    "flag_round_counts": [
+                      {
+                        "count": 1,
+                        "flag": "bottom_buy"
+                      },
+                      {
+                        "count": 0,
+                        "flag": "stop_loss_sold_early"
+                      },
+                      {
+                        "count": 1,
+                        "flag": "profit_sold_early"
+                      },
+                      {
+                        "count": 1,
+                        "flag": "drawdown"
+                      },
+                      {
+                        "count": 0,
+                        "flag": "intraday_t"
+                      },
+                      {
+                        "count": 0,
+                        "flag": "swing_t"
+                      },
+                      {
+                        "count": 0,
+                        "flag": "intraday_rebalance_out"
+                      },
+                      {
+                        "count": 0,
+                        "flag": "intraday_rebalance_in"
+                      }
+                    ],
                     "holding_by_pnl": {
                       "classes": [
                         {

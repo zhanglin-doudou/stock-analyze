@@ -1848,6 +1848,16 @@ class InsightPnlHoldingOut(BaseModel):
     classes: list[InsightPnlHoldingClassOut]
 
 
+class InsightFlagRoundCountOut(BaseModel):
+    """按回合旗标统计的回合数（v1.2 词表全部 item_flag）。
+
+    口径是筛选后的全量回合（与分页无关），同一回合只计一次，不累加旗标次数。
+    """
+
+    flag: str
+    count: int
+
+
 class InsightsSummaryOut(BaseModel):
     swing: InsightBucketSummaryOut
     fill_swing: InsightFillSwingOut
@@ -1856,6 +1866,7 @@ class InsightsSummaryOut(BaseModel):
     sell_fly: InsightSellFlySummaryOut
     reason_coverage: InsightReasonCoverageOut
     ranking: InsightRankingOut
+    flag_round_counts: list[InsightFlagRoundCountOut] = Field(default_factory=list)
     pending: dict[str, int]
 
 

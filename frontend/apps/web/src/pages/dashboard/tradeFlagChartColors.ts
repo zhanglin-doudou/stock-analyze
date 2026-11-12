@@ -46,6 +46,16 @@ const SERIES_TOKENS: Record<string, string> = {
   bucket_short: "--chart-buy-2",
   bucket_position: "--chart-buy-1",
   bucket_long: "--chart-bucket-long",
+  // 回合旗标计数柱状图（v1.2 词表全部 item_flag）：抄底取买侧青蓝，两个卖飞用
+  // 卖侧暖红与警示品红，收益回撤用警示紫，做T/日内调仓各用独立色相，避免同色误读。
+  round_bottom_buy: "--chart-buy-2",
+  round_stop_loss_sold_early: "--chart-sell-1",
+  round_profit_sold_early: "--chart-warn-sold-early",
+  round_drawdown: "--chart-warn-drawdown",
+  round_intraday_t: "--chart-flag-intraday",
+  round_swing_t: "--chart-flag-swing",
+  round_intraday_rebalance_out: "--chart-flag-rebalance-out",
+  round_intraday_rebalance_in: "--chart-flag-rebalance-in",
 };
 
 function readVar(style: CSSStyleDeclaration, name: string): string {

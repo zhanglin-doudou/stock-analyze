@@ -1971,6 +1971,16 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
                     "basis": "benchmark_excess_20d",
                     "definition_version": "1.2",
                 },
+                "flag_round_counts": [
+                    {"flag": "bottom_buy", "count": 1},
+                    {"flag": "stop_loss_sold_early", "count": 0},
+                    {"flag": "profit_sold_early", "count": 1},
+                    {"flag": "drawdown", "count": 1},
+                    {"flag": "intraday_t", "count": 0},
+                    {"flag": "swing_t", "count": 0},
+                    {"flag": "intraday_rebalance_out", "count": 0},
+                    {"flag": "intraday_rebalance_in", "count": 0},
+                ],
                 "pending": {"forward_recompute": 0, "reason_missing": 0},
             },
             "items": [

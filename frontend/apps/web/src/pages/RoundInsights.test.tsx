@@ -3,6 +3,8 @@ import { cleanup, render, screen, waitFor, within } from "@testing-library/react
 import { MemoryRouter } from "react-router-dom";
 import type { RoundInsightsPage } from "@sa/api-client";
 import { RoundInsights } from "./RoundInsights";
+import { buildFlagRoundBars } from "./rounds/RoundFlagCharts";
+import type { ChartPalette } from "./dashboard/tradeFlagChartColors";
 import { currentYearToken } from "../lib/date";
 import { api } from "../client";
 
@@ -159,6 +161,17 @@ function makePage(overrides: Partial<RoundInsightsPage> = {}): RoundInsightsPage
         quadrant_counts: { both_positive: 2 },
         per_stock: [],
       },
+      // 默认全部旗标计数为 0（后端恒定返回词表全部条目，便于图例固定）；非零场景在专门用例里覆盖。
+      flag_round_counts: [
+        { flag: "bottom_buy", count: 0 },
+        { flag: "stop_loss_sold_early", count: 0 },
+        { flag: "profit_sold_early", count: 0 },
+        { flag: "drawdown", count: 0 },
+        { flag: "intraday_t", count: 0 },
+        { flag: "swing_t", count: 0 },
+        { flag: "intraday_rebalance_out", count: 0 },
+        { flag: "intraday_rebalance_in", count: 0 },
+      ],
       pending: { forward_recompute: 1, reason_missing: 1 },
     },
     next_cursor: null,
@@ -419,6 +432,90 @@ describe("RoundInsights 回合洞察页", () => {
     expect(screen.queryByTestId("nivo-pie")).toBeNull();
     expect(screen.queryByTestId("nivo-bar")).toBeNull();
   });
+
+  it("回合旗标计数：覆盖全部 8 类，计数取后端 summary（全量），不按当前页 items 累加", async () => {
+    // 首页 items 只带 1 个回合；若前端累加 items 会数少，这里 summary 给的是全期计数。
+    const page = makePage();
+    if (page.summary) {
+      page.summary.flag_round_counts = [
+        { flag: "bottom_buy", count: 12 },
+        { flag: "stop_loss_sold_early", count: 4 },
+        { flag: "profit_sold_early", count: 7 },
+        { flag: "drawdown", count: 9 },
+        { flag: "intraday_t", count: 3 },
+        { flag: "swing_t", count: 6 },
+        { flag: "intraday_rebalance_out", count: 2 },
+        { flag: "intraday_rebalance_in", count: 1 },
+      ];
+    }
+    listInsights.mockResolvedValue(page);
+    renderPage();
+
+    const chart = await screen.findByTestId("flag-round-charts");
+    // 标题在卡片层（与「加仓与后续下跌」「卖飞」同层级），并标明卖飞的新口径。
+    expect(screen.getByText("回合旗标统计（卖飞按账单级 5 日）")).toBeTruthy();
+    // 指标行与汇总块同一写法：逐项「标签 + 回合数」，同一回合只计一次。
+    const metrics = screen.getByTestId("flag-round-metrics").textContent ?? "";
+    expect(metrics).toContain("抄底 12 个回合");
+    expect(metrics).toContain("止损卖飞 4 个回合");
+    expect(metrics).toContain("止盈卖飞 7 个回合");
+    expect(metrics).toContain("收益回撤 9 个回合");
+    expect(metrics).toContain("日内做T 3 个回合");
+    expect(metrics).toContain("波段做T 6 个回合");
+    expect(metrics).toContain("日内调仓卖出 2 个回合");
+    expect(metrics).toContain("日内调仓买入 1 个回合");
+    expect(chart.textContent).toContain("与卖飞汇总的");
+    // 与持有期柱状图共用 `ResponsiveBar` 桩，因此断言数量 >= 2（懒加载已挂载）。
+    await waitFor(() => expect(screen.getAllByTestId("nivo-bar").length).toBeGreaterThan(1));
+    const legend = within(screen.getByTestId("flag-round-legend"));
+    const labels = [
+      "抄底",
+      "止损卖飞",
+      "止盈卖飞",
+      "收益回撤",
+      "日内做T",
+      "波段做T",
+      "日内调仓卖出",
+      "日内调仓买入",
+    ];
+    for (const label of labels) {
+      expect(legend.getByText(label)).toBeTruthy();
+    }
+    // 计数原样来自 summary；items 里只有 1 个回合（bottom_buy×2），不会被累加成 2。
+    expect(legend.getByText("12")).toBeTruthy();
+    expect(legend.getByText("4")).toBeTruthy();
+    expect(legend.getByText("7")).toBeTruthy();
+    expect(legend.getByText("9")).toBeTruthy();
+    expect(legend.getByText("3")).toBeTruthy();
+    expect(legend.getByText("6")).toBeTruthy();
+    expect(legend.getByText("2")).toBeTruthy();
+    expect(legend.getByText("1")).toBeTruthy();
+    // 每个旗标只占一个图例，不按次数拆开。
+    for (const label of labels) {
+      expect(legend.getAllByText(label)).toHaveLength(1);
+    }
+  });
+
+  it("回合旗标计数空态：全部为 0 时只说明无命中，不画空坐标轴", async () => {
+    renderPage();
+
+    // 当前页 items 有 bottom_buy×2，但 summary 计数为 0 → 证明前端不做累加。
+    expect(await screen.findByText("抄底×2")).toBeTruthy();
+    expect(screen.getByTestId("flag-round-charts").textContent).toContain(
+      "没有任何回合命中旗标",
+    );
+    expect(screen.getAllByTestId("nivo-bar")).toHaveLength(1);
+  });
+
+  it("口径文案：卖飞标明 20 日/仅平仓笔与分母，加仓注明按回合计、不等同抄底", async () => {
+    renderPage();
+
+    await screen.findByText(/以下为事后统计/);
+    const bodyText = document.body.textContent?.replace(/\s+/g, "") ?? "";
+    expect(bodyText).toContain("20日卖飞（仅平仓笔）");
+    expect(bodyText).toContain("止盈卖飞占卖出回合0/1=—");
+    expect(bodyText).toContain("加仓1个回合（按回合计，不等同于抄底）");
+  });
 });
 
 it("旗标说明：末尾渲染后端返回的 code 与中英文说明（前端不拼文案）", async () => {
@@ -451,4 +548,62 @@ it("旗标说明：末尾渲染后端返回的 code 与中英文说明（前端�
   expect(section.textContent).toContain("bottom_buy");
   expect(section.textContent).toContain("回合内命中即时抄底或短期抄底的买入账单个数。");
   expect(section.textContent).toContain("Number of buy bills flagged as an instant or short-term bottom.");
+});
+
+describe("buildFlagRoundBars", () => {
+  const palette = {
+    series: {
+      round_bottom_buy: "#101010",
+      round_stop_loss_sold_early: "#202020",
+      round_profit_sold_early: "#303030",
+      round_drawdown: "#404040",
+      round_intraday_t: "#505050",
+      round_swing_t: "#606060",
+      round_intraday_rebalance_out: "#707070",
+      round_intraday_rebalance_in: "#808080",
+    },
+  } as unknown as ChartPalette;
+
+  it("覆盖词表全部 8 个回合旗标：颜色走 tokens、标签不按次数拆开", () => {
+    const bars = buildFlagRoundBars(
+      [
+        { flag: "bottom_buy", count: 3 },
+        { flag: "stop_loss_sold_early", count: 0 },
+        { flag: "profit_sold_early", count: 5 },
+        { flag: "drawdown", count: 9 },
+        { flag: "intraday_t", count: 1 },
+        { flag: "swing_t", count: 2 },
+        { flag: "intraday_rebalance_out", count: 4 },
+        { flag: "intraday_rebalance_in", count: 6 },
+      ],
+      palette,
+    );
+    expect(bars).toEqual([
+      { id: "bottom_buy", label: "抄底", count: 3, color: "#101010" },
+      { id: "stop_loss_sold_early", label: "止损卖飞", count: 0, color: "#202020" },
+      { id: "profit_sold_early", label: "止盈卖飞", count: 5, color: "#303030" },
+      { id: "drawdown", label: "收益回撤", count: 9, color: "#404040" },
+      { id: "intraday_t", label: "日内做T", count: 1, color: "#505050" },
+      { id: "swing_t", label: "波段做T", count: 2, color: "#606060" },
+      { id: "intraday_rebalance_out", label: "日内调仓卖出", count: 4, color: "#707070" },
+      { id: "intraday_rebalance_in", label: "日内调仓买入", count: 6, color: "#808080" },
+    ]);
+  });
+
+  it("数据质量三态（查询别名）与未知码不入图", () => {
+    const bars = buildFlagRoundBars(
+      [
+        { flag: "reason_missing", count: 7 },
+        { flag: "horizon_pending", count: 7 },
+        { flag: "corporate_action", count: 7 },
+        { flag: "sold_too_early", count: 7 },
+      ],
+      palette,
+    );
+    expect(bars).toEqual([]);
+  });
+
+  it("后端未返回该字段（空数组）时不伪造柱", () => {
+    expect(buildFlagRoundBars([], palette)).toEqual([]);
+  });
 });

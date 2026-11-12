@@ -2455,6 +2455,18 @@ export interface components {
             win_rate_pct?: string | null;
         };
         /**
+         * InsightFlagRoundCountOut
+         * @description 按回合旗标统计的回合数（v1.2 词表全部 item_flag）。
+         *
+         *     口径是筛选后的全量回合（与分页无关），同一回合只计一次，不累加旗标次数。
+         */
+        InsightFlagRoundCountOut: {
+            /** Count */
+            count: number;
+            /** Flag */
+            flag: string;
+        };
+        /**
          * InsightPnlHoldingClassOut
          * @description 单类盈亏的持有期（`code` 与文案均由后端给，前端不重复判定）。
          */
@@ -2571,6 +2583,8 @@ export interface components {
         InsightsSummaryOut: {
             addon: components["schemas"]["InsightAddonSummaryOut"];
             fill_swing: components["schemas"]["InsightFillSwingOut"];
+            /** Flag Round Counts */
+            flag_round_counts?: components["schemas"]["InsightFlagRoundCountOut"][];
             holding_by_pnl: components["schemas"]["InsightPnlHoldingOut"];
             /** Pending */
             pending: {

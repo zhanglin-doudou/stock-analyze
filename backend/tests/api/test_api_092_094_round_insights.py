@@ -178,6 +178,17 @@ async def test_api_092_summary_addon_serialized(client, api_prefix, user, addon_
     assert item["status_counts"]["bottom_buy"] == 1
     assert item["status_counts"]["stop_loss_sold_early"] == 1
     assert item["status_counts"]["profit_sold_early"] == 0
+    # 旗标回合计数：覆盖 v1.2 词表全部 item_flag、顺序稳定，计数与 items[].flags 同源（每回合只计一次）。
+    assert body["summary"]["flag_round_counts"] == [
+        {"flag": "bottom_buy", "count": 1},
+        {"flag": "stop_loss_sold_early", "count": 1},
+        {"flag": "profit_sold_early", "count": 0},
+        {"flag": "drawdown", "count": 1},
+        {"flag": "intraday_t", "count": 0},
+        {"flag": "swing_t", "count": 0},
+        {"flag": "intraday_rebalance_out", "count": 0},
+        {"flag": "intraday_rebalance_in", "count": 0},
+    ]
     assert item["buy_trade"]["trade_id"] == "trd_addon000002"
     # 逐笔数量取 trade.quantity_units 的展示串（整数份额，不带尾零；此前该字段硬编码为 None）。
     assert item["buy_trade"]["quantity_display"] == "50"

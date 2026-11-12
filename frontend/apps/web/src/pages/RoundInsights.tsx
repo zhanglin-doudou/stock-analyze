@@ -17,6 +17,7 @@ import { PeriodInput } from "../ui/PeriodInput";
 import { ProblemView } from "../ui/Problem";
 import { DataTable, type DataTableColumn } from "../ui/DataTable";
 import { HoldingCharts } from "./rounds/HoldingCharts";
+import { RoundFlagCharts } from "./rounds/RoundFlagCharts";
 
 /** 设计 §6.3 的 `flag` 词表（前端只做筛选选择，不参与计算）。 */
 const FLAG_OPTIONS = [
@@ -527,8 +528,9 @@ export function RoundInsights() {
             <h3>加仓与后续下跌</h3>
             {addon ? (
               <p className="muted">
-                加仓 {addon.count} 次，后续下跌 {addon.declined_after_addon} 次；
-                下跌占比 {text(addon.declined_pct)}；平均回撤 {text(addon.avg_dip_pct)}
+                加仓 {addon.count} 个回合（按回合计，不等同于抄底），后续下跌{" "}
+                {addon.declined_after_addon} 个回合；下跌占比 {text(addon.declined_pct)}；
+                平均回撤 {text(addon.avg_dip_pct)}
                 {addon.avg_dip_coverage ? `（${addon.avg_dip_coverage}）` : ""}。
               </p>
             ) : (
@@ -537,9 +539,11 @@ export function RoundInsights() {
             <h3 style={{ marginTop: 16 }}>卖飞</h3>
             {sellFly ? (
               <p className="muted">
-                卖出 {sellFly.sell_count} 次；卖飞 {sellFly.profit_take_fly}（止盈）/{" "}
-                {sellFly.stop_loss_rebound}（止损后反弹）；占比 {text(sellFly.fly_pct)}；
-                最差{sellFly.missed_profit_worst_label ?? ""}{" "}
+                卖出 {sellFly.sell_count} 个回合；20 日卖飞（仅平仓笔）{" "}
+                {sellFly.profit_take_fly}（止盈）/ {sellFly.stop_loss_rebound}
+                （止损后反弹）；止盈卖飞占卖出回合 {sellFly.profit_take_fly}/
+                {sellFly.sell_count} = {text(sellFly.fly_pct)}；最差
+                {sellFly.missed_profit_worst_label ?? ""}{" "}
                 <span className={signedClass(sellFly.missed_profit_worst_abs_display)}>
                   {text(sellFly.missed_profit_worst_abs_display)}
                 </span>
@@ -552,6 +556,8 @@ export function RoundInsights() {
             ) : (
               <p className="muted">—</p>
             )}
+            <h3 style={{ marginTop: 16 }}>回合旗标统计（卖飞按账单级 5 日）</h3>
+            <RoundFlagCharts rows={summary.flag_round_counts ?? []} />
           </div>
 
           <div className="card">

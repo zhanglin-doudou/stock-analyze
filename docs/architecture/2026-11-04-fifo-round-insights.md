@@ -676,7 +676,7 @@ quadrant = sign(buy_excess_20), sign(sell_avoid_20)  # 双正/买正卖负/买�
 ```
 
 - `flags` 为**内部旗标码**，只含目标清单内的 8 项（`bottom_buy / stop_loss_sold_early / profit_sold_early / drawdown / intraday_t / swing_t / intraday_rebalance_out / intraday_rebalance_in`）；计数型三项另给 `status_counts`（固定三键整数，可为 0），`flags` 只做「是否命中」的布尔投影。查询参数 `flag=` 使用 §6.3 词表，由服务端做映射，前端只做文案映射、不做判断。旧码（`addon / dip_sequence / below_avg / continued_decline / profit_taking / profit_take_fly / stop_loss_rebound / rising_sell_sequence / full_exit / partial_exit / same_day`）与别名 `addon_decline` 自 v1.2 起不再输出；`summary.addon` 仍内部使用加仓谓词。
-- `summary`：`swing{...}`、`addon{...}`、`sell_fly{...}`、`reason_coverage{...}`、`ranking{n_rounds,n_events,min_rank_n,basis,quadrant_counts}`、`pending{forward_recompute,reason_missing}`。
+- `summary`：`swing{...}`、`addon{...}`、`sell_fly{...}`、`reason_coverage{...}`、`ranking{n_rounds,n_events,min_rank_n,basis,quadrant_counts}`、`flag_round_counts[{flag,count}]`（覆盖词表全部 8 个回合旗标，顺序沿用 `ITEM_FLAG_CODES`；`count` 为全量回合中 `flags` 含该旗标的回合数，同一回合只计一次；数据质量三态 `reason_missing`/`horizon_pending`/`corporate_action` 为查询别名，不入此数组；因列表分页、前端只看当前页，计数必须由后端在全量筛选集上聚合）、`pending{forward_recompute,reason_missing}`。
 - **回合状态口径 v1.2（2026-11-12，breaking）**：
   - `bottom_buy`（计数）：回合内买入账单命中账单旗标 `instant_bottom` 或 `short_term_bottom` 的账单个数；同一账单同时命中只计 1。
   - `stop_loss_sold_early` / `profit_sold_early`（计数）：回合内卖出账单先须命中账单旗标 `short_term_sold_early`，再用**含费净卖价**与**卖出前持仓含费均价**分侧；净卖价 ≤ 均价 → 止损侧（**等号归止损侧**），严格高于 → 止盈侧；成本缺失或负成本不分侧。
