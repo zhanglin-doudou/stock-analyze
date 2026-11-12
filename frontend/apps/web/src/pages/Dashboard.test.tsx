@@ -635,7 +635,7 @@ function makeTradeFlags(overrides: Partial<DashboardTradeFlagsOut> = {}): Dashbo
   const series = [
     { code: "chase", label_zh: "追涨", label_en: "Chase", side: "buy" as const, lookahead: false },
     { code: "instant_bottom", label_zh: "即时抄底", label_en: "Instant bottom", side: "buy" as const, lookahead: false },
-    { code: "short_term_win", label_zh: "短期成功", label_en: "Short-term win", side: "buy" as const, lookahead: true },
+    { code: "short_term_bottom", label_zh: "短期抄底", label_en: "Short-term bottom", side: "buy" as const, lookahead: true },
     { code: "stop_loss", label_zh: "止损", label_en: "Stop loss", side: "sell" as const, lookahead: false },
     { code: "instant_top", label_zh: "即时逃顶", label_en: "Instant top", side: "sell" as const, lookahead: false },
     { code: "short_term_top", label_zh: "短期逃顶", label_en: "Short-term top", side: "sell" as const, lookahead: true },
@@ -1295,7 +1295,7 @@ describe("Dashboard 看板", () => {
         sell: "sell-total",
         chase: "buy-1",
         instant_bottom: "buy-2",
-        short_term_win: "buy-3",
+        short_term_bottom: "buy-3",
         stop_loss: "sell-1",
         instant_top: "sell-2",
         short_term_top: "sell-3",
@@ -1341,7 +1341,7 @@ describe("Dashboard 看板", () => {
     expect(charts.lineSeries.map((serie) => serie.id)).toEqual([
       "追涨",
       "即时抄底",
-      "短期成功",
+      "短期抄底",
       "止损",
       "即时逃顶",
       "短期逃顶",

@@ -107,9 +107,9 @@ TRADE_FLAG_DEFINITIONS: tuple[TradeFlagDefinition, ...] = (
         side="buy",
     ),
     TradeFlagDefinition(
-        code="short_term_win",
-        label_zh="短期成功",
-        label_en="Short-term win",
+        code="short_term_bottom",
+        label_zh="短期抄底",
+        label_en="Short-term bottom",
         description_zh=(
             "含费净买价距买入日前后各 5 个行情日（不含当日，共 10 个）最低收盘价 5% 以内。"
             "使用未来行情，属事后指标；未来 5 个行情日未走完时状态为「待算」。"
@@ -119,6 +119,24 @@ TRADE_FLAG_DEFINITIONS: tuple[TradeFlagDefinition, ...] = (
             "5 trading days before and after the buy (10 days, excluding the day). Uses "
             "future bars, so it is an ex-post metric and stays pending until the future "
             "window is complete."
+        ),
+        side="buy",
+        lookahead=True,
+    ),
+    TradeFlagDefinition(
+        code="short_term_underwater",
+        label_zh="短期被套",
+        label_en="Short-term underwater",
+        description_zh=(
+            "买入后连续 5 个行情日（不含当日）的每日收盘价都低于含费净买价，即窗口内收益持续为负。"
+            "任一日收盘价不低于净买价（持平也算）即未命中；使用未来行情，属事后指标；"
+            "未来 5 个行情日未走完时状态为「待算」。"
+        ),
+        description_en=(
+            "Every close in the 5 trading days after the buy is below the fee-inclusive net buy "
+            "price, i.e. the position stays underwater for the whole window. A single close at "
+            "or above the net buy price means a miss. Uses future bars, so it is an ex-post "
+            "metric and stays pending until the future window is complete."
         ),
         side="buy",
         lookahead=True,
@@ -218,12 +236,32 @@ TRADE_FLAG_DEFINITIONS: tuple[TradeFlagDefinition, ...] = (
         label_zh="止损卖出",
         label_en="Stop-loss exit",
         description_zh=(
-            "含费净卖价低于卖出日前 5 个行情日最低收盘价的 1% 以上。"
-            "（行情源只提供收盘价，极值按收盘价计。）"
+            "含费净卖价低于卖出日前 5 个行情日最低收盘价的 1% 以上，"
+            "且同时严格低于卖出前持仓含费均价。"
+            "（行情源只提供收盘价，极值按收盘价计；恰等于均价不归止损，归入「回撤」。"
+            "零成本持仓的净卖价不可能低于 0，故本旗标恒不命中。）"
         ),
         description_en=(
             "The fee-inclusive net sell price is more than 1% below the lowest close of the "
-            "5 trading days before the sale. (Only closing prices are available.)"
+            "5 trading days before the sale, and strictly below the position's fee-inclusive "
+            "average cost. Exactly equal to the average cost counts as drawdown, not stop-loss."
+        ),
+        side="sell",
+    ),
+    TradeFlagDefinition(
+        code="sell_drawdown",
+        label_zh="回撤",
+        label_en="Drawdown",
+        description_zh=(
+            "含费净卖价低于卖出日前 5 个行情日最低收盘价的 1% 以上，"
+            "但净卖价不低于卖出前持仓含费均价（价格已破近期低点，仍在成本线上方）。"
+            "恰等于均价归入本旗标；零成本持仓视为有效成本，破位即归入本旗标；"
+            "无持仓或成本为负时状态为「无持仓成本」。"
+        ),
+        description_en=(
+            "The fee-inclusive net sell price is more than 1% below the lowest close of the "
+            "5 trading days before the sale, but not below the position's fee-inclusive "
+            "average cost. Exactly equal to the average cost counts as drawdown."
         ),
         side="sell",
     ),
@@ -258,6 +296,23 @@ TRADE_FLAG_DEFINITIONS: tuple[TradeFlagDefinition, ...] = (
         side="sell",
         lookahead=True,
     ),
+    TradeFlagDefinition(
+        code="short_term_sold_early",
+        label_zh="短期卖飞",
+        label_en="Sold too early",
+        description_zh=(
+            "含费净卖价低于卖出后第 5 个行情日收盘价的 5% 以上（卖出后价格又涨上去）。"
+            "恰低 5% 不计命中；使用未来行情，属事后指标；未来 5 个行情日未走完时状态为「待算」。"
+        ),
+        description_en=(
+            "The fee-inclusive net sell price is more than 5% below the close of the 5th trading "
+            "day after the sale (the price rallied after selling). Exactly 5% is not a hit. Uses "
+            "future bars, so it is an ex-post metric and stays pending until the future window "
+            "is complete."
+        ),
+        side="sell",
+        lookahead=True,
+    ),
 )
 
 TRADE_FLAG_BY_CODE: dict[str, TradeFlagDefinition] = {
@@ -276,11 +331,11 @@ SELL_FLAG_CODES: tuple[str, ...] = tuple(
 )
 
 # 看板趋势口径：买卖各取三个代表性状态旗标（先买后卖，保持图表系列顺序）。
-# 只决定看板展示哪些码，不参与判定；13 码全量仍由 `TRADE_FLAG_CODES` 维护。
+# 只决定看板展示哪些码，不参与判定；20 码全量仍由 `TRADE_FLAG_CODES` 维护。
 TREND_FLAG_CODES: tuple[str, ...] = (
     "chase",
     "instant_bottom",
-    "short_term_win",
+    "short_term_bottom",
     "stop_loss",
     "instant_top",
     "short_term_top",

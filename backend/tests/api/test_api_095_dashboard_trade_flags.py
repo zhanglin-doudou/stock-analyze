@@ -100,7 +100,7 @@ async def _seed_flag(
                 "flag_code": code,
                 "status": status,
                 "reason": None,
-                "lookahead": code in ("short_term_win", "short_term_top"),
+                "lookahead": code in ("short_term_bottom", "short_term_top"),
                 "definition_version": DEFINITION_VERSION,
                 "computed_at": datetime(2026, 7, 1, tzinfo=UTC),
             },
@@ -174,7 +174,7 @@ async def _seed_six_month_fixture(engine: AsyncEngine, user_id: uuid.UUID) -> No
     rows = [
         (date(2026, 6, 3), "b1", "chase", "hit", "buy"),
         (date(2026, 6, 3), "b1", "instant_bottom", "hit", "buy"),
-        (date(2026, 6, 3), "b1", "short_term_win", "pending", "buy"),
+        (date(2026, 6, 3), "b1", "short_term_bottom", "pending", "buy"),
         (date(2026, 6, 3), "b1", "first_entry", "miss", "buy"),
         (date(2026, 6, 3), "b1", "addon_average", "hit", "buy"),
         (date(2026, 6, 3), "b1", "addon_dip", "miss", "buy"),
@@ -243,7 +243,7 @@ async def test_api_095_happy_path_monthly_counts(
     assert [row["code"] for row in body["series"]] == [
         "chase",
         "instant_bottom",
-        "short_term_win",
+        "short_term_bottom",
         "stop_loss",
         "instant_top",
         "short_term_top",
@@ -321,7 +321,7 @@ async def test_api_095_happy_path_monthly_counts(
     assert _flag_counts(june) == {
         "chase": 2,
         "instant_bottom": 1,
-        "short_term_win": 0,
+        "short_term_bottom": 0,
         "stop_loss": 1,
         "instant_top": 0,
         "short_term_top": 1,

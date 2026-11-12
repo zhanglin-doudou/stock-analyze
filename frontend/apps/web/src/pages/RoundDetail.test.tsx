@@ -310,6 +310,42 @@ describe("RoundDetail 回合详情页", () => {
           side: "buy",
           lookahead: false,
         },
+        {
+          code: "short_term_bottom",
+          label_zh: "短期抄底",
+          label_en: "Short-term bottom",
+          description_zh: "含费净买价距前后各 5 个行情日最低收盘价 5% 以内。",
+          description_en: "Within 5% of the 10-day lowest close.",
+          side: "buy",
+          lookahead: true,
+        },
+        {
+          code: "short_term_underwater",
+          label_zh: "短期被套",
+          label_en: "Short-term underwater",
+          description_zh: "买入后连续 5 个行情日收盘价都低于含费净买价。",
+          description_en: "Every close in the next 5 sessions stays below the net buy price.",
+          side: "buy",
+          lookahead: true,
+        },
+        {
+          code: "sell_drawdown",
+          label_zh: "回撤",
+          label_en: "Drawdown",
+          description_zh: "净卖价跌破前 5 日最低收盘价 1% 以上，但仍在成本线上方。",
+          description_en: "Broke the 5-day low by more than 1% while still above cost.",
+          side: "sell",
+          lookahead: false,
+        },
+        {
+          code: "short_term_sold_early",
+          label_zh: "短期卖飞",
+          label_en: "Sold too early",
+          description_zh: "含费净卖价低于卖出后第 5 个行情日收盘价 5% 以上。",
+          description_en: "Net sell price is more than 5% below the 5th future close.",
+          side: "sell",
+          lookahead: true,
+        },
       ],
     });
     renderDetail();
@@ -318,6 +354,12 @@ describe("RoundDetail 回合详情页", () => {
     const panel = document.querySelector("details.trade-flag-glossary") as HTMLDetailsElement;
     expect(panel).toBeTruthy();
     expect(panel.open).toBe(false);
+    // 词表由后端驱动：改名与新增旗标都能直接展示，旧名称不再出现
+    expect(panel.textContent).toContain("短期抄底");
+    expect(panel.textContent).toContain("短期被套");
+    expect(panel.textContent).toContain("短期卖飞");
+    expect(panel.textContent).toContain("回撤");
+    expect(panel.textContent).not.toContain("短期成功");
   });
 
   it("同一笔卖出参与多个配对时按 trade 去重，行数 = 流水笔数", async () => {

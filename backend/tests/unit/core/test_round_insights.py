@@ -357,10 +357,14 @@ def test_addon_and_below_avg() -> None:
     assert classify.is_below_avg(9_000_000, 10_000_000) is True
     assert classify.is_below_avg(10_000_000, 10_000_000) is False
     assert classify.is_below_avg(9_000_000, 0) is False
+    assert classify.is_below_avg(9_000_000, None) is False
+    assert classify.is_below_avg(9_000_000, -1) is False
 
 
 def test_dip_depth_units() -> None:
     assert classify.dip_depth_units(9_000_000, 0) is None
+    assert classify.dip_depth_units(9_000_000, None) is None
+    assert classify.dip_depth_units(9_000_000, -1) is None
     assert classify.dip_depth_units(9_000_000, 10_000_000) == 10_000_000  # 10%
 
 
@@ -376,7 +380,10 @@ def test_dip_and_rise_sequences() -> None:
 
 
 def test_profit_taking_and_sold_too_early() -> None:
-    assert classify.is_profit_taking(20_000_000, 0) is False
+    # 零成本持仓：任意正卖价都算止盈；成本缺失/负成本不判定。
+    assert classify.is_profit_taking(20_000_000, 0) is True
+    assert classify.is_profit_taking(20_000_000, None) is False
+    assert classify.is_profit_taking(20_000_000, -1) is False
     assert classify.is_profit_taking(20_000_000, 19_000_000) is True
     assert classify.is_profit_taking(19_000_000, 19_000_000) is False
 

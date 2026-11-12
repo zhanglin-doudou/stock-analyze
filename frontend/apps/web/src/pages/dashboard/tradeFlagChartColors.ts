@@ -20,7 +20,7 @@ const SERIES_TOKENS: Record<string, string> = {
   buy: "--chart-buy-total",
   chase: "--chart-buy-1",
   instant_bottom: "--chart-buy-2",
-  short_term_win: "--chart-buy-3",
+  short_term_bottom: "--chart-buy-3",
   sell: "--chart-sell-total",
   stop_loss: "--chart-sell-1",
   instant_top: "--chart-sell-2",

@@ -32,13 +32,16 @@ def is_addon(quantity_before_units: int) -> bool:
     return quantity_before_units > 0
 
 
-def is_below_avg(price_net_units: int, avg_cost_net_units: int) -> bool:
-    return avg_cost_net_units > 0 and price_net_units < avg_cost_net_units
+def is_below_avg(price_net_units: int, avg_cost_net_units: int | None) -> bool:
+    """净价低于持仓均价；`None`（无成本数据）或负成本（异常）不判定，零成本恒不成立。"""
+    if avg_cost_net_units is None or avg_cost_net_units < 0:
+        return False
+    return price_net_units < avg_cost_net_units
 
 
-def dip_depth_units(price_net_units: int, avg_cost_net_units: int) -> int | None:
-    """`(avg − P_net)/avg`（scale 1e-8）；无成本 → None。"""
-    if avg_cost_net_units <= 0:
+def dip_depth_units(price_net_units: int, avg_cost_net_units: int | None) -> int | None:
+    """`(avg − P_net)/avg`（scale 1e-8）；成本缺失、为零（无法归一）或为负 → None。"""
+    if avg_cost_net_units is None or avg_cost_net_units <= 0:
         return None
     return (avg_cost_net_units - price_net_units) * 10**8 // avg_cost_net_units
 
@@ -57,9 +60,14 @@ def is_rise_sequence(prices_net_units: Sequence[int]) -> bool:
     )
 
 
-def is_profit_taking(price_net_sell_units: int, avg_cost_net_units: int) -> bool:
-    """卖出净价高于持仓成本净价（>0）→ 止盈型卖出。"""
-    return avg_cost_net_units > 0 and price_net_sell_units > avg_cost_net_units
+def is_profit_taking(price_net_sell_units: int, avg_cost_net_units: int | None) -> bool:
+    """卖出净价高于持仓成本净价 → 止盈型卖出；零成本时任意正卖价即止盈。
+
+    `None`（无成本数据）与负成本（异常）不判定。
+    """
+    if avg_cost_net_units is None or avg_cost_net_units < 0:
+        return False
+    return price_net_sell_units > avg_cost_net_units
 
 
 def sold_too_early(max_close_20_units: int | None, price_net_sell_units: int) -> bool:

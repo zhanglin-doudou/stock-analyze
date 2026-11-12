@@ -155,7 +155,7 @@ async def test_build_is_idempotent_and_hits_expected_flags(owner_engine: AsyncEn
         first = await _build(session, user_id)
         await session.commit()
     assert first.trades == 3
-    assert first.rows == 7 + 7 + 10  # 买入 7 项（首次建仓 + 加仓三态 + 趋势三态）、卖出 10 项
+    assert first.rows == 8 + 8 + 12  # 买入 8 项（首次建仓 + 加仓三态 + 趋势四态）、卖出 12 项
 
     async with AsyncSession(owner_engine) as session:
         rows = list(await session.scalars(select(TradeFlag).where(TradeFlag.user_id == user_id)))

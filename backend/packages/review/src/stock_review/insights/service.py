@@ -600,12 +600,8 @@ def _position_states(trades: Sequence[Trade]) -> dict[str, _PositionState]:
         )
         if trade.side == "buy" and trade.quantity_units > 0:
             qty[trade.security_code] += trade.quantity_units
-            cost[trade.security_code] += (
-                abs(trade.amount_units)
-                + trade.commission_units
-                + trade.stamp_tax_units
-                + trade.other_fee_units
-            )
+            # `amount_units` 已是含费净现金流（解析层统一），不能再叠加费用字段。
+            cost[trade.security_code] += abs(trade.amount_units)
         elif trade.side == "sell" and trade.quantity_units > 0:
             held = qty[trade.security_code]
             if held > 0:
