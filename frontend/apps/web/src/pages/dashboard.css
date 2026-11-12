@@ -753,7 +753,7 @@
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   gap: var(--s4);
-  align-items: start;
+  align-items: end;
 }
 .dash-sector-chart {
   margin-top: var(--s4);
