@@ -58,7 +58,7 @@ function makePage(overrides: Partial<RoundInsightsPage> = {}): RoundInsightsPage
         close_date: "2026-06-20",
         holding_days_legacy: 14,
         holding_trading_days: 14,
-        bucket: "swing",
+        bucket: "position",
         pnl: "-650.00",
         return_rate_pct: "-3.25%",
         flags: ["addon", "continued_decline"],
@@ -80,9 +80,10 @@ function makePage(overrides: Partial<RoundInsightsPage> = {}): RoundInsightsPage
     summary: {
       swing: {
         closed: 1,
+        scalp: 0,
         short: 0,
-        swing: 1,
-        trend: 0,
+        position: 1,
+        long: 0,
         avg_holding_trading_days: "14.00",
         win_rate_pct: "0.00%",
         avg_pnl_display: "-650.00",
@@ -268,13 +269,15 @@ describe("RoundInsights 回合洞察页", () => {
     expect(screen.getByText(/缺失数值显示「—」，不显示 0%/)).toBeTruthy();
   });
 
-  it("Tabs 只映射后端筛选参数（波段 → bucket=swing）", async () => {
+  it("Tabs 只映射后端筛选参数（中线 → bucket=position）", async () => {
     renderPage();
-    const tab = await screen.findByRole("tab", { name: "波段" });
+    const tab = await screen.findByRole("tab", { name: "中线" });
     tab.click();
 
     await waitFor(() => {
-      expect(listInsights).toHaveBeenLastCalledWith(expect.objectContaining({ bucket: "swing" }));
+      expect(listInsights).toHaveBeenLastCalledWith(
+        expect.objectContaining({ bucket: "position" }),
+      );
     });
   });
 
@@ -354,11 +357,12 @@ describe("RoundInsights 回合洞察页", () => {
     // 两张图都走 lazy + Suspense，异步挂载。
     expect(await screen.findByTestId("nivo-pie")).toBeTruthy();
     expect(screen.getByTestId("nivo-bar")).toBeTruthy();
-    // 图例只渲染后端计数（短线 0 / 波段 1 / 趋势 0）；限定在图例内，避开同名 Tab 与统计块。
+    // 图例只渲染后端计数（超短线 0 / 短线 0 / 中线 1 / 长线 0）；限定在图例内，避开同名 Tab 与统计块。
     const legend = within(screen.getByTestId("holding-legend"));
+    expect(legend.getByText("超短线")).toBeTruthy();
     expect(legend.getByText("短线")).toBeTruthy();
-    expect(legend.getByText("波段")).toBeTruthy();
-    expect(legend.getByText("趋势")).toBeTruthy();
+    expect(legend.getByText("中线")).toBeTruthy();
+    expect(legend.getByText("长线")).toBeTruthy();
     expect(legend.getByText("1")).toBeTruthy();
     // 保本容差说明由后端 flat_tolerance_display 渲染，前端不写死 100。
     expect(screen.getByText(/计为保本/).textContent).toContain("100.00");
@@ -389,7 +393,14 @@ describe("RoundInsights 回合洞察页", () => {
   it("持有期分布空态：无已平仓回合时不渲染图表、不伪造 0 天", async () => {
     const page = makePage();
     if (page.summary) {
-      page.summary.swing = { ...page.summary.swing, closed: 0, short: 0, swing: 0, trend: 0 };
+      page.summary.swing = {
+        ...page.summary.swing,
+        closed: 0,
+        scalp: 0,
+        short: 0,
+        position: 0,
+        long: 0,
+      };
       page.summary.holding_by_pnl = {
         flat_tolerance_display: "100.00",
         classes: page.summary.holding_by_pnl.classes.map((row) => ({

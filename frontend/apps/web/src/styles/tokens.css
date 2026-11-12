@@ -168,6 +168,8 @@
   --chart-warn-underwater: #b45309;
   --chart-warn-drawdown: #6d28d9;
   --chart-warn-sold-early: #a21caf;
+  /* 持有期分桶「长线」：青蓝三档之外新增的靛蓝一档。 */
+  --chart-bucket-long: #3b4a8f;
 
   /* ── 层级 ────────────────────────────────────────── */
   --z-rail: 20;
@@ -274,6 +276,7 @@
   --chart-warn-underwater: #fbbf24;
   --chart-warn-drawdown: #a78bfa;
   --chart-warn-sold-early: #e879f9;
+  --chart-bucket-long: #93a4e8;
 }
 
 /* 对比度偏好：提高边框/次级文字对比（WCAG 2.2 AA 兜底） */

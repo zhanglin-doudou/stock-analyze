@@ -297,9 +297,10 @@ def _summary_out(summary: Any) -> InsightsSummaryOut:
     return InsightsSummaryOut(
         swing=InsightBucketSummaryOut(
             closed=swing.closed,
+            scalp=swing.scalp,
             short=swing.short,
-            swing=swing.swing,
-            trend=swing.trend,
+            position=swing.position,
+            long=swing.long,
             avg_holding_trading_days=swing.avg_holding_trading_days,
             win_rate_pct=swing.win_rate_pct,
             avg_pnl_display=swing.avg_pnl_display,

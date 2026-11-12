@@ -30,9 +30,10 @@ const FLAG_OPTIONS = [
 
 const BUCKET_OPTIONS = [
   { value: "", label: "全部持有期" },
-  { value: "short", label: "短线（≤1 日）" },
-  { value: "swing", label: "波段（2~20 日）" },
-  { value: "trend", label: "趋势（>20 日）" },
+  { value: "scalp", label: "超短线（≤3 日）" },
+  { value: "short", label: "短线（4~10 日）" },
+  { value: "position", label: "中线（11~126 日）" },
+  { value: "long", label: "长线（>126 日）" },
 ];
 
 const SORT_OPTIONS = [
@@ -81,9 +82,10 @@ const FLAG_LABELS: Record<string, string> = {
 };
 
 const BUCKET_LABELS: Record<string, string> = {
-  short: "短线（≤1 日）",
-  swing: "波段（2~20 日）",
-  trend: "趋势（>20 日）",
+  scalp: "超短线（≤3 日）",
+  short: "短线（4~10 日）",
+  position: "中线（11~126 日）",
+  long: "长线（>126 日）",
   unknown: "未知",
 };
 
@@ -98,7 +100,7 @@ interface InsightTab {
 /** 设计 §7.1 的 Tabs：每个 Tab 只映射到既有筛选参数，不额外计算。 */
 const TABS: InsightTab[] = [
   { id: "", label: "回合表现" },
-  { id: "swing", label: "波段", bucket: "swing" },
+  { id: "position", label: "中线", bucket: "position" },
   { id: "addon", label: "抄底", flag: "addon_decline" },
   { id: "sellfly", label: "卖飞", flag: "sold_too_early" },
   { id: "reason", label: "待补理由", hasReason: "false" },

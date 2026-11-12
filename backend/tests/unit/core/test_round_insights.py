@@ -341,10 +341,16 @@ def test_forward_price_jump_flagged() -> None:
     [
         (None, "closed", RoundBucket.UNKNOWN),
         (3, "open", RoundBucket.UNKNOWN),
-        (1, "closed", RoundBucket.SHORT),
-        (2, "closed", RoundBucket.SWING),
-        (20, "closed", RoundBucket.SWING),
-        (21, "closed", RoundBucket.TREND),
+        (0, "closed", RoundBucket.SCALP),
+        (1, "closed", RoundBucket.SCALP),
+        (3, "closed", RoundBucket.SCALP),
+        (4, "closed", RoundBucket.SHORT),
+        (10, "closed", RoundBucket.SHORT),
+        (11, "closed", RoundBucket.POSITION),
+        (63, "closed", RoundBucket.POSITION),
+        (126, "closed", RoundBucket.POSITION),
+        (127, "closed", RoundBucket.LONG),
+        (252, "closed", RoundBucket.LONG),
     ],
 )
 def test_bucket_of(td: int | None, status: str, expected: str) -> None:

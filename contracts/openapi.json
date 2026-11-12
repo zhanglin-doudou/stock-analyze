@@ -3560,12 +3560,20 @@
             "title": "Closed",
             "type": "integer"
           },
-          "short": {
-            "title": "Short",
+          "long": {
+            "title": "Long",
             "type": "integer"
           },
-          "swing": {
-            "title": "Swing",
+          "position": {
+            "title": "Position",
+            "type": "integer"
+          },
+          "scalp": {
+            "title": "Scalp",
+            "type": "integer"
+          },
+          "short": {
+            "title": "Short",
             "type": "integer"
           },
           "total_pnl_display": {
@@ -3578,10 +3586,6 @@
               }
             ],
             "title": "Total Pnl Display"
-          },
-          "trend": {
-            "title": "Trend",
-            "type": "integer"
           },
           "win_rate_pct": {
             "anyOf": [
@@ -3597,9 +3601,10 @@
         },
         "required": [
           "closed",
+          "scalp",
           "short",
-          "swing",
-          "trend"
+          "position",
+          "long"
         ],
         "title": "InsightBucketSummaryOut",
         "type": "object"
@@ -6613,9 +6618,10 @@
         "properties": {
           "bucket": {
             "enum": [
+              "scalp",
               "short",
-              "swing",
-              "trend",
+              "position",
+              "long",
               "unknown"
             ],
             "title": "Bucket",
@@ -6762,9 +6768,10 @@
         "properties": {
           "bucket": {
             "enum": [
+              "scalp",
               "short",
-              "swing",
-              "trend",
+              "position",
+              "long",
               "unknown"
             ],
             "title": "Bucket",
@@ -17805,7 +17812,7 @@
                   "benchmark_id": "hs300_tr",
                   "bucket_basis": "round",
                   "data_as_of": "2026-09-30",
-                  "definition_version": "1.0",
+                  "definition_version": "1.1",
                   "disclaimer": "以下为事后统计，仅用于个人复盘，不构成投资建议；不评价个人能力，不预测收益；相对基准为 hs300_tr ETF 代理；缺失/公司行动显示 —，不显示 0%。",
                   "flag_glossary": [
                     {
@@ -17837,7 +17844,7 @@
                   "item_total": 1,
                   "items": [
                     {
-                      "bucket": "swing",
+                      "bucket": "position",
                       "buy_excess_pct": "8.00%",
                       "buy_trade": {
                         "amount_display": "10005.00",
@@ -18039,7 +18046,7 @@
                       "basis": "benchmark_excess_20d",
                       "combined_avg_pct": "1.65%",
                       "combined_median_pct": "1.65%",
-                      "definition_version": "1.0",
+                      "definition_version": "1.1",
                       "n_eligible": 1,
                       "n_sample": 1,
                       "per_stock": [],
@@ -18079,10 +18086,11 @@
                       "avg_holding_trading_days": "12.0",
                       "avg_pnl_display": "1234.56",
                       "closed": 1,
+                      "long": 0,
+                      "position": 1,
+                      "scalp": 0,
                       "short": 0,
-                      "swing": 1,
                       "total_pnl_display": "1234.56",
-                      "trend": 0,
                       "win_rate_pct": "100.0%"
                     }
                   }
@@ -18875,13 +18883,13 @@
             "content": {
               "application/json": {
                 "example": {
-                  "bucket": "swing",
+                  "bucket": "position",
                   "buy_trade": null,
                   "close_date": "2026-11-18",
                   "disclaimer": "以下为事后统计，仅用于个人复盘，不构成投资建议；不评价个人能力，不预测收益；相对基准为 hs300_tr ETF 代理；缺失/公司行动显示 —，不显示 0%。",
                   "fills": [
                     {
-                      "bucket": "swing",
+                      "bucket": "position",
                       "buy": null,
                       "close_date": "2026-11-18",
                       "fill_id": "fil_01J9Z6ABCDEFGHJKMNPQRSTVWX",

@@ -21,9 +21,10 @@ import "./detail.css";
 import { roundStatusLabel } from "./Rounds";
 
 const BUCKET_LABELS: Record<string, string> = {
-  short: "短线（≤1 日）",
-  swing: "波段（2~20 日）",
-  trend: "趋势（>20 日）",
+  scalp: "超短线（≤3 日）",
+  short: "短线（4~10 日）",
+  position: "中线（11~126 日）",
+  long: "长线（>126 日）",
   unknown: "持有期未知",
 };
 

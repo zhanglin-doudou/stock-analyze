@@ -3,7 +3,7 @@
  *
  * 数据全部来自后端 `summary`，前端只做展示投影：
  * - 统计块：平均持有交易日/胜率/平均盈亏/合计盈亏/回合数（`summary.swing`）；
- * - 饼图：短线/波段/趋势的回合数量（`summary.swing`，分类口径在后端）；
+ * - 饼图：超短线/短线/中线/长线的回合数量（`summary.swing`，分类口径在后端）；
  * - 柱状图：亏损/保本/盈利的平均持有交易日（`summary.holding_by_pnl`，
  *   盈亏判定与「保本」容差都在后端常量里，前端不重算）。
  * nivo 图表懒加载：首屏不解析 `@nivo/pie`、`@nivo/bar`。
@@ -38,9 +38,10 @@ export interface HoldingBarDatum {
 
 /** 饼图图例短文案（仅展示用；分类本身仍以后端 `bucket` 为准）。 */
 const BUCKET_CHART_LABELS: Record<string, string> = {
+  scalp: "超短线",
   short: "短线",
-  swing: "波段",
-  trend: "趋势",
+  position: "中线",
+  long: "长线",
 };
 
 /** 后端未给值（null）时统一显示 `—`，不补 0。 */
@@ -63,22 +64,28 @@ export function buildHoldingCharts(
 ): HoldingChartData {
   const pie: HoldingPieDatum[] = [
     {
+      id: "scalp",
+      label: BUCKET_CHART_LABELS.scalp,
+      value: summary.swing.scalp,
+      color: palette.series.bucket_scalp,
+    },
+    {
       id: "short",
       label: BUCKET_CHART_LABELS.short,
       value: summary.swing.short,
       color: palette.series.bucket_short,
     },
     {
-      id: "swing",
-      label: BUCKET_CHART_LABELS.swing,
-      value: summary.swing.swing,
-      color: palette.series.bucket_swing,
+      id: "position",
+      label: BUCKET_CHART_LABELS.position,
+      value: summary.swing.position,
+      color: palette.series.bucket_position,
     },
     {
-      id: "trend",
-      label: BUCKET_CHART_LABELS.trend,
-      value: summary.swing.trend,
-      color: palette.series.bucket_trend,
+      id: "long",
+      label: BUCKET_CHART_LABELS.long,
+      value: summary.swing.long,
+      color: palette.series.bucket_long,
     },
   ];
   // 无样本的分类（均值为 null）不上柱，避免以 0 冒充「平均持有 0 天」。

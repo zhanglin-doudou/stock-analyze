@@ -6,4 +6,6 @@
 
 from __future__ import annotations
 
-DEFINITION_VERSION = "1.0"
+# 1.1（2026-11-12）：持有期由「短/波段/趋势」改为「超短/短/中/长」四段，
+#     阈值改为 3 / 10 / 126 交易日；旧版前瞻收益缓存随版本号自然失效后重算。
+DEFINITION_VERSION = "1.1"

@@ -147,9 +147,10 @@ class InsightItem:
 @dataclass(slots=True)
 class SummaryBucket:
     closed: int
+    scalp: int
     short: int
-    swing: int
-    trend: int
+    position: int
+    long: int
     avg_holding_trading_days: str | None
     win_rate_pct: str | None
     avg_pnl_display: str | None
@@ -1076,9 +1077,10 @@ def _summary(
     ]
     swing = SummaryBucket(
         closed=len(closed),
+        scalp=sum(1 for item in closed if item.bucket == "scalp"),
         short=sum(1 for item in closed if item.bucket == "short"),
-        swing=sum(1 for item in closed if item.bucket == "swing"),
-        trend=sum(1 for item in closed if item.bucket == "trend"),
+        position=sum(1 for item in closed if item.bucket == "position"),
+        long=sum(1 for item in closed if item.bucket == "long"),
         avg_holding_trading_days=(f"{sum(holdings) / len(holdings):.1f}" if holdings else None),
         win_rate_pct=(f"{win * 100 / len(pnls):.2f}%" if pnls else None),
         avg_pnl_display=_money(sum(pnls) // len(pnls) if pnls else None),

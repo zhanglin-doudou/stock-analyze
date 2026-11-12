@@ -1878,7 +1878,7 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
         "200": {
             "period": "2026-11",
             "period_basis": "close_date",
-            "definition_version": "1.0",
+            "definition_version": "1.1",
             "bucket_basis": "round",
             "data_as_of": _DATE,
             "ranking_as_of": _DATE,
@@ -1888,9 +1888,10 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
             "summary": {
                 "swing": {
                     "closed": 1,
+                    "scalp": 0,
                     "short": 0,
-                    "swing": 1,
-                    "trend": 0,
+                    "position": 1,
+                    "long": 0,
                     "avg_holding_trading_days": "12.0",
                     "win_rate_pct": "100.0%",
                     "avg_pnl_display": "1234.56",
@@ -1968,7 +1969,7 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
                     "quadrant_counts": {"double_positive": 1},
                     "per_stock": [],
                     "basis": "benchmark_excess_20d",
-                    "definition_version": "1.0",
+                    "definition_version": "1.1",
                 },
                 "pending": {"forward_recompute": 0, "reason_missing": 0},
             },
@@ -1982,7 +1983,7 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
                     "close_date": "2026-11-18",
                     "holding_days_legacy": 16,
                     "holding_trading_days": 12,
-                    "bucket": "swing",
+                    "bucket": "position",
                     "pnl": "1234.56",
                     "return_rate_pct": "4.56%",
                     "buy_trade": {
@@ -2164,7 +2165,7 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
             "close_date": "2026-11-18",
             "holding_days_legacy": 16,
             "holding_trading_days": 12,
-            "bucket": "swing",
+            "bucket": "position",
             "pnl": "1234.56",
             "return_rate_pct": "4.56%",
             "buy_trade": None,
@@ -2178,7 +2179,7 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
                     "open_date": "2026-11-02",
                     "close_date": "2026-11-18",
                     "holding_trading_days": 12,
-                    "bucket": "swing",
+                    "bucket": "position",
                     "buy": None,
                     "sell": None,
                 }
@@ -2192,7 +2193,7 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
                 "combined_pct": "6.50%",
                 "quadrant": "double_positive",
                 "basis": "benchmark_excess_20d",
-                "definition_version": "1.0",
+                "definition_version": "1.1",
             },
             "disclaimer": (
                 "以下为事后统计，仅用于个人复盘，不构成投资建议；不评价个人能力，不预测收益；"

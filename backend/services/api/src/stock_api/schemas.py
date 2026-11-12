@@ -1718,7 +1718,7 @@ class RoundInsightItemOut(BaseModel):
     close_date: date | None = None
     holding_days_legacy: int
     holding_trading_days: int | None = None
-    bucket: Literal["short", "swing", "trend", "unknown"]
+    bucket: Literal["scalp", "short", "position", "long", "unknown"]
     pnl: str
     return_rate_pct: str
     buy_trade: TradeSideInsightOut | None = None
@@ -1743,9 +1743,10 @@ class RoundInsightItemOut(BaseModel):
 
 class InsightBucketSummaryOut(BaseModel):
     closed: int
+    scalp: int
     short: int
-    swing: int
-    trend: int
+    position: int
+    long: int
     avg_holding_trading_days: str | None = None
     win_rate_pct: str | None = None
     avg_pnl_display: str | None = None
@@ -1896,7 +1897,7 @@ class RoundInsightDetailOut(BaseModel):
     close_date: date | None = None
     holding_days_legacy: int
     holding_trading_days: int | None = None
-    bucket: Literal["short", "swing", "trend", "unknown"]
+    bucket: Literal["scalp", "short", "position", "long", "unknown"]
     pnl: str
     return_rate_pct: str
     buy_trade: TradeSideInsightOut | None = None

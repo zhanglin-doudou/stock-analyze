@@ -2420,14 +2420,16 @@ export interface components {
             avg_pnl_display?: string | null;
             /** Closed */
             closed: number;
+            /** Long */
+            long: number;
+            /** Position */
+            position: number;
+            /** Scalp */
+            scalp: number;
             /** Short */
             short: number;
-            /** Swing */
-            swing: number;
             /** Total Pnl Display */
             total_pnl_display?: string | null;
-            /** Trend */
-            trend: number;
             /** Win Rate Pct */
             win_rate_pct?: string | null;
         };
@@ -3561,7 +3563,7 @@ export interface components {
              * Bucket
              * @enum {string}
              */
-            bucket: "short" | "swing" | "trend" | "unknown";
+            bucket: "scalp" | "short" | "position" | "long" | "unknown";
             buy_trade?: components["schemas"]["TradeSideInsightOut"] | null;
             /** Close Date */
             close_date?: string | null;
@@ -3612,7 +3614,7 @@ export interface components {
              * Bucket
              * @enum {string}
              */
-            bucket: "short" | "swing" | "trend" | "unknown";
+            bucket: "scalp" | "short" | "position" | "long" | "unknown";
             /** Buy Excess Pct */
             buy_excess_pct?: string | null;
             buy_trade?: components["schemas"]["TradeSideInsightOut"] | null;

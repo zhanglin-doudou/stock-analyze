@@ -267,7 +267,7 @@ async def test_api_092_list_zero_caliber_and_period_basis(client, api_prefix, us
     assert body["period"] == "2026-06"
     assert body["period_basis"] == "close_date"
     assert body["basis"] == "benchmark_excess_20d"
-    assert body["definition_version"] == "1.0"
+    assert body["definition_version"] == "1.1"
     assert body["item_total"] >= 1
     assert "不构成投资建议" in body["disclaimer"]
     assert body["missing"] == [] or set(body["missing"]) <= {
@@ -300,11 +300,11 @@ async def test_api_092_list_zero_caliber_and_period_basis(client, api_prefix, us
 
 
 async def test_api_092_filters_and_include_summary(client, api_prefix, user, scenario):
-    by_bucket = await _list(client, api_prefix, user.headers, "?period=2026-06&bucket=swing")
+    by_bucket = await _list(client, api_prefix, user.headers, "?period=2026-06&bucket=position")
     assert [item["round_id"] for item in by_bucket.json()["items"]] == [
         scenario["round"]["round_id"]
     ]
-    none_bucket = await _list(client, api_prefix, user.headers, "?period=2026-06&bucket=trend")
+    none_bucket = await _list(client, api_prefix, user.headers, "?period=2026-06&bucket=long")
     assert none_bucket.json()["items"] == []
 
     missing_reason = await _list(
@@ -433,7 +433,7 @@ async def test_api_092_ac_s3_fill_pairs_not_added_to_rounds(
     summary = body["summary"]
     assert body["item_total"] == 1
     assert summary["swing"]["closed"] == 1
-    assert summary["swing"]["swing"] == 1
+    assert summary["swing"]["position"] == 1
     assert summary["fill_swing"]["pairs"] == 2
     # fill 与回合是两种统计单位：2 ≠ 1，汇总不得相加（AC-S3）。
     assert summary["swing"]["closed"] != summary["fill_swing"]["pairs"]
@@ -518,7 +518,7 @@ async def test_api_093_detail_and_cross_user_404(client, api_prefix, user, scena
     assert body["fills"][0]["pnl_display"] is not None
     # AC-S3：fill 明细用真实交易日（不是 round.holding_days 的 weekday 近似）。
     assert isinstance(body["fills"][0]["holding_trading_days"], int)
-    assert body["fills"][0]["bucket"] == "swing"
+    assert body["fills"][0]["bucket"] == "position"
     assert isinstance(body["flags"], list)
     assert isinstance(body["quality"], list)
     assert body["ranking"]["basis"] == "benchmark_excess_20d"

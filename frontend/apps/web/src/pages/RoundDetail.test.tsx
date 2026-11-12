@@ -137,7 +137,7 @@ function makeInsight(overrides: Partial<RoundInsightDetail> = {}): RoundInsightD
     close_date: "2026-06-20",
     holding_days_legacy: 14,
     holding_trading_days: 14,
-    bucket: "swing",
+    bucket: "position",
     pnl: "650.00",
     return_rate_pct: "40.62%",
     buy_trade: {

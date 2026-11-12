@@ -15,16 +15,27 @@ CONTINUED_DECLINE_B2 = -3 * 10**6  # -3%
 WORST_CLOSE_DROP = 95  # P_net × 95%
 SELL_FLY_PREMIUM = 103  # P_net × 103%
 
+# 持有期分桶上界（交易日，闭区间；约 21 TD/月、5 TD/周）：
+# 超短线 ≤3、短线 ≤10、中线 ≤126（6 个月），更长归长线。
+BUCKET_SCALP_MAX_TD = 3
+BUCKET_SHORT_MAX_TD = 10
+BUCKET_POSITION_MAX_TD = 126
+
 
 def bucket_of(holding_trading_days: int | None, *, status: str) -> str:
-    """短/波段/趋势分桶；非 closed 或缺日历 → unknown。"""
+    """超短线/短线/中线/长线分桶；非 closed 或缺日历 → unknown。
+
+    区间（交易日，含端点）：超短 0–3、短线 4–10、中线 11–126、长线 ≥127。
+    """
     if status != "closed" or holding_trading_days is None:
         return RoundBucket.UNKNOWN
-    if holding_trading_days <= 1:
+    if holding_trading_days <= BUCKET_SCALP_MAX_TD:
+        return RoundBucket.SCALP
+    if holding_trading_days <= BUCKET_SHORT_MAX_TD:
         return RoundBucket.SHORT
-    if holding_trading_days <= 20:
-        return RoundBucket.SWING
-    return RoundBucket.TREND
+    if holding_trading_days <= BUCKET_POSITION_MAX_TD:
+        return RoundBucket.POSITION
+    return RoundBucket.LONG
 
 
 def is_addon(quantity_before_units: int) -> bool:
