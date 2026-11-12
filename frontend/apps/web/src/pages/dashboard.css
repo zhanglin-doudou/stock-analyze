@@ -638,6 +638,17 @@
   text-decoration: underline;
 }
 
+/* 年度指标「解读」列：文案来自 /metrics/catalog，允许换行且不挤压数值列 */
+.dash-table th.dash-metric-note,
+.dash-table td.dash-metric-note {
+  max-width: 460px;
+  padding-left: var(--s4);
+  font-size: var(--fs-xs);
+  line-height: 1.5;
+  text-align: left;
+  color: var(--text-2);
+}
+
 .dash-foot {
   display: flex;
   flex-wrap: wrap;
@@ -720,9 +731,20 @@
     height: 180px;
   }
 
-  .dash-table th:nth-child(2),
-  .dash-table td:nth-child(2) {
+  /* 持仓表在窄屏隐藏「数量」；指标表保留「值/解读」，隐藏「样本」 */
+  .dash-holdings th:nth-child(2),
+  .dash-holdings td:nth-child(2) {
     display: none;
+  }
+
+  .dash-metrics-table th:nth-child(4),
+  .dash-metrics-table td:nth-child(4) {
+    display: none;
+  }
+
+  .dash-table th.dash-metric-note,
+  .dash-table td.dash-metric-note {
+    max-width: none;
   }
 }
 

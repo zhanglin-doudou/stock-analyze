@@ -15,6 +15,7 @@ import {
   type JobEvent,
   type JobPage,
   type MetricBatch,
+  type MetricCatalog,
   type SectorsOverview,
 } from "@sa/api-client";
 import { Assets } from "./Assets";
@@ -29,7 +30,7 @@ import { api } from "../client";
 vi.mock("../client", () => ({
   api: {
     dashboard: { get: vi.fn(), tradeFlags: vi.fn() },
-    metrics: { batch: vi.fn() },
+    metrics: { batch: vi.fn(), catalog: vi.fn() },
     assets: { chart: vi.fn(), list: vi.fn(), build: vi.fn() },
     jobs: { list: vi.fn(), get: vi.fn(), events: vi.fn() },
     sectors: { overview: vi.fn() },
@@ -43,6 +44,7 @@ vi.mock("@nivo/line", () => ({ ResponsiveLine: () => null }));
 const getDashboard = vi.mocked(api.dashboard.get);
 const getTradeFlags = vi.mocked(api.dashboard.tradeFlags);
 const batchMetrics = vi.mocked(api.metrics.batch);
+const getMetricsCatalog = vi.mocked(api.metrics.catalog);
 const getAssetChart = vi.mocked(api.assets.chart);
 const getSectorsOverview = vi.mocked(api.sectors.overview);
 const listAssets = vi.mocked(api.assets.list);
@@ -326,6 +328,76 @@ function makeMetricBatch(): MetricBatch {
         n: 20,
         n_pending: 0,
         data_as_of: "2026-06-30",
+      },
+      {
+        metric_id: "perf.win_rate",
+        definition_version: "1.0",
+        domain: "perf",
+        period: "2026",
+        status: "ok",
+        sample_status: "ok",
+        reason: null,
+        value: "55.00",
+        unit: "ratio",
+        precision: 2,
+        n: 20,
+        n_pending: 0,
+        data_as_of: "2026-06-30",
+      },
+    ],
+  };
+}
+
+/** API-086 口径说明书：Dashboard 的「解读」列只读这里的 meaning/bands。 */
+function makeMetricCatalog(): MetricCatalog {
+  return {
+    registry_version: "1.0",
+    items: [
+      {
+        metric_id: "perf.total_return",
+        display_name: "累计收益率",
+        display_name_en: "Total return",
+        domain: "perf",
+        direction: "higher_better",
+        unit: "ratio",
+        precision: 2,
+        definition_version: "1.0",
+        scope: { unit: "day", cohort: "all", period: "year" },
+        min_n: 20,
+        ci_min_n: 20,
+        ci: "bootstrap",
+        min_trading_days: 0,
+        window_kind: "month",
+        bands: null,
+        meaning: "本期收益 ÷ 期初资产，为正说明账户赚钱。",
+        method: "期末资产 ÷ 期初资产 - 1。",
+        what_to_do: null,
+        caveat: null,
+      },
+      {
+        metric_id: "perf.win_rate",
+        display_name: "胜率",
+        display_name_en: "Win rate",
+        domain: "perf",
+        direction: "higher_better",
+        unit: "ratio",
+        precision: 2,
+        definition_version: "1.0",
+        scope: { unit: "round", cohort: "all", period: "year" },
+        min_n: 10,
+        ci_min_n: 20,
+        ci: "wilson",
+        min_trading_days: 0,
+        window_kind: "month",
+        bands: [
+          { level: "watch", label: "需关注", from: null, to: "40.00" },
+          { level: "neutral", label: "中性", from: "40.00", to: "55.00" },
+          { level: "good", label: "良好", from: "55.00", to: null },
+        ],
+        meaning: "本月平仓的回合里，盈利回合占比越高，说明出手质量越好。",
+        method: "盈利平仓回合数 ÷ 已平仓回合数。",
+        what_to_do: "查看下钻里的亏损回合，确认亏损是否集中在同一标的。",
+        caveat: "胜率必须与盈亏比联读；经验区间非权威阈值。",
       },
     ],
   };
@@ -747,6 +819,7 @@ beforeEach(() => {
   getDashboard.mockResolvedValue(makeDashboard());
   getTradeFlags.mockResolvedValue(makeTradeFlags());
   batchMetrics.mockResolvedValue(makeMetricBatch());
+  getMetricsCatalog.mockResolvedValue(makeMetricCatalog());
   getAssetChart.mockResolvedValue(makeAssetChart());
   getSectorsOverview.mockImplementation(async ({ taxonomy }) =>
     taxonomy === "concept" ? makeConceptOverview() : makeIndustryOverview(),
@@ -986,6 +1059,15 @@ describe("Dashboard 看板", () => {
     const annual = screen.getByTestId("annual-metrics");
     expect(annual.textContent).toContain("12.34");
     expect(annual.textContent).toContain("元");
+    // 「解读」列文案来自 /metrics/catalog 的 meaning，前端不写死
+    expect(screen.getByText("解读")).toBeTruthy();
+    await screen.findByTestId("annual-metric-note-perf.total_return");
+    expect(screen.getByTestId("annual-metric-note-perf.total_return").textContent).toBe(
+      "本期收益 ÷ 期初资产，为正说明账户赚钱。",
+    );
+    expect(screen.getByTestId("annual-metric-note-perf.win_rate").textContent).toBe(
+      "本月平仓的回合里，盈利回合占比越高，说明出手质量越好。",
+    );
   });
 
   it("FT-04 零口径：源码不含 Number/parseFloat/parseInt/toFixed", () => {
