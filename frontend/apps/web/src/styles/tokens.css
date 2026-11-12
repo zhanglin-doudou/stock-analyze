@@ -164,6 +164,10 @@
   --chart-sell-exit-1: #8f4a5c;
   --chart-sell-exit-2: #b06a79;
   --chart-sell-exit-3: #cd94a0;
+  /* 警示类状态旗标：与买卖两套色系分离，暗色主题自动换更亮的同色相。 */
+  --chart-warn-underwater: #b45309;
+  --chart-warn-drawdown: #6d28d9;
+  --chart-warn-sold-early: #a21caf;
 
   /* ── 层级 ────────────────────────────────────────── */
   --z-rail: 20;
@@ -267,6 +271,9 @@
   --chart-sell-exit-1: #ee9aa8;
   --chart-sell-exit-2: #d97b8c;
   --chart-sell-exit-3: #bb6374;
+  --chart-warn-underwater: #fbbf24;
+  --chart-warn-drawdown: #a78bfa;
+  --chart-warn-sold-early: #e879f9;
 }
 
 /* 对比度偏好：提高边框/次级文字对比（WCAG 2.2 AA 兜底） */

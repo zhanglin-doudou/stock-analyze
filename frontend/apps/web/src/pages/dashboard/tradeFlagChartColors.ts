@@ -25,6 +25,10 @@ const SERIES_TOKENS: Record<string, string> = {
   stop_loss: "--chart-sell-1",
   instant_top: "--chart-sell-2",
   short_term_top: "--chart-sell-3",
+  // 警示类状态旗标：独立色相（琥珀/紫/品红），不与买卖两套色系共用槽位。
+  short_term_underwater: "--chart-warn-underwater",
+  sell_drawdown: "--chart-warn-drawdown",
+  short_term_sold_early: "--chart-warn-sold-early",
   // 柱状图互斥状态（买侧青蓝、卖侧暖红，与折线同色系但独立取槽位）。
   first_entry: "--chart-buy-0",
   addon_average: "--chart-buy-1",

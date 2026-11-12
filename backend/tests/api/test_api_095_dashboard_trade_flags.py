@@ -244,18 +244,34 @@ async def test_api_095_happy_path_monthly_counts(
         "chase",
         "instant_bottom",
         "short_term_bottom",
+        "short_term_underwater",
         "stop_loss",
+        "sell_drawdown",
         "instant_top",
         "short_term_top",
+        "short_term_sold_early",
     ]
-    assert [row["side"] for row in body["series"]] == ["buy", "buy", "buy", "sell", "sell", "sell"]
+    assert [row["side"] for row in body["series"]] == [
+        "buy",
+        "buy",
+        "buy",
+        "buy",
+        "sell",
+        "sell",
+        "sell",
+        "sell",
+        "sell",
+    ]
     assert body["total_labels"] == {"buy": "买入笔数", "sell": "卖出笔数"}
     assert [row["lookahead"] for row in body["series"]] == [
         False,
         False,
         True,
+        True,
         False,
         False,
+        False,
+        True,
         True,
     ]
     # 柱状图口径：买侧首次建仓 + 三加仓；卖侧减仓三态 + 清仓三态（均不是事后指标）。
@@ -322,9 +338,12 @@ async def test_api_095_happy_path_monthly_counts(
         "chase": 2,
         "instant_bottom": 1,
         "short_term_bottom": 0,
+        "short_term_underwater": 0,
         "stop_loss": 1,
+        "sell_drawdown": 0,
         "instant_top": 0,
         "short_term_top": 1,
+        "short_term_sold_early": 0,
     }
     # 互斥状态：b1 均价、b2 抄底、b3 首次建仓；s1 止盈减仓、s2 回本清仓。
     assert _state_counts(june) == {

@@ -636,9 +636,12 @@ function makeTradeFlags(overrides: Partial<DashboardTradeFlagsOut> = {}): Dashbo
     { code: "chase", label_zh: "追涨", label_en: "Chase", side: "buy" as const, lookahead: false },
     { code: "instant_bottom", label_zh: "即时抄底", label_en: "Instant bottom", side: "buy" as const, lookahead: false },
     { code: "short_term_bottom", label_zh: "短期抄底", label_en: "Short-term bottom", side: "buy" as const, lookahead: true },
+    { code: "short_term_underwater", label_zh: "短期被套", label_en: "Short-term underwater", side: "buy" as const, lookahead: true },
     { code: "stop_loss", label_zh: "止损", label_en: "Stop loss", side: "sell" as const, lookahead: false },
+    { code: "sell_drawdown", label_zh: "回撤", label_en: "Drawdown", side: "sell" as const, lookahead: false },
     { code: "instant_top", label_zh: "即时逃顶", label_en: "Instant top", side: "sell" as const, lookahead: false },
     { code: "short_term_top", label_zh: "短期逃顶", label_en: "Short-term top", side: "sell" as const, lookahead: true },
+    { code: "short_term_sold_early", label_zh: "短期卖飞", label_en: "Short-term sold early", side: "sell" as const, lookahead: true },
   ];
   const stateSeries = [
     { code: "first_entry", label_zh: "首次建仓", label_en: "First entry", side: "buy" as const, lookahead: false },
@@ -1296,9 +1299,12 @@ describe("Dashboard 看板", () => {
         chase: "buy-1",
         instant_bottom: "buy-2",
         short_term_bottom: "buy-3",
+        short_term_underwater: "warn-underwater",
         stop_loss: "sell-1",
+        sell_drawdown: "warn-drawdown",
         instant_top: "sell-2",
         short_term_top: "sell-3",
+        short_term_sold_early: "warn-sold-early",
         addon_average: "buy-1",
         addon_dip: "buy-2",
         addon_chase: "buy-3",
@@ -1342,9 +1348,12 @@ describe("Dashboard 看板", () => {
       "追涨",
       "即时抄底",
       "短期抄底",
+      "短期被套",
       "止损",
+      "回撤",
       "即时逃顶",
       "短期逃顶",
+      "短期卖飞",
     ]);
     expect(charts.lineSeries[0]?.data).toEqual([
       { x: "2026-05", y: 0 },
@@ -1354,9 +1363,12 @@ describe("Dashboard 看板", () => {
       "buy-1",
       "buy-2",
       "buy-3",
+      "warn-underwater",
       "sell-1",
+      "warn-drawdown",
       "sell-2",
       "sell-3",
+      "warn-sold-early",
     ]);
     // 单月收益：柱高/展示串/符号/金额全部原样透传，配色只按 sign 选 token。
     expect(charts.returnData).toEqual([

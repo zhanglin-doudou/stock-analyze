@@ -250,7 +250,7 @@ TRADE_FLAG_DEFINITIONS: tuple[TradeFlagDefinition, ...] = (
     ),
     TradeFlagDefinition(
         code="sell_drawdown",
-        label_zh="回撤",
+        label_zh="回撤卖出",
         label_en="Drawdown",
         description_zh=(
             "含费净卖价低于卖出日前 5 个行情日最低收盘价的 1% 以上，"
@@ -336,9 +336,12 @@ TREND_FLAG_CODES: tuple[str, ...] = (
     "chase",
     "instant_bottom",
     "short_term_bottom",
+    "short_term_underwater",
     "stop_loss",
+    "sell_drawdown",
     "instant_top",
     "short_term_top",
+    "short_term_sold_early",
 )
 
 # 看板柱状图口径：买卖两侧的互斥状态（先买后卖，保持堆叠顺序）。
