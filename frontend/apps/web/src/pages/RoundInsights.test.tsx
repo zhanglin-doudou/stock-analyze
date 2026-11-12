@@ -61,7 +61,8 @@ function makePage(overrides: Partial<RoundInsightsPage> = {}): RoundInsightsPage
         bucket: "position",
         pnl: "-650.00",
         return_rate_pct: "-3.25%",
-        flags: ["addon", "continued_decline"],
+        flags: ["bottom_buy", "drawdown"],
+        status_counts: { bottom_buy: 2, stop_loss_sold_early: 0, profit_sold_early: 0 },
         quality: [],
         buy_trade: {
           trade_id: "trd_buy_1",
@@ -240,7 +241,7 @@ describe("RoundInsights 回合洞察页", () => {
     // 卖后 pending → —（不能是 0%）。
     expect(screen.getAllByText("—").length).toBeGreaterThan(0);
     expect(screen.getByText("计划建仓")).toBeTruthy();
-    expect(screen.getAllByText("加仓后下跌").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("止损卖飞").length).toBeGreaterThan(0);
     expect(screen.getByText(/以下为事后统计，仅用于个人复盘/)).toBeTruthy();
     // 设计 AC-P5：页面不露 B0/B1/B2/B3 裸码。
     expect(screen.queryByText(/B0|B1|B2|B3/)).toBeNull();
@@ -425,19 +426,19 @@ it("旗标说明：末尾渲染后端返回的 code 与中英文说明（前端�
     makePage({
       flag_glossary: [
         {
-          code: "addon",
-          label_zh: "加仓",
-          label_en: "Add-on",
-          description_zh: "本回合内有买入发生在已有持仓之后。",
-          description_en: "A buy happened while the security was already held.",
+          code: "bottom_buy",
+          label_zh: "抄底",
+          label_en: "Bottom buy",
+          description_zh: "回合内命中即时抄底或短期抄底的买入账单个数。",
+          description_en: "Number of buy bills flagged as an instant or short-term bottom.",
           kind: "item_flag",
         },
         {
-          code: "addon_decline",
-          label_zh: "加仓后下跌",
-          label_en: "Add-on then decline",
-          description_zh: "同时命中 addon 与 continued_decline。",
-          description_en: "Both addon and continued_decline.",
+          code: "sold_too_early",
+          label_zh: "卖飞",
+          label_en: "Sold too early (any)",
+          description_zh: "查询别名：命中止损卖飞或止盈卖飞。",
+          description_en: "Query alias for stop-loss or profit sold too early.",
           kind: "filter_alias",
         },
       ],
@@ -447,7 +448,7 @@ it("旗标说明：末尾渲染后端返回的 code 与中英文说明（前端�
 
   const section = await screen.findByTestId("flag-glossary");
   expect(section.textContent).toContain("旗标说明");
-  expect(section.textContent).toContain("addon");
-  expect(section.textContent).toContain("本回合内有买入发生在已有持仓之后。");
-  expect(section.textContent).toContain("A buy happened while the security was already held.");
+  expect(section.textContent).toContain("bottom_buy");
+  expect(section.textContent).toContain("回合内命中即时抄底或短期抄底的买入账单个数。");
+  expect(section.textContent).toContain("Number of buy bills flagged as an instant or short-term bottom.");
 });

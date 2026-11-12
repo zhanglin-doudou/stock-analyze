@@ -3605,6 +3605,10 @@ export interface components {
             sell_trade?: components["schemas"]["TradeSideInsightOut"] | null;
             /** Status */
             status: string;
+            /** Status Counts */
+            status_counts?: {
+                [key: string]: number;
+            };
             /** Trade Flag Glossary */
             trade_flag_glossary?: components["schemas"]["TradeFlagGlossaryOut"][];
         };
@@ -3670,6 +3674,10 @@ export interface components {
             sell_trade?: components["schemas"]["TradeSideInsightOut"] | null;
             /** Status */
             status: string;
+            /** Status Counts */
+            status_counts?: {
+                [key: string]: number;
+            };
         };
         /** RoundInsightsPageOut */
         RoundInsightsPageOut: {

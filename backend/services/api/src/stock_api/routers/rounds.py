@@ -269,6 +269,7 @@ def _item_out(item: Any) -> RoundInsightItemOut:
         quadrant=item.quadrant,
         flags=item.flags,
         quality=list(dict.fromkeys(item.quality)),
+        status_counts=item.status_counts,
         missed_profit_worst_display=(
             str(Money(item.missed_profit_worst_units))
             if item.missed_profit_worst_units is not None
@@ -502,6 +503,7 @@ async def get_round_insights_endpoint(
         fills=fills,
         flags=detail.flags,
         quality=list(dict.fromkeys(detail.quality)),
+        status_counts=detail.status_counts,
         ranking=detail.ranking,
         disclaimer=detail.disclaimer,
         flag_glossary=_glossary_out(detail.flag_glossary),

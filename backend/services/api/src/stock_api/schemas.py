@@ -1730,6 +1730,8 @@ class RoundInsightItemOut(BaseModel):
     quadrant: str | None = None
     flags: list[str] = Field(default_factory=list)
     quality: list[str] = Field(default_factory=list)
+    # 计数型状态：bottom_buy / stop_loss_sold_early / profit_sold_early 固定三键（可为 0）。
+    status_counts: dict[str, int] = Field(default_factory=dict)
     missed_profit_worst_display: str | None = None
     missed_profit_end_display: str | None = None
     # additive：绝对值展示串 + 符号语义标签（少赚/多赚），前端只渲染不判符号。
@@ -1905,6 +1907,7 @@ class RoundInsightDetailOut(BaseModel):
     fills: list[dict[str, Any]] = Field(default_factory=list)
     flags: list[str] = Field(default_factory=list)
     quality: list[str] = Field(default_factory=list)
+    status_counts: dict[str, int] = Field(default_factory=dict)
     ranking: dict[str, Any] = Field(default_factory=dict)
     disclaimer: str
     flag_glossary: list[FlagGlossaryOut] = Field(default_factory=list)

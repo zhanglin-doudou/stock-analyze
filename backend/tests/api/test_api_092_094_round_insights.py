@@ -171,9 +171,13 @@ async def test_api_092_summary_addon_serialized(client, api_prefix, user, addon_
     assert resp.status_code == 200, resp.text
     body = resp.json()
     item = body["items"][0]
-    assert {"addon", "below_avg", "stop_loss_rebound"} <= set(item["flags"])
-    # 加仓笔（100 股 @50）买后上涨，不再误打「加仓后下跌」。
-    assert "continued_decline" not in item["flags"]
+    assert {"bottom_buy", "stop_loss_sold_early", "drawdown"} <= set(item["flags"])
+    # 旧旗标不再输出。
+    assert not {"addon", "below_avg", "profit_take_fly", "stop_loss_rebound"} & set(item["flags"])
+    # 计数型状态：抄底账单 1 笔（100 股 @50），卖出带短期卖飞旗标且低于均价 → 止损侧 1 笔。
+    assert item["status_counts"]["bottom_buy"] == 1
+    assert item["status_counts"]["stop_loss_sold_early"] == 1
+    assert item["status_counts"]["profit_sold_early"] == 0
     assert item["buy_trade"]["trade_id"] == "trd_addon000002"
     # 逐笔数量取 trade.quantity_units 的展示串（整数份额，不带尾零；此前该字段硬编码为 None）。
     assert item["buy_trade"]["quantity_display"] == "50"
@@ -211,8 +215,8 @@ async def test_api_092_summary_sell_fly_serialized(client, api_prefix, user, sel
     body = resp.json()
     all_flags = [flag for item in body["items"] for flag in item["flags"]]
     assert body["summary"]["swing"]["closed"] == 2
-    assert "profit_take_fly" in all_flags
-    assert "stop_loss_rebound" in all_flags
+    assert "profit_sold_early" in all_flags
+    assert "stop_loss_sold_early" in all_flags
 
     sell_fly = body["summary"]["sell_fly"]
     assert sell_fly["sell_count"] == 2
@@ -231,7 +235,7 @@ async def test_api_092_summary_sell_fly_serialized(client, api_prefix, user, sel
     assert sell_fly["missed_profit_end_abs_display"] == "161275.00"
     assert sell_fly["missed_profit_end_label"] == "少赚"
     # 逐项同样带标签，便于前端直接渲染。
-    fly_item = next(item for item in body["items"] if "profit_take_fly" in item["flags"])
+    fly_item = next(item for item in body["items"] if "profit_sold_early" in item["flags"])
     assert fly_item["missed_profit_end_label"] == "少赚"
     assert fly_item["missed_profit_worst_abs_display"] == fly_item["missed_profit_worst_display"]
 
@@ -267,7 +271,7 @@ async def test_api_092_list_zero_caliber_and_period_basis(client, api_prefix, us
     assert body["period"] == "2026-06"
     assert body["period_basis"] == "close_date"
     assert body["basis"] == "benchmark_excess_20d"
-    assert body["definition_version"] == "1.1"
+    assert body["definition_version"] == "1.2"
     assert body["item_total"] >= 1
     assert "不构成投资建议" in body["disclaimer"]
     assert body["missing"] == [] or set(body["missing"]) <= {
@@ -913,22 +917,21 @@ async def test_api_092_addon_uses_statement_order_not_trade_id(
     assert set(by_open) == {"2026-05-06", "2026-05-07"}
     reopening = by_open["2026-05-07"]
     assert reopening["buy_trade"]["trade_id"] == "trd_aaaa00000003"
-    assert "addon" not in reopening["flags"]
-    assert "below_avg" not in reopening["flags"]
-    assert "dip_sequence" not in reopening["flags"]
+    # 新回合首笔买入（qty_before=0）为抄底笔；加仓已不再是输出旗标。
+    assert reopening["status_counts"]["bottom_buy"] == 1
     # 同源统计：本场景没有任何加仓，summary.addon 必须为 0。
     assert body["summary"]["addon"]["count"] == 0
     assert body["summary"]["addon"]["rounds"] == 0
 
 
 async def test_api_092_093_flag_glossary_serialized(client, api_prefix, user, sell_fly_scenario):
-    """旗标词表：列表与详情同源透出 16 个枚举值，且覆盖响应中出现的全部 item flags。"""
+    """旗标词表：列表与详情同源透出 12 个枚举值，且覆盖响应中出现的全部 item flags。"""
     resp = await _list(client, api_prefix, user.headers, "?period=2026-07")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     glossary = body["flag_glossary"]
-    assert len(glossary) == 16
-    assert len({entry["code"] for entry in glossary}) == 16
+    assert len(glossary) == 12
+    assert len({entry["code"] for entry in glossary}) == 12
     for entry in glossary:
         assert set(entry) == {
             "code",
@@ -945,8 +948,10 @@ async def test_api_092_093_flag_glossary_serialized(client, api_prefix, user, se
     glossary_codes = {entry["code"] for entry in glossary}
     observed_flags = {flag for item in body["items"] for flag in item["flags"]}
     assert observed_flags <= glossary_codes
-    assert {"addon", "profit_take_fly", "stop_loss_rebound"} <= glossary_codes
-    assert {"addon_decline", "sold_too_early"} <= glossary_codes
+    assert {"bottom_buy", "stop_loss_sold_early", "profit_sold_early"} <= glossary_codes
+    assert {"sold_too_early", "reason_missing", "horizon_pending", "corporate_action"} <= (
+        glossary_codes
+    )
 
     detail = await _detail(client, api_prefix, user.headers, body["items"][0]["round_id"])
     assert detail.status_code == 200, detail.text

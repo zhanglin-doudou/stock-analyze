@@ -36,17 +36,14 @@ const QUADRANT_LABELS: Record<string, string> = {
 };
 
 const FLAG_LABELS: Record<string, string> = {
-  addon: "加仓",
-  dip_sequence: "越跌越买",
-  below_avg: "低于均价加仓",
-  continued_decline: "加仓后下跌",
-  profit_taking: "止盈",
-  profit_take_fly: "卖飞",
-  stop_loss_rebound: "止损后反弹",
-  rising_sell_sequence: "越涨越卖",
-  full_exit: "清仓",
-  partial_exit: "部分卖出",
-  same_day: "当日回转",
+  bottom_buy: "抄底",
+  stop_loss_sold_early: "止损卖飞",
+  profit_sold_early: "止盈卖飞",
+  drawdown: "收益回撤",
+  intraday_t: "日内做T",
+  swing_t: "波段做T",
+  intraday_rebalance_out: "日内调仓卖出",
+  intraday_rebalance_in: "日内调仓买入",
 };
 
 interface RankingDetail {
@@ -89,6 +86,16 @@ function text(value: string | null | undefined): string {
 
 function flagLabel(flag: string): string {
   return FLAG_LABELS[flag] ?? flag;
+}
+
+/** 计数型状态在 chips 里带 ×N；其余旗标只显示文案（数值全部由后端给出）。 */
+const COUNT_FLAGS = new Set(["bottom_buy", "stop_loss_sold_early", "profit_sold_early"]);
+
+function flagText(flag: string, counts?: Record<string, number>): string {
+  const count = counts?.[flag];
+  return COUNT_FLAGS.has(flag) && typeof count === "number"
+    ? `${flagLabel(flag)}×${count}`
+    : flagLabel(flag);
 }
 
 function statusLabel(status: string): string {
@@ -565,7 +572,7 @@ export function RoundDetail() {
                     <span className="chips">
                       {insight.flags.map((flag) => (
                         <span key={flag} className="chip">
-                          {flagLabel(flag)}
+                          {flagText(flag, insight.status_counts)}
                         </span>
                       ))}
                     </span>

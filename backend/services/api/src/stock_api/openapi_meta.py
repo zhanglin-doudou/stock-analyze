@@ -1878,7 +1878,7 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
         "200": {
             "period": "2026-11",
             "period_basis": "close_date",
-            "definition_version": "1.1",
+            "definition_version": "1.2",
             "bucket_basis": "round",
             "data_as_of": _DATE,
             "ranking_as_of": _DATE,
@@ -1969,7 +1969,7 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
                     "quadrant_counts": {"double_positive": 1},
                     "per_stock": [],
                     "basis": "benchmark_excess_20d",
-                    "definition_version": "1.1",
+                    "definition_version": "1.2",
                 },
                 "pending": {"forward_recompute": 0, "reason_missing": 0},
             },
@@ -2103,8 +2103,13 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
                     "combined_pct": None,
                     "rank": None,
                     "quadrant": None,
-                    "flags": ["addon", "profit_taking", "full_exit"],
+                    "flags": ["bottom_buy", "stop_loss_sold_early", "drawdown"],
                     "quality": ["forward_incomplete"],
+                    "status_counts": {
+                        "bottom_buy": 2,
+                        "stop_loss_sold_early": 1,
+                        "profit_sold_early": 0,
+                    },
                     "missed_profit_worst_display": "1010.00",
                     "missed_profit_end_display": "510.00",
                     "missed_profit_worst_abs_display": "1010.00",
@@ -2125,30 +2130,43 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
             ),
             "flag_glossary": [
                 {
-                    "code": "addon",
-                    "label_zh": "加仓",
-                    "label_en": "Add-on",
+                    "code": "bottom_buy",
+                    "label_zh": "抄底",
+                    "label_en": "Bottom buy",
                     "description_zh": (
-                        "本回合内有买入发生在已有持仓之后（按流水发生顺序推演，"
-                        "同日多笔以文件行号排序）；回合的第一笔建仓不算加仓。"
+                        "回合内命中「即时抄底」或「短期抄底」账单旗标的买入账单个数；"
+                        "同一笔账单同时命中两者只计 1 次。"
                     ),
-                    "description_en": "A buy inside this round happened while the security was already held.",
+                    "description_en": (
+                        "Number of buy bills in the round flagged as either an instant bottom "
+                        "or a short-term bottom; a bill hitting both is counted once."
+                    ),
                     "kind": "item_flag",
                 },
                 {
-                    "code": "profit_take_fly",
+                    "code": "stop_loss_sold_early",
+                    "label_zh": "止损卖飞",
+                    "label_en": "Stop-loss sold too early",
+                    "description_zh": (
+                        "回合内带「短期卖飞」账单旗标、且含费净卖价低于（含等于）卖出前"
+                        "持仓含费均价的卖出账单次数。"
+                    ),
+                    "description_en": (
+                        "Number of sell bills flagged as short-term sold-early whose net sell "
+                        "price is at or below the average cost before the sale."
+                    ),
+                    "kind": "item_flag",
+                },
+                {
+                    "code": "sold_too_early",
                     "label_zh": "卖飞",
-                    "label_en": "Sold too early",
-                    "description_zh": "止盈卖出后 20 个交易日最高收盘 > 净卖价 × 1.03。",
-                    "description_en": "After a profitable sale, the 20-day highest close exceeded the net sell price by more than 3%.",
-                    "kind": "item_flag",
-                },
-                {
-                    "code": "addon_decline",
-                    "label_zh": "加仓后下跌",
-                    "label_en": "Add-on then decline",
-                    "description_zh": "查询别名：同时命中 `addon` 与 `continued_decline`。",
-                    "description_en": "Query alias matching rounds flagged with both `addon` and `continued_decline`.",
+                    "label_en": "Sold too early (any)",
+                    "description_zh": (
+                        "查询别名：命中 `stop_loss_sold_early` 或 `profit_sold_early`。"
+                    ),
+                    "description_en": (
+                        "Query alias matching `stop_loss_sold_early` or `profit_sold_early`."
+                    ),
                     "kind": "filter_alias",
                 },
             ],
@@ -2184,8 +2202,13 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
                     "sell": None,
                 }
             ],
-            "flags": ["swing", "profit_taking"],
+            "flags": ["bottom_buy", "profit_sold_early", "intraday_t"],
             "quality": [],
+            "status_counts": {
+                "bottom_buy": 1,
+                "stop_loss_sold_early": 0,
+                "profit_sold_early": 1,
+            },
             "ranking": {
                 "rank": None,
                 "buy_excess_pct": "8.00%",
@@ -2193,7 +2216,7 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
                 "combined_pct": "6.50%",
                 "quadrant": "double_positive",
                 "basis": "benchmark_excess_20d",
-                "definition_version": "1.1",
+                "definition_version": "1.2",
             },
             "disclaimer": (
                 "以下为事后统计，仅用于个人复盘，不构成投资建议；不评价个人能力，不预测收益；"
@@ -2201,30 +2224,43 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
             ),
             "flag_glossary": [
                 {
-                    "code": "addon",
-                    "label_zh": "加仓",
-                    "label_en": "Add-on",
+                    "code": "bottom_buy",
+                    "label_zh": "抄底",
+                    "label_en": "Bottom buy",
                     "description_zh": (
-                        "本回合内有买入发生在已有持仓之后（按流水发生顺序推演，"
-                        "同日多笔以文件行号排序）；回合的第一笔建仓不算加仓。"
+                        "回合内命中「即时抄底」或「短期抄底」账单旗标的买入账单个数；"
+                        "同一笔账单同时命中两者只计 1 次。"
                     ),
-                    "description_en": "A buy inside this round happened while the security was already held.",
+                    "description_en": (
+                        "Number of buy bills in the round flagged as either an instant bottom "
+                        "or a short-term bottom; a bill hitting both is counted once."
+                    ),
                     "kind": "item_flag",
                 },
                 {
-                    "code": "profit_take_fly",
+                    "code": "stop_loss_sold_early",
+                    "label_zh": "止损卖飞",
+                    "label_en": "Stop-loss sold too early",
+                    "description_zh": (
+                        "回合内带「短期卖飞」账单旗标、且含费净卖价低于（含等于）卖出前"
+                        "持仓含费均价的卖出账单次数。"
+                    ),
+                    "description_en": (
+                        "Number of sell bills flagged as short-term sold-early whose net sell "
+                        "price is at or below the average cost before the sale."
+                    ),
+                    "kind": "item_flag",
+                },
+                {
+                    "code": "sold_too_early",
                     "label_zh": "卖飞",
-                    "label_en": "Sold too early",
-                    "description_zh": "止盈卖出后 20 个交易日最高收盘 > 净卖价 × 1.03。",
-                    "description_en": "After a profitable sale, the 20-day highest close exceeded the net sell price by more than 3%.",
-                    "kind": "item_flag",
-                },
-                {
-                    "code": "addon_decline",
-                    "label_zh": "加仓后下跌",
-                    "label_en": "Add-on then decline",
-                    "description_zh": "查询别名：同时命中 `addon` 与 `continued_decline`。",
-                    "description_en": "Query alias matching rounds flagged with both `addon` and `continued_decline`.",
+                    "label_en": "Sold too early (any)",
+                    "description_zh": (
+                        "查询别名：命中 `stop_loss_sold_early` 或 `profit_sold_early`。"
+                    ),
+                    "description_en": (
+                        "Query alias matching `stop_loss_sold_early` or `profit_sold_early`."
+                    ),
                     "kind": "filter_alias",
                 },
             ],

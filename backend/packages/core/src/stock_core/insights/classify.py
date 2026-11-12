@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from collections.abc import Sequence
-from itertools import pairwise
+from datetime import date
 
 from stock_contracts.enums import RoundBucket
 
@@ -14,6 +14,11 @@ from stock_contracts.enums import RoundBucket
 CONTINUED_DECLINE_B2 = -3 * 10**6  # -3%
 WORST_CLOSE_DROP = 95  # P_net × 95%
 SELL_FLY_PREMIUM = 103  # P_net × 103%
+DRAWDOWN_DISCOUNT = 95  # 平均卖价 < 区间最高收盘 × 95%
+
+# 卖飞分侧（账单旗标 `short_term_sold_early` 命中后，按净卖价与卖出前均价比较）。
+SOLD_EARLY_STOP_LOSS = "stop_loss"
+SOLD_EARLY_PROFIT = "profit"
 
 # 持有期分桶上界（交易日，闭区间；约 21 TD/月、5 TD/周）：
 # 超短线 ≤3、短线 ≤10、中线 ≤126（6 个月），更长归长线。
@@ -43,32 +48,71 @@ def is_addon(quantity_before_units: int) -> bool:
     return quantity_before_units > 0
 
 
-def is_below_avg(price_net_units: int, avg_cost_net_units: int | None) -> bool:
-    """净价低于持仓均价；`None`（无成本数据）或负成本（异常）不判定，零成本恒不成立。"""
+def sold_early_side(price_net_sell_units: int, avg_cost_net_units: int | None) -> str | None:
+    """卖飞分侧：净卖价 ≤ 卖出前均价 → 止损侧（含等号）；严格高于 → 止盈侧。
+
+    成本缺失（`None`）或负成本（异常）无法分侧 → `None`；零成本是有效成本，
+    任意正卖价归止盈侧。
+    """
     if avg_cost_net_units is None or avg_cost_net_units < 0:
-        return False
-    return price_net_units < avg_cost_net_units
-
-
-def dip_depth_units(price_net_units: int, avg_cost_net_units: int | None) -> int | None:
-    """`(avg − P_net)/avg`（scale 1e-8）；成本缺失、为零（无法归一）或为负 → None。"""
-    if avg_cost_net_units is None or avg_cost_net_units <= 0:
         return None
-    return (avg_cost_net_units - price_net_units) * 10**8 // avg_cost_net_units
+    if price_net_sell_units <= avg_cost_net_units:
+        return SOLD_EARLY_STOP_LOSS
+    return SOLD_EARLY_PROFIT
 
 
-def is_dip_sequence(prices_net_units: Sequence[int]) -> bool:
-    """越跌越买：至少 2 次加仓且净买价逐次更低。"""
-    return len(prices_net_units) >= 2 and all(
-        later < earlier for earlier, later in pairwise(prices_net_units)
-    )
+def is_round_drawdown(avg_sell_net_units: int | None, max_close_units: int | None) -> bool:
+    """收益回撤：数量加权平均卖价严格低于区间最高收盘的 95%。"""
+    if avg_sell_net_units is None or max_close_units is None:
+        return False
+    if avg_sell_net_units <= 0 or max_close_units <= 0:
+        return False
+    return avg_sell_net_units * 100 < max_close_units * DRAWDOWN_DISCOUNT
 
 
-def is_rise_sequence(prices_net_units: Sequence[int]) -> bool:
-    """越涨越卖：至少 2 次卖出且净卖价逐次更高。"""
-    return len(prices_net_units) >= 2 and all(
-        later > earlier for earlier, later in pairwise(prices_net_units)
-    )
+def is_partial_sell(quantity_units: int, quantity_before_units: int) -> bool:
+    """部分卖出：卖出数量大于 0 且严格小于卖出前持仓。"""
+    return 0 < quantity_units < quantity_before_units
+
+
+def detect_t_patterns(
+    events: Sequence[tuple[date, str, int, int]],
+) -> tuple[bool, bool]:
+    """识别日内做T / 波段做T。
+
+    `events` 为本回合当前证券的账单，按 FIFO 稳定序排列，元素为
+    `(交易日, 方向, 卖出数量, 卖出前持仓数量)`（买入笔后两个数量可忽略）。
+    对每笔「部分卖出」取其后第一笔买入：同日 → 日内做T；更晚交易日 → 波段做T。
+    同一笔卖出只按其后第一笔买入归类，已被日内配对的不再计入波段。
+    """
+    intraday = False
+    swing = False
+    for index, (day, side, quantity, quantity_before) in enumerate(events):
+        if side != "sell" or not is_partial_sell(quantity, quantity_before):
+            continue
+        for next_day, next_side, _, _ in events[index + 1 :]:
+            if next_side != "buy":
+                continue
+            if next_day == day:
+                intraday = True
+            else:
+                swing = True
+            break
+    return intraday, swing
+
+
+def has_same_day_after(
+    earlier: Sequence[tuple[date, int]], later: Sequence[tuple[date, int]]
+) -> bool:
+    """`earlier` 中任一事件之后（同日、全局序号更大）存在 `later` 事件。
+
+    用于日内调仓：先卖当前证券再看同日其它证券的买入，或先看同日其它证券的卖出
+    再看当前证券的买入。序号取同一份 FIFO 稳定序的全局下标，保证「先后」可判定。
+    """
+    for day, index in earlier:
+        if any(other_day == day and other_index > index for other_day, other_index in later):
+            return True
+    return False
 
 
 def is_profit_taking(price_net_sell_units: int, avg_cost_net_units: int | None) -> bool:

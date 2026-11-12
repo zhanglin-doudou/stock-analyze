@@ -21,8 +21,15 @@ import { HoldingCharts } from "./rounds/HoldingCharts";
 /** 设计 §6.3 的 `flag` 词表（前端只做筛选选择，不参与计算）。 */
 const FLAG_OPTIONS = [
   { value: "", label: "全部" },
-  { value: "addon_decline", label: "加仓后下跌" },
-  { value: "sold_too_early", label: "卖飞" },
+  { value: "bottom_buy", label: "抄底" },
+  { value: "stop_loss_sold_early", label: "止损卖飞" },
+  { value: "profit_sold_early", label: "止盈卖飞" },
+  { value: "sold_too_early", label: "卖飞（全部）" },
+  { value: "drawdown", label: "收益回撤" },
+  { value: "intraday_t", label: "日内做T" },
+  { value: "swing_t", label: "波段做T" },
+  { value: "intraday_rebalance_out", label: "日内调仓卖出" },
+  { value: "intraday_rebalance_in", label: "日内调仓买入" },
   { value: "reason_missing", label: "缺理由" },
   { value: "horizon_pending", label: "前瞻待算" },
   { value: "corporate_action", label: "公司行动" },
@@ -68,17 +75,14 @@ function parseSecurityTypes(raw: string | null): string[] {
 }
 
 const FLAG_LABELS: Record<string, string> = {
-  addon: "加仓",
-  dip_sequence: "越跌越买",
-  below_avg: "低于均价加仓",
-  continued_decline: "加仓后下跌",
-  profit_taking: "止盈",
-  profit_take_fly: "卖飞",
-  stop_loss_rebound: "止损后反弹",
-  rising_sell_sequence: "越涨越卖",
-  full_exit: "清仓",
-  partial_exit: "部分卖出",
-  same_day: "当日回转",
+  bottom_buy: "抄底",
+  stop_loss_sold_early: "止损卖飞",
+  profit_sold_early: "止盈卖飞",
+  drawdown: "收益回撤",
+  intraday_t: "日内做T",
+  swing_t: "波段做T",
+  intraday_rebalance_out: "日内调仓卖出",
+  intraday_rebalance_in: "日内调仓买入",
 };
 
 const BUCKET_LABELS: Record<string, string> = {
@@ -101,7 +105,7 @@ interface InsightTab {
 const TABS: InsightTab[] = [
   { id: "", label: "回合表现" },
   { id: "position", label: "中线", bucket: "position" },
-  { id: "addon", label: "抄底", flag: "addon_decline" },
+  { id: "addon", label: "抄底", flag: "bottom_buy" },
   { id: "sellfly", label: "卖飞", flag: "sold_too_early" },
   { id: "reason", label: "待补理由", hasReason: "false" },
 ];
@@ -153,6 +157,16 @@ function text(value: string | null | undefined): string {
 
 function flagLabel(flag: string): string {
   return FLAG_LABELS[flag] ?? flag;
+}
+
+/** 计数型状态在 chips 里带 ×N；其余旗标只显示文案（数值全部由后端给出）。 */
+const COUNT_FLAGS = new Set(["bottom_buy", "stop_loss_sold_early", "profit_sold_early"]);
+
+function flagText(flag: string, counts?: Record<string, number>): string {
+  const count = counts?.[flag];
+  return COUNT_FLAGS.has(flag) && typeof count === "number"
+    ? `${flagLabel(flag)}×${count}`
+    : flagLabel(flag);
 }
 
 /** 回合洞察（/rounds/insights）：事后统计，只渲染后端产出字符串（前端零口径）。 */
@@ -337,7 +351,7 @@ export function RoundInsights() {
           <span className="chips">
             {row.flags.map((item, index) => (
               <span key={item} className="chip">
-                {flagLabel(item)}
+                {flagText(item, row.status_counts)}
                 {index + 1 !== row.flags?.length && <span>, </span>}
               </span>
             ))}

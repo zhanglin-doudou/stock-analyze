@@ -161,7 +161,8 @@ function makeInsight(overrides: Partial<RoundInsightDetail> = {}): RoundInsightD
       forward: { "20": { ...forward, status: "pending", b1_pct: null, b2_pct: null, b3_pct: null } },
     },
     fills: [],
-    flags: ["profit_taking", "profit_take_fly"],
+    flags: ["bottom_buy", "stop_loss_sold_early", "drawdown"],
+    status_counts: { bottom_buy: 2, stop_loss_sold_early: 1, profit_sold_early: 0 },
     quality: ["SAMPLE_INSUFFICIENT"],
     ranking: {
       rank: 12,
@@ -469,7 +470,8 @@ describe("RoundDetail 回合详情页", () => {
     expect(await screen.findByText("买卖流水与事后表现")).toBeTruthy();
     expect(screen.getByText("事后标注")).toBeTruthy();
     expect(screen.getByText("业绩超预期")).toBeTruthy();
-    expect(screen.getByText("卖飞")).toBeTruthy();
+    expect(screen.getByText("抄底×2")).toBeTruthy();
+    expect(screen.getByText("收益回撤")).toBeTruthy();
     expect(screen.getByText("买入后相对基准（20 日）")).toBeTruthy();
     expect(screen.getAllByText("-1.10%").length).toBeGreaterThan(0);
   });
@@ -602,11 +604,11 @@ it("旗标说明：详情页末尾渲染后端返回的 code 与中英文说明"
     makeInsight({
       flag_glossary: [
         {
-          code: "profit_take_fly",
-          label_zh: "卖飞",
-          label_en: "Sold too early",
-          description_zh: "止盈后 20 日最高收盘高出净卖价 3% 以上。",
-          description_en: "The 20-day high exceeded the net sell price by more than 3%.",
+          code: "bottom_buy",
+          label_zh: "抄底",
+          label_en: "Bottom buy",
+          description_zh: "回合内命中即时抄底或短期抄底的买入账单个数。",
+          description_en: "Number of buy bills flagged as an instant or short-term bottom.",
           kind: "item_flag",
         },
       ],
@@ -615,7 +617,7 @@ it("旗标说明：详情页末尾渲染后端返回的 code 与中英文说明"
   renderDetail();
 
   const section = await screen.findByTestId("flag-glossary");
-  expect(section.textContent).toContain("profit_take_fly");
-  expect(section.textContent).toContain("止盈后 20 日最高收盘高出净卖价 3% 以上。");
-  expect(section.textContent).toContain("The 20-day high exceeded the net sell price by more than 3%.");
+  expect(section.textContent).toContain("bottom_buy");
+  expect(section.textContent).toContain("回合内命中即时抄底或短期抄底的买入账单个数。");
+  expect(section.textContent).toContain("Number of buy bills flagged as an instant or short-term bottom.");
 });
