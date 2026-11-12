@@ -481,7 +481,7 @@
   - `drawdown`（收益回撤，布尔）：回合内按数量加权的平均卖出价 < 区间最高收盘 × 95%（**严格**）；区间为「首笔买入日（含）至末笔卖出日（不含）」，即排除卖出当日。
   - `intraday_t`（日内做T，布尔）：同一交易日内先部分卖出（卖出数量严格小于卖出前持仓）再买入同一证券。
   - `swing_t`（波段做T，布尔）：回合内部分卖出后在更晚交易日再买入；同一笔卖出当日已被买入配对的（日内做T）不重复计入。
-  - `intraday_rebalance_out` / `intraday_rebalance_in`（日内调仓卖出/买入，布尔）：回合内先卖出当前证券、同日再买入其它证券 / 先卖出其它证券、同日再买入当前证券。判定范围为**当前用户同日全部流水、不按账户切分**（退化口径：所有账户合并为一条时间线）。
+  - `intraday_rebalance_out` / `intraday_rebalance_in`（日内调仓卖出/买入，布尔）：回合内先卖出当前证券、同日再买入其它证券 / 先卖出其它证券、同日再买入当前证券。判定范围为**当前用户同日全部流水、不按账户切分**（退化口径：所有账户合并为一条时间线），但对手方只认**真实二级市场证券成交**（2026-11-12 收紧）：`CASH` 资金行（转账/费用/利息/红利税补缴）、公司行动（分红/送转/配股）、新股申购与货基申赎（`money_fund_balance_units` 非空，如 940018）都不算「买入/卖出其它证券」；只判方向与全局行序，不要求金额匹配（清仓换股仍计为调仓卖出）。
   - `sold_too_early`（别名）= `stop_loss_sold_early > 0 或 profit_sold_early > 0`；`reason_missing`/`horizon_pending`/`corporate_action` 三个别名口径不变。
   - 账单级旗标（即时抄底/短期抄底/短期卖飞）在洞察读路径内联重算，行情回看比账单最早交易日多取 45 天，与账单旗标月度构建同口径。
 - 盈亏 × 持有期（2026-11-10，additive）：`summary.holding_by_pnl{flat_tolerance_display, classes[]}` 为「持有期分布」图表数据源。`classes[]` **恒定三条**、顺序 `loss → flat → win`，每项 `code`(`loss|flat|win`)/`label`(亏损/保本/盈利)/`count`/`avg_holding_trading_days`(一位小数串或 null)/`avg_holding_trading_days_x10`(交易日 × 10 的定点整数，供图表直接用；与展示串同源)。**盈亏判定与「保本」容差在后端**：`|pnl| ≤ flat_tolerance_display`（常量 `stock_core.insights.aggregate.PNL_FLAT_TOLERANCE_UNITS`，默认 100.00 元，边界含在内）即保本；前端不得重算分类或容差。无样本的类别仍返回（`count=0`、均值为 `null`，不输出 0）；`Σcount` 恒等于 `summary.swing.closed`。

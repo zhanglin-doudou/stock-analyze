@@ -40,6 +40,7 @@ from stock_ledger.models import Trade
 from stock_platform.ids import new_id
 from stock_platform.ports import Bar, MarketDataSource
 from stock_platform.symbols import classify_symbol, is_convertible_bond
+from stock_review.application.valuation import is_money_fund_row
 from stock_review.insights import reasons
 from stock_review.insights.reasons import REASON_LABELS, ReasonDTO
 from stock_review.metrics.context import Period, parse_period_label
@@ -459,12 +460,31 @@ def _to_view(result: ForwardResult) -> ForwardView:
     )
 
 
+# 货基申赎摘要码（分类规则见 stock_ledger.repositories.rules）：旧批次可能没有
+# `money_fund_balance_units` 标记，但这两类摘要恒为货基申赎；场内 ETF/LOF 走
+# `sys_buy_stock`/`sys_sell_stock`，不受影响。
+_MONEY_FUND_SUMMARY_CODES = frozenset({"sys_fund_buy", "sys_redeem"})
+
+
 def _trade_day_index(
     trades: Sequence[Trade],
 ) -> dict[date, list[tuple[str, str, int]]]:
-    """交易日 → [(证券代码, 方向, 全局序号)]，供日内调仓按同日全部流水判定。"""
+    """交易日 → [(证券代码, 方向, 全局序号)]，供日内调仓按同日全部流水判定。
+
+    只收**真实二级市场证券成交**（`classify.is_rebalance_counterparty`）：CASH 资金行
+    （转账/费用/利息/红利税补缴）、公司行动（分红/送转/配股）、新股申购与货基申赎都
+    不是「买入/卖出其它证券」，纳入会把「卖出后补缴红利税」「卖出后申购货基」误判成
+    日内调仓。全局序号仍是整条 FIFO 稳定序的下标，保证「先后」可判定。
+    """
     out: dict[date, list[tuple[str, str, int]]] = defaultdict(list)
     for index, trade in enumerate(trades):
+        if not classify.is_rebalance_counterparty(
+            security_code=trade.security_code,
+            category=trade.category or "",
+            is_money_fund=is_money_fund_row(trade)
+            or (trade.summary_code or "") in _MONEY_FUND_SUMMARY_CODES,
+        ):
+            continue
         out[trade.trade_date].append((trade.security_code, trade.side, index))
     return dict(out)
 

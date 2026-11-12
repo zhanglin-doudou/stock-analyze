@@ -429,6 +429,20 @@ def test_has_same_day_after() -> None:
     assert classify.has_same_day_after([(d1, 5)], [(d2, 6)]) is False
 
 
+def test_rebalance_counterparty_only_accepts_real_security_trades() -> None:
+    """日内调仓对手方：只认二级市场证券成交（类别词表复用 EventKind）。"""
+    real = {"security_code": "002049", "category": "buy", "is_money_fund": False}
+    assert classify.is_rebalance_counterparty(**real) is True
+    assert classify.is_rebalance_counterparty(**{**real, "category": " SELL "}) is True
+    # 资金伪代码、公司行动、新股申购、货基申赎都不是「买入/卖出其它证券」。
+    assert classify.is_rebalance_counterparty(**{**real, "security_code": "CASH"}) is False
+    for category in ("fee", "transfer", "interest", "dividend", "bonus", "rights", "new_stock"):
+        assert classify.is_rebalance_counterparty(**{**real, "category": category}) is False, (
+            category
+        )
+    assert classify.is_rebalance_counterparty(**{**real, "is_money_fund": True}) is False
+
+
 def test_profit_taking_and_sold_too_early() -> None:
     # 零成本持仓：任意正卖价都算止盈；成本缺失/负成本不判定。
     assert classify.is_profit_taking(20_000_000, 0) is True

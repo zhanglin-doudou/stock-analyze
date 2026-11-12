@@ -10,6 +10,8 @@ from datetime import date
 
 from stock_contracts.enums import RoundBucket
 
+from stock_core.fifo.types import EventKind
+
 # 阈值（比率 scale=1e-8；价格比较用百分比整数 100/103/95）
 CONTINUED_DECLINE_B2 = -3 * 10**6  # -3%
 WORST_CLOSE_DROP = 95  # P_net × 95%
@@ -19,6 +21,29 @@ DRAWDOWN_DISCOUNT = 95  # 平均卖价 < 区间最高收盘 × 95%
 # 卖飞分侧（账单旗标 `short_term_sold_early` 命中后，按净卖价与卖出前均价比较）。
 SOLD_EARLY_STOP_LOSS = "stop_loss"
 SOLD_EARLY_PROFIT = "profit"
+
+# 日内调仓的对手方候选：只有真实二级市场证券成交才算「买入/卖出其它证券」。
+# `CASH` 是资金伪代码（银证转账/费用/利息/红利税补缴），公司行动（分红/送转/配股）、
+# 新股申购与货基申赎都不是换股；把它们算进来会把「卖出后补缴红利税」「卖出后申购
+# 货基」误判成日内调仓。category 词表复用 FIFO 事件类型（唯一真相来源）。
+CASH_SECURITY_CODE = "CASH"
+REBALANCE_CATEGORIES: frozenset[str] = frozenset({EventKind.BUY.value, EventKind.SELL.value})
+
+
+def is_rebalance_counterparty(*, security_code: str, category: str, is_money_fund: bool) -> bool:
+    """该笔流水能否作为日内调仓的对手方（真实二级市场证券成交）。
+
+    - `security_code == CASH`：资金流水，不是证券；
+    - `category` 只接受 `buy` / `sell`：分红/送转/配股/新股申购/费用/转账/利息均非
+      二级市场成交；
+    - 货基申赎（`category` 为 buy/sell 但带货基标记）是现金管理，不是调仓。
+    """
+    return (
+        security_code != CASH_SECURITY_CODE
+        and category.strip().lower() in REBALANCE_CATEGORIES
+        and not is_money_fund
+    )
+
 
 # 持有期分桶上界（交易日，闭区间；约 21 TD/月、5 TD/周）：
 # 超短线 ≤3、短线 ≤10、中线 ≤126（6 个月），更长归长线。
