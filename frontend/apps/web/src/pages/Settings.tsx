@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
+import { newIdempotencyKey } from "@sa/api-client";
 import type {
   CreatedPatToken,
+  Job,
   PatToken,
   SectorCatalogItem,
   SettingsOut,
@@ -178,6 +180,12 @@ export function Settings() {
   const [sessions, setSessions] = useState<SessionsForm | null>(null);
   const [concept, setConcept] = useState<ConceptForm | null>(null);
 
+  // API-097：按生效阈值重建账单旗标（P0「需重建」提示的真实入口）。
+  const [rebuildJobId, setRebuildJobId] = useState<string | null>(null);
+  const [rebuildProgress, setRebuildProgress] = useState(0);
+  const [rebuildError, setRebuildError] = useState<unknown>(null);
+  const [rebuildDone, setRebuildDone] = useState(false);
+
   const [catalog, setCatalog] = useState<SectorCatalogItem[]>([]);
   const [catalogCursor, setCatalogCursor] = useState<string | null>(null);
   const [catalogLoading, setCatalogLoading] = useState(false);
@@ -230,6 +238,42 @@ export function Settings() {
   useEffect(() => {
     void loadSettings();
   }, [loadSettings]);
+
+  // API-097 重算任务：轮询到终态；成功后刷新设置（指纹/is_default）并提示完成。
+  useEffect(() => {
+    if (!rebuildJobId) return;
+    const jobId = rebuildJobId;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+
+    async function poll(): Promise<void> {
+      try {
+        const job: Job = await api.jobs.get(jobId);
+        if (cancelled) return;
+        setRebuildProgress(job.progress);
+        if (job.status === "succeeded") {
+          setRebuildJobId(null);
+          setRebuildDone(true);
+          await loadSettings();
+          return;
+        }
+        if (job.status === "failed" || job.status === "cancelled") {
+          setRebuildJobId(null);
+          setRebuildError(job.error ?? new Error(`账单旗标重建未成功（${job.status}）。`));
+          return;
+        }
+      } catch (err) {
+        if (!cancelled) setRebuildError(err);
+      }
+      if (!cancelled) timer = setTimeout(() => void poll(), 800);
+    }
+
+    void poll();
+    return () => {
+      cancelled = true;
+      if (timer !== null) clearTimeout(timer);
+    };
+  }, [rebuildJobId, loadSettings]);
 
   const loadCatalog = useCallback(async (cursor?: string) => {
     setCatalogLoading(true);
@@ -326,6 +370,22 @@ export function Settings() {
         window_trading_days: null,
       },
     });
+  }
+
+  async function startRebuild(): Promise<void> {
+    setRebuildError(null);
+    setRebuildDone(false);
+    setRebuildProgress(0);
+    try {
+      // scope=all：按首末交易月逐月重建（后端截断最近 120 个月）。
+      const accepted = await api.settings.rebuildTradeFlags(
+        { scope: "all" },
+        newIdempotencyKey(),
+      );
+      setRebuildJobId(accepted.job_id);
+    } catch (err) {
+      setRebuildError(err);
+    }
   }
 
   async function saveSessions(): Promise<void> {
@@ -430,6 +490,8 @@ export function Settings() {
     ? BILL_FIELDS.some((field) => !BILL_PATTERN.test(bill[field.form]))
     : false;
   const billDirty = Boolean(bill && settings && Object.keys(billPatchOf(bill, billFormOf(settings))).length > 0);
+  const rebuildBusy = rebuildJobId !== null;
+  const rebuildBlocked = billDirty || billInvalid;
   const windowOptions = bill && !WINDOW_OPTIONS.includes(bill.window)
     ? [bill.window, ...WINDOW_OPTIONS]
     : WINDOW_OPTIONS;
@@ -577,11 +639,10 @@ export function Settings() {
             <div className="settings-notice" role="status">
               <strong>需重建账单旗标</strong>
               <p className="settings-hint">
-                阈值或窗口与默认值不同：看板与回合洞察中已有旗标仍按旧配置生成，重建账单旗标后才会按新配置更新。
+                阈值或窗口与默认值不同：看板与回合洞察中已有旗标仍按旧配置生成，点击下方「立即重算」后才会按新配置更新。
               </p>
             </div>
           ) : null}
-
           <div className="settings-form-grid">
             {BILL_FIELDS.map((field) => (
               <div className="settings-field-group" key={field.form}>
@@ -635,7 +696,29 @@ export function Settings() {
             >
               恢复默认
             </button>
+            <button
+              type="button"
+              className="settings-btn settings-btn-ghost"
+              data-testid="settings-rebuild"
+              disabled={saving !== null || rebuildBusy || rebuildBlocked}
+              onClick={() => void startRebuild()}
+            >
+              {rebuildBusy ? `重算中 ${rebuildProgress}%…` : "立即重算"}
+            </button>
           </div>
+          {rebuildBlocked && !rebuildBusy ? (
+            <p className="settings-hint">先保存或修正阈值，再按当前配置重建账单旗标。</p>
+          ) : null}
+          {rebuildDone ? (
+            <p className="settings-hint" data-testid="settings-rebuild-done">
+              已按当前生效阈值重建账单旗标。
+            </p>
+          ) : null}
+          {rebuildError ? (
+            <p className="settings-error" role="alert">
+              重建失败：{toProblem(rebuildError).user_message}
+            </p>
+          ) : null}
         </section>
       ) : null}
 

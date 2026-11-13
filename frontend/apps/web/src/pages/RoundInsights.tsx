@@ -15,6 +15,7 @@ import { FilterBar, FilterField } from "../ui/FilterBar";
 import { FlagGlossary } from "../ui/FlagGlossary";
 import { PeriodInput } from "../ui/PeriodInput";
 import { ProblemView } from "../ui/Problem";
+import { StaleFlagsNotice } from "../ui/StaleFlagsNotice";
 import { DataTable, type DataTableColumn } from "../ui/DataTable";
 import { HoldingCharts } from "./rounds/HoldingCharts";
 import { RoundFlagCharts } from "./rounds/RoundFlagCharts";
@@ -373,6 +374,7 @@ export function RoundInsights() {
           数据不完整：{page.missing.join("、")}；缺失数值显示「—」，不显示 0%。
         </div>
       ) : null}
+      <StaleFlagsNotice stale={page?.flag_config?.stale ?? false} />
       {notice ? <div className="notice">{notice}</div> : null}
       {error ? <ProblemView error={error} /> : null}
 

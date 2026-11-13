@@ -621,3 +621,34 @@ it("旗标说明：详情页末尾渲染后端返回的 code 与中英文说明"
   expect(section.textContent).toContain("回合内命中即时抄底或短期抄底的买入账单个数。");
   expect(section.textContent).toContain("Number of buy bills flagged as an instant or short-term bottom.");
 });
+
+it("旗标过期横幅：只渲染后端 flag_config.stale，动作指向设置页重算", async () => {
+  getInsight.mockResolvedValue(
+    makeInsight({
+      flags: [],
+      flag_config: {
+        near_equal_tolerance_pct: "1.00%",
+        chase_margin_pct: "1.00%",
+        stop_loss_margin_pct: "1.00%",
+        short_term_margin_pct: "5.00%",
+        window_trading_days: "5",
+        flags_hash: "hash_new",
+        is_default: false,
+        stale: true,
+      },
+    }),
+  );
+  renderDetail();
+
+  const notice = await screen.findByTestId("flag-stale-notice");
+  expect(notice.textContent).toContain("旗标已过期");
+  expect(notice.textContent).toContain("账单旗标阈值刚更新，当前旗标待重算。");
+  expect(screen.getByTestId("flag-stale-action").getAttribute("href")).toBe("/settings");
+});
+
+it("flag_config.stale=false：不显示旗标过期横幅", async () => {
+  renderDetail();
+
+  await screen.findByRole("table", { name: "买入流水与事后表现" });
+  expect(screen.queryByTestId("flag-stale-notice")).toBeNull();
+});

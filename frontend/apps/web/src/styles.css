@@ -255,6 +255,12 @@ input[type="checkbox"] {
 .notice-warn p {
   margin: 4px 0 0;
 }
+/* 通知内的动作入口（如旗标过期 → 去设置页重算） */
+.notice-action {
+  display: inline-block;
+  margin-top: 8px;
+  text-decoration: none;
+}
 .uploader {
   display: flex;
   align-items: center;

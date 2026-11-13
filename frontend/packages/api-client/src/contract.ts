@@ -117,6 +117,9 @@ export type FlagGlossaryOut = ApiSchemas["FlagGlossaryOut"];
 // 2026-11-09：账单级独立旗标（与回合旗标隔离）
 export type TradeFlagOut = ApiSchemas["TradeFlagOut"];
 export type TradeFlagGlossaryOut = ApiSchemas["TradeFlagGlossaryOut"];
+// 2026-11-13：按生效阈值重建账单旗标（API-097）
+export type TradeFlagRebuildIn = ApiSchemas["TradeFlagRebuildIn"];
+export type TradeFlagRebuildAccepted = ApiSchemas["TradeFlagRebuildAccepted"];
 
 // Period2-03：净值与收益（API-032）
 export type NavOut = ApiSchemas["NavOut"];
@@ -502,6 +505,10 @@ export type AssertAssetBuildStateFields = Assert<
   >
 >;
 export type AssertAssetBuildAcceptedFields = Assert<FieldsPresent<AssetBuildAccepted, "job_id" | "type" | "status" | "links">>;
+/** API-097：`scope=all|months` + 可选 `months[]`；202 体与资产构建同形。 */
+export type AssertTradeFlagRebuildFields = Assert<
+  FieldsPresent<TradeFlagRebuildAccepted, "job_id" | "type" | "status" | "links">
+>;
 export type AssertAssetBuildFailedFields = Assert<
   FieldsPresent<AssetBuildFailed, "job_id" | "type" | "status" | "message" | "missing">
 >;

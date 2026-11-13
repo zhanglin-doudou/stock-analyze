@@ -15,6 +15,10 @@ vi.mock("../client", () => ({
     settings: {
       get: vi.fn(),
       patch: vi.fn(),
+      rebuildTradeFlags: vi.fn(),
+    },
+    jobs: {
+      get: vi.fn(),
     },
     sectors: {
       list: vi.fn(),
@@ -26,6 +30,8 @@ vi.mock("../client", () => ({
 const listTokens = vi.mocked(api.tokens.list);
 const getSettings = vi.mocked(api.settings.get);
 const patchSettings = vi.mocked(api.settings.patch);
+const rebuildTradeFlags = vi.mocked(api.settings.rebuildTradeFlags);
+const getJob = vi.mocked(api.jobs.get);
 const listSectors = vi.mocked(api.sectors.list);
 
 function makeToken(): PatToken {
@@ -390,5 +396,36 @@ describe("Settings（偏好四组，API-055/096）", () => {
       { bill_flags: { chase_margin_pct: "3.00%" } },
       expect.objectContaining({ version: 4 }),
     );
+  });
+
+  it("「立即重算」调用 API-097 并轮询到成功后刷新设置", async () => {
+    rebuildTradeFlags.mockResolvedValue({
+      job_id: "job_rebuild",
+      type: "rebuild_trade_flags",
+      status: "pending",
+      links: {
+        self: "/api/v1/jobs/job_rebuild",
+        events: "/api/v1/jobs/job_rebuild/events",
+      },
+    } as never);
+    getJob.mockResolvedValue({
+      job_id: "job_rebuild",
+      type: "rebuild_trade_flags",
+      status: "succeeded",
+      progress: 100,
+      stage: "done",
+      error: null,
+    } as never);
+
+    render(<Settings />);
+    await screen.findByRole("heading", { name: "账单旗标阈值" });
+
+    fireEvent.click(screen.getByTestId("settings-rebuild"));
+
+    await waitFor(() =>
+      expect(rebuildTradeFlags).toHaveBeenCalledWith({ scope: "all" }, expect.any(String)),
+    );
+    expect(await screen.findByTestId("settings-rebuild-done")).toBeTruthy();
+    await waitFor(() => expect(getSettings).toHaveBeenCalledTimes(2));
   });
 });

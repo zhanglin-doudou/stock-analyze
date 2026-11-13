@@ -58,6 +58,8 @@ import type {
   SettingsOut,
   SettingsPatchIn,
   TokenList,
+  TradeFlagRebuildAccepted,
+  TradeFlagRebuildIn,
   TradeHistoryPage,
   TradeMutationOut,
   TradeMutationResult,
@@ -532,6 +534,15 @@ export function createClient(options: ClientOptions) {
         idempotencyKey: opts.idempotencyKey,
       });
       return { settings: r.data, etag: r.headers.get("ETag") };
+    },
+    /** API-097：按当前生效阈值重建账单旗标（异步 202；同 scope 在途单飞复用）。 */
+    rebuildTradeFlags(body: TradeFlagRebuildIn, idempotencyKey: string) {
+      return send<TradeFlagRebuildAccepted>({
+        path: "/settings/trade-flags/rebuild",
+        method: "POST",
+        body,
+        idempotencyKey,
+      }).then((r) => r.data);
     },
   };
 

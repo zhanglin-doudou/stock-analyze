@@ -725,6 +725,17 @@ function makeTradeFlags(overrides: Partial<DashboardTradeFlagsOut> = {}): Dashbo
       }),
     ],
     months_without_data: ["2026-01", "2026-02", "2026-03", "2026-04"],
+    stale_months: [],
+    flag_config: {
+      near_equal_tolerance_pct: "1.00%",
+      chase_margin_pct: "1.00%",
+      stop_loss_margin_pct: "1.00%",
+      short_term_margin_pct: "5.00%",
+      window_trading_days: "5",
+      flags_hash: "c425bc5b871f59f5",
+      is_default: true,
+      stale: false,
+    },
     has_return_data: true,
     return_basis: "单月收益 = 资产日表逐日收益（TWR，已剔除出入金）在自然月内复利。",
     return_labels: { pos: "正收益", neg: "负收益", none: "无数据" },
@@ -1281,6 +1292,23 @@ describe("Dashboard 看板", () => {
     renderPage();
 
     expect(await screen.findByTestId("tfc-return-empty")).toBeTruthy();
+  });
+
+  it("FT-16 旗标过期横幅：月份原样来自后端 stale_months，入口指向设置页重算", async () => {
+    getTradeFlags.mockResolvedValue(makeTradeFlags({ stale_months: ["2026-05", "2026-06"] }));
+    renderPage();
+
+    const notice = await screen.findByTestId("flag-stale-notice");
+    expect(notice.textContent).toContain("旗标已过期");
+    expect(notice.textContent).toContain("以下月份按旧阈值计算：2026-05、2026-06。");
+    expect(screen.getByTestId("flag-stale-action").getAttribute("href")).toBe("/settings");
+  });
+
+  it("FT-17 无过期月份：不渲染旗标过期横幅", async () => {
+    renderPage();
+
+    await screen.findByTestId("tfc-basis");
+    expect(screen.queryByTestId("flag-stale-notice")).toBeNull();
   });
 
   it("FT-10 图表数据投影：标签/计数原样透传，柱状系列先买后卖且配色按侧分组", () => {

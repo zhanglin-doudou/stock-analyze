@@ -577,3 +577,49 @@ describe("buildFlagRoundBars", () => {
     expect(buildFlagRoundBars([], palette)).toEqual([]);
   });
 });
+
+describe("RoundInsights 旗标过期横幅（设计 §7.4）", () => {
+  it("flag_config.stale=true：渲染后端结论与设置页重算入口", async () => {
+    listInsights.mockResolvedValue(
+      makePage({
+        flag_config: {
+          near_equal_tolerance_pct: "1.00%",
+          chase_margin_pct: "1.00%",
+          stop_loss_margin_pct: "1.00%",
+          short_term_margin_pct: "5.00%",
+          window_trading_days: "5",
+          flags_hash: "hash_new",
+          is_default: false,
+          stale: true,
+        },
+      }),
+    );
+    renderPage();
+
+    const notice = await screen.findByTestId("flag-stale-notice");
+    expect(notice.textContent).toContain("旗标已过期");
+    expect(notice.textContent).toContain("账单旗标阈值刚更新，当前旗标待重算。");
+    expect(screen.getByTestId("flag-stale-action").getAttribute("href")).toBe("/settings");
+  });
+
+  it("flag_config.stale=false：不显示横幅", async () => {
+    listInsights.mockResolvedValue(
+      makePage({
+        flag_config: {
+          near_equal_tolerance_pct: "1.00%",
+          chase_margin_pct: "1.00%",
+          stop_loss_margin_pct: "1.00%",
+          short_term_margin_pct: "5.00%",
+          window_trading_days: "5",
+          flags_hash: "hash_new",
+          is_default: false,
+          stale: false,
+        },
+      }),
+    );
+    renderPage();
+
+    await screen.findByText("-3.25%");
+    expect(screen.queryByTestId("flag-stale-notice")).toBeNull();
+  });
+});

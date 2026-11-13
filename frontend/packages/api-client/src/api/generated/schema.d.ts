@@ -861,6 +861,26 @@ export interface paths {
         patch: operations["patchSettings"];
         trace?: never;
     };
+    "/api/v1/settings/trade-flags/rebuild": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rebuild Trade Flags
+         * @description API-097：按当前生效阈值重建账单旗标（202 + Location）。
+         */
+        post: operations["rebuildTradeFlags"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/summary-rules": {
         parameters: {
             query?: never;
@@ -2284,6 +2304,31 @@ export interface components {
             /** Trade Count */
             trade_count: number;
         };
+        /**
+         * DashboardTradeFlagConfigOut
+         * @description API-095/092/093 additive：该用户生效的旗标阈值（百分比为展示字符串）。
+         */
+        DashboardTradeFlagConfigOut: {
+            /** Chase Margin Pct */
+            chase_margin_pct: string;
+            /** Flags Hash */
+            flags_hash: string;
+            /** Is Default */
+            is_default: boolean;
+            /** Near Equal Tolerance Pct */
+            near_equal_tolerance_pct: string;
+            /** Short Term Margin Pct */
+            short_term_margin_pct: string;
+            /**
+             * Stale
+             * @default false
+             */
+            stale: boolean;
+            /** Stop Loss Margin Pct */
+            stop_loss_margin_pct: string;
+            /** Window Trading Days */
+            window_trading_days: string;
+        };
         /** DashboardTradeFlagCountOut */
         DashboardTradeFlagCountOut: {
             /** Code */
@@ -2338,6 +2383,7 @@ export interface components {
             definition_version: string;
             /** End Month */
             end_month: string;
+            flag_config: components["schemas"]["DashboardTradeFlagConfigOut"];
             /** Has Data */
             has_data: boolean;
             /** Has Flag Data */
@@ -2366,6 +2412,8 @@ export interface components {
             };
             /** Series */
             series: components["schemas"]["DashboardTradeFlagSeriesOut"][];
+            /** Stale Months */
+            stale_months: string[];
             /** Start Month */
             start_month: string;
             /** State Series */
@@ -3718,6 +3766,7 @@ export interface components {
             fills?: {
                 [key: string]: unknown;
             }[];
+            flag_config?: components["schemas"]["DashboardTradeFlagConfigOut"] | null;
             /** Flag Glossary */
             flag_glossary?: components["schemas"]["FlagGlossaryOut"][];
             /** Flags */
@@ -3771,6 +3820,7 @@ export interface components {
             close_date?: string | null;
             /** Combined Pct */
             combined_pct?: string | null;
+            flag_config?: components["schemas"]["DashboardTradeFlagConfigOut"] | null;
             /** Flags */
             flags?: string[];
             /** Holding Days Legacy */
@@ -3827,6 +3877,7 @@ export interface components {
             definition_version: string;
             /** Disclaimer */
             disclaimer: string;
+            flag_config?: components["schemas"]["DashboardTradeFlagConfigOut"] | null;
             /** Flag Glossary */
             flag_glossary?: components["schemas"]["FlagGlossaryOut"][];
             /** Has More */
@@ -4486,6 +4537,44 @@ export interface components {
             status: string;
             /** Status Label */
             status_label: string;
+        };
+        /**
+         * TradeFlagRebuildAccepted
+         * @description API-097：202 专用响应（同参数复用已有 job 时 `X-Job-Reused: true`）。
+         */
+        TradeFlagRebuildAccepted: {
+            /** Job Id */
+            job_id: string;
+            links: components["schemas"]["JobLinks"];
+            /**
+             * Status
+             * @default pending
+             * @constant
+             */
+            status: "pending";
+            /**
+             * Type
+             * @default rebuild_trade_flags
+             * @constant
+             */
+            type: "rebuild_trade_flags";
+        };
+        /**
+         * TradeFlagRebuildIn
+         * @description API-097：重建账单旗标范围。
+         *
+         *     `scope=months` 必须给 `months`（`YYYY-MM`，去重后 ≤120）；`scope=all` 覆盖首笔交易月
+         *     到最近交易月（服务端最多取最近 120 个月）。
+         */
+        TradeFlagRebuildIn: {
+            /** Months */
+            months?: string[];
+            /**
+             * Scope
+             * @default all
+             * @enum {string}
+             */
+            scope: "all" | "months";
         };
         /** TradeHistoryItem */
         TradeHistoryItem: {
@@ -7631,6 +7720,86 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    rebuildTradeFlags: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TradeFlagRebuildIn"];
+            };
+        };
+        responses: {
+            /** @description 已入队重建；同参数复用已有任务时返回 X-Job-Reused: true */
+            202: {
+                headers: {
+                    /** @description 任务详情（/api/v1/jobs/{job_id}） */
+                    Location?: unknown;
+                    /** @description 建议轮询间隔（秒） */
+                    "Retry-After"?: unknown;
+                    /** @description true 表示复用了同参数的在途/已完成任务 */
+                    "X-Job-Reused"?: unknown;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TradeFlagRebuildAccepted"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 资源状态冲突 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 请求过于频繁 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
                     "application/problem+json": components["schemas"]["Error"];
                 };
             };

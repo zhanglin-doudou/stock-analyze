@@ -16,6 +16,7 @@ import { DataTable, type DataTableColumn, type DataTableExpansion } from "../ui/
 import { TradeReasonForm } from "../ui/TradeReasonForm";
 import { Icon } from "../ui/icons";
 import { FlagGlossary } from "../ui/FlagGlossary";
+import { StaleFlagsNotice } from "../ui/StaleFlagsNotice";
 import { TradeFlagGlossary } from "../ui/TradeFlagGlossary";
 import "./detail.css";
 import { roundStatusLabel } from "./Rounds";
@@ -523,6 +524,7 @@ export function RoundDetail() {
 
           {insight ? (
             <>
+              <StaleFlagsNotice stale={insight.flag_config?.stale ?? false} />
               <h2 className="detail-section-title">买卖流水与事后表现</h2>
               <div className="detail-card">
                 <p className="muted">
