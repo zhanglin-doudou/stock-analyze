@@ -271,15 +271,12 @@ dip_sequence = 同持仓在 60 交易日内 ≥2 次 add-on 且净买价逐次�
 - **“后续继续下跌”**（默认）：
   - `B2_20 ≤ −3%` **或** `worst_close_20 ≤ P_net_buy × (1−5%)`；
   - `worst_close_20` = `(d0,d20]` 最低收盘；**不是 intraday low**，字段名不得叫 MAE；
-  - `decline_after_addon` 只在 `status=ok` 样本上统计；分母 n 显式；
-  - 金额影响：
-    - `additional_loss_end_20 = qty × (C20 − P_net_buy)`（期末实际，负=浮亏）；
-    - `additional_loss_worst_20 = qty × (worst_close_20 − P_net_buy)`（事后最低收盘，**理论上限/不可实现**）。
+  - `decline_after_addon` 只在 `status=ok` 样本上统计；分母 n 显式。
 - **“越跌越买”**：逐次更低净买价 + 同持仓 + 窗口内 ≥2 次；首次建仓不算；部分卖出后重新买入是否算“同一持仓”由 `position_epoch` 判定（仓位归零则新 epoch）。
 - **与既有指标关系**：`is_addon/below_avg/dip_depth` 复用抽出后的 core 分类器；`behavior.averaging_down` 只算聚合率/深度，本设计补后验结果；不改旧指标。
 - **成本基座警示**：若 d0 前公司行动导致股息未扣，`cost_basis_warning=true`；标签只展示并标注口径，**不计入“失败率/排序”分母**；P1 total-return 成本。
 
-**聚合**：加仓笔数/金额占比、摊平占比/深度、序列数/长度、后续下跌率、平均/中位 B2 5/10/20、金额影响、理由交叉表（`bottom_fish/add_on` vs 识别）。
+**聚合**：加仓笔数/金额占比、摊平占比/深度、序列数/长度、后续下跌率、平均/中位 B2 5/10/20、理由交叉表（`bottom_fish/add_on` vs 识别）。
 
 ### 3.6 止盈卖飞 / 越涨越卖（卖出侧）
 
@@ -294,13 +291,11 @@ max_close_20 = max(close in (d0,d20])
 sold_too_early = max_close_20 > P_net_sell × (1+3%)      # 单一主口径
 profit_take_fly = is_profit_taking AND sold_too_early
 stop_loss_rebound = (NOT is_profit_taking) AND sold_too_early
-missed_profit_worst = qty × (max_close_20 − P_net_sell)  # 理论上限
-missed_profit_end   = qty × (C20 − P_net_sell)           # 期末可实现口径
 ```
 
 - **删除“或 B2>5%”**：因为 `C20 > 1.05P ⇒ max_close_20 ≥ C20 > 1.05P > 1.03P`，B2>5% 已被主条件包含，OR 是死条件；只保留 `max_close` 阈值（可配 3%）。
 - **与 `timing.fly` 的关系**：`timing.fly` 用 **gross 卖价**、20 根自身 bar，无盈利过滤；本设计用 **net 卖价**，并拆 `profit_take_fly`/`stop_loss_rebound`。两者只做方向性对账，**不声称同一分母**。
-- **部分卖出/清仓**：`is_full_exit = 卖出后持仓=0`；同一回合多次卖出分别计算，`missed_profit` 只乘该笔卖出数量，不重复乘整仓。
+- **部分卖出/清仓**：`is_full_exit = 卖出后持仓=0`；同一回合多次卖出分别计算。
 - **止损后反弹**：单独 `stop_loss_rebound`，**不算卖飞**；页面解释“纪律卖出后反弹是正常成本，不等于错误”。
 - **越涨越卖** 是行为模式（多次逐高），与 `sold_too_early`（结果）分列；不等于“止盈卖飞”。
 - **分母**：`sold_too_early_rate` 可给“全部卖出”和“止盈卖出”两个分母；页面标清楚。
@@ -627,8 +622,8 @@ quadrant = sign(buy_excess_20), sign(sell_avoid_20)  # 双正/买正卖负/买�
 | 参数 | 说明 |
 |---|---|
 | `period` | `YYYY`/`YYYY-MM`/`YYYY-MM-DD..YYYY-MM-DD`；**默认 close_date 归属**，`period_basis=close_date` |
-| `bucket` | `all / short / swing / trend`（默认 all） |
-| `flag` | `addon_decline / sold_too_early / reason_missing / horizon_pending / corporate_action`（可重复/逗号） |
+| `bucket` | `all / scalp / short / position / long`（默认 all；四段口径见 API-Catalog API-092） |
+| `flag` | `bottom_buy / stop_loss_sold_early / profit_sold_early / sold_too_early / drawdown / intraday_t / swing_t / intraday_rebalance_out / intraday_rebalance_in / reason_missing / horizon_pending / corporate_action`（可重复/逗号） |
 | `has_reason` | bool；过滤“有/无理由” |
 | `reason_code` | buy/sell 理由码（可重复）；非法 400 |
 | `security_code` | 过滤 |
@@ -636,7 +631,7 @@ quadrant = sign(buy_excess_20), sign(sell_avoid_20)  # 双正/买正卖负/买�
 | `include_summary` | bool 默认 true |
 | `limit`/`cursor` | 1–200/游标；非法 400 INVALID_CURSOR |
 
-- 响应 `200`：`period` / `period_basis` / `definition_version="1.0"` / `data_as_of` / `ranking_as_of` / `benchmark_id` / `basis="benchmark_excess_20d"` / `summary{...}` / `items[]` / `next_cursor` / `has_more` / `missing[]` / `assumptions` / `disclaimer`。
+- 响应 `200`：`period` / `period_basis` / `definition_version="1.2"` / `data_as_of` / `ranking_as_of` / `benchmark_id` / `basis="benchmark_excess_20d"` / `summary{...}` / `items[]` / `next_cursor` / `has_more` / `missing[]` / `assumptions` / `disclaimer`。
 - `items[]`（每回合，**全部展示字段均为后端格式化串**）：
 
 ```json
@@ -644,7 +639,7 @@ quadrant = sign(buy_excess_20), sign(sell_avoid_20)  # 双正/买正卖负/买�
   "round_id": "rnd_...",
   "security_code": "000422", "security_name": "...",
   "status": "closed", "open_date": "2026-03-02", "close_date": "2026-03-18",
-  "holding_days_legacy": 12, "holding_trading_days": 10, "bucket": "swing",
+  "holding_days_legacy": 12, "holding_trading_days": 10, "bucket": "position",
   "pnl": "1234.56", "return_rate_pct": "4.56%",
   "buy_trade": {
     "trade_id": "trd_...", "date": "2026-03-02",
@@ -668,14 +663,23 @@ quadrant = sign(buy_excess_20), sign(sell_avoid_20)  # 双正/买正卖负/买�
   },
   "buy_excess_pct": "2.10%", "sell_avoid_pct": "1.20%", "combined_pct": "1.65%",
   "rank": 3, "quadrant": "双正",
-  "flags": ["profit_taking", "full_exit"],
-  "quality": ["forward_complete"],
-  "missed_profit_worst_display": "0.00", "missed_profit_end_display": "0.00"
+  "flags": ["bottom_buy", "profit_sold_early", "drawdown"],
+  "status_counts": {"bottom_buy": 2, "stop_loss_sold_early": 0, "profit_sold_early": 1},
+  "quality": ["forward_complete"]
 }
 ```
 
-- `flags` 为**内部旗标码**（`addon / dip_sequence / below_avg / continued_decline / profit_taking / profit_take_fly / stop_loss_rebound / rising_sell_sequence / full_exit / partial_exit / same_day`）；查询参数 `flag=` 使用 §6.3 词表，由服务端做映射，前端只做文案映射、不做判断。
-- `summary`：`swing{...}`、`addon{...}`、`sell_fly{...}`、`reason_coverage{...}`、`ranking{n_rounds,n_events,min_rank_n,basis,quadrant_counts}`、`pending{forward_recompute,reason_missing}`。
+- `flags` 为**内部旗标码**，只含目标清单内的 8 项（`bottom_buy / stop_loss_sold_early / profit_sold_early / drawdown / intraday_t / swing_t / intraday_rebalance_out / intraday_rebalance_in`）；计数型三项另给 `status_counts`（固定三键整数，可为 0），`flags` 只做「是否命中」的布尔投影。查询参数 `flag=` 使用 §6.3 词表，由服务端做映射，前端只做文案映射、不做判断。旧码（`addon / dip_sequence / below_avg / continued_decline / profit_taking / profit_take_fly / stop_loss_rebound / rising_sell_sequence / full_exit / partial_exit / same_day`）与别名 `addon_decline` 自 v1.2 起不再输出；`summary.addon` 仍内部使用加仓谓词。
+- `summary`：`swing{...}`、`addon{...}`、`sell_fly{...}`、`reason_coverage{...}`、`ranking{n_rounds,n_events,min_rank_n,basis,quadrant_counts}`、`flag_round_counts[{flag,count}]`（覆盖词表全部 8 个回合旗标，顺序沿用 `ITEM_FLAG_CODES`；`count` 为全量回合中 `flags` 含该旗标的回合数，同一回合只计一次；数据质量三态 `reason_missing`/`horizon_pending`/`corporate_action` 为查询别名，不入此数组；因列表分页、前端只看当前页，计数必须由后端在全量筛选集上聚合）、`pending{forward_recompute,reason_missing}`。
+- **回合状态口径 v1.2（2026-11-12，breaking）**：
+  - `bottom_buy`（计数）：回合内买入账单命中账单旗标 `instant_bottom` 或 `short_term_bottom` 的账单个数；同一账单同时命中只计 1。
+  - `stop_loss_sold_early` / `profit_sold_early`（计数）：回合内卖出账单先须命中账单旗标 `short_term_sold_early`，再用**含费净卖价**与**卖出前持仓含费均价**分侧；净卖价 ≤ 均价 → 止损侧（**等号归止损侧**），严格高于 → 止盈侧；成本缺失或负成本不分侧。
+  - `drawdown`（布尔）：回合内按数量加权的平均卖出价 < 区间最高收盘 × 95%（**严格**）。区间为「首笔买入日（含）至末笔卖出日（不含）」，即**排除卖出当日**。
+  - `intraday_t`（布尔）：同一交易日内先**部分卖出**（卖出数量严格小于卖出前持仓）再买入同一证券。
+  - `swing_t`（布尔）：回合内部分卖出后在更晚交易日再买入同一证券；同一笔卖出当日已被买入配对的（日内做T）不重复计入波段。
+  - `intraday_rebalance_out` / `intraday_rebalance_in`（布尔）：回合内先卖出当前证券、同日再买入其它证券 / 先卖出其它证券、同日再买入当前证券。范围是**当前用户同日全部流水，不按账户切分**（退化口径：所有账户合并成一条时间线）；但对手方只认**真实二级市场证券成交**（2026-11-12 收紧）：`CASH` 资金行（转账/费用/利息/红利税补缴）、公司行动（分红/送转/配股）、新股申购与货基申赎（`money_fund_balance_units` 非空，如 940018）都不算，避免把「卖出后补缴红利税」「卖出后申购货基」误判成调仓。
+  - `sold_too_early` 别名 = 两类卖飞计数任一 > 0；`reason_missing` / `horizon_pending` / `corporate_action` 口径不变。
+  - 账单级旗标在洞察读路径内联重算（不依赖月度构建任务），行情回看比最早账单日多取 45 天；`DEFINITION_VERSION` 由 `1.1` 升 `1.2`，旧版前瞻缓存自然失效并在读路径现算。
 - **零口径展示契约**：所有数值字段带 `_pct`/`_display`/`label`；**前端不得自己算/拼百分号**；缺失为 null，不返回 0 分。`disclaimer` 固定文案（见 §7.4）。
 - `summary` 每次请求计算一次，**不随 cursor 变化**；P1 加短 TTL 缓存/ETag（以 `data_as_of`+filter hash 为键）；`items` 分页。<br>- 无数据/blocked：`items=[]` + `missing[]`；`sample_status` 显式；**不伪造 0%**。
 - 错误：`INVALID_PERIOD(422)`、`UNKNOWN_QUERY_PARAM(400)`、`INVALID_SORT_FIELD(400)`、`INVALID_CURSOR(400)`、401/403。
@@ -802,15 +806,23 @@ PageHeader：期间（年/月/自定义，默认年）+ 数据截至 + “手动
 
 ### 8.4 抄底/卖飞（AC-D）
 
+> **v1.2（2026-11-12）修订**：AC-D2 / AC-D4 的「越跌越买 / 越涨越卖」与 AC-D5 的 20D 3% 卖飞、AC-D7 的部分/清仓/T+1 旗标**不再作为回合状态输出**；加仓/加仓后下跌仅保留为 `summary.addon` 内部口径。回合状态以 AC-D8 ~ AC-D13 为准。
+
 | # | 验收 | 判定/方法 |
 |---|---|---|
-| AC-D1 | 加仓/摊平 | 买入前 qty>0；`P_net_buy < avg_cost_net`；与抽出的 core 分类器一致；测试 `test_addon_classifier` |
-| AC-D2 | 越跌越买 | 窗口内 ≥2 次加仓且净买价逐次更低；epoch 归零后重开；首次建仓不算；边界 fixture |
-| AC-D3 | 后续下跌 | `B2_20≤−3%` 或 `worst_close_20≤P_net_buy×(1−5%)`；分母只 ok；`additional_loss_end` 与 `worst`（理论上限）分开；手算 |
-| AC-D4 | 止盈/越涨越卖 | 卖出前盈利；窗口内 ≥2 次卖出逐次更高；`is_full_exit`/部分卖出分开；测试 |
-| AC-D5 | 卖飞单一主口径 | `max_close_20 > P_net_sell×1.03`，**无 B2>5% OR**；`profit_take_fly` 与 `stop_loss_rebound` 分开；止损后反弹不得计卖飞；错失收益 theoretical+end 两版；边界 B2=5.00% 不触发额外条件 |
+| AC-D1 | 加仓/摊平 | 买入前 qty>0；`summary.addon` 内部口径；测试 `test_addon` |
+| AC-D2 | 越跌越买（已废弃） | v1.2 起不再输出旗标 |
+| AC-D3 | 后续下跌 | `B2_20≤−3%` 或 `worst_close_20≤P_net_buy×(1−5%)`；仅 `summary.addon.declined_after_addon` 内部使用 |
+| AC-D4 | 止盈/越涨越卖（已废弃） | v1.2 起 `profit_taking`/`rising_sell_sequence` 不再输出 |
+| AC-D5 | 卖飞（已废弃，见 AC-D9/D10） | 旧 20D 3% 口径仅保留在 `summary.sell_fly` 内部 |
 | AC-D6 | 理由一致性 | 手工 code 与识别标签交叉表；不强制一致；`late_annotated` 分层展示；覆盖率近 90 日/全历史 |
-| AC-D7 | 部分/清仓/T+1 | `is_partial_exit`/`is_full_exit`/`is_same_day` 正确；卖飞只乘当笔数量；ETF 同日卖出单列 |
+| AC-D7 | 部分/清仓/T+1（已废弃） | 由 AC-D11/D12 的做T/调仓判定替代 |
+| AC-D8 | 抄底计数 | 回合内买入账单命中 `instant_bottom` 或 `short_term_bottom` 的账单个数；同一账单只计 1；`status_counts.bottom_buy` 与 `flags` 投影一致 |
+| AC-D9 | 止损卖飞计数 | 卖出账单命中 `short_term_sold_early` 且含费净卖价 **≤** 卖出前含费均价；等号归止损侧；`status_counts.stop_loss_sold_early` |
+| AC-D10 | 止盈卖飞计数 | 卖出账单命中 `short_term_sold_early` 且含费净卖价 **>** 卖出前含费均价；`status_counts.profit_sold_early`；`sold_too_early` = 两类任一 > 0 |
+| AC-D11 | 收益回撤 | 数量加权平均卖价 < 首笔买入日（含）~末笔卖出日（不含）最高收盘 × 95%，严格；无 bar/无卖出 → 不触发 |
+| AC-D12 | 日内/波段做T | 部分卖出 = `0 < 卖出数量 < 卖出前持仓`；其后第一笔买入同日 → 日内、更晚交易日 → 波段；已被日内配对的卖出不再计波段 |
+| AC-D13 | 日内调仓 | 同用户同日全部流水（不按账户切分）；先卖当前证券后买其它 → out；先卖其它后买当前 → in；只判方向与全局行序，不要求金额匹配；对手方只认真实二级市场证券成交（排除 `CASH` 资金行、公司行动、新股申购、货基申赎） |
 
 ### 8.5 买卖后表现排序（AC-K）
 
@@ -973,14 +985,11 @@ PageHeader：期间（年/月/自定义，默认年）+ 数据截至 + “手动
 - 20 日内最低收盘 8.30，期末 8.60。
 - `B2_20 = 8.60/9.02−1 = −4.656%`（≤−3%）→ `decline_after_addon=true`。
 - `worst_close_20 = 8.30/9.02−1 = −7.98%`（≤−5%）。
-- `additional_loss_end = 800×(8.60−9.02) = −336 元`；`additional_loss_worst = 800×(8.30−9.02) = −576 元`（**理论上限**，不是可实现亏损）。
 
 **A.3 止盈卖飞（净价含费，单一主口径）**
 
 - 卖出 500 股，毛价 20.00，费用 10.00 → `P_net_sell=19.98`。
-- 20 日内最高收盘 22.00，期末 21.00；`19.98×1.03=20.5794` → `max_close 22.00 > 20.5794` → `sold_too_early=true`。
-- `missed_profit_worst = 500×(22.00−19.98) = 1,010 元`（理论最高，不可实现）。
-- `missed_profit_end = 500×(21.00−19.98) = 510 元`（期末可实现口径）。
+- 20 日内最高收盘 22.00；`19.98×1.03=20.5794` → `max_close 22.00 > 20.5794` → `sold_too_early=true`。
 - 若卖出前均价 21.00（亏损卖出）→ `is_profit_taking=false`，标记 `stop_loss_rebound`，**不算止盈卖飞**。
 - 不再使用 `B2>5%` 作为并列条件（已逻辑包含）。
 

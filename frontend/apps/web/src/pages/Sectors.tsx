@@ -1,7 +1,12 @@
 import { type ReactElement } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
-import type { SectorsOverview, SectorCatalogPage, SectorTaxonomy } from "@sa/api-client";
+import type {
+  SectorsOverview,
+  SectorCatalogPage,
+  SectorConceptFilters,
+  SectorTaxonomy,
+} from "@sa/api-client";
 import { api } from "../client";
 import { ProblemView } from "../ui/Problem";
 import { CaveatBanner } from "../ui/Caveat";
@@ -145,6 +150,44 @@ function IndustryView({
   );
 }
 
+function ConceptFilterNotice({
+  filters,
+  filteredMarketValue,
+  filteredHoldingCount,
+}: {
+  filters: SectorConceptFilters | null | undefined;
+  filteredMarketValue: string | null | undefined;
+  filteredHoldingCount: number | null | undefined;
+}): ReactElement | null {
+  if (!filters || !filters.applied) return null;
+  const sum = displayValue(filteredMarketValue);
+  return (
+    <div className="sector-filter-notice" data-testid="sector-concept-filters" role="note">
+      <p className="sector-filter-text">
+        已按偏好{filters.mode === "exclude" ? "剔除" : "隐藏"} {filters.excluded.length}{" "}
+        个概念（行/TopN 不含这些概念，覆盖度与重叠仍为全量口径）：
+      </p>
+      <ul className="sector-filter-list">
+        {filters.excluded.map((item) => (
+          <li
+            key={item.code}
+            className={`sector-filter-chip${item.resolved ? "" : " is-unresolved"}`}
+          >
+            {item.name}
+            <span className="sector-filter-code">{item.code}</span>
+            {item.resolved ? null : <span className="sector-filter-flag">已失效</span>}
+          </li>
+        ))}
+      </ul>
+      {filters.mode === "exclude" ? (
+        <p className="sector-filter-text" data-testid="sector-filtered-summary">
+          被排除概念市值合计 {sum}，涉及持仓 {filteredHoldingCount ?? "—"} 只（按概念去重，可与其他概念重叠）。
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 function ConceptView({ overview }: { overview: SectorsOverview }): ReactElement {
   const concept = overview.concept;
   return (
@@ -162,6 +205,12 @@ function ConceptView({ overview }: { overview: SectorsOverview }): ReactElement 
       </div>
 
       <CaveatBanner text={concept?.caveat} />
+
+      <ConceptFilterNotice
+        filters={concept?.filters}
+        filteredMarketValue={concept?.filtered_market_value}
+        filteredHoldingCount={concept?.filtered_holding_count}
+      />
 
       <SectorTable rows={overview.sectors} taxonomy="concept" />
 

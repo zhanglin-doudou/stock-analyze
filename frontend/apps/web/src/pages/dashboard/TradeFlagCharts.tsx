@@ -2,6 +2,7 @@ import { lazy, Suspense, useState, type ReactElement } from "react";
 import { useQuery } from "@tanstack/react-query";
 import type { DashboardTradeFlagsOut } from "@sa/api-client";
 import { api } from "../../client";
+import { StaleFlagsNotice } from "../../ui/StaleFlagsNotice";
 import { useChartPalette } from "./tradeFlagChartColors";
 import type {
   MonthlyReturnBarDatum,
@@ -118,6 +119,9 @@ export function TradeFlagCharts(): ReactElement {
           {data.start_month} → {data.end_month} · {data.months_basis}
         </p>
       ) : null}
+
+      {/* 设计 §7.4：过期月份与结论全部来自后端 `stale_months`，前端不自行判断。 */}
+      {data ? <StaleFlagsNotice months={data.stale_months} /> : null}
 
       {query.isLoading ? (
         <p className="dash-chart-empty">加载账单旗标…</p>

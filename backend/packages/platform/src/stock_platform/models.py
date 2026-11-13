@@ -17,6 +17,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    SmallInteger,
     String,
     Text,
     UniqueConstraint,
@@ -260,6 +261,28 @@ class UserSetting(Base):
     benchmark_id: Mapped[str] = mapped_column(String(32), nullable=False, default="hs300_tr")
     privacy_flags: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     display_prefs: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    # 2026-11-11 用户偏好：4 个 bps 阈值 + 窗口（typed，DB CHECK 兜底，迁移 0014）。
+    bill_near_equal_tolerance_bps: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=100, server_default=text("100")
+    )
+    bill_chase_margin_bps: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=100, server_default=text("100")
+    )
+    bill_stop_loss_margin_bps: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=100, server_default=text("100")
+    )
+    bill_short_term_margin_bps: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=500, server_default=text("500")
+    )
+    bill_window_trading_days: Mapped[int] = mapped_column(
+        SmallInteger, nullable=False, default=5, server_default=text("5")
+    )
+    market_session_prefs: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
+    )
+    concept_filter_prefs: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
+    )
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False

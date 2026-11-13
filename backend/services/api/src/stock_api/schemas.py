@@ -705,6 +705,26 @@ class AssetBuildAccepted(StrictModel):
     links: JobLinks
 
 
+class TradeFlagRebuildIn(StrictModel):
+    """API-097：重建账单旗标范围。
+
+    `scope=months` 必须给 `months`（`YYYY-MM`，去重后 ≤120）；`scope=all` 覆盖首笔交易月
+    到最近交易月（服务端最多取最近 120 个月）。
+    """
+
+    scope: Literal["all", "months"] = "all"
+    months: list[str] = Field(default_factory=list)
+
+
+class TradeFlagRebuildAccepted(StrictModel):
+    """API-097：202 专用响应（同参数复用已有 job 时 `X-Job-Reused: true`）。"""
+
+    job_id: str
+    type: Literal["rebuild_trade_flags"] = "rebuild_trade_flags"
+    status: Literal["pending"] = "pending"
+    links: JobLinks
+
+
 class AssetBuildMissingOut(StrictModel):
     """API-082：缺行情提示项（字段名沿用归因/看板的 `missing[]` 风格）。"""
 
@@ -990,6 +1010,20 @@ class DashboardTradeFlagMonthOut(StrictModel):
     monthly_return: DashboardMonthlyReturnOut
 
 
+class DashboardTradeFlagConfigOut(StrictModel):
+    """API-095/092/093 additive：该用户生效的旗标阈值（百分比为展示字符串）。"""
+
+    window_trading_days: str
+    near_equal_tolerance_pct: str
+    chase_margin_pct: str
+    stop_loss_margin_pct: str
+    short_term_margin_pct: str
+    flags_hash: str
+    is_default: bool
+    # 仅回合洞察（092/093）使用：请求账单存在旧阈值指纹行（需重算）。
+    stale: bool = False
+
+
 class DashboardTradeFlagsOut(StrictModel):
     """API-095：账单旗标月度聚合（最近 6/12/24 个完整月）。"""
 
@@ -1010,6 +1044,10 @@ class DashboardTradeFlagsOut(StrictModel):
     items: list[DashboardTradeFlagMonthOut]
     # 区间内没有任何旗标记录的月份（可能未运行 build-trade-flags，或当月无交易）。
     months_without_data: list[str]
+    # 有旗标行但指纹不是当前生效阈值的月份（阈值改过但未重算）。
+    stale_months: list[str]
+    # 当前生效阈值（additive）。
+    flag_config: DashboardTradeFlagConfigOut
     # 单月收益（additive）：口径说明/图例文案由后端给，前端只渲染。
     has_return_data: bool
     return_basis: str
@@ -1044,6 +1082,8 @@ SectorMissingCode = Literal[
     "SECTOR_HOLDING_TRUNCATED",
     "SECTOR_PRICE_MISSING",
     "SECTOR_AS_OF_NOT_AVAILABLE",
+    "SECTOR_CONCEPT_FILTER_APPLIED",
+    "SECTOR_CONCEPT_FILTER_UNRESOLVED",
 ]
 
 
@@ -1168,6 +1208,22 @@ class SectorConceptTopOut(StrictModel):
     exposure_pct: str
 
 
+class SectorConceptFilterItemOut(StrictModel):
+    """用户排除的概念；`resolved=false` 表示概念目录中已不存在（悬空 code）。"""
+
+    code: str
+    name: str
+    resolved: bool
+
+
+class SectorConceptFiltersOut(StrictModel):
+    """概念过滤披露（仅 `mode != off` 输出）；`applied=false` 表示排除项为空。"""
+
+    mode: Literal["off", "hide", "exclude"]
+    applied: bool
+    excluded: list[SectorConceptFilterItemOut]
+
+
 class SectorConceptBlockOut(StrictModel):
     """概念块（多归属；overlap 为 Σexposure 比率，非权重）。"""
 
@@ -1182,6 +1238,9 @@ class SectorConceptBlockOut(StrictModel):
     top1_concept: SectorConceptTopOut | None = None
     top5_concepts: list[SectorConceptTopOut]
     caveat: str | None = None
+    filters: SectorConceptFiltersOut | None = None
+    filtered_market_value: str | None = None
+    filtered_holding_count: int | None = None
 
 
 class SectorOverviewLinksOut(StrictModel):
@@ -1718,7 +1777,7 @@ class RoundInsightItemOut(BaseModel):
     close_date: date | None = None
     holding_days_legacy: int
     holding_trading_days: int | None = None
-    bucket: Literal["short", "swing", "trend", "unknown"]
+    bucket: Literal["scalp", "short", "position", "long", "unknown"]
     pnl: str
     return_rate_pct: str
     buy_trade: TradeSideInsightOut | None = None
@@ -1730,22 +1789,18 @@ class RoundInsightItemOut(BaseModel):
     quadrant: str | None = None
     flags: list[str] = Field(default_factory=list)
     quality: list[str] = Field(default_factory=list)
-    missed_profit_worst_display: str | None = None
-    missed_profit_end_display: str | None = None
-    # additive：绝对值展示串 + 符号语义标签（少赚/多赚），前端只渲染不判符号。
-    missed_profit_worst_abs_display: str | None = None
-    missed_profit_worst_label: str | None = None
-    missed_profit_worst_label_en: str | None = None
-    missed_profit_end_abs_display: str | None = None
-    missed_profit_end_label: str | None = None
-    missed_profit_end_label_en: str | None = None
+    # 计数型状态：bottom_buy / stop_loss_sold_early / profit_sold_early 固定三键（可为 0）。
+    status_counts: dict[str, int] = Field(default_factory=dict)
+    # 当前生效阈值（additive）。
+    flag_config: DashboardTradeFlagConfigOut | None = None
 
 
 class InsightBucketSummaryOut(BaseModel):
     closed: int
+    scalp: int
     short: int
-    swing: int
-    trend: int
+    position: int
+    long: int
     avg_holding_trading_days: str | None = None
     win_rate_pct: str | None = None
     avg_pnl_display: str | None = None
@@ -1790,17 +1845,11 @@ class InsightFillSwingOut(BaseModel):
 
 
 class InsightAddonSummaryOut(BaseModel):
-    """加仓统计（设计 §6.3）：`count` 与兼容字段 `rounds` 同值。
-
-    `avg_dip_pct` 是加仓笔次 20 日 B2 均值，仅对 `status=ok` 样本取均值；
-    `avg_dip_coverage` 形如 `"3/9"`，0 个有效样本时 `avg_dip_pct=null`。
-    """
+    """加仓统计（设计 §6.3）：`count` 与兼容字段 `rounds` 同值。"""
 
     count: int
     declined_after_addon: int
     declined_pct: str | None = None
-    avg_dip_pct: str | None = None
-    avg_dip_coverage: str
     rounds: int
     share_pct: str | None = None
 
@@ -1812,15 +1861,6 @@ class InsightSellFlySummaryOut(BaseModel):
     profit_take_fly: int
     stop_loss_rebound: int
     fly_pct: str | None = None
-    missed_profit_worst_display: str | None = None
-    missed_profit_end_display: str | None = None
-    # additive：绝对值展示串 + 符号语义标签（少赚/多赚），前端只渲染不判符号。
-    missed_profit_worst_abs_display: str | None = None
-    missed_profit_worst_label: str | None = None
-    missed_profit_worst_label_en: str | None = None
-    missed_profit_end_abs_display: str | None = None
-    missed_profit_end_label: str | None = None
-    missed_profit_end_label_en: str | None = None
     rounds: int
     share_pct: str | None = None
 
@@ -1845,6 +1885,16 @@ class InsightPnlHoldingOut(BaseModel):
     classes: list[InsightPnlHoldingClassOut]
 
 
+class InsightFlagRoundCountOut(BaseModel):
+    """按回合旗标统计的回合数（v1.2 词表全部 item_flag）。
+
+    口径是筛选后的全量回合（与分页无关），同一回合只计一次，不累加旗标次数。
+    """
+
+    flag: str
+    count: int
+
+
 class InsightsSummaryOut(BaseModel):
     swing: InsightBucketSummaryOut
     fill_swing: InsightFillSwingOut
@@ -1853,6 +1903,7 @@ class InsightsSummaryOut(BaseModel):
     sell_fly: InsightSellFlySummaryOut
     reason_coverage: InsightReasonCoverageOut
     ranking: InsightRankingOut
+    flag_round_counts: list[InsightFlagRoundCountOut] = Field(default_factory=list)
     pending: dict[str, int]
 
 
@@ -1885,6 +1936,8 @@ class RoundInsightsPageOut(BaseModel):
     assumptions: list[str] = Field(default_factory=list)
     disclaimer: str
     flag_glossary: list[FlagGlossaryOut] = Field(default_factory=list)
+    # 当前生效阈值（additive）。
+    flag_config: DashboardTradeFlagConfigOut | None = None
 
 
 class RoundInsightDetailOut(BaseModel):
@@ -1896,7 +1949,7 @@ class RoundInsightDetailOut(BaseModel):
     close_date: date | None = None
     holding_days_legacy: int
     holding_trading_days: int | None = None
-    bucket: Literal["short", "swing", "trend", "unknown"]
+    bucket: Literal["scalp", "short", "position", "long", "unknown"]
     pnl: str
     return_rate_pct: str
     buy_trade: TradeSideInsightOut | None = None
@@ -1904,10 +1957,13 @@ class RoundInsightDetailOut(BaseModel):
     fills: list[dict[str, Any]] = Field(default_factory=list)
     flags: list[str] = Field(default_factory=list)
     quality: list[str] = Field(default_factory=list)
+    status_counts: dict[str, int] = Field(default_factory=dict)
     ranking: dict[str, Any] = Field(default_factory=dict)
     disclaimer: str
     flag_glossary: list[FlagGlossaryOut] = Field(default_factory=list)
     trade_flag_glossary: list[TradeFlagGlossaryOut] = Field(default_factory=list)
+    # 当前生效阈值（additive）；`stale=true` 表示该回合账单仍是旧阈值结果。
+    flag_config: DashboardTradeFlagConfigOut | None = None
 
 
 class RoundInsightsRefreshIn(StrictModel):
@@ -1925,3 +1981,102 @@ class RoundInsightsRefreshOut(BaseModel):
     divisor_missing: int
     stale_price: int
     data_as_of: date | None = None
+
+
+# ── 用户偏好设置（API-055 / API-096，2026-11-11）─────────────
+class AppearancePrefsOut(BaseModel):
+    theme: Literal["light", "dark", "system"]
+    density: Literal["cozy", "compact"]
+    trend: Literal["red-up", "green-up"]
+
+
+class BillFlagsPrefsOut(BaseModel):
+    """阈值一律后端字符串化：百分比 `x.xx%`，窗口十进制整数串。"""
+
+    near_equal_tolerance_pct: str
+    chase_margin_pct: str
+    stop_loss_margin_pct: str
+    short_term_margin_pct: str
+    window_trading_days: str
+    flags_hash: str
+    is_default: bool
+
+
+class MarketSessionOut(BaseModel):
+    open: str
+    close: str
+
+
+class MarketSessionsPrefsOut(BaseModel):
+    sessions: list[MarketSessionOut]
+    data_ready_after: str
+    session_notice_enabled: bool
+    timezone: str
+
+
+class ConceptExcludedOut(BaseModel):
+    code: str
+    name: str
+    resolved: bool
+
+
+class ConceptFiltersPrefsOut(BaseModel):
+    mode: Literal["off", "hide", "exclude"]
+    excluded: list[ConceptExcludedOut] = Field(default_factory=list)
+
+
+class SettingsOut(BaseModel):
+    version: int
+    updated_at: datetime | None = None
+    appearance: AppearancePrefsOut
+    bill_flags: BillFlagsPrefsOut
+    market_sessions: MarketSessionsPrefsOut
+    concept_filters: ConceptFiltersPrefsOut
+    benchmark_id: str
+    privacy_flags: dict[str, Any] = Field(default_factory=dict)
+
+
+class AppearancePatch(StrictModel):
+    theme: Literal["light", "dark", "system"] | None = None
+    density: Literal["cozy", "compact"] | None = None
+    trend: Literal["red-up", "green-up"] | None = None
+
+
+class BillFlagsPatch(StrictModel):
+    """`null` = 恢复该列默认值；只更新出现键。"""
+
+    near_equal_tolerance_pct: str | None = None
+    chase_margin_pct: str | None = None
+    stop_loss_margin_pct: str | None = None
+    short_term_margin_pct: str | None = None
+    window_trading_days: str | None = None
+
+
+class MarketSessionPatchItem(StrictModel):
+    open: str
+    close: str
+
+
+class MarketSessionsPatch(StrictModel):
+    sessions: list[MarketSessionPatchItem] | None = None
+    data_ready_after: str | None = None
+    session_notice_enabled: bool | None = None
+
+
+class ConceptExcludedPatchItem(StrictModel):
+    code: str
+    name: str
+
+
+class ConceptFiltersPatch(StrictModel):
+    mode: Literal["off", "hide", "exclude"] | None = None
+    excluded: list[ConceptExcludedPatchItem] | None = None
+
+
+class SettingsPatchIn(StrictModel):
+    """顶层组 `null` = 整组重置默认；`{}` = 该组无变更。"""
+
+    appearance: AppearancePatch | None = None
+    bill_flags: BillFlagsPatch | None = None
+    market_sessions: MarketSessionsPatch | None = None
+    concept_filters: ConceptFiltersPatch | None = None

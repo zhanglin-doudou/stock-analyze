@@ -20,10 +20,13 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, Query, Request
 from stock_contracts.errors import ApiError, ErrorCode
 from stock_core.values import Money, Ratio, format_quantity
+from stock_platform.repositories.users import UserSettingRepository
 from stock_platform.tenant import TenantContext
 from stock_review.trade_flags import (
     MonthlyReturn,
+    TradeFlagConfigView,
     TradeFlagMonthlySummary,
+    config_view,
     monthly_trade_flag_summary,
 )
 
@@ -41,6 +44,7 @@ from stock_api.schemas import (
     DashboardOut,
     DashboardRoundOut,
     DashboardTradeCountOut,
+    DashboardTradeFlagConfigOut,
     DashboardTradeFlagCountOut,
     DashboardTradeFlagMonthOut,
     DashboardTradeFlagSeriesOut,
@@ -320,7 +324,9 @@ async def get_dashboard_endpoint(
     return _to_out(result)
 
 
-def _to_flags_out(result: TradeFlagMonthlySummary) -> DashboardTradeFlagsOut:
+def _to_flags_out(
+    result: TradeFlagMonthlySummary, flag_config: TradeFlagConfigView
+) -> DashboardTradeFlagsOut:
     def _series(items: Any) -> list[DashboardTradeFlagSeriesOut]:
         return [
             DashboardTradeFlagSeriesOut(
@@ -367,6 +373,16 @@ def _to_flags_out(result: TradeFlagMonthlySummary) -> DashboardTradeFlagsOut:
             for item in result.items
         ],
         months_without_data=list(result.months_without_data),
+        stale_months=list(result.stale_months),
+        flag_config=DashboardTradeFlagConfigOut(
+            window_trading_days=flag_config.window_trading_days,
+            near_equal_tolerance_pct=flag_config.near_equal_tolerance_pct,
+            chase_margin_pct=flag_config.chase_margin_pct,
+            stop_loss_margin_pct=flag_config.stop_loss_margin_pct,
+            short_term_margin_pct=flag_config.short_term_margin_pct,
+            flags_hash=flag_config.flags_hash,
+            is_default=flag_config.is_default,
+        ),
         has_return_data=result.has_return_data,
         return_basis=RETURN_BASIS,
         return_labels=dict(RETURN_LABELS),
@@ -391,13 +407,15 @@ async def get_dashboard_trade_flags_endpoint(
     user_id = ctx.require_user()
     state = get_state(request)
     async with state.db.session(user_id=user_id, begin=True) as session:
+        effective = await UserSettingRepository(session).get_effective(user_id)
         result = await monthly_trade_flag_summary(
             session,
             user_id,
             window_months=months,
             clock=state.clock,
+            flags_hash=effective.flags_hash,
         )
-    return _to_flags_out(result)
+    return _to_flags_out(result, config_view(effective))
 
 
 __all__ = ["router"]

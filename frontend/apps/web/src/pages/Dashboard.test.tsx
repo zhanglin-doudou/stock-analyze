@@ -15,6 +15,7 @@ import {
   type JobEvent,
   type JobPage,
   type MetricBatch,
+  type MetricCatalog,
   type SectorsOverview,
 } from "@sa/api-client";
 import { Assets } from "./Assets";
@@ -29,7 +30,7 @@ import { api } from "../client";
 vi.mock("../client", () => ({
   api: {
     dashboard: { get: vi.fn(), tradeFlags: vi.fn() },
-    metrics: { batch: vi.fn() },
+    metrics: { batch: vi.fn(), catalog: vi.fn() },
     assets: { chart: vi.fn(), list: vi.fn(), build: vi.fn() },
     jobs: { list: vi.fn(), get: vi.fn(), events: vi.fn() },
     sectors: { overview: vi.fn() },
@@ -43,6 +44,7 @@ vi.mock("@nivo/line", () => ({ ResponsiveLine: () => null }));
 const getDashboard = vi.mocked(api.dashboard.get);
 const getTradeFlags = vi.mocked(api.dashboard.tradeFlags);
 const batchMetrics = vi.mocked(api.metrics.batch);
+const getMetricsCatalog = vi.mocked(api.metrics.catalog);
 const getAssetChart = vi.mocked(api.assets.chart);
 const getSectorsOverview = vi.mocked(api.sectors.overview);
 const listAssets = vi.mocked(api.assets.list);
@@ -327,6 +329,76 @@ function makeMetricBatch(): MetricBatch {
         n_pending: 0,
         data_as_of: "2026-06-30",
       },
+      {
+        metric_id: "perf.win_rate",
+        definition_version: "1.0",
+        domain: "perf",
+        period: "2026",
+        status: "ok",
+        sample_status: "ok",
+        reason: null,
+        value: "55.00",
+        unit: "ratio",
+        precision: 2,
+        n: 20,
+        n_pending: 0,
+        data_as_of: "2026-06-30",
+      },
+    ],
+  };
+}
+
+/** API-086 口径说明书：Dashboard 的「解读」列只读这里的 meaning/bands。 */
+function makeMetricCatalog(): MetricCatalog {
+  return {
+    registry_version: "1.0",
+    items: [
+      {
+        metric_id: "perf.total_return",
+        display_name: "累计收益率",
+        display_name_en: "Total return",
+        domain: "perf",
+        direction: "higher_better",
+        unit: "ratio",
+        precision: 2,
+        definition_version: "1.0",
+        scope: { unit: "day", cohort: "all", period: "year" },
+        min_n: 20,
+        ci_min_n: 20,
+        ci: "bootstrap",
+        min_trading_days: 0,
+        window_kind: "month",
+        bands: null,
+        meaning: "本期收益 ÷ 期初资产，为正说明账户赚钱。",
+        method: "期末资产 ÷ 期初资产 - 1。",
+        what_to_do: null,
+        caveat: null,
+      },
+      {
+        metric_id: "perf.win_rate",
+        display_name: "胜率",
+        display_name_en: "Win rate",
+        domain: "perf",
+        direction: "higher_better",
+        unit: "ratio",
+        precision: 2,
+        definition_version: "1.0",
+        scope: { unit: "round", cohort: "all", period: "year" },
+        min_n: 10,
+        ci_min_n: 20,
+        ci: "wilson",
+        min_trading_days: 0,
+        window_kind: "month",
+        bands: [
+          { level: "watch", label: "需关注", from: null, to: "40.00" },
+          { level: "neutral", label: "中性", from: "40.00", to: "55.00" },
+          { level: "good", label: "良好", from: "55.00", to: null },
+        ],
+        meaning: "本月平仓的回合里，盈利回合占比越高，说明出手质量越好。",
+        method: "盈利平仓回合数 ÷ 已平仓回合数。",
+        what_to_do: "查看下钻里的亏损回合，确认亏损是否集中在同一标的。",
+        caveat: "胜率必须与盈亏比联读；经验区间非权威阈值。",
+      },
     ],
   };
 }
@@ -563,10 +635,13 @@ function makeTradeFlags(overrides: Partial<DashboardTradeFlagsOut> = {}): Dashbo
   const series = [
     { code: "chase", label_zh: "追涨", label_en: "Chase", side: "buy" as const, lookahead: false },
     { code: "instant_bottom", label_zh: "即时抄底", label_en: "Instant bottom", side: "buy" as const, lookahead: false },
-    { code: "short_term_win", label_zh: "短期成功", label_en: "Short-term win", side: "buy" as const, lookahead: true },
+    { code: "short_term_bottom", label_zh: "短期抄底", label_en: "Short-term bottom", side: "buy" as const, lookahead: true },
+    { code: "short_term_underwater", label_zh: "短期被套", label_en: "Short-term underwater", side: "buy" as const, lookahead: true },
     { code: "stop_loss", label_zh: "止损", label_en: "Stop loss", side: "sell" as const, lookahead: false },
+    { code: "sell_drawdown", label_zh: "回撤", label_en: "Drawdown", side: "sell" as const, lookahead: false },
     { code: "instant_top", label_zh: "即时逃顶", label_en: "Instant top", side: "sell" as const, lookahead: false },
     { code: "short_term_top", label_zh: "短期逃顶", label_en: "Short-term top", side: "sell" as const, lookahead: true },
+    { code: "short_term_sold_early", label_zh: "短期卖飞", label_en: "Short-term sold early", side: "sell" as const, lookahead: true },
   ];
   const stateSeries = [
     { code: "first_entry", label_zh: "首次建仓", label_en: "First entry", side: "buy" as const, lookahead: false },
@@ -650,6 +725,17 @@ function makeTradeFlags(overrides: Partial<DashboardTradeFlagsOut> = {}): Dashbo
       }),
     ],
     months_without_data: ["2026-01", "2026-02", "2026-03", "2026-04"],
+    stale_months: [],
+    flag_config: {
+      near_equal_tolerance_pct: "1.00%",
+      chase_margin_pct: "1.00%",
+      stop_loss_margin_pct: "1.00%",
+      short_term_margin_pct: "5.00%",
+      window_trading_days: "5",
+      flags_hash: "c425bc5b871f59f5",
+      is_default: true,
+      stale: false,
+    },
     has_return_data: true,
     return_basis: "单月收益 = 资产日表逐日收益（TWR，已剔除出入金）在自然月内复利。",
     return_labels: { pos: "正收益", neg: "负收益", none: "无数据" },
@@ -747,6 +833,7 @@ beforeEach(() => {
   getDashboard.mockResolvedValue(makeDashboard());
   getTradeFlags.mockResolvedValue(makeTradeFlags());
   batchMetrics.mockResolvedValue(makeMetricBatch());
+  getMetricsCatalog.mockResolvedValue(makeMetricCatalog());
   getAssetChart.mockResolvedValue(makeAssetChart());
   getSectorsOverview.mockImplementation(async ({ taxonomy }) =>
     taxonomy === "concept" ? makeConceptOverview() : makeIndustryOverview(),
@@ -986,6 +1073,15 @@ describe("Dashboard 看板", () => {
     const annual = screen.getByTestId("annual-metrics");
     expect(annual.textContent).toContain("12.34");
     expect(annual.textContent).toContain("元");
+    // 「解读」列文案来自 /metrics/catalog 的 meaning，前端不写死
+    expect(screen.getByText("解读")).toBeTruthy();
+    await screen.findByTestId("annual-metric-note-perf.total_return");
+    expect(screen.getByTestId("annual-metric-note-perf.total_return").textContent).toBe(
+      "本期收益 ÷ 期初资产，为正说明账户赚钱。",
+    );
+    expect(screen.getByTestId("annual-metric-note-perf.win_rate").textContent).toBe(
+      "本月平仓的回合里，盈利回合占比越高，说明出手质量越好。",
+    );
   });
 
   it("FT-04 零口径：源码不含 Number/parseFloat/parseInt/toFixed", () => {
@@ -1198,6 +1294,23 @@ describe("Dashboard 看板", () => {
     expect(await screen.findByTestId("tfc-return-empty")).toBeTruthy();
   });
 
+  it("FT-16 旗标过期横幅：月份原样来自后端 stale_months，入口指向设置页重算", async () => {
+    getTradeFlags.mockResolvedValue(makeTradeFlags({ stale_months: ["2026-05", "2026-06"] }));
+    renderPage();
+
+    const notice = await screen.findByTestId("flag-stale-notice");
+    expect(notice.textContent).toContain("旗标已过期");
+    expect(notice.textContent).toContain("以下月份按旧阈值计算：2026-05、2026-06。");
+    expect(screen.getByTestId("flag-stale-action").getAttribute("href")).toBe("/settings");
+  });
+
+  it("FT-17 无过期月份：不渲染旗标过期横幅", async () => {
+    renderPage();
+
+    await screen.findByTestId("tfc-basis");
+    expect(screen.queryByTestId("flag-stale-notice")).toBeNull();
+  });
+
   it("FT-10 图表数据投影：标签/计数原样透传，柱状系列先买后卖且配色按侧分组", () => {
     const palette = {
       text: "t",
@@ -1213,10 +1326,13 @@ describe("Dashboard 看板", () => {
         sell: "sell-total",
         chase: "buy-1",
         instant_bottom: "buy-2",
-        short_term_win: "buy-3",
+        short_term_bottom: "buy-3",
+        short_term_underwater: "warn-underwater",
         stop_loss: "sell-1",
+        sell_drawdown: "warn-drawdown",
         instant_top: "sell-2",
         short_term_top: "sell-3",
+        short_term_sold_early: "warn-sold-early",
         addon_average: "buy-1",
         addon_dip: "buy-2",
         addon_chase: "buy-3",
@@ -1259,10 +1375,13 @@ describe("Dashboard 看板", () => {
     expect(charts.lineSeries.map((serie) => serie.id)).toEqual([
       "追涨",
       "即时抄底",
-      "短期成功",
+      "短期抄底",
+      "短期被套",
       "止损",
+      "回撤",
       "即时逃顶",
       "短期逃顶",
+      "短期卖飞",
     ]);
     expect(charts.lineSeries[0]?.data).toEqual([
       { x: "2026-05", y: 0 },
@@ -1272,9 +1391,12 @@ describe("Dashboard 看板", () => {
       "buy-1",
       "buy-2",
       "buy-3",
+      "warn-underwater",
       "sell-1",
+      "warn-drawdown",
       "sell-2",
       "sell-3",
+      "warn-sold-early",
     ]);
     // 单月收益：柱高/展示串/符号/金额全部原样透传，配色只按 sign 选 token。
     expect(charts.returnData).toEqual([

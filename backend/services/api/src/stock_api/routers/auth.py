@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, Header, Request, Response
 from sqlalchemy.ext.asyncio import AsyncSession
 from stock_contracts.constants import LOGIN_FAILURE_MAX_ATTEMPTS, LOGIN_FAILURE_WINDOW_SECONDS
 from stock_contracts.errors import ApiError, ErrorCode, FieldError
+from stock_core.preferences import effective_appearance
 from stock_platform import audit
 from stock_platform.db import set_tenant
 from stock_platform.obs import get_logger
@@ -275,7 +276,8 @@ async def get_me(
         settings_payload = {
             "benchmark_id": setting.benchmark_id,
             "privacy_flags": setting.privacy_flags,
-            "display_prefs": setting.display_prefs,
+            # 与 GET /settings 同口径：返回生效值（形状不变），避免 raw vs effective 双口径。
+            "display_prefs": effective_appearance({"display_prefs": setting.display_prefs}),
             "version": setting.version,
         }
         return MeOut(user=_brief(user), settings=settings_payload)

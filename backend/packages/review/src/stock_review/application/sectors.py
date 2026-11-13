@@ -99,6 +99,8 @@ SECTOR_HOLDING_TRUNCATED = "SECTOR_HOLDING_TRUNCATED"
 SECTOR_PRICE_MISSING = "SECTOR_PRICE_MISSING"
 SECTOR_AS_OF_NOT_AVAILABLE = "SECTOR_AS_OF_NOT_AVAILABLE"
 SECTOR_SYNC_FAILED = "SECTOR_SYNC_FAILED"
+SECTOR_CONCEPT_FILTER_APPLIED = "SECTOR_CONCEPT_FILTER_APPLIED"
+SECTOR_CONCEPT_FILTER_UNRESOLVED = "SECTOR_CONCEPT_FILTER_UNRESOLVED"
 
 DEFINITION_VERSION = "1.0"
 CONCEPT_CAVEAT = "概念为多归属标签：暴露可重叠、不可加总，也不代表资金权重。"
@@ -203,6 +205,63 @@ class SectorPreference:
 
 
 @dataclass(slots=True, frozen=True)
+class ConceptFilterItem:
+    """用户排除的概念（code + 保存时的展示名）。"""
+
+    code: str
+    name: str
+
+
+@dataclass(slots=True, frozen=True)
+class ConceptFilter:
+    """概念过滤偏好（设计 §4.6）；`off` 时对结果零影响。"""
+
+    mode: str = "off"
+    excluded: tuple[ConceptFilterItem, ...] = ()
+    hash: str = ""
+
+    @property
+    def active(self) -> bool:
+        return self.mode != "off"
+
+    @property
+    def excluded_codes(self) -> tuple[str, ...]:
+        return tuple(item.code for item in self.excluded)
+
+
+@dataclass(slots=True, frozen=True)
+class ConceptFilterInfo:
+    """响应里的 `concept.filters`（仅非 off 时输出）。"""
+
+    mode: str
+    applied: bool
+    excluded: tuple[ConceptFilterItem, ...]
+    unresolved: tuple[str, ...]
+
+
+def concept_filter_from_preferences(
+    concept_filters: Mapping[str, object], digest: str
+) -> ConceptFilter:
+    """把 `EffectivePreferences.concept_filters` 转成应用层过滤参数（不做校验/推断）。"""
+    raw_mode = concept_filters.get("mode")
+    mode = raw_mode if isinstance(raw_mode, str) else "off"
+    raw_items = concept_filters.get("excluded")
+    excluded: list[ConceptFilterItem] = []
+    if isinstance(raw_items, list):
+        for item in raw_items:
+            if not isinstance(item, Mapping):
+                continue
+            code = item.get("code")
+            if not isinstance(code, str) or not code:
+                continue
+            name = item.get("name")
+            excluded.append(
+                ConceptFilterItem(code=code, name=name if isinstance(name, str) else code)
+            )
+    return ConceptFilter(mode=mode, excluded=tuple(excluded), hash=digest)
+
+
+@dataclass(slots=True, frozen=True)
 class ConceptBlock:
     coverage_units: int
     tagged_market_value_units: int
@@ -213,6 +272,10 @@ class ConceptBlock:
     top1_concept: SectorRow | None
     top5_concepts: list[SectorRow]
     caveat: str | None
+    #: 概念过滤（非 off 才非空）；`filtered_*` 仅 exclude 模式给出。
+    filters: ConceptFilterInfo | None = None
+    filtered_market_value_units: int | None = None
+    filtered_holding_count: int | None = None
 
 
 @dataclass(slots=True, frozen=True)
@@ -321,20 +384,22 @@ def _inputs_hash(
     definition_version: str,
     total_assets_units: int | None,
     holding_market_value_units: int | None,
+    concept_filter_hash: str = "",
 ) -> str:
-    payload = "|".join(
-        [
-            as_of.isoformat() if as_of else "",
-            taxonomy,
-            str(level),
-            parent or "",
-            provenance,
-            definition_version,
-            str(total_assets_units),
-            str(holding_market_value_units),
-        ]
-    )
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    parts = [
+        as_of.isoformat() if as_of else "",
+        taxonomy,
+        str(level),
+        parent or "",
+        provenance,
+        definition_version,
+        str(total_assets_units),
+        str(holding_market_value_units),
+    ]
+    # 设计 §4.6/§5.5：`off` 不进指纹（与旧 ETag 逐字一致），非 off 追加过滤指纹。
+    if concept_filter_hash:
+        parts.append(concept_filter_hash)
+    return hashlib.sha256("|".join(parts).encode("utf-8")).hexdigest()
 
 
 def _empty_portfolio() -> SectorPortfolio:
@@ -406,6 +471,7 @@ async def build_sector_overview(
     benchmark_max_age_days: int = SECTOR_BENCHMARK_MAX_AGE_DAYS,
     industry_stale_days: int = 35,
     concept_stale_days: int = 7,
+    concept_filter: ConceptFilter | None = None,
 ) -> SectorOverview:
     """组装板块概览（纯读；行业/概念两条分支）。"""
     if taxonomy not in _DB_TAXONOMY:
@@ -709,6 +775,7 @@ async def build_sector_overview(
                 coverage_ok_min_units=coverage_ok_min_units,
                 coverage_degraded_min_units=coverage_degraded_min_units,
                 statuses=statuses,
+                concept_filter=concept_filter or ConceptFilter(),
             )
 
     if not history_blocked:
@@ -757,6 +824,11 @@ async def build_sector_overview(
             definition_version=definition_version,
             total_assets_units=total_assets,
             holding_market_value_units=holding_mv,
+            concept_filter_hash=(
+                (concept_filter.hash or "")
+                if taxonomy == TAXONOMY_CONCEPT and concept_filter is not None
+                else ""
+            ),
         ),
         classification_version=classification_version,
         assumptions=body.assumptions,
@@ -1006,7 +1078,9 @@ async def _concept_overview(
     coverage_ok_min_units: int,
     coverage_degraded_min_units: int,
     statuses: Sequence[str],
+    concept_filter: ConceptFilter,
 ) -> _Body:
+    """概念分支：行/TopN/others 可按偏好过滤；覆盖度/重叠/多归属保持全量口径。"""
     missing: list[SectorMissing] = []
     names = _names(catalog)
     display_names = stock_names or {}
@@ -1037,6 +1111,55 @@ async def _concept_overview(
             )
     for refs in holdings_by_concept.values():
         refs.sort(key=lambda ref: (-stock_mv[ref.symbol], ref.symbol))
+
+    # ── 概念过滤（设计 §4.6）：只裁剪行/TopN/others/n_sectors ────────────
+    # 覆盖度、重叠、多归属、tagged/unclassified 一律保持全量口径；
+    # `off` 不做任何改动，输出与旧版本逐字一致（ETag 也不变）。
+    filters_info: ConceptFilterInfo | None = None
+    filtered_mv_units: int | None = None
+    filtered_holding_count: int | None = None
+    excluded_codes = set(concept_filter.excluded_codes)
+    if concept_filter.active:
+        unresolved = tuple(item.code for item in concept_filter.excluded if item.code not in names)
+        excluded_existing = [code for code in excluded_codes if code in mv_by_concept]
+        if concept_filter.mode == "exclude":
+            filtered_mv_units = sum(mv_by_concept[code] for code in excluded_existing)
+            filtered_holding_count = len(
+                {
+                    ref.symbol
+                    for code in excluded_existing
+                    for ref in holdings_by_concept.get(code, ())
+                }
+            )
+        for code in excluded_codes:
+            mv_by_concept.pop(code, None)
+            count_by_concept.pop(code, None)
+            overlap_concept.pop(code, None)
+            holdings_by_concept.pop(code, None)
+        filters_info = ConceptFilterInfo(
+            mode=concept_filter.mode,
+            applied=bool(excluded_codes),
+            excluded=concept_filter.excluded,
+            unresolved=unresolved,
+        )
+        if excluded_codes:
+            missing.append(
+                SectorMissing(
+                    field="concept.filters",
+                    code=SECTOR_CONCEPT_FILTER_APPLIED,
+                    reason=f"已按偏好排除 {len(excluded_codes)} 个概念，行/TopN/others 不含这些概念。",
+                    what_to_do="在设置页调整概念过滤后重新查看。",
+                )
+            )
+        if unresolved:
+            missing.append(
+                SectorMissing(
+                    field="concept.filters.excluded",
+                    code=SECTOR_CONCEPT_FILTER_UNRESOLVED,
+                    reason=f"有 {len(unresolved)} 个已排除概念在概念目录中不存在。",
+                    what_to_do="在设置页移除失效概念，或重新同步概念目录（make sync-sectors）。",
+                )
+            )
 
     portfolio = SectorPortfolio(
         total_assets_units=total_assets,
@@ -1123,6 +1246,9 @@ async def _concept_overview(
         top1_concept=top5[0] if top5 else None,
         top5_concepts=top5,
         caveat=CONCEPT_CAVEAT if concept.overlap_units > RATIO_ONE_UNITS else None,
+        filters=filters_info,
+        filtered_market_value_units=filtered_mv_units,
+        filtered_holding_count=filtered_holding_count,
     )
     unclassified = SectorUnclassified(
         market_value_units=equity_units - tagged_mv,
@@ -1155,6 +1281,7 @@ async def _concept_overview(
             "concept_assignment": "catalog_all",
             "weight_basis": "equity_market_value",
             "non_stock_excluded": "true",
+            **({"concept_filter_hash": concept_filter.hash} if concept_filter.active else {}),
         },
     )
 

@@ -163,17 +163,30 @@ async def test_api_092_summary_addon_serialized(client, api_prefix, user, addon_
 
     买入侧判定落在「本回合最后一笔买入」（有加仓时即加仓笔）：本场景最后一笔是
     06-01 的 100 股 @50.00（开仓笔是同日 50 股 @1800.00），因此
-    `continued_decline` 按 50.00 这笔评估（价格后续上涨 → 不命中），
-    `avg_dip_pct` 也取这笔的 20 日 B2。
-    `missed_profit_*` 只统计 `profit_take_fly`，本场景是止损反弹 → 必须为 null。
+    `continued_decline` 按 50.00 这笔评估（价格后续上涨 → 不命中）。
     """
     resp = await _list(client, api_prefix, user.headers, "?period=2026-06")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     item = body["items"][0]
-    assert {"addon", "below_avg", "stop_loss_rebound"} <= set(item["flags"])
-    # 加仓笔（100 股 @50）买后上涨，不再误打「加仓后下跌」。
-    assert "continued_decline" not in item["flags"]
+    assert {"bottom_buy", "stop_loss_sold_early", "drawdown"} <= set(item["flags"])
+    # 旧旗标不再输出。
+    assert not {"addon", "below_avg", "profit_take_fly", "stop_loss_rebound"} & set(item["flags"])
+    # 计数型状态：抄底账单 1 笔（100 股 @50），卖出带短期卖飞旗标且低于均价 → 止损侧 1 笔。
+    assert item["status_counts"]["bottom_buy"] == 1
+    assert item["status_counts"]["stop_loss_sold_early"] == 1
+    assert item["status_counts"]["profit_sold_early"] == 0
+    # 旗标回合计数：覆盖 v1.2 词表全部 item_flag、顺序稳定，计数与 items[].flags 同源（每回合只计一次）。
+    assert body["summary"]["flag_round_counts"] == [
+        {"flag": "bottom_buy", "count": 1},
+        {"flag": "stop_loss_sold_early", "count": 1},
+        {"flag": "profit_sold_early", "count": 0},
+        {"flag": "drawdown", "count": 1},
+        {"flag": "intraday_t", "count": 0},
+        {"flag": "swing_t", "count": 0},
+        {"flag": "intraday_rebalance_out", "count": 0},
+        {"flag": "intraday_rebalance_in", "count": 0},
+    ]
     assert item["buy_trade"]["trade_id"] == "trd_addon000002"
     # 逐笔数量取 trade.quantity_units 的展示串（整数份额，不带尾零；此前该字段硬编码为 None）。
     assert item["buy_trade"]["quantity_display"] == "50"
@@ -183,9 +196,6 @@ async def test_api_092_summary_addon_serialized(client, api_prefix, user, addon_
     assert addon["rounds"] == 1  # 兼容字段，与 count 同值
     assert addon["declined_after_addon"] == 0
     assert addon["declined_pct"] == "0.00%"
-    # 加仓笔 B2 = (1705.96 − 50.00) / 50.00 = +3311.92%
-    assert addon["avg_dip_pct"] == "3311.92%"
-    assert addon["avg_dip_coverage"] == "1/1"
     assert addon["share_pct"] == "100.00%"  # 1/1 个平仓回合
 
     sell_fly = body["summary"]["sell_fly"]
@@ -195,24 +205,17 @@ async def test_api_092_summary_addon_serialized(client, api_prefix, user, addon_
     assert sell_fly["fly_pct"] == "0.00%"  # 只算止盈卖飞
     assert sell_fly["rounds"] == 0
     assert sell_fly["share_pct"] == "0.00%"
-    # 止损反弹不并入 missed_profit（只有止盈卖飞才统计）
-    assert sell_fly["missed_profit_worst_display"] is None
-    assert sell_fly["missed_profit_end_display"] is None
-    assert sell_fly["missed_profit_worst_abs_display"] is None
-    assert sell_fly["missed_profit_worst_label"] is None
-    assert sell_fly["missed_profit_end_abs_display"] is None
-    assert sell_fly["missed_profit_end_label"] is None
 
 
 async def test_api_092_summary_sell_fly_serialized(client, api_prefix, user, sell_fly_scenario):
-    """`summary.sell_fly`：分母是全部卖出回合，分子只算止盈卖飞；金额只并止盈卖飞。"""
+    """`summary.sell_fly`：分母是全部卖出回合，分子只算止盈卖飞。"""
     resp = await _list(client, api_prefix, user.headers, "?period=2026-07")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     all_flags = [flag for item in body["items"] for flag in item["flags"]]
     assert body["summary"]["swing"]["closed"] == 2
-    assert "profit_take_fly" in all_flags
-    assert "stop_loss_rebound" in all_flags
+    assert "profit_sold_early" in all_flags
+    assert "stop_loss_sold_early" in all_flags
 
     sell_fly = body["summary"]["sell_fly"]
     assert sell_fly["sell_count"] == 2
@@ -221,28 +224,14 @@ async def test_api_092_summary_sell_fly_serialized(client, api_prefix, user, sel
     assert sell_fly["fly_pct"] == "50.00%"  # 1/2，只算止盈卖飞
     assert sell_fly["rounds"] == 1
     assert sell_fly["share_pct"] == "50.00%"
-    # 只统计止盈卖飞那 1 笔：100 股 ×(1712.75 − 100.00) = 161275.00
-    assert sell_fly["missed_profit_worst_display"] == "161275.00"
-    assert sell_fly["missed_profit_end_display"] == "161275.00"
-    # additive：正数 → 少赚；绝对值串与原有带符号串同值。
-    assert sell_fly["missed_profit_worst_abs_display"] == "161275.00"
-    assert sell_fly["missed_profit_worst_label"] == "少赚"
-    assert sell_fly["missed_profit_worst_label_en"] == "missed gain"
-    assert sell_fly["missed_profit_end_abs_display"] == "161275.00"
-    assert sell_fly["missed_profit_end_label"] == "少赚"
-    # 逐项同样带标签，便于前端直接渲染。
-    fly_item = next(item for item in body["items"] if "profit_take_fly" in item["flags"])
-    assert fly_item["missed_profit_end_label"] == "少赚"
-    assert fly_item["missed_profit_worst_abs_display"] == fly_item["missed_profit_worst_display"]
 
     addon = body["summary"]["addon"]
     assert addon["count"] == 0
-    assert addon["avg_dip_pct"] is None
-    assert addon["avg_dip_coverage"] == "0/0"
+    assert addon["declined_pct"] is None
 
 
 async def test_api_092_summary_addon_empty_when_no_addon(client, api_prefix, user, scenario):
-    """无加仓时 `count=0`、百分比为 null、覆盖度 `0/0`（不伪造 0%）。"""
+    """无加仓时 `count=0`、百分比为 null（不伪造 0%）。"""
     resp = await _list(client, api_prefix, user.headers, "?period=2026-06")
     assert resp.status_code == 200, resp.text
     summary = resp.json()["summary"]
@@ -251,8 +240,6 @@ async def test_api_092_summary_addon_empty_when_no_addon(client, api_prefix, use
         "count": 0,
         "declined_after_addon": 0,
         "declined_pct": None,
-        "avg_dip_pct": None,
-        "avg_dip_coverage": "0/0",
         "rounds": 0,
         "share_pct": "0.00%",
     }
@@ -267,7 +254,7 @@ async def test_api_092_list_zero_caliber_and_period_basis(client, api_prefix, us
     assert body["period"] == "2026-06"
     assert body["period_basis"] == "close_date"
     assert body["basis"] == "benchmark_excess_20d"
-    assert body["definition_version"] == "1.0"
+    assert body["definition_version"] == "1.2"
     assert body["item_total"] >= 1
     assert "不构成投资建议" in body["disclaimer"]
     assert body["missing"] == [] or set(body["missing"]) <= {
@@ -300,11 +287,11 @@ async def test_api_092_list_zero_caliber_and_period_basis(client, api_prefix, us
 
 
 async def test_api_092_filters_and_include_summary(client, api_prefix, user, scenario):
-    by_bucket = await _list(client, api_prefix, user.headers, "?period=2026-06&bucket=swing")
+    by_bucket = await _list(client, api_prefix, user.headers, "?period=2026-06&bucket=position")
     assert [item["round_id"] for item in by_bucket.json()["items"]] == [
         scenario["round"]["round_id"]
     ]
-    none_bucket = await _list(client, api_prefix, user.headers, "?period=2026-06&bucket=trend")
+    none_bucket = await _list(client, api_prefix, user.headers, "?period=2026-06&bucket=long")
     assert none_bucket.json()["items"] == []
 
     missing_reason = await _list(
@@ -433,7 +420,7 @@ async def test_api_092_ac_s3_fill_pairs_not_added_to_rounds(
     summary = body["summary"]
     assert body["item_total"] == 1
     assert summary["swing"]["closed"] == 1
-    assert summary["swing"]["swing"] == 1
+    assert summary["swing"]["position"] == 1
     assert summary["fill_swing"]["pairs"] == 2
     # fill 与回合是两种统计单位：2 ≠ 1，汇总不得相加（AC-S3）。
     assert summary["swing"]["closed"] != summary["fill_swing"]["pairs"]
@@ -518,7 +505,7 @@ async def test_api_093_detail_and_cross_user_404(client, api_prefix, user, scena
     assert body["fills"][0]["pnl_display"] is not None
     # AC-S3：fill 明细用真实交易日（不是 round.holding_days 的 weekday 近似）。
     assert isinstance(body["fills"][0]["holding_trading_days"], int)
-    assert body["fills"][0]["bucket"] == "swing"
+    assert body["fills"][0]["bucket"] == "position"
     assert isinstance(body["flags"], list)
     assert isinstance(body["quality"], list)
     assert body["ranking"]["basis"] == "benchmark_excess_20d"
@@ -527,6 +514,39 @@ async def test_api_093_detail_and_cross_user_404(client, api_prefix, user, scena
     missing = await _detail(client, api_prefix, user.headers, "rnd_missing")
     assert missing.status_code == 404
     assert missing.json()["code"] == ErrorCode.NOT_FOUND
+
+
+async def test_api_092_093_flag_config_additive(client, api_prefix, user, scenario):
+    """列表/详情都附加 `flag_config`；改阈值后详情词表按生效配置重渲染。"""
+    list_body = (await _list(client, api_prefix, user.headers, "?period=2026-06")).json()
+    assert list_body["flag_config"]["flags_hash"]
+    assert list_body["flag_config"]["is_default"] is True
+    assert list_body["items"][0]["flag_config"] == list_body["flag_config"]
+
+    detail = await _detail(client, api_prefix, user.headers, scenario["round"]["round_id"])
+    assert detail.status_code == 200, detail.text
+    body = detail.json()
+    assert body["flag_config"]["flags_hash"] == list_body["flag_config"]["flags_hash"]
+    assert body["flag_config"]["stale"] is False
+    glossary = {item["code"]: item for item in body["trade_flag_glossary"]}
+    assert "上下 1% 以内" in glossary["addon_average"]["description_zh"]
+
+    patched = await client.patch(
+        f"{api_prefix}/settings",
+        json={"bill_flags": {"near_equal_tolerance_pct": "2.50%", "window_trading_days": "3"}},
+        headers={**user.headers, "If-Match": 'W/"1"'},
+    )
+    assert patched.status_code == 200, patched.text
+    changed = patched.json()["bill_flags"]
+
+    detail = await _detail(client, api_prefix, user.headers, scenario["round"]["round_id"])
+    body = detail.json()
+    assert body["flag_config"]["flags_hash"] == changed["flags_hash"]
+    assert body["flag_config"]["is_default"] is False
+    assert body["flag_config"]["window_trading_days"] == "3"
+    glossary = {item["code"]: item for item in body["trade_flag_glossary"]}
+    assert "上下 2.5% 以内" in glossary["addon_average"]["description_zh"]
+    assert "前 3 个行情日最高收盘价的 1% 以上" in glossary["chase"]["description_zh"]
 
 
 async def test_api_092_093_display_scale_6dp_and_2dp(
@@ -913,22 +933,21 @@ async def test_api_092_addon_uses_statement_order_not_trade_id(
     assert set(by_open) == {"2026-05-06", "2026-05-07"}
     reopening = by_open["2026-05-07"]
     assert reopening["buy_trade"]["trade_id"] == "trd_aaaa00000003"
-    assert "addon" not in reopening["flags"]
-    assert "below_avg" not in reopening["flags"]
-    assert "dip_sequence" not in reopening["flags"]
+    # 新回合首笔买入（qty_before=0）为抄底笔；加仓已不再是输出旗标。
+    assert reopening["status_counts"]["bottom_buy"] == 1
     # 同源统计：本场景没有任何加仓，summary.addon 必须为 0。
     assert body["summary"]["addon"]["count"] == 0
     assert body["summary"]["addon"]["rounds"] == 0
 
 
 async def test_api_092_093_flag_glossary_serialized(client, api_prefix, user, sell_fly_scenario):
-    """旗标词表：列表与详情同源透出 16 个枚举值，且覆盖响应中出现的全部 item flags。"""
+    """旗标词表：列表与详情同源透出 12 个枚举值，且覆盖响应中出现的全部 item flags。"""
     resp = await _list(client, api_prefix, user.headers, "?period=2026-07")
     assert resp.status_code == 200, resp.text
     body = resp.json()
     glossary = body["flag_glossary"]
-    assert len(glossary) == 16
-    assert len({entry["code"] for entry in glossary}) == 16
+    assert len(glossary) == 12
+    assert len({entry["code"] for entry in glossary}) == 12
     for entry in glossary:
         assert set(entry) == {
             "code",
@@ -945,8 +964,10 @@ async def test_api_092_093_flag_glossary_serialized(client, api_prefix, user, se
     glossary_codes = {entry["code"] for entry in glossary}
     observed_flags = {flag for item in body["items"] for flag in item["flags"]}
     assert observed_flags <= glossary_codes
-    assert {"addon", "profit_take_fly", "stop_loss_rebound"} <= glossary_codes
-    assert {"addon_decline", "sold_too_early"} <= glossary_codes
+    assert {"bottom_buy", "stop_loss_sold_early", "profit_sold_early"} <= glossary_codes
+    assert {"sold_too_early", "reason_missing", "horizon_pending", "corporate_action"} <= (
+        glossary_codes
+    )
 
     detail = await _detail(client, api_prefix, user.headers, body["items"][0]["round_id"])
     assert detail.status_code == 200, detail.text

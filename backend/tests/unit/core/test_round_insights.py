@@ -341,42 +341,117 @@ def test_forward_price_jump_flagged() -> None:
     [
         (None, "closed", RoundBucket.UNKNOWN),
         (3, "open", RoundBucket.UNKNOWN),
-        (1, "closed", RoundBucket.SHORT),
-        (2, "closed", RoundBucket.SWING),
-        (20, "closed", RoundBucket.SWING),
-        (21, "closed", RoundBucket.TREND),
+        (0, "closed", RoundBucket.SCALP),
+        (1, "closed", RoundBucket.SCALP),
+        (3, "closed", RoundBucket.SCALP),
+        (4, "closed", RoundBucket.SHORT),
+        (10, "closed", RoundBucket.SHORT),
+        (11, "closed", RoundBucket.POSITION),
+        (63, "closed", RoundBucket.POSITION),
+        (126, "closed", RoundBucket.POSITION),
+        (127, "closed", RoundBucket.LONG),
+        (252, "closed", RoundBucket.LONG),
     ],
 )
 def test_bucket_of(td: int | None, status: str, expected: str) -> None:
     assert classify.bucket_of(td, status=status) == expected
 
 
-def test_addon_and_below_avg() -> None:
+def test_addon() -> None:
     assert classify.is_addon(0) is False
     assert classify.is_addon(1) is True
-    assert classify.is_below_avg(9_000_000, 10_000_000) is True
-    assert classify.is_below_avg(10_000_000, 10_000_000) is False
-    assert classify.is_below_avg(9_000_000, 0) is False
 
 
-def test_dip_depth_units() -> None:
-    assert classify.dip_depth_units(9_000_000, 0) is None
-    assert classify.dip_depth_units(9_000_000, 10_000_000) == 10_000_000  # 10%
+def test_sold_early_side() -> None:
+    # 净卖价严格低于均价 → 止损侧；等号也归止损侧（用户确认口径）。
+    assert classify.sold_early_side(9_000_000, 10_000_000) == classify.SOLD_EARLY_STOP_LOSS
+    assert classify.sold_early_side(10_000_000, 10_000_000) == classify.SOLD_EARLY_STOP_LOSS
+    assert classify.sold_early_side(11_000_000, 10_000_000) == classify.SOLD_EARLY_PROFIT
+    # 零成本是有效成本：任意正卖价归止盈侧。
+    assert classify.sold_early_side(1_000_000, 0) == classify.SOLD_EARLY_PROFIT
+    # 成本缺失或负成本无法分侧。
+    assert classify.sold_early_side(9_000_000, None) is None
+    assert classify.sold_early_side(9_000_000, -1) is None
 
 
-def test_dip_and_rise_sequences() -> None:
-    assert classify.is_dip_sequence([]) is False
-    assert classify.is_dip_sequence([9_000_000]) is False
-    assert classify.is_dip_sequence([10_000_000, 9_000_000, 8_000_000]) is True
-    assert classify.is_dip_sequence([10_000_000, 10_000_000]) is False
+def test_is_round_drawdown() -> None:
+    # 严格低于 95%：100 vs 105.27 → 95% 线 100.0065，100 低于它 → 回撤。
+    assert classify.is_round_drawdown(100_000_000, 105_270_000) is True
+    # 恰为 95% → 不触发（严格）。
+    assert classify.is_round_drawdown(95_000_000, 100_000_000) is False
+    assert classify.is_round_drawdown(94_990_000, 100_000_000) is True
+    assert classify.is_round_drawdown(None, 100_000_000) is False
+    assert classify.is_round_drawdown(100_000_000, None) is False
+    assert classify.is_round_drawdown(0, 100_000_000) is False
+    assert classify.is_round_drawdown(100_000_000, 0) is False
 
-    assert classify.is_rise_sequence([]) is False
-    assert classify.is_rise_sequence([10_000_000, 11_000_000]) is True
-    assert classify.is_rise_sequence([10_000_000, 9_500_000]) is False
+
+def test_is_partial_sell() -> None:
+    assert classify.is_partial_sell(0, 10) is False
+    assert classify.is_partial_sell(10, 10) is False  # 清仓，不是部分卖出
+    assert classify.is_partial_sell(10, 11) is True
+    assert classify.is_partial_sell(11, 10) is False  # 超卖（异常）不判定
+
+
+def test_detect_t_patterns() -> None:
+    d1, d2 = date(2026, 6, 1), date(2026, 6, 2)
+    # 日内：先部分卖 30（持仓 100）再买 30。
+    assert classify.detect_t_patterns([(d1, "sell", 30, 100), (d1, "buy", 30, 0)]) == (True, False)
+    # 清仓后同日再买：不是部分卖出 → 都不算。
+    assert classify.detect_t_patterns([(d1, "sell", 100, 100), (d1, "buy", 100, 0)]) == (
+        False,
+        False,
+    )
+    # 先买后卖：顺序不符 → 不算。
+    assert classify.detect_t_patterns([(d1, "buy", 30, 10), (d1, "sell", 30, 40)]) == (False, False)
+    # 跨日：部分卖后次日买 → 波段做T，不计日内。
+    assert classify.detect_t_patterns([(d1, "sell", 30, 100), (d2, "buy", 30, 0)]) == (False, True)
+    # 部分卖出后先出现的不是买入（再卖一笔）→ 跳过非买入事件，取其后第一笔买入。
+    assert classify.detect_t_patterns(
+        [(d1, "sell", 30, 100), (d1, "sell", 30, 70), (d2, "buy", 30, 0)]
+    ) == (False, True)
+    # 同一笔卖出已被同日买入配对 → 不再计入波段（即使后续还有买入）。
+    assert classify.detect_t_patterns(
+        [(d1, "sell", 30, 100), (d1, "buy", 10, 30), (d2, "buy", 20, 0)]
+    ) == (True, False)
+    # 两笔独立卖出：一笔日内、一笔跨日 → 两个状态都命中。
+    assert classify.detect_t_patterns(
+        [
+            (d1, "sell", 30, 100),
+            (d1, "buy", 30, 0),
+            (d2, "sell", 20, 100),
+            (date(2026, 6, 3), "buy", 20, 0),
+        ]
+    ) == (True, True)
+
+
+def test_has_same_day_after() -> None:
+    d1, d2 = date(2026, 6, 1), date(2026, 6, 2)
+    assert classify.has_same_day_after([(d1, 5)], [(d1, 6)]) is True
+    assert classify.has_same_day_after([(d1, 5)], [(d1, 5)]) is False
+    assert classify.has_same_day_after([(d1, 5)], [(d1, 4)]) is False
+    assert classify.has_same_day_after([(d1, 5)], [(d2, 6)]) is False
+
+
+def test_rebalance_counterparty_only_accepts_real_security_trades() -> None:
+    """日内调仓对手方：只认二级市场证券成交（类别词表复用 EventKind）。"""
+    real = {"security_code": "002049", "category": "buy", "is_money_fund": False}
+    assert classify.is_rebalance_counterparty(**real) is True
+    assert classify.is_rebalance_counterparty(**{**real, "category": " SELL "}) is True
+    # 资金伪代码、公司行动、新股申购、货基申赎都不是「买入/卖出其它证券」。
+    assert classify.is_rebalance_counterparty(**{**real, "security_code": "CASH"}) is False
+    for category in ("fee", "transfer", "interest", "dividend", "bonus", "rights", "new_stock"):
+        assert classify.is_rebalance_counterparty(**{**real, "category": category}) is False, (
+            category
+        )
+    assert classify.is_rebalance_counterparty(**{**real, "is_money_fund": True}) is False
 
 
 def test_profit_taking_and_sold_too_early() -> None:
-    assert classify.is_profit_taking(20_000_000, 0) is False
+    # 零成本持仓：任意正卖价都算止盈；成本缺失/负成本不判定。
+    assert classify.is_profit_taking(20_000_000, 0) is True
+    assert classify.is_profit_taking(20_000_000, None) is False
+    assert classify.is_profit_taking(20_000_000, -1) is False
     assert classify.is_profit_taking(20_000_000, 19_000_000) is True
     assert classify.is_profit_taking(19_000_000, 19_000_000) is False
 
@@ -395,13 +470,6 @@ def test_continued_decline_thresholds() -> None:
     assert classify.continued_decline(0, 9_500_000, 10_000_000) is True  # 最差 −5%
     assert classify.continued_decline(0, 9_600_000, 10_000_000) is False
     assert classify.continued_decline(0, 9_000_000, 0) is False  # 净价缺失不做阈值
-
-
-def test_additional_loss_units() -> None:
-    # 800 股 × (860.00 − 902.00) = −33,600.00 → Money 标度 2 = −3,360,000
-    assert classify.additional_loss_units(8_000_000, 902_000_000, 860_000_000) == -3_360_000
-    # 800 股 × (830.00 − 902.00) = −57,600.00
-    assert classify.additional_loss_units(8_000_000, 902_000_000, 830_000_000) == -5_760_000
 
 
 # ── aggregate ───────────────────────────────────────────────
@@ -510,24 +578,20 @@ def test_flag_glossary_covers_every_enumerated_flag() -> None:
     )
 
     codes = [entry.code for entry in FLAG_DEFINITIONS]
-    assert len(codes) == len(set(codes)) == 16
-    # items[].flags 的 11 个回合旗标（与 service 实际追加的字符串一一对应）。
+    assert len(codes) == len(set(codes)) == 12
+    # items[].flags 的 8 个回合旗标（与 service 实际追加的字符串一一对应）。
     assert set(ITEM_FLAG_CODES) == {
-        "addon",
-        "dip_sequence",
-        "below_avg",
-        "continued_decline",
-        "profit_taking",
-        "profit_take_fly",
-        "stop_loss_rebound",
-        "rising_sell_sequence",
-        "full_exit",
-        "partial_exit",
-        "same_day",
+        "bottom_buy",
+        "stop_loss_sold_early",
+        "profit_sold_early",
+        "drawdown",
+        "intraday_t",
+        "swing_t",
+        "intraday_rebalance_out",
+        "intraday_rebalance_in",
     }
-    # ?flag= 查询词表的 5 个别名。
+    # ?flag= 查询词表的 4 个别名。
     assert set(FILTER_FLAG_CODES) == {
-        "addon_decline",
         "sold_too_early",
         "reason_missing",
         "horizon_pending",

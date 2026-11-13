@@ -32,11 +32,13 @@ from stock_platform.tenant import TenantContext
 from stock_api.deps import get_state, get_tenant
 from stock_api.routing import StrictQueryRoute
 from stock_api.schemas import (
+    DashboardTradeFlagConfigOut,
     FlagGlossaryOut,
     ForwardReturnOut,
     InsightAddonSummaryOut,
     InsightBucketSummaryOut,
     InsightFillSwingOut,
+    InsightFlagRoundCountOut,
     InsightPnlHoldingClassOut,
     InsightPnlHoldingOut,
     InsightRankingOut,
@@ -247,6 +249,21 @@ def _trade_reason_out(dto: Any) -> Any:
     return _reason_out(dto)
 
 
+def _flag_config_out(view: Any) -> DashboardTradeFlagConfigOut | None:
+    if view is None:
+        return None
+    return DashboardTradeFlagConfigOut(
+        window_trading_days=view.window_trading_days,
+        near_equal_tolerance_pct=view.near_equal_tolerance_pct,
+        chase_margin_pct=view.chase_margin_pct,
+        stop_loss_margin_pct=view.stop_loss_margin_pct,
+        short_term_margin_pct=view.short_term_margin_pct,
+        flags_hash=view.flags_hash,
+        is_default=view.is_default,
+        stale=view.stale,
+    )
+
+
 def _item_out(item: Any) -> RoundInsightItemOut:
     return RoundInsightItemOut(
         round_id=item.round_id,
@@ -269,22 +286,8 @@ def _item_out(item: Any) -> RoundInsightItemOut:
         quadrant=item.quadrant,
         flags=item.flags,
         quality=list(dict.fromkeys(item.quality)),
-        missed_profit_worst_display=(
-            str(Money(item.missed_profit_worst_units))
-            if item.missed_profit_worst_units is not None
-            else None
-        ),
-        missed_profit_end_display=(
-            str(Money(item.missed_profit_end_units))
-            if item.missed_profit_end_units is not None
-            else None
-        ),
-        missed_profit_worst_abs_display=item.missed_profit_worst_abs_display,
-        missed_profit_worst_label=item.missed_profit_worst_label,
-        missed_profit_worst_label_en=item.missed_profit_worst_label_en,
-        missed_profit_end_abs_display=item.missed_profit_end_abs_display,
-        missed_profit_end_label=item.missed_profit_end_label,
-        missed_profit_end_label_en=item.missed_profit_end_label_en,
+        status_counts=item.status_counts,
+        flag_config=_flag_config_out(item.flag_config),
     )
 
 
@@ -297,9 +300,10 @@ def _summary_out(summary: Any) -> InsightsSummaryOut:
     return InsightsSummaryOut(
         swing=InsightBucketSummaryOut(
             closed=swing.closed,
+            scalp=swing.scalp,
             short=swing.short,
-            swing=swing.swing,
-            trend=swing.trend,
+            position=swing.position,
+            long=swing.long,
             avg_holding_trading_days=swing.avg_holding_trading_days,
             win_rate_pct=swing.win_rate_pct,
             avg_pnl_display=swing.avg_pnl_display,
@@ -309,8 +313,6 @@ def _summary_out(summary: Any) -> InsightsSummaryOut:
             count=summary.addon.count,
             declined_after_addon=summary.addon.declined_after_addon,
             declined_pct=summary.addon.declined_pct,
-            avg_dip_pct=summary.addon.avg_dip_pct,
-            avg_dip_coverage=summary.addon.avg_dip_coverage,
             rounds=summary.addon.rounds,
             share_pct=summary.addon.share_pct,
         ),
@@ -319,14 +321,6 @@ def _summary_out(summary: Any) -> InsightsSummaryOut:
             profit_take_fly=summary.sell_fly.profit_take_fly,
             stop_loss_rebound=summary.sell_fly.stop_loss_rebound,
             fly_pct=summary.sell_fly.fly_pct,
-            missed_profit_worst_display=summary.sell_fly.missed_profit_worst_display,
-            missed_profit_end_display=summary.sell_fly.missed_profit_end_display,
-            missed_profit_worst_abs_display=summary.sell_fly.missed_profit_worst_abs_display,
-            missed_profit_worst_label=summary.sell_fly.missed_profit_worst_label,
-            missed_profit_worst_label_en=summary.sell_fly.missed_profit_worst_label_en,
-            missed_profit_end_abs_display=summary.sell_fly.missed_profit_end_abs_display,
-            missed_profit_end_label=summary.sell_fly.missed_profit_end_label,
-            missed_profit_end_label_en=summary.sell_fly.missed_profit_end_label_en,
             rounds=summary.sell_fly.rounds,
             share_pct=summary.sell_fly.share_pct,
         ),
@@ -375,6 +369,10 @@ def _summary_out(summary: Any) -> InsightsSummaryOut:
             basis=summary.ranking.basis,
             definition_version=summary.ranking.definition_version,
         ),
+        flag_round_counts=[
+            InsightFlagRoundCountOut(flag=row.flag, count=row.count)
+            for row in summary.flag_round_counts
+        ],
         pending=summary.pending,
     )
 
@@ -449,6 +447,7 @@ async def list_round_insights_endpoint(
         assumptions=page.assumptions,
         disclaimer=page.disclaimer,
         flag_glossary=_glossary_out(page.flag_glossary),
+        flag_config=_flag_config_out(page.flag_config),
     )
 
 
@@ -501,10 +500,12 @@ async def get_round_insights_endpoint(
         fills=fills,
         flags=detail.flags,
         quality=list(dict.fromkeys(detail.quality)),
+        status_counts=detail.status_counts,
         ranking=detail.ranking,
         disclaimer=detail.disclaimer,
         flag_glossary=_glossary_out(detail.flag_glossary),
         trade_flag_glossary=_trade_flag_glossary_out(detail.trade_flag_glossary),
+        flag_config=_flag_config_out(detail.flag_config),
     )
 
 

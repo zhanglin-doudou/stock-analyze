@@ -1,4 +1,4 @@
-"""回合洞察展示层：卖飞金额符号 → 措辞，以及证券类型筛选口径。"""
+"""回合洞察展示层：证券类型筛选口径与持仓推演。"""
 
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ from typing import Any
 
 from stock_review.insights.service import (
     SECURITY_TYPES,
-    _missed_presentation,
     _position_states,
     _security_type,
     _trade_order_key,
@@ -24,6 +23,7 @@ def _trade(
     quantity_units: int = 0,
     price_units: int = 0,
     amount_units: int = 0,
+    commission_units: int = 0,
 ) -> Any:
     """`_position_states` 只读这几个字段的轻量替身（不落库、不建 ORM 对象）。"""
     return SimpleNamespace(
@@ -36,26 +36,10 @@ def _trade(
         quantity_units=quantity_units,
         price_units=price_units,
         amount_units=amount_units,
-        commission_units=0,
+        commission_units=commission_units,
         stamp_tax_units=0,
         other_fee_units=0,
     )
-
-
-def test_missed_presentation_positive_is_missed_gain() -> None:
-    """正数 = 本该赚到却没赚到 → 少赚，展示绝对值串。"""
-    assert _missed_presentation(5_206_21) == ("5206.21", "少赚", "missed gain")
-
-
-def test_missed_presentation_negative_is_extra_gain() -> None:
-    """负数 = 卖后继续下跌、卖出反而多赚 → 多赚，展示绝对值串。"""
-    assert _missed_presentation(-21_965_03) == ("21965.03", "多赚", "extra gain")
-
-
-def test_missed_presentation_zero_and_none() -> None:
-    """零归入「少赚」侧；None 三项全空（前端只渲染「—」，不拼措辞）。"""
-    assert _missed_presentation(0) == ("0.00", "少赚", "missed gain")
-    assert _missed_presentation(None) == (None, None, None)
 
 
 def test_security_type_classification() -> None:
@@ -184,3 +168,31 @@ def test_position_states_keeps_addon_when_position_really_held() -> None:
     state = _position_states(trades)[addon.id]
     assert state.qty_before == 20_000_000
     assert state.avg_cost_before == 20_512_705  # 4102541×1e8//20000000，price 1e-6 标度
+
+
+def test_position_states_counts_fee_once() -> None:
+    """`amount_units` 已含费用：均价只按净现金流计一次，不能再叠加佣金字段。
+
+    1000 股 @10.00，佣金 5.00 → 净现金流 -10005.00，均价应为 10.005（而非 10.010）。
+    """
+    buy = _trade(
+        "trd_buy_fee",
+        trade_date=date(2026, 4, 24),
+        line_no=1,
+        side="buy",
+        quantity_units=10_000_000,
+        price_units=10_000_000,
+        amount_units=-1_000_500,
+        commission_units=500,
+    )
+    sell = _trade(
+        "trd_sell_fee",
+        trade_date=date(2026, 4, 30),
+        line_no=2,
+        side="sell",
+        quantity_units=1_000_000,
+        price_units=10_100_000,
+        amount_units=100_990,
+    )
+    state = _position_states([buy, sell])[sell.id]
+    assert state.avg_cost_before == 10_005_000

@@ -48,6 +48,9 @@ from stock_api.routers import (
     tokens,
     trades,
 )
+from stock_api.routers import (
+    settings as settings_api,
+)
 from stock_api.version import API_PREFIX, APP_VERSION
 
 log = get_logger("stock_api")
@@ -140,6 +143,7 @@ def create_app(settings: Settings | None = None, *, clock: Clock | None = None) 
         metrics,
         dashboard,
         sectors,
+        settings_api,
         attribution,
     ):
         app.include_router(module.router, prefix=API_PREFIX)

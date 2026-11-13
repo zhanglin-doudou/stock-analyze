@@ -19,7 +19,10 @@ from stock_contracts.clock import Clock
 from stock_contracts.errors import ApiError, ErrorCode
 from stock_core.insights.forward import ForwardTrade, price_net
 from stock_core.metrics.portfolio_index import compound_index
+from stock_core.preferences import EffectivePreferences
+from stock_core.preferences import flags_hash as compute_flags_hash
 from stock_core.trade_flags import (
+    DEFAULT_TRADE_FLAG_CONFIG,
     DEFINITION_VERSION,
     DISPLAY_STATUSES,
     STACKED_STATE_FLAG_CODES,
@@ -30,12 +33,15 @@ from stock_core.trade_flags import (
     TRADE_FLAG_DEFINITIONS,
     TREND_FLAG_CODES,
     TradeContext,
+    TradeFlagConfig,
     TradeFlagDefinition,
     evaluate_trade_flags,
+    render_description,
 )
 from stock_ledger.corporate_actions import is_corporate_action
 from stock_ledger.models import Trade
 from stock_platform.ports import Bar, MarketDataSource
+from stock_platform.repositories.users import UserSettingRepository
 
 from stock_review.metrics.context import Period
 from stock_review.metrics.datasets import DEFAULT_BENCHMARK, benchmark_fetch_symbol
@@ -66,9 +72,47 @@ class TradeFlagRecord:
     lookahead: bool
 
 
-def trade_flag_glossary() -> list[TradeFlagDefinition]:
-    """账单旗标词表（中英文案单点维护）。"""
-    return list(TRADE_FLAG_DEFINITIONS)
+def trade_flag_glossary(
+    config: TradeFlagConfig = DEFAULT_TRADE_FLAG_CONFIG,
+) -> list[TradeFlagDefinition]:
+    """账单旗标词表（文案单点维护；阈值/窗口按用户生效配置渲染）。"""
+    return list(render_description(config))
+
+
+async def load_flag_config(
+    session: AsyncSession, user_id: uuid.UUID
+) -> tuple[TradeFlagConfig, str]:
+    """读取用户生效阈值配置与对应当前 `flags_hash`（无设置行时即默认配置）。"""
+    effective = await UserSettingRepository(session).get_effective(user_id)
+    return TradeFlagConfig.from_columns(effective.bill_bps), effective.flags_hash
+
+
+@dataclass(frozen=True, slots=True)
+class TradeFlagConfigView:
+    """看板/回合洞察的 `flag_config` 附加块（百分比为展示字符串）。"""
+
+    window_trading_days: str
+    near_equal_tolerance_pct: str
+    chase_margin_pct: str
+    stop_loss_margin_pct: str
+    short_term_margin_pct: str
+    flags_hash: str
+    is_default: bool
+    stale: bool = False
+
+
+def config_view(effective: EffectivePreferences, *, stale: bool = False) -> TradeFlagConfigView:
+    bill = effective.bill_flags
+    return TradeFlagConfigView(
+        window_trading_days=str(bill["window_trading_days"]),
+        near_equal_tolerance_pct=str(bill["near_equal_tolerance_pct"]),
+        chase_margin_pct=str(bill["chase_margin_pct"]),
+        stop_loss_margin_pct=str(bill["stop_loss_margin_pct"]),
+        short_term_margin_pct=str(bill["short_term_margin_pct"]),
+        flags_hash=str(bill["flags_hash"]),
+        is_default=bool(bill["is_default"]),
+        stale=stale,
+    )
 
 
 async def _fetch_bars(
@@ -125,12 +169,8 @@ def _position_states(trades: Sequence[Trade]) -> dict[str, _PositionState]:
         )
         if trade.side == "buy" and trade.quantity_units > 0:
             qty[trade.security_code] += trade.quantity_units
-            cost[trade.security_code] += (
-                abs(trade.amount_units)
-                + trade.commission_units
-                + trade.stamp_tax_units
-                + trade.other_fee_units
-            )
+            # `amount_units` 已是含费净现金流（解析层统一），不能再叠加费用字段。
+            cost[trade.security_code] += abs(trade.amount_units)
         elif trade.side == "sell" and trade.quantity_units > 0:
             if held > 0:
                 sold = min(trade.quantity_units, held)
@@ -182,8 +222,13 @@ async def build_trade_flags_for_user(
     market_data: MarketDataSource,
     clock: Clock,
     dry_run: bool = False,
+    config: TradeFlagConfig = DEFAULT_TRADE_FLAG_CONFIG,
 ) -> BuildResult:
-    """构建某用户某月的账单旗标；同月同版本先删后插，重跑幂等。"""
+    """构建某用户某月的账单旗标；同月同版本先删后插，重跑幂等。
+
+    `config` 为用户生效阈值；落库行同时记录其 `flags_hash`，读取侧按当前 hash 过滤。
+    """
+    config_digest = compute_flags_hash(config.as_columns())
     trades = list(
         await session.scalars(
             select(Trade)
@@ -243,6 +288,7 @@ async def build_trade_flags_for_user(
                 bars=grouped.get(trade.security_code, ()),
                 calendar=calendar,
                 data_as_of=data_as_of,
+                config=config,
             )
             results = [(item.code, item.status, item.reason) for item in evaluated]
         for code, status, reason in results:
@@ -263,6 +309,7 @@ async def build_trade_flags_for_user(
                         item.lookahead for item in TRADE_FLAG_DEFINITIONS if item.code == code
                     ),
                     definition_version=DEFINITION_VERSION,
+                    flags_hash=config_digest,
                     computed_at=now,
                 )
             )
@@ -289,8 +336,10 @@ async def load_trade_flags(
     session: AsyncSession,
     user_id: uuid.UUID,
     dedupe_keys: Iterable[str],
+    *,
+    flags_hash: str,
 ) -> dict[str, list[TradeFlagRecord]]:
-    """按逻辑键批量读取当前版本的账单旗标（仅返回可展示状态）。"""
+    """按逻辑键批量读取当前版本 + 当前阈值指纹的账单旗标（仅可展示状态）。"""
     keys = list(dict.fromkeys(dedupe_keys))
     if not keys:
         return {}
@@ -298,6 +347,7 @@ async def load_trade_flags(
         select(TradeFlag).where(
             TradeFlag.user_id == user_id,
             TradeFlag.definition_version == DEFINITION_VERSION,
+            TradeFlag.flags_hash == flags_hash,
             TradeFlag.trade_dedupe_key.in_(keys),
             TradeFlag.status.in_(DISPLAY_STATUSES),
         )
@@ -316,6 +366,30 @@ async def load_trade_flags(
     for records in grouped.values():
         records.sort(key=lambda item: order[item.code])
     return grouped
+
+
+async def has_stale_flags(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    dedupe_keys: Iterable[str],
+    *,
+    flags_hash: str,
+) -> bool:
+    """请求账单中是否存在旧阈值指纹的行（存在即「需重算」）。"""
+    keys = list(dict.fromkeys(dedupe_keys))
+    if not keys:
+        return False
+    found = await session.scalar(
+        select(TradeFlag.id)
+        .where(
+            TradeFlag.user_id == user_id,
+            TradeFlag.definition_version == DEFINITION_VERSION,
+            TradeFlag.trade_dedupe_key.in_(keys),
+            TradeFlag.flags_hash != flags_hash,
+        )
+        .limit(1)
+    )
+    return found is not None
 
 
 @dataclass(frozen=True, slots=True)
@@ -375,6 +449,8 @@ class TradeFlagMonthlySummary:
     definition_version: str
     returns: tuple[MonthlyReturn, ...]
     has_return_data: bool
+    flags_hash: str
+    stale_months: tuple[str, ...]
 
 
 def _shift_month(year: int, month: int, delta: int) -> tuple[int, int]:
@@ -416,12 +492,15 @@ async def monthly_trade_flag_summary(
     *,
     window_months: int,
     clock: Clock,
+    flags_hash: str,
 ) -> TradeFlagMonthlySummary:
     """看板聚合：最近 N 个完整月的买卖笔数、趋势旗标、互斥状态旗标命中数与单月收益。
 
     口径：
     * 只统计当前 `definition_version` 的落库结果（不做重算）；
-    * 买卖笔数 = 当月按 `trade_dedupe_key` 去重后的账单数；
+    * 旗标/状态数量只统计 `flags_hash` 等于当前生效阈值的行；存在旧指纹行的月份
+      进入 `stale_months`（该月需重算后才能反映新阈值）；
+    * 买卖笔数 = 当月按 `trade_dedupe_key` 去重后的账单数（与阈值无关）；
     * 旗标/状态数量 = 当月 `status='hit'` 的账单数（同一账单命中多个旗标会分别计数）；
     * 折线口径 `TREND_FLAG_CODES`，柱状图口径 `STACKED_STATE_FLAG_CODES`；
     * 单月收益 = 当前资产口径版本的 `asset_daily.daily_return_units` 在自然月内复利
@@ -456,6 +535,7 @@ async def monthly_trade_flag_summary(
         )
         .where(
             *base_where,
+            TradeFlag.flags_hash == flags_hash,
             TradeFlag.status == STATUS_HIT,
             TradeFlag.flag_code.in_(TREND_FLAG_CODES + STACKED_STATE_FLAG_CODES),
         )
@@ -464,6 +544,14 @@ async def monthly_trade_flag_summary(
     code_counts: dict[tuple[str, str], int] = {
         (str(month), str(code)): int(count) for month, code, count in flag_rows.all()
     }
+    current_months = {
+        str(month)
+        for month in await session.scalars(
+            select(month_expr).where(*base_where, TradeFlag.flags_hash == flags_hash).distinct()
+        )
+    }
+    all_months = {month for month, _side in totals}
+    stale_months = tuple(sorted(all_months - current_months))
 
     asset_state = await AssetRepository(session).get_state(user_id)
     daily_returns: dict[str, list[int]] = defaultdict(list)
@@ -557,6 +645,8 @@ async def monthly_trade_flag_summary(
         definition_version=DEFINITION_VERSION,
         returns=tuple(returns),
         has_return_data=any(item.value_units is not None for item in returns),
+        flags_hash=flags_hash,
+        stale_months=stale_months,
     )
 
 
@@ -565,9 +655,13 @@ __all__ = [
     "FlagSeries",
     "MonthlyFlagCount",
     "MonthlyReturn",
+    "TradeFlagConfigView",
     "TradeFlagMonthlySummary",
     "TradeFlagRecord",
     "build_trade_flags_for_user",
+    "config_view",
+    "has_stale_flags",
+    "load_flag_config",
     "load_trade_flags",
     "monthly_trade_flag_summary",
     "trade_flag_glossary",

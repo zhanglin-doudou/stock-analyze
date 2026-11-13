@@ -6,6 +6,7 @@ import type {
   DashboardRoundOut,
   DashboardTradeCountOut,
   MetricBatch,
+  MetricCatalog,
   MetricItem,
 } from "@sa/api-client";
 import { api } from "../client";
@@ -121,6 +122,7 @@ function AnnualMetrics({
   start,
   end,
   batch,
+  catalog,
   loading,
   error,
 }: {
@@ -128,9 +130,14 @@ function AnnualMetrics({
   start: string;
   end: string;
   batch: MetricBatch | null;
+  /** API-086 口径说明书：`meaning` 是「解读」列的唯一文案来源。 */
+  catalog: MetricCatalog | null;
   loading: boolean;
   error: unknown;
 }): ReactElement {
+  const catalogById = new Map(
+    (catalog?.items ?? []).map((item) => [item.metric_id, item] as const),
+  );
   const valueCell = (row: MetricItem): ReactNode => {
     if (row.value == null) return <span className="dash-muted">—</span>;
     const unit = UNIT_LABELS[row.unit] ?? row.unit;
@@ -160,44 +167,54 @@ function AnnualMetrics({
       {error != null ? <ProblemView error={error} /> : null}
       {loading && !batch ? <p className="dash-muted">加载中…</p> : null}
       {batch ? (
-        <table className="dash-table dash-legacy-table">
+        <table className="dash-table dash-legacy-table dash-metrics-table">
           <thead>
             <tr>
               <th>指标</th>
               <th>值</th>
+              <th className="dash-metric-note">解读</th>
               <th>样本</th>
               <th>状态</th>
             </tr>
           </thead>
           <tbody>
-            {batch.items.map((row) => (
-              <tr key={row.metric_id}>
-                <td>
-                  <Link to={`/metrics/${encodeURIComponent(row.metric_id)}?period=${period}`}>
-                    {row.presentation?.display_name ?? row.metric_id}
-                  </Link>
-                </td>
-                <td>{valueCell(row)}</td>
-                <td>
-                  {row.n}
-                  {SAMPLE_STATUS_LABELS[row.sample_status as keyof typeof SAMPLE_STATUS_LABELS]
-                    ? `（${SAMPLE_STATUS_LABELS[row.sample_status as keyof typeof SAMPLE_STATUS_LABELS]}）`
-                    : null}
-                </td>
-                <td>
-                  {row.presentation ? (
-                    <span
-                      className={`badge badge-${row.presentation.confidence.level}`}
-                      title={row.presentation.verdict.rationale}
-                    >
-                      {row.presentation.verdict.label}
-                    </span>
-                  ) : (
-                    <StatusBadge status={row.status} kind="data" />
-                  )}
-                </td>
-              </tr>
-            ))}
+            {batch.items.map((row) => {
+              const note = catalogById.get(row.metric_id);
+              return (
+                <tr key={row.metric_id}>
+                  <td>
+                    <Link to={`/metrics/${encodeURIComponent(row.metric_id)}?period=${period}`}>
+                      {row.presentation?.display_name ?? row.metric_id}
+                    </Link>
+                  </td>
+                  <td>{valueCell(row)}</td>
+                  <td
+                    className="dash-metric-note"
+                    data-testid={`annual-metric-note-${row.metric_id}`}
+                  >
+                    {note ? note.meaning : <span className="dash-muted">—</span>}
+                  </td>
+                  <td>
+                    {row.n}
+                    {SAMPLE_STATUS_LABELS[row.sample_status as keyof typeof SAMPLE_STATUS_LABELS]
+                      ? `（${SAMPLE_STATUS_LABELS[row.sample_status as keyof typeof SAMPLE_STATUS_LABELS]}）`
+                      : null}
+                  </td>
+                  <td>
+                    {row.presentation ? (
+                      <span
+                        className={`badge badge-${row.presentation.confidence.level}`}
+                        title={row.presentation.verdict.rationale}
+                      >
+                        {row.presentation.verdict.label}
+                      </span>
+                    ) : (
+                      <StatusBadge status={row.status} kind="data" />
+                    )}
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       ) : null}
@@ -227,6 +244,12 @@ export function Dashboard(): ReactElement {
     queryFn: () => api.metrics.batch({ period: data?.metrics_period ?? "" }),
     enabled: data != null,
     staleTime: 60_000,
+  });
+  // 口径说明书是静态元数据：一次拉取后复用，只用于「解读」列文案。
+  const metricsCatalogQuery = useQuery({
+    queryKey: ["metrics", "catalog"],
+    queryFn: () => api.metrics.catalog(),
+    staleTime: 10 * 60_000,
   });
 
   // 资产表 stale 自动构建：与资产页共用同一 hook / 同一跨页去重真源。
@@ -558,17 +581,16 @@ export function Dashboard(): ReactElement {
 
       {/* 历史概览 + 持仓（板块级容器 history-overview） */}
       <div data-board="history-overview">
-      <div className="dash-grid">
-        <AnnualMetrics
-          period={data.metrics_period}
-          start={data.metrics_period_start}
-          end={data.metrics_period_end}
-          batch={metricsQuery.data ?? null}
-          loading={metricsQuery.isLoading}
-          error={metricsQuery.error}
-        />
+      <AnnualMetrics
+        period={data.metrics_period}
+        start={data.metrics_period_start}
+        end={data.metrics_period_end}
+        batch={metricsQuery.data ?? null}
+        catalog={metricsCatalogQuery.data ?? null}
+        loading={metricsQuery.isLoading}
+        error={metricsQuery.error}
+      />
         
-      </div>
 
       {/* 最赚 / 最亏 */}
       <div className="dash-grid">

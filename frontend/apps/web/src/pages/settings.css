@@ -153,6 +153,178 @@
   margin: var(--s2) 0 var(--s4);
 }
 
+/* 2026-11-13：偏好四组表单（阈值/时段/概念过滤） */
+
+.settings-field select {
+  display: block;
+  width: 100%;
+  max-width: 420px;
+  height: var(--control-h);
+  margin-top: 4px;
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+}
+
+.settings-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 var(--s5);
+}
+
+/* 提示文案放在 label 外，避免被并入控件的可访问名称。 */
+.settings-field-group {
+  margin-bottom: var(--s3);
+}
+
+.settings-field-group .settings-field {
+  margin-bottom: 0;
+}
+
+.settings-actions {
+  display: flex;
+  gap: var(--s3);
+  margin-top: var(--s3);
+}
+
+.settings-actions:first-child {
+  margin-top: 0;
+}
+
+.settings-error {
+  margin: 0 0 var(--s4);
+  padding: var(--s3);
+  border: 1px solid var(--status-blocked);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  color: var(--status-blocked);
+  font-size: var(--fs-sm);
+}
+
+.settings-notice {
+  margin-bottom: var(--s4);
+  padding: var(--s3);
+  border: 1px solid var(--status-degraded);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+}
+
+.settings-notice strong {
+  font-size: var(--fs-sm);
+  color: var(--status-degraded);
+}
+
+.settings-notice .settings-hint {
+  margin-top: var(--s1);
+  max-width: none;
+}
+
+.settings-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--s2);
+  margin-bottom: var(--s2);
+}
+
+.settings-session-row {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--s3);
+}
+
+.settings-session-row .settings-field {
+  margin-bottom: 0;
+}
+
+.settings-session-row .settings-btn {
+  margin-bottom: 1px;
+}
+
+.settings-check {
+  margin: var(--s2) 0;
+}
+
+.settings-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--s2);
+  margin: var(--s2) 0 var(--s4);
+  padding: 0;
+  list-style: none;
+}
+
+.settings-chips li {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  font-size: var(--fs-sm);
+}
+
+.settings-chips li.is-unresolved {
+  border-style: dashed;
+  color: var(--muted);
+}
+
+.settings-chips li em {
+  font-style: normal;
+  font-size: var(--fs-xs);
+  color: var(--status-degraded);
+}
+
+.settings-chips li button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+  padding: 0 2px;
+}
+
+.settings-catalog {
+  align-items: center;
+  border-top: 1px solid var(--line);
+  padding-top: var(--s3);
+}
+
+.settings-search {
+  flex: none;
+  width: 220px;
+  height: var(--control-h);
+  padding: 0 10px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-sm);
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: var(--fs-sm);
+}
+
+.settings-catalog-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--s1) var(--s4);
+  max-height: 280px;
+  overflow-y: auto;
+  padding: var(--s2) 0;
+}
+
+.settings-catalog-list .check {
+  font-size: var(--fs-sm);
+}
+
+.settings-catalog-list code {
+  margin-left: 6px;
+  font-size: var(--fs-xs);
+  color: var(--muted);
+}
+
 .settings-btn {
   height: var(--control-h);
   padding: 0 14px;

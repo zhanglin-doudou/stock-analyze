@@ -15,14 +15,23 @@ import { FilterBar, FilterField } from "../ui/FilterBar";
 import { FlagGlossary } from "../ui/FlagGlossary";
 import { PeriodInput } from "../ui/PeriodInput";
 import { ProblemView } from "../ui/Problem";
+import { StaleFlagsNotice } from "../ui/StaleFlagsNotice";
 import { DataTable, type DataTableColumn } from "../ui/DataTable";
 import { HoldingCharts } from "./rounds/HoldingCharts";
+import { RoundFlagCharts } from "./rounds/RoundFlagCharts";
 
 /** 设计 §6.3 的 `flag` 词表（前端只做筛选选择，不参与计算）。 */
 const FLAG_OPTIONS = [
   { value: "", label: "全部" },
-  { value: "addon_decline", label: "加仓后下跌" },
-  { value: "sold_too_early", label: "卖飞" },
+  { value: "bottom_buy", label: "抄底" },
+  { value: "stop_loss_sold_early", label: "止损卖飞" },
+  { value: "profit_sold_early", label: "止盈卖飞" },
+  { value: "sold_too_early", label: "卖飞（全部）" },
+  { value: "drawdown", label: "收益回撤" },
+  { value: "intraday_t", label: "日内做T" },
+  { value: "swing_t", label: "波段做T" },
+  { value: "intraday_rebalance_out", label: "日内调仓卖出" },
+  { value: "intraday_rebalance_in", label: "日内调仓买入" },
   { value: "reason_missing", label: "缺理由" },
   { value: "horizon_pending", label: "前瞻待算" },
   { value: "corporate_action", label: "公司行动" },
@@ -30,9 +39,10 @@ const FLAG_OPTIONS = [
 
 const BUCKET_OPTIONS = [
   { value: "", label: "全部持有期" },
-  { value: "short", label: "短线（≤1 日）" },
-  { value: "swing", label: "波段（2~20 日）" },
-  { value: "trend", label: "趋势（>20 日）" },
+  { value: "scalp", label: "超短线（≤3 日）" },
+  { value: "short", label: "短线（4~10 日）" },
+  { value: "position", label: "中线（11~126 日）" },
+  { value: "long", label: "长线（>126 日）" },
 ];
 
 const SORT_OPTIONS = [
@@ -67,23 +77,21 @@ function parseSecurityTypes(raw: string | null): string[] {
 }
 
 const FLAG_LABELS: Record<string, string> = {
-  addon: "加仓",
-  dip_sequence: "越跌越买",
-  below_avg: "低于均价加仓",
-  continued_decline: "加仓后下跌",
-  profit_taking: "止盈",
-  profit_take_fly: "卖飞",
-  stop_loss_rebound: "止损后反弹",
-  rising_sell_sequence: "越涨越卖",
-  full_exit: "清仓",
-  partial_exit: "部分卖出",
-  same_day: "当日回转",
+  bottom_buy: "抄底",
+  stop_loss_sold_early: "止损卖飞",
+  profit_sold_early: "止盈卖飞",
+  drawdown: "收益回撤",
+  intraday_t: "日内做T",
+  swing_t: "波段做T",
+  intraday_rebalance_out: "日内调仓卖出",
+  intraday_rebalance_in: "日内调仓买入",
 };
 
 const BUCKET_LABELS: Record<string, string> = {
-  short: "短线（≤1 日）",
-  swing: "波段（2~20 日）",
-  trend: "趋势（>20 日）",
+  scalp: "超短线（≤3 日）",
+  short: "短线（4~10 日）",
+  position: "中线（11~126 日）",
+  long: "长线（>126 日）",
   unknown: "未知",
 };
 
@@ -98,8 +106,8 @@ interface InsightTab {
 /** 设计 §7.1 的 Tabs：每个 Tab 只映射到既有筛选参数，不额外计算。 */
 const TABS: InsightTab[] = [
   { id: "", label: "回合表现" },
-  { id: "swing", label: "波段", bucket: "swing" },
-  { id: "addon", label: "抄底", flag: "addon_decline" },
+  { id: "position", label: "中线", bucket: "position" },
+  { id: "addon", label: "抄底", flag: "bottom_buy" },
   { id: "sellfly", label: "卖飞", flag: "sold_too_early" },
   { id: "reason", label: "待补理由", hasReason: "false" },
 ];
@@ -109,22 +117,12 @@ interface AddonSummary {
   count: number;
   declined_after_addon: number;
   declined_pct?: string | null;
-  avg_dip_pct?: string | null;
-  /** 形如 "3/9"：avg_dip_pct 的有效样本占全部加仓笔次，避免只看到百分比而误读样本量。 */
-  avg_dip_coverage?: string | null;
 }
 interface SellFlySummary {
   sell_count: number;
   profit_take_fly: number;
   stop_loss_rebound: number;
   fly_pct?: string | null;
-  missed_profit_worst_display?: string | null;
-  missed_profit_end_display?: string | null;
-  /** 后端给好的绝对值串 + 措辞（少赚/多赚）；前端只渲染，不判符号、不做 abs。 */
-  missed_profit_worst_abs_display?: string | null;
-  missed_profit_worst_label?: string | null;
-  missed_profit_end_abs_display?: string | null;
-  missed_profit_end_label?: string | null;
 }
 interface RankingSummary {
   n_sample: number;
@@ -151,6 +149,16 @@ function text(value: string | null | undefined): string {
 
 function flagLabel(flag: string): string {
   return FLAG_LABELS[flag] ?? flag;
+}
+
+/** 计数型状态在 chips 里带 ×N；其余旗标只显示文案（数值全部由后端给出）。 */
+const COUNT_FLAGS = new Set(["bottom_buy", "stop_loss_sold_early", "profit_sold_early"]);
+
+function flagText(flag: string, counts?: Record<string, number>): string {
+  const count = counts?.[flag];
+  return COUNT_FLAGS.has(flag) && typeof count === "number"
+    ? `${flagLabel(flag)}×${count}`
+    : flagLabel(flag);
 }
 
 /** 回合洞察（/rounds/insights）：事后统计，只渲染后端产出字符串（前端零口径）。 */
@@ -335,7 +343,7 @@ export function RoundInsights() {
           <span className="chips">
             {row.flags.map((item, index) => (
               <span key={item} className="chip">
-                {flagLabel(item)}
+                {flagText(item, row.status_counts)}
                 {index + 1 !== row.flags?.length && <span>, </span>}
               </span>
             ))}
@@ -366,6 +374,7 @@ export function RoundInsights() {
           数据不完整：{page.missing.join("、")}；缺失数值显示「—」，不显示 0%。
         </div>
       ) : null}
+      <StaleFlagsNotice stale={page?.flag_config?.stale ?? false} />
       {notice ? <div className="notice">{notice}</div> : null}
       {error ? <ProblemView error={error} /> : null}
 
@@ -511,9 +520,8 @@ export function RoundInsights() {
             <h3>加仓与后续下跌</h3>
             {addon ? (
               <p className="muted">
-                加仓 {addon.count} 次，后续下跌 {addon.declined_after_addon} 次；
-                下跌占比 {text(addon.declined_pct)}；平均回撤 {text(addon.avg_dip_pct)}
-                {addon.avg_dip_coverage ? `（${addon.avg_dip_coverage}）` : ""}。
+                加仓 {addon.count} 个回合（按回合计，不等同于抄底），后续下跌{" "}
+                {addon.declined_after_addon} 个回合；下跌占比 {text(addon.declined_pct)}。
               </p>
             ) : (
               <p className="muted">—</p>
@@ -521,21 +529,16 @@ export function RoundInsights() {
             <h3 style={{ marginTop: 16 }}>卖飞</h3>
             {sellFly ? (
               <p className="muted">
-                卖出 {sellFly.sell_count} 次；卖飞 {sellFly.profit_take_fly}（止盈）/{" "}
-                {sellFly.stop_loss_rebound}（止损后反弹）；占比 {text(sellFly.fly_pct)}；
-                最差{sellFly.missed_profit_worst_label ?? ""}{" "}
-                <span className={signedClass(sellFly.missed_profit_worst_abs_display)}>
-                  {text(sellFly.missed_profit_worst_abs_display)}
-                </span>
-                ，期末{sellFly.missed_profit_end_label ?? ""}{" "}
-                <span className={signedClass(sellFly.missed_profit_end_abs_display)}>
-                  {text(sellFly.missed_profit_end_abs_display)}
-                </span>
-                。
+                卖出 {sellFly.sell_count} 个回合；20 日卖飞（仅平仓笔）{" "}
+                {sellFly.profit_take_fly}（止盈）/ {sellFly.stop_loss_rebound}
+                （止损后反弹）；止盈卖飞占卖出回合 {sellFly.profit_take_fly}/
+                {sellFly.sell_count} = {text(sellFly.fly_pct)}。
               </p>
             ) : (
               <p className="muted">—</p>
             )}
+            <h3 style={{ marginTop: 16 }}>回合旗标统计（卖飞按账单级 5 日）</h3>
+            <RoundFlagCharts rows={summary.flag_round_counts ?? []} />
           </div>
 
           <div className="card">

@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
 from typing import Any
 
@@ -97,6 +98,8 @@ MONEY_FIELDS = frozenset(
         "account_level_total",
         "listed_total",
         "others_total",
+        # 2026-11-13（API-087）：概念过滤的被排除概念市值合计
+        "filtered_market_value",
     }
 )
 PRICE_FIELDS = frozenset({"price", "unit_nav"})
@@ -376,6 +379,24 @@ _FIELD_ERROR_CODES = frozenset({"IDEMPOTENCY_KEY_REUSED", "VALIDATION_ERROR", "W
 OPERATION_META: dict[str, dict[str, Any]] = {
     "buildAssets": {
         "api_id": "API-082",
+        "scope": "write",
+        "idempotent": True,
+        "async": True,
+        "error_codes": [
+            "IDEMPOTENCY_KEY_REUSED",
+            "IDEMPOTENCY_IN_PROGRESS",
+            "JOB_ALREADY_RUNNING",
+            "QUOTA_EXCEEDED",
+            "VALIDATION_ERROR",
+            "TOKEN_EXPIRED",
+            "TOKEN_REVOKED",
+            "MULTIPLE_CREDENTIALS",
+            "INSUFFICIENT_SCOPE",
+            "ADMIN_CANNOT_READ_TRADES",
+        ],
+    },
+    "rebuildTradeFlags": {
+        "api_id": "API-097",
         "scope": "write",
         "idempotent": True,
         "async": True,
@@ -1250,6 +1271,34 @@ OPERATION_META: dict[str, dict[str, Any]] = {
             "ADMIN_CANNOT_READ_TRADES",
         ],
     },
+    "getSettings": {
+        "api_id": "API-055",
+        "scope": "read",
+        "idempotent": False,
+        "async": False,
+        "error_codes": [
+            "TOKEN_EXPIRED",
+            "TOKEN_REVOKED",
+            "MULTIPLE_CREDENTIALS",
+            "INSUFFICIENT_SCOPE",
+        ],
+    },
+    "patchSettings": {
+        "api_id": "API-096",
+        "scope": "write",
+        "idempotent": True,
+        "async": False,
+        "error_codes": [
+            "VERSION_CONFLICT",
+            "VALIDATION_ERROR",
+            "IDEMPOTENCY_KEY_REUSED",
+            "IDEMPOTENCY_IN_PROGRESS",
+            "TOKEN_EXPIRED",
+            "TOKEN_REVOKED",
+            "MULTIPLE_CREDENTIALS",
+            "INSUFFICIENT_SCOPE",
+        ],
+    },
 }
 
 # 非 JSON 的 2xx 手工示例：SSE（API-063）与 Prometheus 文本（API-074）。
@@ -1359,6 +1408,35 @@ def _metric_item_example() -> dict[str, Any]:
 
 
 # 关键端点手工示例（其余按 schema 递归生成；生成规则见 _example_for_schema）。
+def _settings_example() -> dict[str, Any]:
+    return {
+        "version": 2,
+        "updated_at": _DATETIME,
+        "appearance": {"theme": "dark", "density": "compact", "trend": "red-up"},
+        "bill_flags": {
+            "near_equal_tolerance_pct": "1.00%",
+            "chase_margin_pct": "1.00%",
+            "stop_loss_margin_pct": "1.00%",
+            "short_term_margin_pct": "5.00%",
+            "window_trading_days": "5",
+            "flags_hash": "c425bc5b871f59f5",
+            "is_default": True,
+        },
+        "market_sessions": {
+            "sessions": [
+                {"open": "09:30", "close": "11:30"},
+                {"open": "13:00", "close": "15:00"},
+            ],
+            "data_ready_after": "16:30",
+            "session_notice_enabled": True,
+            "timezone": "Asia/Shanghai",
+        },
+        "concept_filters": {"mode": "off", "excluded": []},
+        "benchmark_id": "hs300_tr",
+        "privacy_flags": {},
+    }
+
+
 EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
     "metrics_batch": {
         "200": {
@@ -1481,6 +1559,9 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
         }
     },
     "getTrade": {"200": _trade_example()},
+    # Period2-19：用户偏好（默认阈值下 flags_hash 固定，窗口也为字符串）。
+    "getSettings": {"200": _settings_example()},
+    "patchSettings": {"200": _settings_example()},
     # Period2-16（API-081）：资产表列表（blocked 行的数值字段是显式 null，示例给正常行）。
     "listAssets": {
         "200": {
@@ -1527,6 +1608,18 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
         "202": {
             "job_id": "job_" + _ID_SUFFIX,
             "type": "build_assets",
+            "status": "pending",
+            "links": {
+                "self": f"/api/v1/jobs/job_{_ID_SUFFIX}",
+                "events": f"/api/v1/jobs/job_{_ID_SUFFIX}/events",
+            },
+        }
+    },
+    # 2026-11-13（API-097）：202 专用响应（type 必须是 rebuild_trade_flags）。
+    "rebuildTradeFlags": {
+        "202": {
+            "job_id": "job_" + _ID_SUFFIX,
+            "type": "rebuild_trade_flags",
             "status": "pending",
             "links": {
                 "self": f"/api/v1/jobs/job_{_ID_SUFFIX}",
@@ -1878,7 +1971,7 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
         "200": {
             "period": "2026-11",
             "period_basis": "close_date",
-            "definition_version": "1.0",
+            "definition_version": "1.2",
             "bucket_basis": "round",
             "data_as_of": _DATE,
             "ranking_as_of": _DATE,
@@ -1888,9 +1981,10 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
             "summary": {
                 "swing": {
                     "closed": 1,
+                    "scalp": 0,
                     "short": 0,
-                    "swing": 1,
-                    "trend": 0,
+                    "position": 1,
+                    "long": 0,
                     "avg_holding_trading_days": "12.0",
                     "win_rate_pct": "100.0%",
                     "avg_pnl_display": "1234.56",
@@ -1935,21 +2029,12 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
                     "count": 1,
                     "declined_after_addon": 0,
                     "declined_pct": "0.0%",
-                    "avg_dip_pct": "-2.10%",
                 },
                 "sell_fly": {
                     "sell_count": 1,
                     "profit_take_fly": 1,
                     "stop_loss_rebound": 0,
                     "fly_pct": "100.0%",
-                    "missed_profit_worst_display": "1010.00",
-                    "missed_profit_end_display": "510.00",
-                    "missed_profit_worst_abs_display": "1010.00",
-                    "missed_profit_worst_label": "少赚",
-                    "missed_profit_worst_label_en": "missed gain",
-                    "missed_profit_end_abs_display": "510.00",
-                    "missed_profit_end_label": "少赚",
-                    "missed_profit_end_label_en": "missed gain",
                 },
                 "reason_coverage": {
                     "annotated": 1,
@@ -1968,8 +2053,18 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
                     "quadrant_counts": {"double_positive": 1},
                     "per_stock": [],
                     "basis": "benchmark_excess_20d",
-                    "definition_version": "1.0",
+                    "definition_version": "1.2",
                 },
+                "flag_round_counts": [
+                    {"flag": "bottom_buy", "count": 1},
+                    {"flag": "stop_loss_sold_early", "count": 0},
+                    {"flag": "profit_sold_early", "count": 1},
+                    {"flag": "drawdown", "count": 1},
+                    {"flag": "intraday_t", "count": 0},
+                    {"flag": "swing_t", "count": 0},
+                    {"flag": "intraday_rebalance_out", "count": 0},
+                    {"flag": "intraday_rebalance_in", "count": 0},
+                ],
                 "pending": {"forward_recompute": 0, "reason_missing": 0},
             },
             "items": [
@@ -1982,7 +2077,7 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
                     "close_date": "2026-11-18",
                     "holding_days_legacy": 16,
                     "holding_trading_days": 12,
-                    "bucket": "swing",
+                    "bucket": "position",
                     "pnl": "1234.56",
                     "return_rate_pct": "4.56%",
                     "buy_trade": {
@@ -2102,16 +2197,13 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
                     "combined_pct": None,
                     "rank": None,
                     "quadrant": None,
-                    "flags": ["addon", "profit_taking", "full_exit"],
+                    "flags": ["bottom_buy", "stop_loss_sold_early", "drawdown"],
                     "quality": ["forward_incomplete"],
-                    "missed_profit_worst_display": "1010.00",
-                    "missed_profit_end_display": "510.00",
-                    "missed_profit_worst_abs_display": "1010.00",
-                    "missed_profit_worst_label": "少赚",
-                    "missed_profit_worst_label_en": "missed gain",
-                    "missed_profit_end_abs_display": "510.00",
-                    "missed_profit_end_label": "少赚",
-                    "missed_profit_end_label_en": "missed gain",
+                    "status_counts": {
+                        "bottom_buy": 2,
+                        "stop_loss_sold_early": 1,
+                        "profit_sold_early": 0,
+                    },
                 }
             ],
             "next_cursor": None,
@@ -2124,30 +2216,43 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
             ),
             "flag_glossary": [
                 {
-                    "code": "addon",
-                    "label_zh": "加仓",
-                    "label_en": "Add-on",
+                    "code": "bottom_buy",
+                    "label_zh": "抄底",
+                    "label_en": "Bottom buy",
                     "description_zh": (
-                        "本回合内有买入发生在已有持仓之后（按流水发生顺序推演，"
-                        "同日多笔以文件行号排序）；回合的第一笔建仓不算加仓。"
+                        "回合内命中「即时抄底」或「短期抄底」账单旗标的买入账单个数；"
+                        "同一笔账单同时命中两者只计 1 次。"
                     ),
-                    "description_en": "A buy inside this round happened while the security was already held.",
+                    "description_en": (
+                        "Number of buy bills in the round flagged as either an instant bottom "
+                        "or a short-term bottom; a bill hitting both is counted once."
+                    ),
                     "kind": "item_flag",
                 },
                 {
-                    "code": "profit_take_fly",
+                    "code": "stop_loss_sold_early",
+                    "label_zh": "止损卖飞",
+                    "label_en": "Stop-loss sold too early",
+                    "description_zh": (
+                        "回合内带「短期卖飞」账单旗标、且含费净卖价低于（含等于）卖出前"
+                        "持仓含费均价的卖出账单次数。"
+                    ),
+                    "description_en": (
+                        "Number of sell bills flagged as short-term sold-early whose net sell "
+                        "price is at or below the average cost before the sale."
+                    ),
+                    "kind": "item_flag",
+                },
+                {
+                    "code": "sold_too_early",
                     "label_zh": "卖飞",
-                    "label_en": "Sold too early",
-                    "description_zh": "止盈卖出后 20 个交易日最高收盘 > 净卖价 × 1.03。",
-                    "description_en": "After a profitable sale, the 20-day highest close exceeded the net sell price by more than 3%.",
-                    "kind": "item_flag",
-                },
-                {
-                    "code": "addon_decline",
-                    "label_zh": "加仓后下跌",
-                    "label_en": "Add-on then decline",
-                    "description_zh": "查询别名：同时命中 `addon` 与 `continued_decline`。",
-                    "description_en": "Query alias matching rounds flagged with both `addon` and `continued_decline`.",
+                    "label_en": "Sold too early (any)",
+                    "description_zh": (
+                        "查询别名：命中 `stop_loss_sold_early` 或 `profit_sold_early`。"
+                    ),
+                    "description_en": (
+                        "Query alias matching `stop_loss_sold_early` or `profit_sold_early`."
+                    ),
                     "kind": "filter_alias",
                 },
             ],
@@ -2164,7 +2269,7 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
             "close_date": "2026-11-18",
             "holding_days_legacy": 16,
             "holding_trading_days": 12,
-            "bucket": "swing",
+            "bucket": "position",
             "pnl": "1234.56",
             "return_rate_pct": "4.56%",
             "buy_trade": None,
@@ -2178,13 +2283,18 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
                     "open_date": "2026-11-02",
                     "close_date": "2026-11-18",
                     "holding_trading_days": 12,
-                    "bucket": "swing",
+                    "bucket": "position",
                     "buy": None,
                     "sell": None,
                 }
             ],
-            "flags": ["swing", "profit_taking"],
+            "flags": ["bottom_buy", "profit_sold_early", "intraday_t"],
             "quality": [],
+            "status_counts": {
+                "bottom_buy": 1,
+                "stop_loss_sold_early": 0,
+                "profit_sold_early": 1,
+            },
             "ranking": {
                 "rank": None,
                 "buy_excess_pct": "8.00%",
@@ -2192,7 +2302,7 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
                 "combined_pct": "6.50%",
                 "quadrant": "double_positive",
                 "basis": "benchmark_excess_20d",
-                "definition_version": "1.0",
+                "definition_version": "1.2",
             },
             "disclaimer": (
                 "以下为事后统计，仅用于个人复盘，不构成投资建议；不评价个人能力，不预测收益；"
@@ -2200,30 +2310,43 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
             ),
             "flag_glossary": [
                 {
-                    "code": "addon",
-                    "label_zh": "加仓",
-                    "label_en": "Add-on",
+                    "code": "bottom_buy",
+                    "label_zh": "抄底",
+                    "label_en": "Bottom buy",
                     "description_zh": (
-                        "本回合内有买入发生在已有持仓之后（按流水发生顺序推演，"
-                        "同日多笔以文件行号排序）；回合的第一笔建仓不算加仓。"
+                        "回合内命中「即时抄底」或「短期抄底」账单旗标的买入账单个数；"
+                        "同一笔账单同时命中两者只计 1 次。"
                     ),
-                    "description_en": "A buy inside this round happened while the security was already held.",
+                    "description_en": (
+                        "Number of buy bills in the round flagged as either an instant bottom "
+                        "or a short-term bottom; a bill hitting both is counted once."
+                    ),
                     "kind": "item_flag",
                 },
                 {
-                    "code": "profit_take_fly",
+                    "code": "stop_loss_sold_early",
+                    "label_zh": "止损卖飞",
+                    "label_en": "Stop-loss sold too early",
+                    "description_zh": (
+                        "回合内带「短期卖飞」账单旗标、且含费净卖价低于（含等于）卖出前"
+                        "持仓含费均价的卖出账单次数。"
+                    ),
+                    "description_en": (
+                        "Number of sell bills flagged as short-term sold-early whose net sell "
+                        "price is at or below the average cost before the sale."
+                    ),
+                    "kind": "item_flag",
+                },
+                {
+                    "code": "sold_too_early",
                     "label_zh": "卖飞",
-                    "label_en": "Sold too early",
-                    "description_zh": "止盈卖出后 20 个交易日最高收盘 > 净卖价 × 1.03。",
-                    "description_en": "After a profitable sale, the 20-day highest close exceeded the net sell price by more than 3%.",
-                    "kind": "item_flag",
-                },
-                {
-                    "code": "addon_decline",
-                    "label_zh": "加仓后下跌",
-                    "label_en": "Add-on then decline",
-                    "description_zh": "查询别名：同时命中 `addon` 与 `continued_decline`。",
-                    "description_en": "Query alias matching rounds flagged with both `addon` and `continued_decline`.",
+                    "label_en": "Sold too early (any)",
+                    "description_zh": (
+                        "查询别名：命中 `stop_loss_sold_early` 或 `profit_sold_early`。"
+                    ),
+                    "description_en": (
+                        "Query alias matching `stop_loss_sold_early` or `profit_sold_early`."
+                    ),
                     "kind": "filter_alias",
                 },
             ],
@@ -2252,6 +2375,31 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
             },
         },
     },
+}
+
+
+# ── 生成后示例后处理（按 operationId）────────────────────────
+# 约定：schema 递归生成会给所有字段填示例，遇到「按模式互斥出现」的字段需显式收敛。
+def _sector_overview_example_postprocess(example: Any) -> None:
+    """API-087：`filters` 仅 concept 且非 off 出现；`filtered_*` 仅 exclude 出现。"""
+    if not isinstance(example, dict):
+        return
+    concept = example.get("concept")
+    if not isinstance(concept, dict):
+        return
+    filters = concept.get("filters")
+    mode = filters.get("mode") if isinstance(filters, dict) else None
+    if example.get("taxonomy") != "concept" or mode in (None, "off"):
+        concept.pop("filters", None)
+        concept.pop("filtered_market_value", None)
+        concept.pop("filtered_holding_count", None)
+    elif mode != "exclude":
+        concept.pop("filtered_market_value", None)
+        concept.pop("filtered_holding_count", None)
+
+
+EXAMPLE_POSTPROCESS: dict[str, Callable[[Any], None]] = {
+    "getSectorsOverview": _sector_overview_example_postprocess,
 }
 
 
@@ -2560,7 +2708,11 @@ def _enrich_operation(
             if manual is not None and media_type == JSON_CONTENT_TYPE:
                 media["example"] = deepcopy(manual)
             else:
-                media["example"] = _example_for_schema(media.get("schema"), schemas)
+                generated = _example_for_schema(media.get("schema"), schemas)
+                postprocess = EXAMPLE_POSTPROCESS.get(operation_id)
+                if postprocess is not None:
+                    postprocess(generated)
+                media["example"] = generated
 
 
 def apply_contract_metadata(spec: dict[str, Any]) -> dict[str, Any]:
@@ -2716,6 +2868,70 @@ def _validate_operation(operation: dict[str, Any], label: str, problems: list[st
             problems.append(f"{label}: responses {status} 未被 x-error-codes 覆盖")
 
 
+def _validate_sector_overview_example(
+    operation: dict[str, Any], label: str, problems: list[str]
+) -> None:
+    """API-087 互斥字段断言：off/industry 不输出 filters；`filtered_*` 仅 exclude。"""
+    responses = operation.get("responses")
+    response = responses.get("200") if isinstance(responses, dict) else None
+    content = response.get("content") if isinstance(response, dict) else None
+    media = content.get(JSON_CONTENT_TYPE) if isinstance(content, dict) else None
+    example = media.get("example") if isinstance(media, dict) else None
+    if not isinstance(example, dict):
+        return  # 缺示例由通用校验报错
+    concept = example.get("concept")
+    if not isinstance(concept, dict):
+        return
+    filters = concept.get("filters")
+    filtered = [
+        key for key in ("filtered_market_value", "filtered_holding_count") if key in concept
+    ]
+    if filters is None:
+        if filtered:
+            problems.append(f"{label}: 200 示例未输出 filters 却出现 {'/'.join(filtered)}")
+        return
+    if not isinstance(filters, dict):
+        problems.append(f"{label}: 200 示例 concept.filters 不是对象")
+        return
+    mode = filters.get("mode")
+    if mode == "off":
+        problems.append(f"{label}: 200 示例 filters.mode 不得为 off（off 时不输出 filters）")
+    elif mode not in {"hide", "exclude"}:
+        problems.append(f"{label}: 200 示例 filters.mode 非法（{mode!r}）")
+    if example.get("taxonomy") != "concept":
+        problems.append(
+            f"{label}: 200 示例 filters 仅 concept 请求出现（taxonomy={example.get('taxonomy')!r}）"
+        )
+    if filtered and mode != "exclude":
+        problems.append(
+            f"{label}: 200 示例 {mode!r} 模式不应出现 {'/'.join(filtered)}（仅 exclude）"
+        )
+    if ("filtered_market_value" in concept) != ("filtered_holding_count" in concept):
+        problems.append(
+            f"{label}: 200 示例 filtered_market_value/filtered_holding_count 必须同时出现"
+        )
+    excluded = filters.get("excluded")
+    applied = filters.get("applied")
+    if not isinstance(excluded, list):
+        problems.append(f"{label}: 200 示例 filters.excluded 不是数组")
+        return
+    if not isinstance(applied, bool):
+        problems.append(f"{label}: 200 示例 filters.applied 不是 bool")
+    elif applied != (mode != "off" and bool(excluded)):
+        problems.append(f"{label}: 200 示例 filters.applied 与 mode/excluded 不一致")
+    for item in excluded:
+        if not isinstance(item, dict):
+            problems.append(f"{label}: 200 示例 filters.excluded[] 不是对象")
+            continue
+        code = item.get("code")
+        if not isinstance(code, str):
+            problems.append(f"{label}: 200 示例 filters.excluded[].code 缺失")
+        elif _status_of(code) is not None or code.startswith("SECTOR_"):
+            problems.append(
+                f"{label}: 200 示例 filters.excluded[].code 不得使用错误/降级码（{code}）"
+            )
+
+
 def validate_contract(spec: dict[str, Any]) -> list[str]:
     """校验 §7.4 强制项；返回违规列表（空列表 = 通过）。无副作用。"""
     problems: list[str] = []
@@ -2747,4 +2963,6 @@ def validate_contract(spec: dict[str, Any]) -> list[str]:
             else:
                 seen_operation_ids[operation_id] = label
             _validate_operation(operation, label, problems)
+            if operation_id == "getSectorsOverview":
+                _validate_sector_overview_example(operation, label, problems)
     return problems

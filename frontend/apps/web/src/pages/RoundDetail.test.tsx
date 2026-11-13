@@ -137,7 +137,7 @@ function makeInsight(overrides: Partial<RoundInsightDetail> = {}): RoundInsightD
     close_date: "2026-06-20",
     holding_days_legacy: 14,
     holding_trading_days: 14,
-    bucket: "swing",
+    bucket: "position",
     pnl: "650.00",
     return_rate_pct: "40.62%",
     buy_trade: {
@@ -161,7 +161,8 @@ function makeInsight(overrides: Partial<RoundInsightDetail> = {}): RoundInsightD
       forward: { "20": { ...forward, status: "pending", b1_pct: null, b2_pct: null, b3_pct: null } },
     },
     fills: [],
-    flags: ["profit_taking", "profit_take_fly"],
+    flags: ["bottom_buy", "stop_loss_sold_early", "drawdown"],
+    status_counts: { bottom_buy: 2, stop_loss_sold_early: 1, profit_sold_early: 0 },
     quality: ["SAMPLE_INSUFFICIENT"],
     ranking: {
       rank: 12,
@@ -310,6 +311,42 @@ describe("RoundDetail 回合详情页", () => {
           side: "buy",
           lookahead: false,
         },
+        {
+          code: "short_term_bottom",
+          label_zh: "短期抄底",
+          label_en: "Short-term bottom",
+          description_zh: "含费净买价距前后各 5 个行情日最低收盘价 5% 以内。",
+          description_en: "Within 5% of the 10-day lowest close.",
+          side: "buy",
+          lookahead: true,
+        },
+        {
+          code: "short_term_underwater",
+          label_zh: "短期被套",
+          label_en: "Short-term underwater",
+          description_zh: "买入后连续 5 个行情日收盘价都低于含费净买价。",
+          description_en: "Every close in the next 5 sessions stays below the net buy price.",
+          side: "buy",
+          lookahead: true,
+        },
+        {
+          code: "sell_drawdown",
+          label_zh: "回撤",
+          label_en: "Drawdown",
+          description_zh: "净卖价跌破前 5 日最低收盘价 1% 以上，但仍在成本线上方。",
+          description_en: "Broke the 5-day low by more than 1% while still above cost.",
+          side: "sell",
+          lookahead: false,
+        },
+        {
+          code: "short_term_sold_early",
+          label_zh: "短期卖飞",
+          label_en: "Sold too early",
+          description_zh: "含费净卖价低于卖出后第 5 个行情日收盘价 5% 以上。",
+          description_en: "Net sell price is more than 5% below the 5th future close.",
+          side: "sell",
+          lookahead: true,
+        },
       ],
     });
     renderDetail();
@@ -318,6 +355,12 @@ describe("RoundDetail 回合详情页", () => {
     const panel = document.querySelector("details.trade-flag-glossary") as HTMLDetailsElement;
     expect(panel).toBeTruthy();
     expect(panel.open).toBe(false);
+    // 词表由后端驱动：改名与新增旗标都能直接展示，旧名称不再出现
+    expect(panel.textContent).toContain("短期抄底");
+    expect(panel.textContent).toContain("短期被套");
+    expect(panel.textContent).toContain("短期卖飞");
+    expect(panel.textContent).toContain("回撤");
+    expect(panel.textContent).not.toContain("短期成功");
   });
 
   it("同一笔卖出参与多个配对时按 trade 去重，行数 = 流水笔数", async () => {
@@ -427,7 +470,8 @@ describe("RoundDetail 回合详情页", () => {
     expect(await screen.findByText("买卖流水与事后表现")).toBeTruthy();
     expect(screen.getByText("事后标注")).toBeTruthy();
     expect(screen.getByText("业绩超预期")).toBeTruthy();
-    expect(screen.getByText("卖飞")).toBeTruthy();
+    expect(screen.getByText("抄底×2")).toBeTruthy();
+    expect(screen.getByText("收益回撤")).toBeTruthy();
     expect(screen.getByText("买入后相对基准（20 日）")).toBeTruthy();
     expect(screen.getAllByText("-1.10%").length).toBeGreaterThan(0);
   });
@@ -560,11 +604,11 @@ it("旗标说明：详情页末尾渲染后端返回的 code 与中英文说明"
     makeInsight({
       flag_glossary: [
         {
-          code: "profit_take_fly",
-          label_zh: "卖飞",
-          label_en: "Sold too early",
-          description_zh: "止盈后 20 日最高收盘高出净卖价 3% 以上。",
-          description_en: "The 20-day high exceeded the net sell price by more than 3%.",
+          code: "bottom_buy",
+          label_zh: "抄底",
+          label_en: "Bottom buy",
+          description_zh: "回合内命中即时抄底或短期抄底的买入账单个数。",
+          description_en: "Number of buy bills flagged as an instant or short-term bottom.",
           kind: "item_flag",
         },
       ],
@@ -573,7 +617,38 @@ it("旗标说明：详情页末尾渲染后端返回的 code 与中英文说明"
   renderDetail();
 
   const section = await screen.findByTestId("flag-glossary");
-  expect(section.textContent).toContain("profit_take_fly");
-  expect(section.textContent).toContain("止盈后 20 日最高收盘高出净卖价 3% 以上。");
-  expect(section.textContent).toContain("The 20-day high exceeded the net sell price by more than 3%.");
+  expect(section.textContent).toContain("bottom_buy");
+  expect(section.textContent).toContain("回合内命中即时抄底或短期抄底的买入账单个数。");
+  expect(section.textContent).toContain("Number of buy bills flagged as an instant or short-term bottom.");
+});
+
+it("旗标过期横幅：只渲染后端 flag_config.stale，动作指向设置页重算", async () => {
+  getInsight.mockResolvedValue(
+    makeInsight({
+      flags: [],
+      flag_config: {
+        near_equal_tolerance_pct: "1.00%",
+        chase_margin_pct: "1.00%",
+        stop_loss_margin_pct: "1.00%",
+        short_term_margin_pct: "5.00%",
+        window_trading_days: "5",
+        flags_hash: "hash_new",
+        is_default: false,
+        stale: true,
+      },
+    }),
+  );
+  renderDetail();
+
+  const notice = await screen.findByTestId("flag-stale-notice");
+  expect(notice.textContent).toContain("旗标已过期");
+  expect(notice.textContent).toContain("账单旗标阈值刚更新，当前旗标待重算。");
+  expect(screen.getByTestId("flag-stale-action").getAttribute("href")).toBe("/settings");
+});
+
+it("flag_config.stale=false：不显示旗标过期横幅", async () => {
+  renderDetail();
+
+  await screen.findByRole("table", { name: "买入流水与事后表现" });
+  expect(screen.queryByTestId("flag-stale-notice")).toBeNull();
 });

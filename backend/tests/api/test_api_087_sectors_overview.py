@@ -344,6 +344,146 @@ async def test_api_087_concept_taxonomy(
     assert body["portfolio"]["holding_count"] == 1
 
 
+# ── 概念过滤（偏好联动） ───────────────────────────────────
+
+
+async def _patch_concept_filters(
+    client: httpx.AsyncClient,
+    headers: dict[str, str],
+    *,
+    mode: str,
+    excluded: list[dict[str, str]],
+) -> httpx.Response:
+    return await client.patch(
+        "/api/v1/settings",
+        headers={**headers, "If-Match": 'W/"1"'},
+        json={"concept_filters": {"mode": mode, "excluded": excluded}},
+    )
+
+
+async def test_api_087_concept_filter_hide(
+    sector_client: Any,
+    account_factory: Any,
+    owner_engine: AsyncEngine,
+    settings: Any,
+    frozen_clock: FrozenClock,
+) -> None:
+    """hide：行/TopN/n_sectors 排除被选概念；聚合轴与 ETag/缓存头按 §4.6 处理。"""
+    acc = await account_factory()
+    await _seed_stock_portfolio(
+        sector_client, settings, acc.headers, frozen_clock, owner_engine, user_id=acc.user_id
+    )
+
+    before = await sector_client.get(
+        "/api/v1/sectors/overview", headers=acc.headers, params={"taxonomy": "concept"}
+    )
+    assert before.status_code == 200, before.text
+    before_body = before.json()
+    assert before_body["concept"]["filters"] is None
+    assert before_body["concept"]["filtered_market_value"] is None
+    assert "cache-control" not in before.headers
+
+    patched = await _patch_concept_filters(
+        sector_client,
+        acc.headers,
+        mode="hide",
+        excluded=[{"code": "BK0999", "name": "人工智能"}],
+    )
+    assert patched.status_code == 200, patched.text
+
+    resp = await sector_client.get(
+        "/api/v1/sectors/overview", headers=acc.headers, params={"taxonomy": "concept"}
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.headers["cache-control"] == "private, no-cache"
+    assert resp.headers["etag"] != before.headers["etag"]
+    body = resp.json()
+    assert body["inputs_hash"] != before_body["inputs_hash"]
+
+    assert [row["sector_code"] for row in body["sectors"]] == ["BK1100"]
+    assert body["concentration"]["n_sectors"] == 1
+    assert body["concept"]["filters"] == {
+        "mode": "hide",
+        "applied": True,
+        "excluded": [{"code": "BK0999", "name": "人工智能", "resolved": True}],
+    }
+    assert body["concept"]["filtered_market_value"] is None
+    assert body["concept"]["filtered_holding_count"] is None
+    assert body["assumptions"]["concept_filter_hash"]
+    assert any(item["code"] == "SECTOR_CONCEPT_FILTER_APPLIED" for item in body["missing"])
+    # 覆盖度/重叠/caveat 保持全量口径（数据质量轴不被偏好污染）。
+    assert body["concept"]["coverage"] == before_body["concept"]["coverage"]
+    assert body["concept"]["overlap"] == before_body["concept"]["overlap"]
+    assert body["concept"]["caveat"] == before_body["concept"]["caveat"]
+
+    # 过滤指纹进入 ETag：旧 ETag 不再命中。
+    stale = await sector_client.get(
+        "/api/v1/sectors/overview",
+        headers={**acc.headers, "If-None-Match": before.headers["etag"]},
+        params={"taxonomy": "concept"},
+    )
+    assert stale.status_code == 200
+
+    # 行业请求不受概念偏好影响（无 filters / 无私有缓存头）。
+    industry = await sector_client.get(
+        "/api/v1/sectors/overview", headers=acc.headers, params={"taxonomy": "industry"}
+    )
+    assert industry.status_code == 200, industry.text
+    assert industry.json()["concept"] is None
+    assert "cache-control" not in industry.headers
+
+
+async def test_api_087_concept_filter_exclude_and_unresolved(
+    sector_client: Any,
+    account_factory: Any,
+    owner_engine: AsyncEngine,
+    settings: Any,
+    frozen_clock: FrozenClock,
+) -> None:
+    """exclude：额外输出被排除概念市值/持仓数；悬空 code 只降级不阻断。"""
+    acc = await account_factory()
+    await _seed_stock_portfolio(
+        sector_client, settings, acc.headers, frozen_clock, owner_engine, user_id=acc.user_id
+    )
+    before = await sector_client.get(
+        "/api/v1/sectors/overview", headers=acc.headers, params={"taxonomy": "concept"}
+    )
+    assert before.status_code == 200, before.text
+    excluded_mv = {row["sector_code"]: row["market_value"] for row in before.json()["sectors"]}[
+        "BK0999"
+    ]
+
+    patched = await _patch_concept_filters(
+        sector_client,
+        acc.headers,
+        mode="exclude",
+        excluded=[
+            {"code": "BK0999", "name": "人工智能"},
+            {"code": "BK9999", "name": "已下线概念"},
+        ],
+    )
+    assert patched.status_code == 200, patched.text
+
+    resp = await sector_client.get(
+        "/api/v1/sectors/overview", headers=acc.headers, params={"taxonomy": "concept"}
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert [row["sector_code"] for row in body["sectors"]] == ["BK1100"]
+    assert body["concept"]["filtered_market_value"] == excluded_mv
+    assert body["concept"]["filtered_holding_count"] == 1
+    assert body["concept"]["filters"] == {
+        "mode": "exclude",
+        "applied": True,
+        "excluded": [
+            {"code": "BK0999", "name": "人工智能", "resolved": True},
+            {"code": "BK9999", "name": "已下线概念", "resolved": False},
+        ],
+    }
+    codes = {item["code"] for item in body["missing"]}
+    assert {"SECTOR_CONCEPT_FILTER_APPLIED", "SECTOR_CONCEPT_FILTER_UNRESOLVED"} <= codes
+
+
 # ── 越权 / 身份 ─────────────────────────────────────────────
 
 

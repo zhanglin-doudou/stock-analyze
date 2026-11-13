@@ -137,6 +137,19 @@ async def _rebuild_period(
     return await rebuild_period_job(queue, session, job, clock, market_data)
 
 
+async def _rebuild_trade_flags(
+    queue: JobQueue,
+    session: AsyncSession,
+    job: JobPayload,
+    clock: Clock,
+    market_data: MarketDataSource,
+) -> dict[str, Any] | None:
+    """API-097：按用户生效阈值逐月重建账单旗标（行情端口用于取日线）。"""
+    from stock_review.application.trade_flags import rebuild_trade_flags_job
+
+    return await rebuild_trade_flags_job(queue, session, job, clock, market_data)
+
+
 async def _refresh_round_insights(
     _queue: JobQueue,
     session: AsyncSession,
@@ -179,5 +192,6 @@ HANDLERS: dict[str, JobHandler] = {
     "rebuild_rounds": _rebuild_rounds,
     "build_assets": _build_assets,
     "rebuild_period": _rebuild_period,
+    "rebuild_trade_flags": _rebuild_trade_flags,
     "refresh_round_insights": _refresh_round_insights,
 }

@@ -164,6 +164,17 @@
   --chart-sell-exit-1: #8f4a5c;
   --chart-sell-exit-2: #b06a79;
   --chart-sell-exit-3: #cd94a0;
+  /* 警示类状态旗标：与买卖两套色系分离，暗色主题自动换更亮的同色相。 */
+  --chart-warn-underwater: #b45309;
+  --chart-warn-drawdown: #6d28d9;
+  --chart-warn-sold-early: #a21caf;
+  /* 回合旗标计数图：做T 与日内调仓类行为各一对独立色相（浅色主题）。 */
+  --chart-flag-intraday: #0f766e;
+  --chart-flag-swing: #15803d;
+  --chart-flag-rebalance-out: #1d4ed8;
+  --chart-flag-rebalance-in: #0284c7;
+  /* 持有期分桶「长线」：青蓝三档之外新增的靛蓝一档。 */
+  --chart-bucket-long: #3b4a8f;
 
   /* ── 层级 ────────────────────────────────────────── */
   --z-rail: 20;
@@ -267,6 +278,15 @@
   --chart-sell-exit-1: #ee9aa8;
   --chart-sell-exit-2: #d97b8c;
   --chart-sell-exit-3: #bb6374;
+  --chart-warn-underwater: #fbbf24;
+  --chart-warn-drawdown: #a78bfa;
+  --chart-warn-sold-early: #e879f9;
+  /* 回合旗标计数图：做T 与日内调仓类行为各一对独立色相（暗色主题）。 */
+  --chart-flag-intraday: #2dd4bf;
+  --chart-flag-swing: #4ade80;
+  --chart-flag-rebalance-out: #93c5fd;
+  --chart-flag-rebalance-in: #38bdf8;
+  --chart-bucket-long: #93a4e8;
 }
 
 /* 对比度偏好：提高边框/次级文字对比（WCAG 2.2 AA 兜底） */

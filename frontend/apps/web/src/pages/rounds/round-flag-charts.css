@@ -1,0 +1,76 @@
+/* 回合旗标计数柱状图（/rounds/insights）：只用 tokens 语义色，浅/暗主题自动跟随。 */
+.rfc {
+  margin-top: 4px;
+}
+
+.rfc-bar {
+  height: 220px;
+}
+
+.rfc-fallback,
+.rfc-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  min-height: 48px;
+  margin: 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* 图例允许换行：窄屏三枚标签一行放不下时自动折行，不横向溢出。 */
+.rfc-legend {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 4px 12px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.rfc-legend i {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 4px;
+  border-radius: 2px;
+}
+
+.rfc-note {
+  margin: 6px 0 0;
+  font-size: 12px;
+}
+
+.rfc-tooltip {
+  box-sizing: border-box;
+  width: 120px;
+  padding: 6px 8px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text);
+  background: var(--surface-raised);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  overflow-wrap: anywhere;
+}
+
+.rfc-tooltip-head {
+  margin-bottom: 2px;
+  color: var(--text-2);
+}
+
+.rfc-tooltip-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.rfc-tooltip-row i {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}

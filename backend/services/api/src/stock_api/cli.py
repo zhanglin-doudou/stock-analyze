@@ -48,7 +48,7 @@ from stock_platform.sector_source import create_live_sector_source
 from stock_platform.security import hasher_for
 from stock_platform.symbols import classify_symbol
 from stock_review.metrics.context import parse_period_label
-from stock_review.trade_flags import build_trade_flags_for_user
+from stock_review.trade_flags import build_trade_flags_for_user, load_flag_config
 
 # ── 常量 ────────────────────────────────────────────────────────
 API_PREFIX = "/api/v1"
@@ -1027,6 +1027,8 @@ async def _build_trade_flags(*, month: str, email: str | None, dry_run: bool) ->
         total_rows = 0
         for user_id in user_ids:
             async with db.session(user_id=user_id, begin=True) as session:
+                # 逐用户读取生效阈值：不同用户的 20 码判定口径可以不同。
+                config, config_hash = await load_flag_config(session, user_id)
                 result = await build_trade_flags_for_user(
                     session,
                     user_id,
@@ -1034,11 +1036,15 @@ async def _build_trade_flags(*, month: str, email: str | None, dry_run: bool) ->
                     market_data=market,
                     clock=clock,
                     dry_run=dry_run,
+                    config=config,
                 )
             total_trades += result.trades
             total_rows += result.rows
             if result.trades:
-                emit(f"  {user_id}：{result.trades} 笔账单 / {result.rows} 行旗标")
+                emit(
+                    f"  {user_id}：{result.trades} 笔账单 / {result.rows} 行旗标"
+                    f"（flags_hash={config_hash}）"
+                )
         emit(
             f"✅ {'预演' if dry_run else '构建'}完成：{len(user_ids)} 个账号，"
             f"{total_trades} 笔账单，{total_rows} 行旗标"

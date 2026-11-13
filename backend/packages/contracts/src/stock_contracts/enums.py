@@ -199,9 +199,10 @@ class ForwardReturnStatus(StrEnum):
 
 
 class RoundBucket(StrEnum):
+    SCALP = "scalp"
     SHORT = "short"
-    SWING = "swing"
-    TREND = "trend"
+    POSITION = "position"
+    LONG = "long"
     UNKNOWN = "unknown"
 
 

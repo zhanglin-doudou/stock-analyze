@@ -16,7 +16,7 @@ import uuid
 from collections import defaultdict
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
@@ -29,28 +29,47 @@ from stock_contracts.errors import ApiError, ErrorCode
 from stock_core.insights import DEFINITION_VERSION, classify
 from stock_core.insights import aggregate as agg
 from stock_core.insights import calendar as cal
-from stock_core.insights.flags import FLAG_DEFINITIONS, FlagDefinition
+from stock_core.insights.flags import FLAG_DEFINITIONS, ITEM_FLAG_CODES, FlagDefinition
 from stock_core.insights.forward import ForwardResult, ForwardTrade, compute_forward, price_net
-from stock_core.trade_flags import TradeFlagDefinition
+from stock_core.trade_flags import TradeFlagConfig, TradeFlagDefinition
+from stock_core.trade_flags.constants import STATUS_HIT
+from stock_core.trade_flags.engine import TradeContext, evaluate_trade_flags
 from stock_core.values import Money, Price, Ratio, format_quantity
 from stock_ledger.corporate_actions import is_corporate_action
 from stock_ledger.models import Trade
 from stock_platform.ids import new_id
 from stock_platform.ports import Bar, MarketDataSource
+from stock_platform.repositories.users import UserSettingRepository
 from stock_platform.symbols import classify_symbol, is_convertible_bond
+from stock_review.application.valuation import is_money_fund_row
 from stock_review.insights import reasons
 from stock_review.insights.reasons import REASON_LABELS, ReasonDTO
 from stock_review.metrics.context import Period, parse_period_label
 from stock_review.metrics.datasets import DEFAULT_BENCHMARK, benchmark_fetch_symbol
 from stock_review.models import Round, RoundFill, TradeForwardReturn, TradeReason
 from stock_review.trade_flags import (
+    TradeFlagConfigView,
     TradeFlagRecord,
+    config_view,
+    has_stale_flags,
     load_trade_flags,
     trade_flag_glossary,
 )
 
 HORIZONS: tuple[int, ...] = (5, 10, 20)
-_ADDON_LOOKBACK_TRADING_DAYS = 60
+
+# 回合状态计数型代码（`status_counts` 的固定键；`flags` 只做布尔投影）。
+STATUS_BOTTOM_BUY = "bottom_buy"
+STATUS_STOP_LOSS_SOLD_EARLY = "stop_loss_sold_early"
+STATUS_PROFIT_SOLD_EARLY = "profit_sold_early"
+STATUS_COUNT_CODES: tuple[str, ...] = (
+    STATUS_BOTTOM_BUY,
+    STATUS_STOP_LOSS_SOLD_EARLY,
+    STATUS_PROFIT_SOLD_EARLY,
+)
+
+# 与账单旗标月度构建同口径：行情回看多取 45 天，保证回合内前几笔账单也能判定「抄底」。
+_FLAG_MARKET_PADDING = timedelta(days=45)
 
 # 证券类型筛选词表（设计 §6.3 `security_type`）：四类互斥且覆盖全部回合。
 SECURITY_TYPE_STOCK = "stock"
@@ -132,24 +151,20 @@ class InsightItem:
     quadrant: str | None
     flags: list[str]
     quality: list[str]
-    missed_profit_worst_units: int | None
-    missed_profit_end_units: int | None
-    missed_profit_worst_abs_display: str | None = None
-    missed_profit_worst_label: str | None = None
-    missed_profit_worst_label_en: str | None = None
-    missed_profit_end_abs_display: str | None = None
-    missed_profit_end_label: str | None = None
-    missed_profit_end_label_en: str | None = None
-    # 非序列化：加仓笔的 20 日 B2（仅 status=ok 时非空），供 `summary.addon` 取均值。
-    addon_b2_units: int | None = None
+    status_counts: dict[str, int]
+    # 仅内部汇总使用（加仓/加仓后下跌/止盈卖飞/止损后反弹），不序列化。
+    summary_flags: set[str]
+    # 当前生效阈值（additive，列表/详情均回显；`stale` 仅详情用于提示重算）。
+    flag_config: TradeFlagConfigView | None = None
 
 
 @dataclass(slots=True)
 class SummaryBucket:
     closed: int
+    scalp: int
     short: int
-    swing: int
-    trend: int
+    position: int
+    long: int
     avg_holding_trading_days: str | None
     win_rate_pct: str | None
     avg_pnl_display: str | None
@@ -213,17 +228,11 @@ class ReasonCoverage:
 
 @dataclass(slots=True)
 class AddonSummary:
-    """加仓（含补仓/抄底）统计（设计 §6.3）。
-
-    `count` 与兼容字段 `rounds` 同值；`avg_dip_pct` 是加仓笔次 20 日 B2 的均值，
-    只对有 `status=ok` 的样本取均值，`avg_dip_coverage` 显式给出「有效/总数」。
-    """
+    """加仓（含补仓/抄底）统计（设计 §6.3）：`count` 与兼容字段 `rounds` 同值。"""
 
     count: int
     declined_after_addon: int
     declined_pct: str | None
-    avg_dip_pct: str | None
-    avg_dip_coverage: str
     rounds: int
     share_pct: str | None
 
@@ -236,16 +245,16 @@ class SellFlySummary:
     profit_take_fly: int
     stop_loss_rebound: int
     fly_pct: str | None
-    missed_profit_worst_display: str | None
-    missed_profit_end_display: str | None
     rounds: int
     share_pct: str | None
-    missed_profit_worst_abs_display: str | None = None
-    missed_profit_worst_label: str | None = None
-    missed_profit_worst_label_en: str | None = None
-    missed_profit_end_abs_display: str | None = None
-    missed_profit_end_label: str | None = None
-    missed_profit_end_label_en: str | None = None
+
+
+@dataclass(slots=True)
+class FlagRoundCount:
+    """按计数型回合旗标聚合的回合数（同一回合只计一次，不累加旗标次数）。"""
+
+    flag: str
+    count: int
 
 
 @dataclass(slots=True)
@@ -257,6 +266,9 @@ class InsightsSummary:
     sell_fly: SellFlySummary
     reason_coverage: ReasonCoverage
     ranking: RankingSummary
+    # 按回合旗标（v1.2 词表全部 `item_flag`）统计的回合数，口径是筛选后的全量回合，
+    # 与分页无关，供前端柱状图使用。
+    flag_round_counts: list[FlagRoundCount]
     pending: dict[str, Any]
 
 
@@ -279,6 +291,7 @@ class InsightsPage:
     assumptions: list[str]
     disclaimer: str
     flag_glossary: list[FlagDefinition] = field(default_factory=list)
+    flag_config: TradeFlagConfigView | None = None
 
 
 @dataclass(slots=True)
@@ -299,10 +312,12 @@ class RoundInsightDetail:
     fills: list[dict[str, Any]]
     flags: list[str]
     quality: list[str]
+    status_counts: dict[str, int]
     ranking: dict[str, Any]
     disclaimer: str
     flag_glossary: list[FlagDefinition] = field(default_factory=list)
     trade_flag_glossary: list[TradeFlagDefinition] = field(default_factory=list)
+    flag_config: TradeFlagConfigView | None = None
 
 
 @dataclass(slots=True)
@@ -344,19 +359,6 @@ def _money(units: int | None) -> str | None:
 def _days_x10_display(x10: int | None) -> str | None:
     """交易日 × 10 定点整数 → 一位小数展示串（整数拆分，不引入 float）。"""
     return None if x10 is None else f"{x10 // 10}.{x10 % 10}"
-
-
-def _missed_presentation(units: int | None) -> tuple[str | None, str | None, str | None]:
-    """卖飞金额 → (绝对值展示串, 中文措辞, 英文措辞)。
-
-    符号 → 措辞（与归因 `factor_conclusion` 同思路）：非负表示「本该赚到却没赚到」→
-    少赚；负值表示卖后下跌、卖出反而避免了回撤 → 多赚。零归入「少赚」侧（零既不是
-    额外收益，也不宜渲染成「多赚」，取保守措辞）。`None` 三项全空，前端只渲染「—」。
-    """
-    if units is None:
-        return None, None, None
-    label, label_en = ("少赚", "missed gain") if units >= 0 else ("多赚", "extra gain")
-    return str(Money(abs(units))), label, label_en
 
 
 def _price_6dp(units: int | None) -> str | None:
@@ -438,6 +440,35 @@ def _to_view(result: ForwardResult) -> ForwardView:
         ret_b3_units=result.ret_b3_units,
         ret_b2_units=result.ret_b2_units,
     )
+
+
+# 货基申赎摘要码（分类规则见 stock_ledger.repositories.rules）：旧批次可能没有
+# `money_fund_balance_units` 标记，但这两类摘要恒为货基申赎；场内 ETF/LOF 走
+# `sys_buy_stock`/`sys_sell_stock`，不受影响。
+_MONEY_FUND_SUMMARY_CODES = frozenset({"sys_fund_buy", "sys_redeem"})
+
+
+def _trade_day_index(
+    trades: Sequence[Trade],
+) -> dict[date, list[tuple[str, str, int]]]:
+    """交易日 → [(证券代码, 方向, 全局序号)]，供日内调仓按同日全部流水判定。
+
+    只收**真实二级市场证券成交**（`classify.is_rebalance_counterparty`）：CASH 资金行
+    （转账/费用/利息/红利税补缴）、公司行动（分红/送转/配股）、新股申购与货基申赎都
+    不是「买入/卖出其它证券」，纳入会把「卖出后补缴红利税」「卖出后申购货基」误判成
+    日内调仓。全局序号仍是整条 FIFO 稳定序的下标，保证「先后」可判定。
+    """
+    out: dict[date, list[tuple[str, str, int]]] = defaultdict(list)
+    for index, trade in enumerate(trades):
+        if not classify.is_rebalance_counterparty(
+            security_code=trade.security_code,
+            category=trade.category or "",
+            is_money_fund=is_money_fund_row(trade)
+            or (trade.summary_code or "") in _MONEY_FUND_SUMMARY_CODES,
+        ):
+            continue
+        out[trade.trade_date].append((trade.security_code, trade.side, index))
+    return dict(out)
 
 
 @dataclass(slots=True)
@@ -600,12 +631,8 @@ def _position_states(trades: Sequence[Trade]) -> dict[str, _PositionState]:
         )
         if trade.side == "buy" and trade.quantity_units > 0:
             qty[trade.security_code] += trade.quantity_units
-            cost[trade.security_code] += (
-                abs(trade.amount_units)
-                + trade.commission_units
-                + trade.stamp_tax_units
-                + trade.other_fee_units
-            )
+            # `amount_units` 已是含费净现金流（解析层统一），不能再叠加费用字段。
+            cost[trade.security_code] += abs(trade.amount_units)
         elif trade.side == "sell" and trade.quantity_units > 0:
             held = qty[trade.security_code]
             if held > 0:
@@ -642,29 +669,67 @@ def _round_buy_trades(
     ]
 
 
-def _recent_prices(
-    trades: Sequence[Trade],
-    *,
-    side: str,
-    d0: date,
-    calendar: Sequence[date],
-) -> list[int]:
-    """同持仓 60 交易日内、同一方向且发生在仓位 epoch 内的净价序列。
+def _round_sell_trades(
+    round_row: Round,
+    ordered_trades: Sequence[Trade],
+    order_index: dict[str, int],
+) -> list[Trade]:
+    """回合内的全部卖出笔（含平仓笔），按 FIFO 稳定序返回。"""
+    open_index = order_index.get(round_row.open_trade_id)
+    close_index = order_index.get(round_row.close_trade_id) if round_row.close_trade_id else None
+    if open_index is None or close_index is None:
+        return []
+    return [
+        trade
+        for trade in ordered_trades[open_index : close_index + 1]
+        if trade.security_code == round_row.security_code and trade.side == "sell"
+    ]
 
-    `trades` 必须已按 `_trade_order_key` 排好序（调用方只排一次，避免每回合重复排序）。
-    """
-    cutoff_index = max(0, (cal.base_index(calendar, d0) or 0) - _ADDON_LOOKBACK_TRADING_DAYS)
-    cutoff = calendar[cutoff_index] if calendar else d0
-    prices: list[int] = []
-    for trade in trades:
-        if trade.side != side or trade.quantity_units <= 0:
-            continue
-        if trade.trade_date < cutoff or trade.trade_date > d0:
-            continue
-        net = price_net(_trade_facts(trade))
-        if net is not None:
-            prices.append(net)
-    return prices
+
+def _round_security_trades(
+    round_row: Round,
+    ordered_trades: Sequence[Trade],
+    order_index: dict[str, int],
+) -> list[Trade]:
+    """回合区间内当前证券的全部账单（含平仓笔），用于做 T 的先后顺序判定。"""
+    open_index = order_index.get(round_row.open_trade_id)
+    close_index = order_index.get(round_row.close_trade_id) if round_row.close_trade_id else None
+    if open_index is None or close_index is None:
+        return []
+    return [
+        trade
+        for trade in ordered_trades[open_index : close_index + 1]
+        if trade.security_code == round_row.security_code
+    ]
+
+
+def _trade_flag_statuses(
+    trade: Trade,
+    *,
+    states: dict[str, _PositionState],
+    market: _MarketData,
+    config: TradeFlagConfig,
+) -> dict[str, str]:
+    """单笔账单的旗标状态（与账单旗标构建同源的纯判定，不依赖外部构建任务）。"""
+    state = states.get(trade.id)
+    net = price_net(_trade_facts(trade))
+    if state is None or net is None:
+        return {}
+    results = evaluate_trade_flags(
+        TradeContext(
+            side=trade.side,
+            trade_date=trade.trade_date,
+            net_price_units=net,
+            quantity_units=trade.quantity_units,
+            quantity_before_units=state.qty_before,
+            avg_cost_units=state.avg_cost_before,
+        ),
+        bars=market.bars_by_symbol.get(trade.security_code, ()),
+        calendar=market.calendar,
+        data_as_of=market.data_as_of,
+        config=config,
+    )
+    return {item.code: item.status for item in results}
 
 
 async def _load_trades(session: AsyncSession, user_id: uuid.UUID, *, end: date) -> list[Trade]:
@@ -814,9 +879,8 @@ def _side_view(
 class _RoundFlagResult:
     flags: list[str]
     quality: list[str]
-    missed_worst: int | None
-    missed_end: int | None
-    addon_b2_units: int | None = None
+    status_counts: dict[str, int]
+    summary_flags: set[str]
 
 
 def _round_flags(
@@ -827,35 +891,110 @@ def _round_flags(
     states: dict[str, _PositionState],
     ordered_trades: Sequence[Trade],
     order_index: dict[str, int],
+    day_index: dict[date, list[tuple[str, str, int]]],
     market: _MarketData,
     forwards: dict[tuple[str, int], TradeForwardReturn],
     fingerprint: str,
     corporate: dict[str, list[date]],
+    config: TradeFlagConfig,
 ) -> _RoundFlagResult:
     flags: list[str] = []
     quality: list[str] = []
-    missed_worst: int | None = None
-    missed_end: int | None = None
+    status_counts = dict.fromkeys(STATUS_COUNT_CODES, 0)
+    summary_flags: set[str] = set()
     if buy is None or sell is None:
-        return _RoundFlagResult(flags, quality, missed_worst, missed_end)
-    # 买入侧判定统一落在「本回合最后一笔买入」：无加仓时就是开仓笔（既有口径不变），
-    # 有加仓时就是最后一笔加仓笔（设计 §3.5：加仓 = 买入前同标的持仓 > 0）。
-    # 不能用开仓笔：回合从 0 股开启，开仓笔的买入前持仓恒为 0，永远不可能是加仓。
+        return _RoundFlagResult(flags, quality, status_counts, summary_flags)
+
     round_buys = _round_buy_trades(round_row, ordered_trades, order_index)
+    round_sells = _round_sell_trades(round_row, ordered_trades, order_index)
+    # 加仓/加仓后下跌的汇总判定沿用「本回合最后一笔买入」（与既有 summary 口径一致）。
     buy_eval = round_buys[-1] if round_buys else buy
     state = states.get(buy_eval.id)
-    is_addon = state is not None and classify.is_addon(state.qty_before)
-    if is_addon:
-        flags.append("addon")
 
-    if is_addon and state is not None and state.avg_cost_before:
-        prices = _recent_prices(
-            ordered_trades, side="buy", d0=buy_eval.trade_date, calendar=market.calendar
+    # ── 抄底计数：回合内命中即时抄底或短期抄底的买入账单个数 ──
+    for trade in round_buys or [buy_eval]:
+        statuses = _trade_flag_statuses(trade, states=states, market=market, config=config)
+        if (
+            statuses.get("instant_bottom") == STATUS_HIT
+            or statuses.get("short_term_bottom") == STATUS_HIT
+        ):
+            status_counts[STATUS_BOTTOM_BUY] += 1
+
+    # ── 卖飞计数：带短期卖飞旗标的卖出账单，再按净卖价与卖出前均价分侧 ──
+    for trade in round_sells:
+        statuses = _trade_flag_statuses(trade, states=states, market=market, config=config)
+        if statuses.get("short_term_sold_early") != STATUS_HIT:
+            continue
+        sell_state = states.get(trade.id)
+        net = price_net(_trade_facts(trade))
+        side = (
+            classify.sold_early_side(net, sell_state.avg_cost_before)
+            if sell_state is not None and net is not None
+            else None
         )
-        if classify.is_dip_sequence(prices):
-            flags.append("dip_sequence")
+        if side == classify.SOLD_EARLY_STOP_LOSS:
+            status_counts[STATUS_STOP_LOSS_SOLD_EARLY] += 1
+        elif side == classify.SOLD_EARLY_PROFIT:
+            status_counts[STATUS_PROFIT_SOLD_EARLY] += 1
 
-    # 抄底/加仓：买后 20D 是否继续下跌（只认 status=ok 的 20D 样本）
+    # ── 收益回撤：数量加权平均卖价 vs 首笔买入日（含）~末笔卖出日（不含）最高收盘 ──
+    weighted = 0
+    total_qty = 0
+    for trade in round_sells:
+        net = price_net(_trade_facts(trade))
+        if net is None or trade.quantity_units <= 0:
+            continue
+        weighted += net * trade.quantity_units
+        total_qty += trade.quantity_units
+    avg_sell = weighted // total_qty if total_qty else None
+    max_close: int | None = None
+    if round_buys and round_sells:
+        start = round_buys[0].trade_date
+        end = round_sells[-1].trade_date
+        for day, close in market.bars_by_symbol.get(round_row.security_code, ()):
+            if start <= day < end and (max_close is None or close > max_close):
+                max_close = close
+    drawdown = classify.is_round_drawdown(avg_sell, max_close)
+
+    # ── 做T：回合内当前证券账单的「先部分卖出再买入」 ──
+    events: list[tuple[date, str, int, int]] = []
+    for trade in _round_security_trades(round_row, ordered_trades, order_index):
+        trade_state = states.get(trade.id)
+        events.append(
+            (
+                trade.trade_date,
+                trade.side,
+                trade.quantity_units,
+                trade_state.qty_before if trade_state is not None else 0,
+            )
+        )
+    intraday_t, swing_t = classify.detect_t_patterns(events)
+
+    # ── 日内调仓：同用户同日全部流水（不按账户切分） ──
+    security = round_row.security_code
+    sell_days = {trade.trade_date for trade in round_sells}
+    buy_days = {trade.trade_date for trade in round_buys}
+    other_buys = [
+        (day, index)
+        for day in sell_days
+        for code, side, index in day_index.get(day, ())
+        if code != security and side == "buy"
+    ]
+    other_sells = [
+        (day, index)
+        for day in buy_days
+        for code, side, index in day_index.get(day, ())
+        if code != security and side == "sell"
+    ]
+    rebalance_out = classify.has_same_day_after(
+        [(trade.trade_date, order_index[trade.id]) for trade in round_sells], other_buys
+    )
+    rebalance_in = classify.has_same_day_after(
+        other_sells, [(trade.trade_date, order_index[trade.id]) for trade in round_buys]
+    )
+
+    # ── 加仓/卖飞汇总内部口径（只供 summary，不进入 items[].flags） ──
+    is_addon = state is not None and classify.is_addon(state.qty_before)
     buy_fwd20 = _resolve_forward(
         buy_eval,
         horizon=20,
@@ -864,32 +1003,17 @@ def _round_flags(
         cached=forwards,
         fingerprint=fingerprint,
     )
-    if is_addon and state is not None and state.avg_cost_before:
-        net = price_net(_trade_facts(buy_eval))
-        if net is not None:
-            dip = classify.dip_depth_units(net, state.avg_cost_before)
-            if dip is not None:
-                flags.append("below_avg")
+    if is_addon:
+        summary_flags.add("addon")
     if buy_fwd20.status == ForwardReturnStatus.OK:
         net = price_net(_trade_facts(buy_eval))
         if net is not None and classify.continued_decline(
             buy_fwd20.ret_b2_units, buy_fwd20.min_close_units, net
         ):
-            flags.append("continued_decline")
-        if buy_fwd20.cn_units is not None and net is not None:
-            missed_worst = classify.additional_loss_units(
-                buy_eval.quantity_units, net, buy_fwd20.min_close_units or net
-            )
-            missed_end = classify.additional_loss_units(
-                buy_eval.quantity_units, net, buy_fwd20.cn_units
-            )
+            summary_flags.add("continued_decline")
     if buy_fwd20.price_jump_review:
         quality.append("price_jump_review")
-    addon_b2_units = (
-        buy_fwd20.ret_b2_units if is_addon and buy_fwd20.status == ForwardReturnStatus.OK else None
-    )
 
-    # 卖飞：盈利型 + 20D 最高收盘高于净卖价 3%
     sell_state = states.get(sell.id)
     avg_before = sell_state.avg_cost_before if sell_state else None
     sell_net = price_net(_trade_facts(sell))
@@ -906,33 +1030,30 @@ def _round_flags(
         and sell_net is not None
         and classify.is_profit_taking(sell_net, avg_before)
     )
-    if profit:
-        flags.append("profit_taking")
     if sell_net is not None and classify.sold_too_early(sell_fwd20.max_close_units, sell_net):
         if profit:
-            flags.append("profit_take_fly")
-            if sell_fwd20.max_close_units is not None:
-                missed_worst = classify.additional_loss_units(
-                    sell.quantity_units, sell_net, sell_fwd20.max_close_units
-                )
-            if sell_fwd20.cn_units is not None:
-                missed_end = classify.additional_loss_units(
-                    sell.quantity_units, sell_net, sell_fwd20.cn_units
-                )
+            summary_flags.add("profit_take_fly")
         else:
-            flags.append("stop_loss_rebound")
-    prices = _recent_prices(
-        ordered_trades, side="sell", d0=sell.trade_date, calendar=market.calendar
-    )
-    if classify.is_rise_sequence(prices):
-        flags.append("rising_sell_sequence")
-    if round_row.quantity_units and sell.quantity_units >= round_row.quantity_units:
-        flags.append("full_exit")
-    else:
-        flags.append("partial_exit")
-    if sell.trade_date == round_row.open_date:
-        flags.append("same_day")
-    return _RoundFlagResult(flags, quality, missed_worst, missed_end, addon_b2_units)
+            summary_flags.add("stop_loss_rebound")
+
+    # ── flags 布尔投影（按词表顺序；计数型只在命中时出现） ──
+    if status_counts[STATUS_BOTTOM_BUY]:
+        flags.append(STATUS_BOTTOM_BUY)
+    if status_counts[STATUS_STOP_LOSS_SOLD_EARLY]:
+        flags.append(STATUS_STOP_LOSS_SOLD_EARLY)
+    if status_counts[STATUS_PROFIT_SOLD_EARLY]:
+        flags.append(STATUS_PROFIT_SOLD_EARLY)
+    if drawdown:
+        flags.append("drawdown")
+    if intraday_t:
+        flags.append("intraday_t")
+    if swing_t:
+        flags.append("swing_t")
+    if rebalance_out:
+        flags.append("intraday_rebalance_out")
+    if rebalance_in:
+        flags.append("intraday_rebalance_in")
+    return _RoundFlagResult(flags, quality, status_counts, summary_flags)
 
 
 def _round_bucket(round_row: Round, holding: int | None) -> str:
@@ -951,7 +1072,9 @@ def _build_item(
     states: dict[str, _PositionState],
     ordered_trades: Sequence[Trade],
     order_index: dict[str, int],
+    day_index: dict[date, list[tuple[str, str, int]]],
     fingerprint: str,
+    config: TradeFlagConfig,
 ) -> InsightItem:
     holding = (
         cal.holding_trading_days(market.calendar, round_row.open_date, round_row.close_date)
@@ -965,13 +1088,14 @@ def _build_item(
         states=states,
         ordered_trades=ordered_trades,
         order_index=order_index,
+        day_index=day_index,
         market=market,
         forwards=forwards,
         fingerprint=fingerprint,
         corporate=corporate,
+        config=config,
     )
     flags, quality = flag_result.flags, flag_result.quality
-    missed_worst, missed_end = flag_result.missed_worst, flag_result.missed_end
     buy_view = _side_view(
         buy,
         reason_map=reasons_map,
@@ -999,8 +1123,6 @@ def _build_item(
             else -sell_view.forward[20].ret_b3_units
         )
     combined = agg.combined_20(buy_excess, sell_avoid)
-    worst_abs, worst_label, worst_label_en = _missed_presentation(missed_worst)
-    end_abs, end_label, end_label_en = _missed_presentation(missed_end)
     item = InsightItem(
         round_id=round_row.id,
         security_code=round_row.security_code,
@@ -1022,15 +1144,8 @@ def _build_item(
         quadrant=agg.quadrant(buy_excess, sell_avoid),
         flags=flags,
         quality=quality,
-        missed_profit_worst_units=missed_worst,
-        missed_profit_end_units=missed_end,
-        missed_profit_worst_abs_display=worst_abs,
-        missed_profit_worst_label=worst_label,
-        missed_profit_worst_label_en=worst_label_en,
-        missed_profit_end_abs_display=end_abs,
-        missed_profit_end_label=end_label,
-        missed_profit_end_label_en=end_label_en,
-        addon_b2_units=flag_result.addon_b2_units,
+        status_counts=flag_result.status_counts,
+        summary_flags=flag_result.summary_flags,
     )
     for side in (buy_view, sell_view):
         if side is not None:
@@ -1065,6 +1180,20 @@ def _assign_ranks(items: list[InsightItem], *, sort: str) -> tuple[list[InsightI
     return eligible + remainder, len(eligible)
 
 
+def _flag_round_counts(items: Sequence[InsightItem]) -> list[FlagRoundCount]:
+    """按回合旗标统计命中的回合数（同一回合只计一次，不累加次数）。
+
+    覆盖 v1.2 词表的全部 `item_flag`，顺序沿用词表定义顺序；`items[].flags` 已把
+    计数型旗标投影为「是否命中」，因此直接按旗标存在与否计数，与 `status_counts` 同源。
+    """
+    counts = dict.fromkeys(ITEM_FLAG_CODES, 0)
+    for item in items:
+        for code in item.flags:
+            if code in counts:
+                counts[code] += 1
+    return [FlagRoundCount(flag=code, count=counts[code]) for code in ITEM_FLAG_CODES]
+
+
 def _summary(
     items: Sequence[InsightItem],
     *,
@@ -1080,9 +1209,10 @@ def _summary(
     ]
     swing = SummaryBucket(
         closed=len(closed),
+        scalp=sum(1 for item in closed if item.bucket == "scalp"),
         short=sum(1 for item in closed if item.bucket == "short"),
-        swing=sum(1 for item in closed if item.bucket == "swing"),
-        trend=sum(1 for item in closed if item.bucket == "trend"),
+        position=sum(1 for item in closed if item.bucket == "position"),
+        long=sum(1 for item in closed if item.bucket == "long"),
         avg_holding_trading_days=(f"{sum(holdings) / len(holdings):.1f}" if holdings else None),
         win_rate_pct=(f"{win * 100 / len(pnls):.2f}%" if pnls else None),
         avg_pnl_display=_money(sum(pnls) // len(pnls) if pnls else None),
@@ -1117,49 +1247,25 @@ def _summary(
         avg_pnl_display=_money(sum(fill_pnls) // len(fill_pnls) if fill_pnls else None),
         total_pnl_display=_money(sum(fill_pnls) if fill_pnls else None),
     )
-    addon_items = [item for item in items if "addon" in item.flags]
-    sell_fly_items = [item for item in items if "profit_take_fly" in item.flags]
-    rebound_items = [item for item in items if "stop_loss_rebound" in item.flags]
+    addon_items = [item for item in items if "addon" in item.summary_flags]
+    sell_fly_items = [item for item in items if "profit_take_fly" in item.summary_flags]
+    rebound_items = [item for item in items if "stop_loss_rebound" in item.summary_flags]
     sell_items = [item for item in items if item.sell_trade is not None]
-    declined_addon = sum(1 for item in addon_items if "continued_decline" in item.flags)
-    # avg_dip：取加仓笔（本回合最后一笔买入）status=ok 的 20 日 B2；缺样本时显式 null + 覆盖度。
-    dip_samples = [item.addon_b2_units for item in addon_items if item.addon_b2_units is not None]
+    declined_addon = sum(1 for item in addon_items if "continued_decline" in item.summary_flags)
     addon_summary = AddonSummary(
         count=len(addon_items),
         declined_after_addon=declined_addon,
         declined_pct=(f"{declined_addon * 100 / len(addon_items):.2f}%" if addon_items else None),
-        avg_dip_pct=_pct(agg.weighted_mean([(value, 1) for value in dip_samples])),
-        avg_dip_coverage=f"{len(dip_samples)}/{len(addon_items)}",
         rounds=len(addon_items),
         share_pct=f"{len(addon_items) * 100 / len(closed):.2f}%" if closed else None,
     )
-    worst_units = (
-        sum(item.missed_profit_worst_units or 0 for item in sell_fly_items)
-        if sell_fly_items
-        else None
-    )
-    end_units = (
-        sum(item.missed_profit_end_units or 0 for item in sell_fly_items)
-        if sell_fly_items
-        else None
-    )
-    worst_abs, worst_label, worst_label_en = _missed_presentation(worst_units)
-    end_abs, end_label, end_label_en = _missed_presentation(end_units)
     sell_fly_summary = SellFlySummary(
         sell_count=len(sell_items),
         profit_take_fly=len(sell_fly_items),
         stop_loss_rebound=len(rebound_items),
         fly_pct=f"{len(sell_fly_items) * 100 / len(sell_items):.2f}%" if sell_items else None,
-        missed_profit_worst_display=_money(worst_units),
-        missed_profit_end_display=_money(end_units),
         rounds=len(sell_fly_items),
         share_pct=f"{len(sell_fly_items) * 100 / len(closed):.2f}%" if closed else None,
-        missed_profit_worst_abs_display=worst_abs,
-        missed_profit_worst_label=worst_label,
-        missed_profit_worst_label_en=worst_label_en,
-        missed_profit_end_abs_display=end_abs,
-        missed_profit_end_label=end_label,
-        missed_profit_end_label_en=end_label_en,
     )
     combined_values = [item.combined_units for item in items if item.combined_units is not None]
     ranked = sorted(combined_values)
@@ -1221,6 +1327,7 @@ def _summary(
             quadrant_counts=dict(quadrant_counts),
             per_stock=stock_rows,
         ),
+        flag_round_counts=_flag_round_counts(items),
         pending={
             "status_pending": sum(
                 1
@@ -1269,16 +1376,16 @@ def _matches_flag(item: InsightItem, flag: str) -> bool:
     """`GET /rounds/insights?flag=` 词表（设计 §6.3）→ 内部旗标/状态的映射。
 
     未知旗标按「不匹配」处理（不抛错，词表之外的无结果）；组合含义：
-    * `addon_decline`：加仓 **且** 加仓后 20D 继续下跌（AC-D3）；
-    * `sold_too_early`：价格层面卖飞，含止盈型与止损后反弹型（AC-D5）；
+    * `sold_too_early`：止损卖飞 **或** 止盈卖飞任一计数 > 0（AC-D5）；
     * `reason_missing`：买卖两侧均无理由（与 `has_reason=false` 同义）；
     * `horizon_pending`：任一前瞻为待算（不足 5/10/20 交易日）；
     * `corporate_action`：任一前瞻因公司行动 fail-closed。
     """
-    if flag == "addon_decline":
-        return "addon" in item.flags and "continued_decline" in item.flags
     if flag == "sold_too_early":
-        return "profit_take_fly" in item.flags or "stop_loss_rebound" in item.flags
+        return (
+            item.status_counts.get(STATUS_STOP_LOSS_SOLD_EARLY, 0) > 0
+            or item.status_counts.get(STATUS_PROFIT_SOLD_EARLY, 0) > 0
+        )
     if flag == "reason_missing":
         return (item.buy_trade is None or item.buy_trade.reason is None) and (
             item.sell_trade is None or item.sell_trade.reason is None
@@ -1350,7 +1457,8 @@ async def get_insights_page(
     market = await _load_market(
         market_data,
         symbols,
-        start=min((trade.trade_date for trade in trades), default=resolved.start),
+        start=min((trade.trade_date for trade in trades), default=resolved.start)
+        - _FLAG_MARKET_PADDING,
         end=max(clock.today(), resolved.end),
     )
     missing_calendar = not market.calendar
@@ -1360,6 +1468,9 @@ async def get_insights_page(
     ordered_trades = sorted(trades, key=_trade_order_key)
     order_index = {trade.id: index for index, trade in enumerate(ordered_trades)}
     states = _position_states(ordered_trades)
+    day_index = _trade_day_index(ordered_trades)
+    effective = await UserSettingRepository(session).get_effective(user_id)
+    trade_config = TradeFlagConfig.from_columns(effective.bill_bps)
 
     reason_map = await reasons.active_by_dedupe(
         session, user_id, [trade.dedupe_key for trade in trades if trade.id in symbol_trade_ids]
@@ -1371,21 +1482,23 @@ async def get_insights_page(
     for round_row in rounds:
         buy = by_id.get(round_row.open_trade_id)
         sell = by_id.get(round_row.close_trade_id) if round_row.close_trade_id else None
-        items.append(
-            _build_item(
-                round_row=round_row,
-                buy=buy,
-                sell=sell,
-                reasons_map=reason_map,
-                forwards=cached,
-                market=market,
-                corporate=corporate,
-                states=states,
-                ordered_trades=ordered_trades,
-                order_index=order_index,
-                fingerprint=fingerprint,
-            )
+        item = _build_item(
+            round_row=round_row,
+            buy=buy,
+            sell=sell,
+            reasons_map=reason_map,
+            forwards=cached,
+            market=market,
+            corporate=corporate,
+            states=states,
+            ordered_trades=ordered_trades,
+            order_index=order_index,
+            day_index=day_index,
+            fingerprint=fingerprint,
+            config=trade_config,
         )
+        item.flag_config = config_view(effective)
+        items.append(item)
 
     if bucket:
         items = [item for item in items if item.bucket == bucket]
@@ -1486,6 +1599,7 @@ async def get_insights_page(
         ],
         disclaimer=DISCLAIMER,
         flag_glossary=list(FLAG_DEFINITIONS),
+        flag_config=config_view(effective),
     )
 
 
@@ -1509,7 +1623,8 @@ async def get_round_insight(
     market = await _load_market(
         market_data,
         {trade.security_code for trade in trades},
-        start=min((trade.trade_date for trade in trades), default=round_row.open_date),
+        start=min((trade.trade_date for trade in trades), default=round_row.open_date)
+        - _FLAG_MARKET_PADDING,
         end=max(clock.today(), round_row.close_date or round_row.open_date),
     )
     fingerprint = _fingerprint(market.calendar, market.bars_version, market.benchmark_id)
@@ -1517,9 +1632,13 @@ async def get_round_insight(
     ordered_trades = sorted(trades, key=_trade_order_key)
     order_index = {trade.id: index for index, trade in enumerate(ordered_trades)}
     states = _position_states(ordered_trades)
+    day_index = _trade_day_index(ordered_trades)
     wanted = {trade.dedupe_key for trade in trades}
+    effective = await UserSettingRepository(session).get_effective(user_id)
+    trade_config = TradeFlagConfig.from_columns(effective.bill_bps)
     reason_map = await reasons.active_by_dedupe(session, user_id, wanted)
-    flag_map = await load_trade_flags(session, user_id, wanted)
+    flag_map = await load_trade_flags(session, user_id, wanted, flags_hash=effective.flags_hash)
+    stale = await has_stale_flags(session, user_id, wanted, flags_hash=effective.flags_hash)
     cached = await _cached_forwards(session, user_id, list(wanted))
     buy_view = _side_view(
         buy,
@@ -1550,7 +1669,9 @@ async def get_round_insight(
         states=states,
         ordered_trades=ordered_trades,
         order_index=order_index,
+        day_index=day_index,
         fingerprint=fingerprint,
+        config=trade_config,
     )
     fills = []
     for fill in await session.scalars(
@@ -1606,6 +1727,7 @@ async def get_round_insight(
         fills=fills,
         flags=item.flags,
         quality=item.quality,
+        status_counts=item.status_counts,
         ranking={
             "rank": item.rank,
             "buy_excess_pct": _pct(item.buy_excess_units),
@@ -1617,7 +1739,8 @@ async def get_round_insight(
         },
         disclaimer=DISCLAIMER,
         flag_glossary=list(FLAG_DEFINITIONS),
-        trade_flag_glossary=trade_flag_glossary(),
+        trade_flag_glossary=trade_flag_glossary(trade_config),
+        flag_config=config_view(effective, stale=stale),
     )
 
 
@@ -1641,7 +1764,8 @@ async def refresh_forwards(
     market = await _load_market(
         market_data,
         symbols,
-        start=min((trade.trade_date for trade in all_trades), default=resolved.start),
+        start=min((trade.trade_date for trade in all_trades), default=resolved.start)
+        - _FLAG_MARKET_PADDING,
         end=max(clock.today(), resolved.end),
     )
     corporate = _corporate_action_dates(all_trades)

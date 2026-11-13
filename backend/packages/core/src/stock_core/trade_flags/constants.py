@@ -6,9 +6,20 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import Final
+
 # 词表/判定口径版本：随判定逻辑变化递增，参与幂等唯一键。
 # 1.1（2026-11-09）：新增 `first_entry` 与三个清仓状态（`full_exit_*`）。
-DEFINITION_VERSION = "1.1"
+# 1.2（2026-11-12）：新增 `short_term_underwater` / `short_term_sold_early`；
+#     `short_term_win` 更名 `short_term_bottom`；即时类与短期类共用 5% 容差。
+# 1.3（2026-11-12）：`stop_loss` 增加「净卖价严格低于持仓均价」条件，
+#     破位但价格不低于均价的部分由新 `sell_drawdown`（回撤）承接。
+# 1.4（2026-11-12）：含费均价只计一次费用（`amount` 已含费）；
+#     零成本持仓（送转/红利再投）视为有效成本：止损恒不命中，回撤按破位判定；
+#     `None`（无持仓/成本缺失）与负成本（异常）不参与止盈/止损判定。
+DEFINITION_VERSION = "1.4"
 
 # 比例分母（1 bps = 1/10000）。
 BPS_DENOMINATOR = 10_000
@@ -22,14 +33,51 @@ CHASE_MARGIN_BPS = 100
 # 止损：净卖价低于前 N 个行情日最低价的 1%。
 STOP_LOSS_MARGIN_BPS = 100
 
-# 即时抄底 / 即时逃顶：距前 N 个行情日极值 5% 以内。
-INSTANT_MARGIN_BPS = 500
-
-# 短期成功 / 短期逃顶：距前后各 N 个行情日极值 5% 以内（含未来行情）。
+# 即时类（即时抄底 / 即时逃顶）与短期事后类（短期抄底 / 短期卖飞）共用 5% 容差：
+# 距极值 5% 以内视为贴近，偏离极值 5% 以上视为错过。
 SHORT_TERM_MARGIN_BPS = 500
 
 # 行情日窗口（不含当日）：前后各 5 个行情日。
 WINDOW_TRADING_DAYS = 5
+
+# ── 用户级阈值配置（设计 2026-11-11 §3.2.2）────────────────────
+#: 配置字段 → `platform.user_setting` 列名（与 `stock_contracts.preferences` 一致，
+#: 由单测锁定）。`flags_hash` 的规范 JSON 用去前缀的短键。
+CONFIG_COLUMNS: Final[dict[str, str]] = {
+    "near_equal_tolerance_bps": "bill_near_equal_tolerance_bps",
+    "chase_margin_bps": "bill_chase_margin_bps",
+    "stop_loss_margin_bps": "bill_stop_loss_margin_bps",
+    "short_term_margin_bps": "bill_short_term_margin_bps",
+    "window_trading_days": "bill_window_trading_days",
+}
+
+
+@dataclass(frozen=True, slots=True)
+class TradeFlagConfig:
+    """单用户生效的旗标阈值（bps 整数域 + 行情日窗口），默认值等于 1.4 常量。"""
+
+    near_equal_tolerance_bps: int = NEAR_EQUAL_TOLERANCE_BPS
+    chase_margin_bps: int = CHASE_MARGIN_BPS
+    stop_loss_margin_bps: int = STOP_LOSS_MARGIN_BPS
+    short_term_margin_bps: int = SHORT_TERM_MARGIN_BPS
+    window_trading_days: int = WINDOW_TRADING_DAYS
+
+    def as_columns(self) -> dict[str, int]:
+        """转成 DB 列名映射（供 `stock_core.preferences.flags_hash` 计算指纹）。"""
+        return {column: int(getattr(self, field)) for field, column in CONFIG_COLUMNS.items()}
+
+    @classmethod
+    def from_columns(cls, values: Mapping[str, int]) -> TradeFlagConfig:
+        """从 DB 列名映射构造（缺键回落默认，非法值由调用方先行归一）。"""
+        return cls(
+            **{
+                field: int(values.get(column, getattr(cls(), field)))
+                for field, column in CONFIG_COLUMNS.items()
+            }
+        )
+
+
+DEFAULT_TRADE_FLAG_CONFIG: Final[TradeFlagConfig] = TradeFlagConfig()
 
 # ── 评估状态 ───────────────────────────────────────────────
 STATUS_HIT = "hit"

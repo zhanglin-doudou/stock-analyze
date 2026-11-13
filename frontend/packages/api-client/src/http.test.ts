@@ -421,3 +421,51 @@ describe("在途 GET 合并", () => {
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("用户偏好（API-055/096）", () => {
+  it("GET /settings 命中 If-None-Match 时 304 不消费 body", async () => {
+    const fetchImpl = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit): Promise<Response> =>
+        new Response(null, { status: 304, headers: { ETag: 'W/"2"' } }),
+    );
+    const client = createClient({
+      baseUrl: "/api/v1",
+      getToken: () => ({ access: "token", refresh: null }),
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+
+    const result = await client.settings.get({ etag: 'W/"2"' });
+
+    const init = fetchImpl.mock.calls[0]?.[1] as RequestInit;
+    expect(new Headers(init.headers).get("If-None-Match")).toBe('W/"2"');
+    expect(result.notModified).toBe(true);
+    expect(result.settings).toBeUndefined();
+    expect(result.etag).toBe('W/"2"');
+  });
+
+  it("PATCH /settings 带 If-Match 版本与幂等键", async () => {
+    const fetchImpl = vi.fn(
+      async (_input: RequestInfo | URL, _init?: RequestInit): Promise<Response> =>
+        jsonResponse(200, { version: 3, appearance: {} }),
+    );
+    const client = createClient({
+      baseUrl: "/api/v1",
+      getToken: () => ({ access: "token", refresh: null }),
+      fetchImpl: fetchImpl as typeof fetch,
+    });
+
+    const result = await client.settings.patch(
+      { appearance: { theme: "dark" } },
+      { version: 2, idempotencyKey: "idem-key-0123456789" },
+    );
+
+    const [url, init] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    const headers = new Headers(init.headers);
+    expect(String(url)).toContain("/settings");
+    expect(init.method).toBe("PATCH");
+    expect(headers.get("If-Match")).toBe('W/"2"');
+    expect(headers.get("Idempotency-Key")).toBe("idem-key-0123456789");
+    expect(JSON.parse(String(init.body))).toEqual({ appearance: { theme: "dark" } });
+    expect(result.settings.version).toBe(3);
+  });
+});

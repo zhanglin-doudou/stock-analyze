@@ -20,11 +20,15 @@ const SERIES_TOKENS: Record<string, string> = {
   buy: "--chart-buy-total",
   chase: "--chart-buy-1",
   instant_bottom: "--chart-buy-2",
-  short_term_win: "--chart-buy-3",
+  short_term_bottom: "--chart-buy-3",
   sell: "--chart-sell-total",
   stop_loss: "--chart-sell-1",
   instant_top: "--chart-sell-2",
   short_term_top: "--chart-sell-3",
+  // 警示类状态旗标：独立色相（琥珀/紫/品红），不与买卖两套色系共用槽位。
+  short_term_underwater: "--chart-warn-underwater",
+  sell_drawdown: "--chart-warn-drawdown",
+  short_term_sold_early: "--chart-warn-sold-early",
   // 柱状图互斥状态（买侧青蓝、卖侧暖红，与折线同色系但独立取槽位）。
   first_entry: "--chart-buy-0",
   addon_average: "--chart-buy-1",
@@ -37,10 +41,21 @@ const SERIES_TOKENS: Record<string, string> = {
   full_exit_breakeven: "--chart-sell-exit-1",
   full_exit_profit: "--chart-sell-exit-2",
   full_exit_loss: "--chart-sell-exit-3",
-  // 回合持有期分类（短线/波段/趋势）饼图三分色，沿用买入青蓝系由深到浅。
-  bucket_trend: "--chart-buy-1",
-  bucket_swing: "--chart-buy-2",
-  bucket_short: "--chart-buy-3",
+  // 回合持有期分类（超短线/短线/中线/长线）饼图四分色：短→长由浅到深，长线用独立靛蓝。
+  bucket_scalp: "--chart-buy-3",
+  bucket_short: "--chart-buy-2",
+  bucket_position: "--chart-buy-1",
+  bucket_long: "--chart-bucket-long",
+  // 回合旗标计数柱状图（v1.2 词表全部 item_flag）：抄底取买侧青蓝，两个卖飞用
+  // 卖侧暖红与警示品红，收益回撤用警示紫，做T/日内调仓各用独立色相，避免同色误读。
+  round_bottom_buy: "--chart-buy-2",
+  round_stop_loss_sold_early: "--chart-sell-1",
+  round_profit_sold_early: "--chart-warn-sold-early",
+  round_drawdown: "--chart-warn-drawdown",
+  round_intraday_t: "--chart-flag-intraday",
+  round_swing_t: "--chart-flag-swing",
+  round_intraday_rebalance_out: "--chart-flag-rebalance-out",
+  round_intraday_rebalance_in: "--chart-flag-rebalance-in",
 };
 
 function readVar(style: CSSStyleDeclaration, name: string): string {

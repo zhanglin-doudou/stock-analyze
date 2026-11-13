@@ -1,8 +1,11 @@
-"""回合洞察旗标词表（设计 2026-11-04 §6.3/§6.4）。
+"""回合洞察旗标词表（设计 2026-11-04 §6.3/§6.4；2026-11-12 回合状态重构）。
 
-单一真相：`items[].flags` 的 11 个回合旗标 + `?flag=` 查询词表的 5 个别名。
+单一真相：`items[].flags` 的 8 个回合旗标 + `?flag=` 查询词表的 4 个别名。
 文案按本系统实际判定口径编写（不是通用金融词典），中英文各一份，供 API 直接透出、
 前端零口径渲染。
+
+计数型状态（抄底 / 止损卖飞 / 止盈卖飞）在 `status_counts` 里给出次数，`flags` 只做
+「是否命中」的布尔投影；其余状态只出现在 `flags` 中。
 """
 
 from __future__ import annotations
@@ -23,184 +26,131 @@ class FlagDefinition:
 
 FLAG_DEFINITIONS: tuple[FlagDefinition, ...] = (
     FlagDefinition(
-        code="addon",
-        label_zh="加仓",
-        label_en="Add-on",
+        code="bottom_buy",
+        label_zh="抄底",
+        label_en="Bottom buy",
         description_zh=(
-            "本回合内有买入发生在已有持仓之后（按流水发生顺序推演，同日多笔以文件行号排序）；"
-            "回合的第一笔建仓不算加仓。"
+            "回合内命中「即时抄底」或「短期抄底」账单旗标的买入账单个数；"
+            "同一笔账单同时命中两者只计 1 次。"
         ),
         description_en=(
-            "A buy inside this round happened while the security was already held "
-            "(replayed in statement order, with same-day rows sorted by file line number). "
-            "The first entry of the round is not an add-on."
+            "Number of buy bills in the round flagged as either an instant bottom or a "
+            "short-term bottom; a bill hitting both is counted once."
         ),
         kind="item_flag",
     ),
     FlagDefinition(
-        code="dip_sequence",
-        label_zh="越跌越买",
-        label_en="Buying lower",
+        code="stop_loss_sold_early",
+        label_zh="止损卖飞",
+        label_en="Stop-loss sold too early",
         description_zh=(
-            "同一证券近 60 个交易日内至少 2 次加仓，且每次净买入价都低于上一次，属于连续向下摊平。"
+            "回合内带「短期卖飞」账单旗标、且含费净卖价低于（含等于）卖出前持仓含费均价的"
+            "卖出账单次数。"
         ),
         description_en=(
-            "At least two add-ons within the last 60 trading days for the same security, "
-            "each at a lower fee-inclusive net buy price than the previous one — "
-            "a continuous averaging-down sequence."
+            "Number of sell bills in the round flagged as short-term sold-early whose "
+            "fee-inclusive net sell price is at or below the position's fee-inclusive "
+            "average cost before the sale."
         ),
         kind="item_flag",
     ),
     FlagDefinition(
-        code="below_avg",
-        label_zh="低于均价加仓",
-        label_en="Below average cost",
+        code="profit_sold_early",
+        label_zh="止盈卖飞",
+        label_en="Profit sold too early",
         description_zh=(
-            "本回合加仓笔的含费净买入价低于该笔买入前的持仓含费均价（严格小于），即摊平买入。"
+            "回合内带「短期卖飞」账单旗标、且含费净卖价高于卖出前持仓含费均价的卖出账单次数。"
         ),
         description_en=(
-            "The round's add-on was executed at a fee-inclusive net price strictly below "
-            "the position's fee-inclusive average cost before that buy — an averaging-down purchase."
+            "Number of sell bills in the round flagged as short-term sold-early whose "
+            "fee-inclusive net sell price is above the position's fee-inclusive average "
+            "cost before the sale."
         ),
         kind="item_flag",
     ),
     FlagDefinition(
-        code="continued_decline",
-        label_zh="加仓后下跌",
-        label_en="Decline after add-on",
+        code="drawdown",
+        label_zh="收益回撤",
+        label_en="Give-back",
         description_zh=(
-            "买入后 20 个交易日继续下跌：B2 ≤ −3%，或 20 日内最差收盘 ≤ 含费净买价 × 95%"
-            "（按收盘价计，不含盘中最低价）；无加仓时按回合开仓笔判定。"
+            "回合内按数量加权的平均卖出价，低于「首笔买入日（含）至末笔卖出日（不含）」区间"
+            "最高收盘价的 95%（严格低于），即卖出位置较区间高点回撤超过 5%。"
         ),
         description_en=(
-            "The price kept falling over the 20 trading days after the buy: B2 ≤ −3%, "
-            "or the worst close within 20 days ≤ 95% of the fee-inclusive net buy price "
-            "(closing prices only; intraday lows excluded). Without an add-on this is "
-            "evaluated on the round's opening buy."
+            "The quantity-weighted average sell price in the round is strictly more than 5% "
+            "below the highest close between the first buy date (inclusive) and the last "
+            "sell date (exclusive)."
         ),
         kind="item_flag",
     ),
     FlagDefinition(
-        code="profit_taking",
-        label_zh="止盈",
-        label_en="Profit-taking sale",
-        description_zh=("卖出含费净价高于卖出前持仓的含费均价，本笔卖出实现盈利。"),
+        code="intraday_t",
+        label_zh="日内做T",
+        label_en="Intraday T",
+        description_zh=("同一交易日内先部分卖出（卖出数量严格小于卖出前持仓）再买入同一证券。"),
         description_en=(
-            "The sell's fee-inclusive net price is above the position's fee-inclusive average "
-            "cost before the sale, so this sale closes at a profit."
+            "Within one trading day, a partial sell (sold quantity strictly below the "
+            "position before the sale) of the same security is followed by a buy."
         ),
         kind="item_flag",
     ),
     FlagDefinition(
-        code="profit_take_fly",
-        label_zh="卖飞",
-        label_en="Sold too early",
+        code="swing_t",
+        label_zh="波段做T",
+        label_en="Swing T",
         description_zh=(
-            "止盈卖出后 20 个交易日最高收盘 > 净卖价 × 1.03（高出 3% 以上），"
-            "即卖出后仍有明显更高价，属「止盈型卖飞」。"
+            "回合内部分卖出后，在后续交易日再买入同一证券；同一笔卖出当日已配对买入的"
+            "（日内做T）不重复计入。"
         ),
         description_en=(
-            "After a profitable sale, the highest close in the following 20 trading days "
-            "exceeded the net sell price by more than 3% — the price kept rising after "
-            "the profit-taking exit."
+            "A partial sell in the round is followed by a buy of the same security on a "
+            "later trading day; sells already paired with a same-day buy (intraday T) are "
+            "not counted again."
         ),
         kind="item_flag",
     ),
     FlagDefinition(
-        code="stop_loss_rebound",
-        label_zh="止损后反弹",
-        label_en="Rebound after stop-loss",
+        code="intraday_rebalance_out",
+        label_zh="日内调仓卖出",
+        label_en="Intraday rebalance out",
         description_zh=(
-            "非止盈卖出（净卖价 ≤ 卖出前含费均价），但卖出后 20 个交易日最高收盘 > 净卖价 × 1.03；"
-            "纪律性止损后出现反弹，属正常成本，不计入「卖飞」。"
+            "回合内先卖出当前证券、同日再买入其它证券。范围为当前用户同日全部流水"
+            "（不按账户切分，所有账户合并判定）。"
         ),
         description_en=(
-            "A non-profitable sale (net sell price at or below the prior average cost) after "
-            "which the highest close in the next 20 trading days exceeded the net sell price "
-            "by more than 3%. A disciplined exit followed by a rebound is a normal cost, "
-            "not counted as sold too early."
+            "Inside the round the current security is sold and another security is bought "
+            "later on the same day. Scope is all of the user's same-day trades combined "
+            "across accounts (no per-account split)."
         ),
         kind="item_flag",
     ),
     FlagDefinition(
-        code="rising_sell_sequence",
-        label_zh="越涨越卖",
-        label_en="Selling into strength",
+        code="intraday_rebalance_in",
+        label_zh="日内调仓买入",
+        label_en="Intraday rebalance in",
         description_zh=(
-            "同一证券近 60 个交易日内至少 2 次卖出，且每次净卖出价都高于上一次，属于分批向上卖出。"
+            "回合内先卖出其它证券、同日再买入当前证券。范围为当前用户同日全部流水"
+            "（不按账户切分，所有账户合并判定）。"
         ),
         description_en=(
-            "At least two sells within the last 60 trading days for the same security, "
-            "each at a higher fee-inclusive net sell price than the previous one — "
-            "a scaling-out-into-strength pattern."
+            "Inside the round another security is sold and the current security is bought "
+            "later on the same day. Scope is all of the user's same-day trades combined "
+            "across accounts (no per-account split)."
         ),
         kind="item_flag",
-    ),
-    FlagDefinition(
-        code="full_exit",
-        label_zh="清仓",
-        label_en="Full exit",
-        description_zh=(
-            "本笔卖出数量覆盖整个回合的持仓数量（卖出数量 ≥ 回合总数量），该回合就此清仓。"
-        ),
-        description_en=(
-            "This sell covers the entire round's quantity (sold quantity ≥ round quantity), "
-            "closing the whole round."
-        ),
-        kind="item_flag",
-    ),
-    FlagDefinition(
-        code="partial_exit",
-        label_zh="部分卖出",
-        label_en="Partial exit",
-        description_zh=("本笔卖出数量小于整个回合的持仓数量，回合在卖出后仍有剩余仓位。"),
-        description_en=(
-            "This sell is smaller than the round's total quantity, so the round still has "
-            "an open remainder after the sale."
-        ),
-        kind="item_flag",
-    ),
-    FlagDefinition(
-        code="same_day",
-        label_zh="当日回转",
-        label_en="Same-day round trip",
-        description_zh=(
-            "本回合开仓日与平仓日是同一天（常见于 ETF、可转债等当日可卖的品种），"
-            "持有交易日按 1 天计。"
-        ),
-        description_en=(
-            "The round was opened and closed on the same day (typical for ETFs and "
-            "convertible bonds, which can be sold on the day they are bought); "
-            "the holding period counts as one trading day."
-        ),
-        kind="item_flag",
-    ),
-    FlagDefinition(
-        code="addon_decline",
-        label_zh="加仓后下跌",
-        label_en="Add-on then decline",
-        description_zh=(
-            "查询别名：同时命中 `addon` 与 `continued_decline`，即含加仓且买入后 20 个交易日"
-            "仍在下跌的回合。"
-        ),
-        description_en=(
-            "Query alias matching rounds flagged with both `addon` and `continued_decline` — "
-            "add-ons followed by a further decline within 20 trading days."
-        ),
-        kind="filter_alias",
     ),
     FlagDefinition(
         code="sold_too_early",
         label_zh="卖飞",
         label_en="Sold too early (any)",
         description_zh=(
-            "查询别名：命中 `profit_take_fly` 或 `stop_loss_rebound`，即卖出后 20 日最高收盘"
-            "高出净卖价 3% 以上的全部情形（含止盈型与止损后反弹型）。"
+            "查询别名：命中 `stop_loss_sold_early` 或 `profit_sold_early`，即回合内任一卖出"
+            "账单带「短期卖飞」旗标的情形（含止损侧与止盈侧）。"
         ),
         description_en=(
-            "Query alias matching `profit_take_fly` or `stop_loss_rebound`: any sale after "
-            "which the 20-day highest close exceeded the net sell price by more than 3%, "
-            "including both profit-taking and stop-loss exits."
+            "Query alias matching `stop_loss_sold_early` or `profit_sold_early`: any sell bill "
+            "in the round flagged as short-term sold-early, on either the stop-loss or the "
+            "profit-taking side."
         ),
         kind="filter_alias",
     ),

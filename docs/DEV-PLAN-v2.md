@@ -176,7 +176,7 @@ open http://localhost:5173/dashboard
 | **Period2-08** | 五因子归因（**已交付并验收 2026-11-02；口径收口 2026-11-04**） | [设计 v1.0](architecture/2026-11-02-five-factor-attribution.md)：`core/attribution` 选股/板块/买点/卖点/费用+残差、`GET /attribution`（API-036）、`/attribution` 页、排序结论生成；08a 板块指数日线落 `market.sector_bar`；当前口径：`new_stock` 按本期窗口判定、打新损益进账户级 `ipo_pnl`、降级只看未归因标的损益超容差（期末总资产 0.2%）、`VALUATION_GAP_ABOVE_TOLERANCE`/`SECTOR_BAR_FALLBACK`/`SECTOR_CLASSIFICATION_LOOKAHEAD` 为 info；[交叉评审](reviews/2026-11-02-DevDesign-Review-five-factor-attribution.md) 已处置 | Period2-07/17 | API-036 验收 + `make test-p2/test-isolation/api-check` 全绿；前端 `/attribution` 已交付；月报同源接入按 Period2-09（09b）另行验收 | 8.0~11.5 |
 | **Period2-09** | 月度报告 | `report` 表、`ReportSpec`、区块组装（概览/归因/最赚最亏/行为/重复错误/一条行动/口径脚注）、异步生成、HTML 自包含、`ETag`/下载、`blocked` 降级为说明单 | Period2-06/Period2-08 | API-039~042 验收；离线打开 HTML；报告数字与 `/metrics` 逐一相等（脚本比对）；同 `spec_hash` 复用 | 2.5 |
 | **Period2-10** | 数据导出 | `POST /exports`（异步）、Excel+JSON 打包、签名下载与 410 过期 | Period2-09 | API-059/060 验收；导出→清库→导入后行数/回合/净值一致 | 1 |
-| **Period2-11** | 设置 | `GET /settings`、`PUT /settings/benchmark`、`PUT /settings/privacy`、默认基准沪深300全收益、切换即触发失效重算 | Period2-03 | API-055~057 验收；切基准后历史趋势分段 | 1 |
+| **Period2-11** | 设置（**已被 Period2-19 取代**；API-056/057 仍待做） | 原计划 `GET /settings` + `PUT /settings/benchmark` + `PUT /settings/privacy`。现状：`GET /settings`（API-055）连同 `PATCH /settings`（API-096）、`POST /settings/trade-flags/rebuild`（API-097）已由 Period2-19 交付；**基准切换 API-056 与隐私设置 API-057 尚未实现**，仍按本行待办 | Period2-03 | API-056/057 验收；切基准后历史趋势分段 | 1（仅剩 056/057） |
 | **Period2-12** | 前端看板与下钻 | 五卡（净值/四数字/费用/行为/最赚最亏）、状态徽标（ok/stale/blocked）、下钻抽屉、回合列表与详情、对账横幅、可信度标签 | Period2-06 | 浏览器走查 §3.1 第 1–2、4 步；`blocked` 卡片不渲染数值（快照断言） | 3 |
 | **Period2-13** | 前端报告与导出页 | 报告列表/预览/下载、导出任务与下载、空态与失败态 | Period2-09 | 浏览器走查 §3.1 第 3 步 | 1.5 |
 | **Period2-14** | 二期验收与越权全量 | 二期端点验收补齐、**受保护端点越权用例 100%**、golden 回归、`make verify-p2` | 全部 P2 | `make verify-p2` 全绿；`make test-isolation` 覆盖全部受保护端点 | 2 |
@@ -184,6 +184,7 @@ open http://localhost:5173/dashboard
 | **Period2-16** | 资产表（每日资产快照） | `review.asset_daily/asset_build_state` + 迁移 0006、共享估值原语（`valuation.py`）、增量构建（变更指纹 + 水位线 + 45 天安全窗）、`GET /assets`、`POST /assets/build`、worker 行情装配、`docs/DATABASE.md` | Period2-03 | API-081/082 验收；增量结果与全量逐行相等；`GET /assets` 分页/过滤/blocked 显式 null、`build` 摘要齐全；门禁 82/82 | 2.5 |
 | **Period2-17** | 板块数据底座与看板 | 迁移 `0011_market_sectors` + `market` 6 表、`SectorDataSource` 端口 + akshare/replay 源 + `make sync-sectors`、`stock_core/sector/*` 纯函数（`E_map` 分母 / HHI / 概念暴露）、`GET /sectors/overview`（API-087）+ `GET /sectors`（API-088）、Dashboard 板块子块 + `/sectors` 页面（三级下钻/概念警示） | Period2-07/16 | `make sync-sectors ARGS='--dry-run'` 通过；API-087/088 验收（happy/越权/错误码）；行业 Σweight≈1、Σactive≈0，概念 `Σexposure>1` 带 `caveat`；Dashboard `[data-board]` 恰 2 个 + `links.sectors` | 2.5 |
 | **Period2-18** | FIFO 回合洞察增强（已交付 2026-11-05） | 迁移 `0012_review_round_insights`（理由/前瞻缓存）、`stock_core/insights/*`（真实日历、B0~B3、分类、聚合）、`stock_review/insights/*`、API-090~094、`/rounds/insights` 页与详情洞察区块、归因容差行 | Period2-02 | core 单测 41；API/契约/隔离 166；`pnpm -r test` 146；`api-check` 通过；未覆盖：202 >5000 笔分支（构造方式见验收记录） | 3 |
+| **Period2-19** | 用户偏好配置（**已交付 2026-11-13**：P0 + P1-1 + P1-2 + P1-3） | 迁移 `0014_user_setting_preferences`（7 列/6 CHECK + `trade_flag.flags_hash`）、`stock_contracts/preferences`、`stock_core/preferences`、`GET /settings`（API-055）+ `PATCH /settings`（API-096）+ `POST /settings/trade-flags/rebuild`（API-097）、审计与幂等；P1-1：`TradeFlagConfig` 参数化判定、文案模板、`flags_hash` 过滤与 `stale_months`、CLI 逐用户偏好；P1-2：worker `rebuild_trade_flags` + 设置页「立即重算」+ 看板/回合 stale 横幅；P1-3：概念过滤 `off/hide/exclude`（API-087 additive `filters`/`filtered_*`/条件 ETag 与 `Cache-Control`）+ 前端披露 | Period2-03 | `make test-core`（100%）；API-055/096/097 验收；API-087 过滤验收；`make api-check`；迁移升级/回滚可重放 | 2 |
 
 ### 3.3 二期不做
 
@@ -311,7 +312,7 @@ make verify-p3
 
 ## 附录 A：端点与需求覆盖
 
-### A.1 端点 → 期次/任务（88/88 已排期；另有 5 个设计登记待排期）
+### A.1 端点 → 期次/任务（88/88 已排期；另有 8 个设计登记：API-090~097，API-089 预留不实现）
 
 | 端点 | 期次 | 任务 | 端点 | 期次 | 任务 |
 |---|---|---|---|---|---|
@@ -342,7 +343,7 @@ make verify-p3
 | API-049 | 三 | Period3-01 | API-050 | 三 | Period3-01 |
 | API-051 | 三 | Period3-01 | API-052 | 三 | Period3-03 |
 | API-053 | 三 | Period3-03 | API-054 | 三 | Period3-03 |
-| API-055 | 二 | Period2-11 | API-056 | 二 | Period2-11 |
+| API-055 | 二 | Period2-19 | API-056 | 二 | Period2-11 |
 | API-057 | 二 | Period2-11 | API-058 | 三 | Period3-03 |
 | API-059 | 二 | Period2-10 | API-060 | 二 | Period2-10 |
 | API-061 | 一 | Period1-11 | API-062 | 一 | Period1-11 |
@@ -361,7 +362,10 @@ make verify-p3
 | API-087 | 二 | Period2-17 | API-088 | 二 | Period2-17 |
 | API-090 | 二 | Period2-18 | API-091 | 二 | Period2-18 |
 | API-092 | 二 | Period2-18 | API-093 | 二 | Period2-18 |
-| API-094 | 二 | Period2-18 | | | |
+| API-094 | 二 | Period2-18 | API-096 | 二 | Period2-19 |
+| API-097 | 二 | Period2-19 | — | — | — |
+
+> **实现状态（2026-11-13）**：API-055（GET /settings）+ API-096（PATCH /settings）+ API-097（POST /settings/trade-flags/rebuild）已实现，归属 **Period2-19**（用户偏好 P0/P1）。
 
 > **实现状态（2026-11-05）**：API-090~094（回合洞察/理由/前瞻/刷新）已实现并验收，归属 **Period2-18**；API-089 预留不实现。
 > 校验：`make api-coverage` 当前输出 L1 3/4、L2 6/6、L3 5/5、L4 5/5、L5 6/6、其他 36/67；本表与 [API-Catalog §1](architecture/v2/API-Catalog.md) 的 API-090~094 已对齐。

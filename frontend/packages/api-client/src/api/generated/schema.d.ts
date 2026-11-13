@@ -837,6 +837,50 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Settings
+         * @description API-055：四组偏好生效值 + 只读回显 + `version`/ETag；无行返回默认视图。
+         */
+        get: operations["getSettings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Patch Settings
+         * @description API-096：局部更新偏好（typed 局部列 + JSONB merge patch，CAS 版本）。
+         */
+        patch: operations["patchSettings"];
+        trace?: never;
+    };
+    "/api/v1/settings/trade-flags/rebuild": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rebuild Trade Flags
+         * @description API-097：按当前生效阈值重建账单旗标（202 + Location）。
+         */
+        post: operations["rebuildTradeFlags"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/summary-rules": {
         parameters: {
             query?: never;
@@ -1142,6 +1186,33 @@ export interface components {
              * @enum {string}
              */
             status: "stale" | "blocked" | "unreliable" | "ok";
+        };
+        /** AppearancePatch */
+        AppearancePatch: {
+            /** Density */
+            density?: ("cozy" | "compact") | null;
+            /** Theme */
+            theme?: ("light" | "dark" | "system") | null;
+            /** Trend */
+            trend?: ("red-up" | "green-up") | null;
+        };
+        /** AppearancePrefsOut */
+        AppearancePrefsOut: {
+            /**
+             * Density
+             * @enum {string}
+             */
+            density: "cozy" | "compact";
+            /**
+             * Theme
+             * @enum {string}
+             */
+            theme: "light" | "dark" | "system";
+            /**
+             * Trend
+             * @enum {string}
+             */
+            trend: "red-up" | "green-up";
         };
         /**
          * AssetBuildAccepted
@@ -1782,6 +1853,42 @@ export interface components {
             /** Total Estimate */
             total_estimate?: number | null;
         };
+        /**
+         * BillFlagsPatch
+         * @description `null` = 恢复该列默认值；只更新出现键。
+         */
+        BillFlagsPatch: {
+            /** Chase Margin Pct */
+            chase_margin_pct?: string | null;
+            /** Near Equal Tolerance Pct */
+            near_equal_tolerance_pct?: string | null;
+            /** Short Term Margin Pct */
+            short_term_margin_pct?: string | null;
+            /** Stop Loss Margin Pct */
+            stop_loss_margin_pct?: string | null;
+            /** Window Trading Days */
+            window_trading_days?: string | null;
+        };
+        /**
+         * BillFlagsPrefsOut
+         * @description 阈值一律后端字符串化：百分比 `x.xx%`，窗口十进制整数串。
+         */
+        BillFlagsPrefsOut: {
+            /** Chase Margin Pct */
+            chase_margin_pct: string;
+            /** Flags Hash */
+            flags_hash: string;
+            /** Is Default */
+            is_default: boolean;
+            /** Near Equal Tolerance Pct */
+            near_equal_tolerance_pct: string;
+            /** Short Term Margin Pct */
+            short_term_margin_pct: string;
+            /** Stop Loss Margin Pct */
+            stop_loss_margin_pct: string;
+            /** Window Trading Days */
+            window_trading_days: string;
+        };
         /** Body_previewImport */
         Body_previewImport: {
             /** Date Format */
@@ -1824,6 +1931,39 @@ export interface components {
             realized_pnl: string;
             /** Residual */
             residual: string;
+        };
+        /** ConceptExcludedOut */
+        ConceptExcludedOut: {
+            /** Code */
+            code: string;
+            /** Name */
+            name: string;
+            /** Resolved */
+            resolved: boolean;
+        };
+        /** ConceptExcludedPatchItem */
+        ConceptExcludedPatchItem: {
+            /** Code */
+            code: string;
+            /** Name */
+            name: string;
+        };
+        /** ConceptFiltersPatch */
+        ConceptFiltersPatch: {
+            /** Excluded */
+            excluded?: components["schemas"]["ConceptExcludedPatchItem"][] | null;
+            /** Mode */
+            mode?: ("off" | "hide" | "exclude") | null;
+        };
+        /** ConceptFiltersPrefsOut */
+        ConceptFiltersPrefsOut: {
+            /** Excluded */
+            excluded?: components["schemas"]["ConceptExcludedOut"][];
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "off" | "hide" | "exclude";
         };
         /**
          * DashboardAssetOverviewOut
@@ -2164,6 +2304,31 @@ export interface components {
             /** Trade Count */
             trade_count: number;
         };
+        /**
+         * DashboardTradeFlagConfigOut
+         * @description API-095/092/093 additive：该用户生效的旗标阈值（百分比为展示字符串）。
+         */
+        DashboardTradeFlagConfigOut: {
+            /** Chase Margin Pct */
+            chase_margin_pct: string;
+            /** Flags Hash */
+            flags_hash: string;
+            /** Is Default */
+            is_default: boolean;
+            /** Near Equal Tolerance Pct */
+            near_equal_tolerance_pct: string;
+            /** Short Term Margin Pct */
+            short_term_margin_pct: string;
+            /**
+             * Stale
+             * @default false
+             */
+            stale: boolean;
+            /** Stop Loss Margin Pct */
+            stop_loss_margin_pct: string;
+            /** Window Trading Days */
+            window_trading_days: string;
+        };
         /** DashboardTradeFlagCountOut */
         DashboardTradeFlagCountOut: {
             /** Code */
@@ -2218,6 +2383,7 @@ export interface components {
             definition_version: string;
             /** End Month */
             end_month: string;
+            flag_config: components["schemas"]["DashboardTradeFlagConfigOut"];
             /** Has Data */
             has_data: boolean;
             /** Has Flag Data */
@@ -2246,6 +2412,8 @@ export interface components {
             };
             /** Series */
             series: components["schemas"]["DashboardTradeFlagSeriesOut"][];
+            /** Stale Months */
+            stale_months: string[];
             /** Start Month */
             start_month: string;
             /** State Series */
@@ -2392,15 +2560,8 @@ export interface components {
         /**
          * InsightAddonSummaryOut
          * @description 加仓统计（设计 §6.3）：`count` 与兼容字段 `rounds` 同值。
-         *
-         *     `avg_dip_pct` 是加仓笔次 20 日 B2 均值，仅对 `status=ok` 样本取均值；
-         *     `avg_dip_coverage` 形如 `"3/9"`，0 个有效样本时 `avg_dip_pct=null`。
          */
         InsightAddonSummaryOut: {
-            /** Avg Dip Coverage */
-            avg_dip_coverage: string;
-            /** Avg Dip Pct */
-            avg_dip_pct?: string | null;
             /** Count */
             count: number;
             /** Declined After Addon */
@@ -2420,14 +2581,16 @@ export interface components {
             avg_pnl_display?: string | null;
             /** Closed */
             closed: number;
+            /** Long */
+            long: number;
+            /** Position */
+            position: number;
+            /** Scalp */
+            scalp: number;
             /** Short */
             short: number;
-            /** Swing */
-            swing: number;
             /** Total Pnl Display */
             total_pnl_display?: string | null;
-            /** Trend */
-            trend: number;
             /** Win Rate Pct */
             win_rate_pct?: string | null;
         };
@@ -2451,6 +2614,18 @@ export interface components {
             total_pnl_display?: string | null;
             /** Win Rate Pct */
             win_rate_pct?: string | null;
+        };
+        /**
+         * InsightFlagRoundCountOut
+         * @description 按回合旗标统计的回合数（v1.2 词表全部 item_flag）。
+         *
+         *     口径是筛选后的全量回合（与分页无关），同一回合只计一次，不累加旗标次数。
+         */
+        InsightFlagRoundCountOut: {
+            /** Count */
+            count: number;
+            /** Flag */
+            flag: string;
         };
         /**
          * InsightPnlHoldingClassOut
@@ -2538,22 +2713,6 @@ export interface components {
         InsightSellFlySummaryOut: {
             /** Fly Pct */
             fly_pct?: string | null;
-            /** Missed Profit End Abs Display */
-            missed_profit_end_abs_display?: string | null;
-            /** Missed Profit End Display */
-            missed_profit_end_display?: string | null;
-            /** Missed Profit End Label */
-            missed_profit_end_label?: string | null;
-            /** Missed Profit End Label En */
-            missed_profit_end_label_en?: string | null;
-            /** Missed Profit Worst Abs Display */
-            missed_profit_worst_abs_display?: string | null;
-            /** Missed Profit Worst Display */
-            missed_profit_worst_display?: string | null;
-            /** Missed Profit Worst Label */
-            missed_profit_worst_label?: string | null;
-            /** Missed Profit Worst Label En */
-            missed_profit_worst_label_en?: string | null;
             /** Profit Take Fly */
             profit_take_fly: number;
             /** Rounds */
@@ -2569,6 +2728,8 @@ export interface components {
         InsightsSummaryOut: {
             addon: components["schemas"]["InsightAddonSummaryOut"];
             fill_swing: components["schemas"]["InsightFillSwingOut"];
+            /** Flag Round Counts */
+            flag_round_counts?: components["schemas"]["InsightFlagRoundCountOut"][];
             holding_by_pnl: components["schemas"]["InsightPnlHoldingOut"];
             /** Pending */
             pending: {
@@ -2673,6 +2834,40 @@ export interface components {
         LogoutIn: {
             /** Refresh Token */
             refresh_token?: string | null;
+        };
+        /** MarketSessionOut */
+        MarketSessionOut: {
+            /** Close */
+            close: string;
+            /** Open */
+            open: string;
+        };
+        /** MarketSessionPatchItem */
+        MarketSessionPatchItem: {
+            /** Close */
+            close: string;
+            /** Open */
+            open: string;
+        };
+        /** MarketSessionsPatch */
+        MarketSessionsPatch: {
+            /** Data Ready After */
+            data_ready_after?: string | null;
+            /** Session Notice Enabled */
+            session_notice_enabled?: boolean | null;
+            /** Sessions */
+            sessions?: components["schemas"]["MarketSessionPatchItem"][] | null;
+        };
+        /** MarketSessionsPrefsOut */
+        MarketSessionsPrefsOut: {
+            /** Data Ready After */
+            data_ready_after: string;
+            /** Session Notice Enabled */
+            session_notice_enabled: boolean;
+            /** Sessions */
+            sessions: components["schemas"]["MarketSessionOut"][];
+            /** Timezone */
+            timezone: string;
         };
         /** MeOut */
         MeOut: {
@@ -3561,7 +3756,7 @@ export interface components {
              * Bucket
              * @enum {string}
              */
-            bucket: "short" | "swing" | "trend" | "unknown";
+            bucket: "scalp" | "short" | "position" | "long" | "unknown";
             buy_trade?: components["schemas"]["TradeSideInsightOut"] | null;
             /** Close Date */
             close_date?: string | null;
@@ -3571,6 +3766,7 @@ export interface components {
             fills?: {
                 [key: string]: unknown;
             }[];
+            flag_config?: components["schemas"]["DashboardTradeFlagConfigOut"] | null;
             /** Flag Glossary */
             flag_glossary?: components["schemas"]["FlagGlossaryOut"][];
             /** Flags */
@@ -3603,6 +3799,10 @@ export interface components {
             sell_trade?: components["schemas"]["TradeSideInsightOut"] | null;
             /** Status */
             status: string;
+            /** Status Counts */
+            status_counts?: {
+                [key: string]: number;
+            };
             /** Trade Flag Glossary */
             trade_flag_glossary?: components["schemas"]["TradeFlagGlossaryOut"][];
         };
@@ -3612,7 +3812,7 @@ export interface components {
              * Bucket
              * @enum {string}
              */
-            bucket: "short" | "swing" | "trend" | "unknown";
+            bucket: "scalp" | "short" | "position" | "long" | "unknown";
             /** Buy Excess Pct */
             buy_excess_pct?: string | null;
             buy_trade?: components["schemas"]["TradeSideInsightOut"] | null;
@@ -3620,28 +3820,13 @@ export interface components {
             close_date?: string | null;
             /** Combined Pct */
             combined_pct?: string | null;
+            flag_config?: components["schemas"]["DashboardTradeFlagConfigOut"] | null;
             /** Flags */
             flags?: string[];
             /** Holding Days Legacy */
             holding_days_legacy: number;
             /** Holding Trading Days */
             holding_trading_days?: number | null;
-            /** Missed Profit End Abs Display */
-            missed_profit_end_abs_display?: string | null;
-            /** Missed Profit End Display */
-            missed_profit_end_display?: string | null;
-            /** Missed Profit End Label */
-            missed_profit_end_label?: string | null;
-            /** Missed Profit End Label En */
-            missed_profit_end_label_en?: string | null;
-            /** Missed Profit Worst Abs Display */
-            missed_profit_worst_abs_display?: string | null;
-            /** Missed Profit Worst Display */
-            missed_profit_worst_display?: string | null;
-            /** Missed Profit Worst Label */
-            missed_profit_worst_label?: string | null;
-            /** Missed Profit Worst Label En */
-            missed_profit_worst_label_en?: string | null;
             /**
              * Open Date
              * Format: date
@@ -3668,6 +3853,10 @@ export interface components {
             sell_trade?: components["schemas"]["TradeSideInsightOut"] | null;
             /** Status */
             status: string;
+            /** Status Counts */
+            status_counts?: {
+                [key: string]: number;
+            };
         };
         /** RoundInsightsPageOut */
         RoundInsightsPageOut: {
@@ -3688,6 +3877,7 @@ export interface components {
             definition_version: string;
             /** Disclaimer */
             disclaimer: string;
+            flag_config?: components["schemas"]["DashboardTradeFlagConfigOut"] | null;
             /** Flag Glossary */
             flag_glossary?: components["schemas"]["FlagGlossaryOut"][];
             /** Has More */
@@ -3910,6 +4100,11 @@ export interface components {
             coverage_basis: string;
             /** Coverage Pct */
             coverage_pct: string;
+            /** Filtered Holding Count */
+            filtered_holding_count?: number | null;
+            /** Filtered Market Value */
+            filtered_market_value?: string | null;
+            filters?: components["schemas"]["SectorConceptFiltersOut"] | null;
             /** Hhi Tag */
             hhi_tag?: string | null;
             /** Multi Tag Market Value */
@@ -3923,6 +4118,33 @@ export interface components {
             top1_concept?: components["schemas"]["SectorConceptTopOut"] | null;
             /** Top5 Concepts */
             top5_concepts: components["schemas"]["SectorConceptTopOut"][];
+        };
+        /**
+         * SectorConceptFilterItemOut
+         * @description 用户排除的概念；`resolved=false` 表示概念目录中已不存在（悬空 code）。
+         */
+        SectorConceptFilterItemOut: {
+            /** Code */
+            code: string;
+            /** Name */
+            name: string;
+            /** Resolved */
+            resolved: boolean;
+        };
+        /**
+         * SectorConceptFiltersOut
+         * @description 概念过滤披露（仅 `mode != off` 输出）；`applied=false` 表示排除项为空。
+         */
+        SectorConceptFiltersOut: {
+            /** Applied */
+            applied: boolean;
+            /** Excluded */
+            excluded: components["schemas"]["SectorConceptFilterItemOut"][];
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "off" | "hide" | "exclude";
         };
         /**
          * SectorConceptTopOut
@@ -3947,7 +4169,7 @@ export interface components {
              * Code
              * @enum {string}
              */
-            code: "SECTOR_ASSET_BUILD_MISSING" | "SECTOR_ASSET_BUILD_BLOCKED" | "SECTOR_ASSET_BUILD_STALE" | "SECTOR_DATA_MISSING" | "SECTOR_DATA_STALE" | "SECTOR_SYNC_FAILED" | "SECTOR_MEMBERSHIP_MISSING" | "SECTOR_NON_STOCK_HOLDINGS" | "SECTOR_NO_STOCK_POSITIONS" | "SECTOR_BENCHMARK_WEIGHTS_MISSING" | "SECTOR_BENCHMARK_WEIGHTS_STALE" | "SECTOR_CONCEPT_MULTI_MEMBERSHIP" | "SECTOR_CONCEPT_COVERAGE_LOW" | "SECTOR_CONCEPT_HHI_UNAVAILABLE" | "SECTOR_HISTORY_NOT_COVERED" | "SECTOR_ASSET_MISMATCH" | "SECTOR_TRUNCATED" | "SECTOR_HOLDING_TRUNCATED" | "SECTOR_PRICE_MISSING" | "SECTOR_AS_OF_NOT_AVAILABLE";
+            code: "SECTOR_ASSET_BUILD_MISSING" | "SECTOR_ASSET_BUILD_BLOCKED" | "SECTOR_ASSET_BUILD_STALE" | "SECTOR_DATA_MISSING" | "SECTOR_DATA_STALE" | "SECTOR_SYNC_FAILED" | "SECTOR_MEMBERSHIP_MISSING" | "SECTOR_NON_STOCK_HOLDINGS" | "SECTOR_NO_STOCK_POSITIONS" | "SECTOR_BENCHMARK_WEIGHTS_MISSING" | "SECTOR_BENCHMARK_WEIGHTS_STALE" | "SECTOR_CONCEPT_MULTI_MEMBERSHIP" | "SECTOR_CONCEPT_COVERAGE_LOW" | "SECTOR_CONCEPT_HHI_UNAVAILABLE" | "SECTOR_HISTORY_NOT_COVERED" | "SECTOR_ASSET_MISMATCH" | "SECTOR_TRUNCATED" | "SECTOR_HOLDING_TRUNCATED" | "SECTOR_PRICE_MISSING" | "SECTOR_AS_OF_NOT_AVAILABLE" | "SECTOR_CONCEPT_FILTER_APPLIED" | "SECTOR_CONCEPT_FILTER_UNRESOLVED";
             /** Field */
             field: string;
             /** Reason */
@@ -4179,6 +4401,33 @@ export interface components {
             /** Symbols */
             symbols: string[];
         };
+        /** SettingsOut */
+        SettingsOut: {
+            appearance: components["schemas"]["AppearancePrefsOut"];
+            /** Benchmark Id */
+            benchmark_id: string;
+            bill_flags: components["schemas"]["BillFlagsPrefsOut"];
+            concept_filters: components["schemas"]["ConceptFiltersPrefsOut"];
+            market_sessions: components["schemas"]["MarketSessionsPrefsOut"];
+            /** Privacy Flags */
+            privacy_flags?: {
+                [key: string]: unknown;
+            };
+            /** Updated At */
+            updated_at?: string | null;
+            /** Version */
+            version: number;
+        };
+        /**
+         * SettingsPatchIn
+         * @description 顶层组 `null` = 整组重置默认；`{}` = 该组无变更。
+         */
+        SettingsPatchIn: {
+            appearance?: components["schemas"]["AppearancePatch"] | null;
+            bill_flags?: components["schemas"]["BillFlagsPatch"] | null;
+            concept_filters?: components["schemas"]["ConceptFiltersPatch"] | null;
+            market_sessions?: components["schemas"]["MarketSessionsPatch"] | null;
+        };
         /**
          * SummaryRuleCreateIn
          * @description API-023：`code` 由服务端生成（`usr_`+8hex），客户端不可指定。
@@ -4320,6 +4569,44 @@ export interface components {
             status: string;
             /** Status Label */
             status_label: string;
+        };
+        /**
+         * TradeFlagRebuildAccepted
+         * @description API-097：202 专用响应（同参数复用已有 job 时 `X-Job-Reused: true`）。
+         */
+        TradeFlagRebuildAccepted: {
+            /** Job Id */
+            job_id: string;
+            links: components["schemas"]["JobLinks"];
+            /**
+             * Status
+             * @default pending
+             * @constant
+             */
+            status: "pending";
+            /**
+             * Type
+             * @default rebuild_trade_flags
+             * @constant
+             */
+            type: "rebuild_trade_flags";
+        };
+        /**
+         * TradeFlagRebuildIn
+         * @description API-097：重建账单旗标范围。
+         *
+         *     `scope=months` 必须给 `months`（`YYYY-MM`，去重后 ≤120）；`scope=all` 覆盖首笔交易月
+         *     到最近交易月（服务端最多取最近 120 个月）。
+         */
+        TradeFlagRebuildIn: {
+            /** Months */
+            months?: string[];
+            /**
+             * Scope
+             * @default all
+             * @enum {string}
+             */
+            scope: "all" | "months";
         };
         /** TradeHistoryItem */
         TradeHistoryItem: {
@@ -7347,6 +7634,204 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getSettings: {
+        parameters: {
+            query?: never;
+            header?: {
+                "If-None-Match"?: string | null;
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsOut"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    patchSettings: {
+        parameters: {
+            query?: never;
+            header?: {
+                "If-Match"?: string | null;
+                "Idempotency-Key"?: string | null;
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SettingsPatchIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsOut"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 资源状态冲突 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    rebuildTradeFlags: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["TradeFlagRebuildIn"];
+            };
+        };
+        responses: {
+            /** @description 已入队重建；同参数复用已有任务时返回 X-Job-Reused: true */
+            202: {
+                headers: {
+                    /** @description 任务详情（/api/v1/jobs/{job_id}） */
+                    Location?: unknown;
+                    /** @description 建议轮询间隔（秒） */
+                    "Retry-After"?: unknown;
+                    /** @description true 表示复用了同参数的在途/已完成任务 */
+                    "X-Job-Reused"?: unknown;
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TradeFlagRebuildAccepted"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 资源状态冲突 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 请求过于频繁 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
                     "application/problem+json": components["schemas"]["Error"];
                 };
             };
