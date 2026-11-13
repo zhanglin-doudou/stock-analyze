@@ -55,6 +55,8 @@ import type {
   RoundPage,
   SectorCatalogPage,
   SectorsOverview,
+  SettingsOut,
+  SettingsPatchIn,
   TokenList,
   TradeHistoryPage,
   TradeMutationOut,
@@ -512,6 +514,27 @@ export function createClient(options: ClientOptions) {
     },
   };
 
+  // API-055 / API-096：用户偏好（四组生效值）。GET 支持 If-None-Match → 304。
+  const settings = {
+    async get(opts: { etag?: string } = {}) {
+      const r = await send<SettingsOut>({
+        path: "/settings",
+        headers: opts.etag ? { "If-None-Match": opts.etag } : undefined,
+      });
+      return { settings: r.data, etag: r.headers.get("ETag"), notModified: r.data === undefined };
+    },
+    async patch(body: SettingsPatchIn, opts: { version: number; idempotencyKey?: string }) {
+      const r = await send<SettingsOut>({
+        path: "/settings",
+        method: "PATCH",
+        body,
+        ifMatch: `W/"${opts.version}"`,
+        idempotencyKey: opts.idempotencyKey,
+      });
+      return { settings: r.data, etag: r.headers.get("ETag") };
+    },
+  };
+
   const imports = {
     preview(file: File, opts: PreviewOptions = {}) {
       const form = new FormData();
@@ -939,7 +962,7 @@ export function createClient(options: ClientOptions) {
     },
   };
 
-  return { auth, tokens, imports, jobs, trades, rounds, nav, assets, dashboard, sectors, attribution, metrics: metricsApi, ops, request: send };
+  return { auth, tokens, settings, imports, jobs, trades, rounds, nav, assets, dashboard, sectors, attribution, metrics: metricsApi, ops, request: send };
 }
 
 export type ApiClient = ReturnType<typeof createClient>;

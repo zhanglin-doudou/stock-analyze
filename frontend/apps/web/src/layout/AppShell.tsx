@@ -1,6 +1,7 @@
 import { Suspense, useEffect, useRef, useState } from "react";
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { clearSession } from "../store/session";
+import { clearSettingsCache, saveSettings, syncAppearance } from "../data/settings";
 import { loadPreferences, resolveTheme, updatePreferences, type Theme } from "../theme/theme";
 import { CommandPalette } from "../ui/CommandPalette";
 import { Icon } from "../ui/icons";
@@ -184,6 +185,17 @@ export function AppShell() {
     document.title = `${meta.title} · 交易复盘`;
   }, [meta.title]);
 
+  // 登录后同步云端外观：服务端有值覆盖本地；无行则用本地值播种（只读令牌失败不阻断）。
+  useEffect(() => {
+    let alive = true;
+    void syncAppearance().then((prefs) => {
+      if (alive && prefs) setTheme(prefs.theme);
+    });
+    return () => {
+      alive = false;
+    };
+  }, []);
+
   // 路由切换：打开所属一级分组，关闭紧凑模式浮层。
   useEffect(() => {
     const group = activeGroupId(location.pathname);
@@ -318,6 +330,7 @@ export function AppShell() {
             data-tooltip="登出"
             onClick={() => {
               clearSession();
+              clearSettingsCache();
               navigate("/login", { replace: true });
             }}
           >
@@ -374,9 +387,14 @@ export function AppShell() {
             className="shell-iconbtn"
             aria-label={nextThemeLabel}
             title={nextThemeLabel}
-            onClick={() =>
-              setTheme(updatePreferences({ theme: resolvedTheme === "dark" ? "light" : "dark" }).theme)
-            }
+            onClick={() => {
+              const next = updatePreferences({
+                theme: resolvedTheme === "dark" ? "light" : "dark",
+              });
+              setTheme(next.theme);
+              // 本地已生效；云端同步失败不影响当前会话。
+              void saveSettings({ appearance: { theme: next.theme } }).catch(() => undefined);
+            }}
           >
             <Icon name="theme" size={16} />
           </button>

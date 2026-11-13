@@ -47,6 +47,9 @@ export type ErrorCatalogOut = ApiSchemas["ErrorCatalogOut"];
 export type UserBrief = ApiSchemas["UserBrief"];
 export type AuthOut = ApiSchemas["AuthOut"];
 export type MeOut = ApiSchemas["MeOut"];
+/** 用户偏好（API-055 GET / API-096 PATCH，2026-11-13）：四组生效值 + 版本。 */
+export type SettingsOut = ApiSchemas["SettingsOut"];
+export type SettingsPatchIn = ApiSchemas["SettingsPatchIn"];
 export type LoginIn = ApiSchemas["LoginIn"];
 export type RegisterIn = ApiSchemas["RegisterIn"];
 export type RefreshIn = ApiSchemas["RefreshIn"];
