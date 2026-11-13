@@ -1916,3 +1916,102 @@ class RoundInsightsRefreshOut(BaseModel):
     divisor_missing: int
     stale_price: int
     data_as_of: date | None = None
+
+
+# ── 用户偏好设置（API-055 / API-096，2026-11-11）─────────────
+class AppearancePrefsOut(BaseModel):
+    theme: Literal["light", "dark", "system"]
+    density: Literal["cozy", "compact"]
+    trend: Literal["red-up", "green-up"]
+
+
+class BillFlagsPrefsOut(BaseModel):
+    """阈值一律后端字符串化：百分比 `x.xx%`，窗口十进制整数串。"""
+
+    near_equal_tolerance_pct: str
+    chase_margin_pct: str
+    stop_loss_margin_pct: str
+    short_term_margin_pct: str
+    window_trading_days: str
+    flags_hash: str
+    is_default: bool
+
+
+class MarketSessionOut(BaseModel):
+    open: str
+    close: str
+
+
+class MarketSessionsPrefsOut(BaseModel):
+    sessions: list[MarketSessionOut]
+    data_ready_after: str
+    session_notice_enabled: bool
+    timezone: str
+
+
+class ConceptExcludedOut(BaseModel):
+    code: str
+    name: str
+    resolved: bool
+
+
+class ConceptFiltersPrefsOut(BaseModel):
+    mode: Literal["off", "hide", "exclude"]
+    excluded: list[ConceptExcludedOut] = Field(default_factory=list)
+
+
+class SettingsOut(BaseModel):
+    version: int
+    updated_at: datetime | None = None
+    appearance: AppearancePrefsOut
+    bill_flags: BillFlagsPrefsOut
+    market_sessions: MarketSessionsPrefsOut
+    concept_filters: ConceptFiltersPrefsOut
+    benchmark_id: str
+    privacy_flags: dict[str, Any] = Field(default_factory=dict)
+
+
+class AppearancePatch(StrictModel):
+    theme: Literal["light", "dark", "system"] | None = None
+    density: Literal["cozy", "compact"] | None = None
+    trend: Literal["red-up", "green-up"] | None = None
+
+
+class BillFlagsPatch(StrictModel):
+    """`null` = 恢复该列默认值；只更新出现键。"""
+
+    near_equal_tolerance_pct: str | None = None
+    chase_margin_pct: str | None = None
+    stop_loss_margin_pct: str | None = None
+    short_term_margin_pct: str | None = None
+    window_trading_days: str | None = None
+
+
+class MarketSessionPatchItem(StrictModel):
+    open: str
+    close: str
+
+
+class MarketSessionsPatch(StrictModel):
+    sessions: list[MarketSessionPatchItem] | None = None
+    data_ready_after: str | None = None
+    session_notice_enabled: bool | None = None
+
+
+class ConceptExcludedPatchItem(StrictModel):
+    code: str
+    name: str
+
+
+class ConceptFiltersPatch(StrictModel):
+    mode: Literal["off", "hide", "exclude"] | None = None
+    excluded: list[ConceptExcludedPatchItem] | None = None
+
+
+class SettingsPatchIn(StrictModel):
+    """顶层组 `null` = 整组重置默认；`{}` = 该组无变更。"""
+
+    appearance: AppearancePatch | None = None
+    bill_flags: BillFlagsPatch | None = None
+    market_sessions: MarketSessionsPatch | None = None
+    concept_filters: ConceptFiltersPatch | None = None

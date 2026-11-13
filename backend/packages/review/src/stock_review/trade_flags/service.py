@@ -17,6 +17,7 @@ from sqlalchemy import delete, distinct, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from stock_contracts.clock import Clock
 from stock_contracts.errors import ApiError, ErrorCode
+from stock_contracts.preferences import DEFAULT_FLAGS_HASH
 from stock_core.insights.forward import ForwardTrade, price_net
 from stock_core.metrics.portfolio_index import compound_index
 from stock_core.trade_flags import (
@@ -259,6 +260,8 @@ async def build_trade_flags_for_user(
                         item.lookahead for item in TRADE_FLAG_DEFINITIONS if item.code == code
                     ),
                     definition_version=DEFINITION_VERSION,
+                    # P0：构建仍按默认阈值（P1 接 `flag_config` 后改为传生效 hash）。
+                    flags_hash=DEFAULT_FLAGS_HASH,
                     computed_at=now,
                 )
             )

@@ -406,6 +406,10 @@ def test_detect_t_patterns() -> None:
     assert classify.detect_t_patterns([(d1, "buy", 30, 10), (d1, "sell", 30, 40)]) == (False, False)
     # 跨日：部分卖后次日买 → 波段做T，不计日内。
     assert classify.detect_t_patterns([(d1, "sell", 30, 100), (d2, "buy", 30, 0)]) == (False, True)
+    # 部分卖出后先出现的不是买入（再卖一笔）→ 跳过非买入事件，取其后第一笔买入。
+    assert classify.detect_t_patterns(
+        [(d1, "sell", 30, 100), (d1, "sell", 30, 70), (d2, "buy", 30, 0)]
+    ) == (False, True)
     # 同一笔卖出已被同日买入配对 → 不再计入波段（即使后续还有买入）。
     assert classify.detect_t_patterns(
         [(d1, "sell", 30, 100), (d1, "buy", 10, 30), (d2, "buy", 20, 0)]

@@ -837,6 +837,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Settings
+         * @description API-055：四组偏好生效值 + 只读回显 + `version`/ETag；无行返回默认视图。
+         */
+        get: operations["getSettings"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Patch Settings
+         * @description API-096：局部更新偏好（typed 局部列 + JSONB merge patch，CAS 版本）。
+         */
+        patch: operations["patchSettings"];
+        trace?: never;
+    };
     "/api/v1/summary-rules": {
         parameters: {
             query?: never;
@@ -1142,6 +1166,33 @@ export interface components {
              * @enum {string}
              */
             status: "stale" | "blocked" | "unreliable" | "ok";
+        };
+        /** AppearancePatch */
+        AppearancePatch: {
+            /** Density */
+            density?: ("cozy" | "compact") | null;
+            /** Theme */
+            theme?: ("light" | "dark" | "system") | null;
+            /** Trend */
+            trend?: ("red-up" | "green-up") | null;
+        };
+        /** AppearancePrefsOut */
+        AppearancePrefsOut: {
+            /**
+             * Density
+             * @enum {string}
+             */
+            density: "cozy" | "compact";
+            /**
+             * Theme
+             * @enum {string}
+             */
+            theme: "light" | "dark" | "system";
+            /**
+             * Trend
+             * @enum {string}
+             */
+            trend: "red-up" | "green-up";
         };
         /**
          * AssetBuildAccepted
@@ -1782,6 +1833,42 @@ export interface components {
             /** Total Estimate */
             total_estimate?: number | null;
         };
+        /**
+         * BillFlagsPatch
+         * @description `null` = 恢复该列默认值；只更新出现键。
+         */
+        BillFlagsPatch: {
+            /** Chase Margin Pct */
+            chase_margin_pct?: string | null;
+            /** Near Equal Tolerance Pct */
+            near_equal_tolerance_pct?: string | null;
+            /** Short Term Margin Pct */
+            short_term_margin_pct?: string | null;
+            /** Stop Loss Margin Pct */
+            stop_loss_margin_pct?: string | null;
+            /** Window Trading Days */
+            window_trading_days?: string | null;
+        };
+        /**
+         * BillFlagsPrefsOut
+         * @description 阈值一律后端字符串化：百分比 `x.xx%`，窗口十进制整数串。
+         */
+        BillFlagsPrefsOut: {
+            /** Chase Margin Pct */
+            chase_margin_pct: string;
+            /** Flags Hash */
+            flags_hash: string;
+            /** Is Default */
+            is_default: boolean;
+            /** Near Equal Tolerance Pct */
+            near_equal_tolerance_pct: string;
+            /** Short Term Margin Pct */
+            short_term_margin_pct: string;
+            /** Stop Loss Margin Pct */
+            stop_loss_margin_pct: string;
+            /** Window Trading Days */
+            window_trading_days: string;
+        };
         /** Body_previewImport */
         Body_previewImport: {
             /** Date Format */
@@ -1824,6 +1911,39 @@ export interface components {
             realized_pnl: string;
             /** Residual */
             residual: string;
+        };
+        /** ConceptExcludedOut */
+        ConceptExcludedOut: {
+            /** Code */
+            code: string;
+            /** Name */
+            name: string;
+            /** Resolved */
+            resolved: boolean;
+        };
+        /** ConceptExcludedPatchItem */
+        ConceptExcludedPatchItem: {
+            /** Code */
+            code: string;
+            /** Name */
+            name: string;
+        };
+        /** ConceptFiltersPatch */
+        ConceptFiltersPatch: {
+            /** Excluded */
+            excluded?: components["schemas"]["ConceptExcludedPatchItem"][] | null;
+            /** Mode */
+            mode?: ("off" | "hide" | "exclude") | null;
+        };
+        /** ConceptFiltersPrefsOut */
+        ConceptFiltersPrefsOut: {
+            /** Excluded */
+            excluded?: components["schemas"]["ConceptExcludedOut"][];
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "off" | "hide" | "exclude";
         };
         /**
          * DashboardAssetOverviewOut
@@ -2666,6 +2786,40 @@ export interface components {
         LogoutIn: {
             /** Refresh Token */
             refresh_token?: string | null;
+        };
+        /** MarketSessionOut */
+        MarketSessionOut: {
+            /** Close */
+            close: string;
+            /** Open */
+            open: string;
+        };
+        /** MarketSessionPatchItem */
+        MarketSessionPatchItem: {
+            /** Close */
+            close: string;
+            /** Open */
+            open: string;
+        };
+        /** MarketSessionsPatch */
+        MarketSessionsPatch: {
+            /** Data Ready After */
+            data_ready_after?: string | null;
+            /** Session Notice Enabled */
+            session_notice_enabled?: boolean | null;
+            /** Sessions */
+            sessions?: components["schemas"]["MarketSessionPatchItem"][] | null;
+        };
+        /** MarketSessionsPrefsOut */
+        MarketSessionsPrefsOut: {
+            /** Data Ready After */
+            data_ready_after: string;
+            /** Session Notice Enabled */
+            session_notice_enabled: boolean;
+            /** Sessions */
+            sessions: components["schemas"]["MarketSessionOut"][];
+            /** Timezone */
+            timezone: string;
         };
         /** MeOut */
         MeOut: {
@@ -4163,6 +4317,33 @@ export interface components {
             ratio_of_equity?: string | null;
             /** Symbols */
             symbols: string[];
+        };
+        /** SettingsOut */
+        SettingsOut: {
+            appearance: components["schemas"]["AppearancePrefsOut"];
+            /** Benchmark Id */
+            benchmark_id: string;
+            bill_flags: components["schemas"]["BillFlagsPrefsOut"];
+            concept_filters: components["schemas"]["ConceptFiltersPrefsOut"];
+            market_sessions: components["schemas"]["MarketSessionsPrefsOut"];
+            /** Privacy Flags */
+            privacy_flags?: {
+                [key: string]: unknown;
+            };
+            /** Updated At */
+            updated_at?: string | null;
+            /** Version */
+            version: number;
+        };
+        /**
+         * SettingsPatchIn
+         * @description 顶层组 `null` = 整组重置默认；`{}` = 该组无变更。
+         */
+        SettingsPatchIn: {
+            appearance?: components["schemas"]["AppearancePatch"] | null;
+            bill_flags?: components["schemas"]["BillFlagsPatch"] | null;
+            concept_filters?: components["schemas"]["ConceptFiltersPatch"] | null;
+            market_sessions?: components["schemas"]["MarketSessionsPatch"] | null;
         };
         /**
          * SummaryRuleCreateIn
@@ -7318,6 +7499,124 @@ export interface operations {
             };
             /** @description 权限不足 */
             403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getSettings: {
+        parameters: {
+            query?: never;
+            header?: {
+                "If-None-Match"?: string | null;
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsOut"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    patchSettings: {
+        parameters: {
+            query?: never;
+            header?: {
+                "If-Match"?: string | null;
+                "Idempotency-Key"?: string | null;
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SettingsPatchIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SettingsOut"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 资源状态冲突 */
+            409: {
                 headers: {
                     [name: string]: unknown;
                 };

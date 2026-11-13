@@ -591,6 +591,8 @@ class TradeFlag(Base):
     reason: Mapped[str | None] = mapped_column(String(64))
     lookahead: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     definition_version: Mapped[str] = mapped_column(String(8), nullable=False)
+    # 阈值 + 窗口的规范指纹（16 hex）：读路径按「当前 version + 当前 hash」过滤（迁移 0014）。
+    flags_hash: Mapped[str] = mapped_column(String(16), nullable=False)
     computed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

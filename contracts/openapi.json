@@ -25,6 +25,95 @@
         "title": "AffectedMetric",
         "type": "object"
       },
+      "AppearancePatch": {
+        "additionalProperties": false,
+        "properties": {
+          "density": {
+            "anyOf": [
+              {
+                "enum": [
+                  "cozy",
+                  "compact"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Density"
+          },
+          "theme": {
+            "anyOf": [
+              {
+                "enum": [
+                  "light",
+                  "dark",
+                  "system"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Theme"
+          },
+          "trend": {
+            "anyOf": [
+              {
+                "enum": [
+                  "red-up",
+                  "green-up"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Trend"
+          }
+        },
+        "title": "AppearancePatch",
+        "type": "object"
+      },
+      "AppearancePrefsOut": {
+        "properties": {
+          "density": {
+            "enum": [
+              "cozy",
+              "compact"
+            ],
+            "title": "Density",
+            "type": "string"
+          },
+          "theme": {
+            "enum": [
+              "light",
+              "dark",
+              "system"
+            ],
+            "title": "Theme",
+            "type": "string"
+          },
+          "trend": {
+            "enum": [
+              "red-up",
+              "green-up"
+            ],
+            "title": "Trend",
+            "type": "string"
+          }
+        },
+        "required": [
+          "theme",
+          "density",
+          "trend"
+        ],
+        "title": "AppearancePrefsOut",
+        "type": "object"
+      },
       "AssetBuildAccepted": {
         "additionalProperties": false,
         "description": "API-082：202 专用响应（不复用 `JobAcceptedOut`，避免多出 `batch_id:null`）。",
@@ -1664,6 +1753,113 @@
         "title": "BatchPage",
         "type": "object"
       },
+      "BillFlagsPatch": {
+        "additionalProperties": false,
+        "description": "`null` = 恢复该列默认值；只更新出现键。",
+        "properties": {
+          "chase_margin_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Chase Margin Pct"
+          },
+          "near_equal_tolerance_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Near Equal Tolerance Pct"
+          },
+          "short_term_margin_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Short Term Margin Pct"
+          },
+          "stop_loss_margin_pct": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Stop Loss Margin Pct"
+          },
+          "window_trading_days": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Window Trading Days"
+          }
+        },
+        "title": "BillFlagsPatch",
+        "type": "object"
+      },
+      "BillFlagsPrefsOut": {
+        "description": "阈值一律后端字符串化：百分比 `x.xx%`，窗口十进制整数串。",
+        "properties": {
+          "chase_margin_pct": {
+            "title": "Chase Margin Pct",
+            "type": "string"
+          },
+          "flags_hash": {
+            "title": "Flags Hash",
+            "type": "string"
+          },
+          "is_default": {
+            "title": "Is Default",
+            "type": "boolean"
+          },
+          "near_equal_tolerance_pct": {
+            "title": "Near Equal Tolerance Pct",
+            "type": "string"
+          },
+          "short_term_margin_pct": {
+            "title": "Short Term Margin Pct",
+            "type": "string"
+          },
+          "stop_loss_margin_pct": {
+            "title": "Stop Loss Margin Pct",
+            "type": "string"
+          },
+          "window_trading_days": {
+            "title": "Window Trading Days",
+            "type": "string"
+          }
+        },
+        "required": [
+          "near_equal_tolerance_pct",
+          "chase_margin_pct",
+          "stop_loss_margin_pct",
+          "short_term_margin_pct",
+          "window_trading_days",
+          "flags_hash",
+          "is_default"
+        ],
+        "title": "BillFlagsPrefsOut",
+        "type": "object"
+      },
       "Body_previewImport": {
         "properties": {
           "date_format": {
@@ -1764,6 +1960,110 @@
           "residual"
         ],
         "title": "BridgeIdentityOut",
+        "type": "object"
+      },
+      "ConceptExcludedOut": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "resolved": {
+            "title": "Resolved",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "resolved"
+        ],
+        "title": "ConceptExcludedOut",
+        "type": "object"
+      },
+      "ConceptExcludedPatchItem": {
+        "additionalProperties": false,
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "name"
+        ],
+        "title": "ConceptExcludedPatchItem",
+        "type": "object"
+      },
+      "ConceptFiltersPatch": {
+        "additionalProperties": false,
+        "properties": {
+          "excluded": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/ConceptExcludedPatchItem"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Excluded"
+          },
+          "mode": {
+            "anyOf": [
+              {
+                "enum": [
+                  "off",
+                  "hide",
+                  "exclude"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mode"
+          }
+        },
+        "title": "ConceptFiltersPatch",
+        "type": "object"
+      },
+      "ConceptFiltersPrefsOut": {
+        "properties": {
+          "excluded": {
+            "items": {
+              "$ref": "#/components/schemas/ConceptExcludedOut"
+            },
+            "title": "Excluded",
+            "type": "array"
+          },
+          "mode": {
+            "enum": [
+              "off",
+              "hide",
+              "exclude"
+            ],
+            "title": "Mode",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode"
+        ],
+        "title": "ConceptFiltersPrefsOut",
         "type": "object"
       },
       "DashboardAssetOverviewOut": {
@@ -4264,6 +4564,117 @@
           }
         },
         "title": "LogoutIn",
+        "type": "object"
+      },
+      "MarketSessionOut": {
+        "properties": {
+          "close": {
+            "title": "Close",
+            "type": "string"
+          },
+          "open": {
+            "title": "Open",
+            "type": "string"
+          }
+        },
+        "required": [
+          "open",
+          "close"
+        ],
+        "title": "MarketSessionOut",
+        "type": "object"
+      },
+      "MarketSessionPatchItem": {
+        "additionalProperties": false,
+        "properties": {
+          "close": {
+            "title": "Close",
+            "type": "string"
+          },
+          "open": {
+            "title": "Open",
+            "type": "string"
+          }
+        },
+        "required": [
+          "open",
+          "close"
+        ],
+        "title": "MarketSessionPatchItem",
+        "type": "object"
+      },
+      "MarketSessionsPatch": {
+        "additionalProperties": false,
+        "properties": {
+          "data_ready_after": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Data Ready After"
+          },
+          "session_notice_enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Session Notice Enabled"
+          },
+          "sessions": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/MarketSessionPatchItem"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sessions"
+          }
+        },
+        "title": "MarketSessionsPatch",
+        "type": "object"
+      },
+      "MarketSessionsPrefsOut": {
+        "properties": {
+          "data_ready_after": {
+            "title": "Data Ready After",
+            "type": "string"
+          },
+          "session_notice_enabled": {
+            "title": "Session Notice Enabled",
+            "type": "boolean"
+          },
+          "sessions": {
+            "items": {
+              "$ref": "#/components/schemas/MarketSessionOut"
+            },
+            "title": "Sessions",
+            "type": "array"
+          },
+          "timezone": {
+            "title": "Timezone",
+            "type": "string"
+          }
+        },
+        "required": [
+          "sessions",
+          "data_ready_after",
+          "session_notice_enabled",
+          "timezone"
+        ],
+        "title": "MarketSessionsPrefsOut",
         "type": "object"
       },
       "MeOut": {
@@ -8477,6 +8888,105 @@
           "symbols"
         ],
         "title": "SectorUnclassifiedOut",
+        "type": "object"
+      },
+      "SettingsOut": {
+        "properties": {
+          "appearance": {
+            "$ref": "#/components/schemas/AppearancePrefsOut"
+          },
+          "benchmark_id": {
+            "title": "Benchmark Id",
+            "type": "string"
+          },
+          "bill_flags": {
+            "$ref": "#/components/schemas/BillFlagsPrefsOut"
+          },
+          "concept_filters": {
+            "$ref": "#/components/schemas/ConceptFiltersPrefsOut"
+          },
+          "market_sessions": {
+            "$ref": "#/components/schemas/MarketSessionsPrefsOut"
+          },
+          "privacy_flags": {
+            "additionalProperties": true,
+            "title": "Privacy Flags",
+            "type": "object"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "version",
+          "appearance",
+          "bill_flags",
+          "market_sessions",
+          "concept_filters",
+          "benchmark_id"
+        ],
+        "title": "SettingsOut",
+        "type": "object"
+      },
+      "SettingsPatchIn": {
+        "additionalProperties": false,
+        "description": "顶层组 `null` = 整组重置默认；`{}` = 该组无变更。",
+        "properties": {
+          "appearance": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AppearancePatch"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "bill_flags": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BillFlagsPatch"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "concept_filters": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ConceptFiltersPatch"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "market_sessions": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MarketSessionsPatch"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "SettingsPatchIn",
         "type": "object"
       },
       "SummaryRuleCreateIn": {
@@ -19660,6 +20170,446 @@
         ],
         "x-idempotent": false,
         "x-required-scope": "read"
+      }
+    },
+    "/api/v1/settings": {
+      "get": {
+        "description": "API-055：四组偏好生效值 + 只读回显 + `version`/ETag；无行返回默认视图。",
+        "operationId": "getSettings",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "If-None-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-None-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-api-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "appearance": {
+                    "density": "compact",
+                    "theme": "dark",
+                    "trend": "red-up"
+                  },
+                  "benchmark_id": "hs300_tr",
+                  "bill_flags": {
+                    "chase_margin_pct": "1.00%",
+                    "flags_hash": "c425bc5b871f59f5",
+                    "is_default": true,
+                    "near_equal_tolerance_pct": "1.00%",
+                    "short_term_margin_pct": "5.00%",
+                    "stop_loss_margin_pct": "1.00%",
+                    "window_trading_days": "5"
+                  },
+                  "concept_filters": {
+                    "excluded": [],
+                    "mode": "off"
+                  },
+                  "market_sessions": {
+                    "data_ready_after": "16:30",
+                    "session_notice_enabled": true,
+                    "sessions": [
+                      {
+                        "close": "11:30",
+                        "open": "09:30"
+                      },
+                      {
+                        "close": "15:00",
+                        "open": "13:00"
+                      }
+                    ],
+                    "timezone": "Asia/Shanghai"
+                  },
+                  "privacy_flags": {},
+                  "updated_at": "2026-09-30T09:30:00Z",
+                  "version": 2
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "TOKEN_EXPIRED",
+                  "detail": "访问凭证已过期。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 401,
+                  "title": "TOKEN_EXPIRED",
+                  "type": "https://stock-analyze.local/errors/TOKEN_EXPIRED",
+                  "user_message": "访问凭证已过期。",
+                  "what_to_do": "用 refresh_token 换新 access，或重建 PAT。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "未认证或凭证无效"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "INSUFFICIENT_SCOPE",
+                  "detail": "当前令牌只有只读权限。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 403,
+                  "title": "INSUFFICIENT_SCOPE",
+                  "type": "https://stock-analyze.local/errors/INSUFFICIENT_SCOPE",
+                  "user_message": "当前令牌只有只读权限。",
+                  "what_to_do": "创建带 write scope 的 PAT。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "权限不足"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "example": {
+                  "code": "VALIDATION_ERROR",
+                  "detail": "请求参数有问题。",
+                  "errors": [
+                    {
+                      "code": "invalid",
+                      "field": "body.email",
+                      "message": "邮箱格式不正确。"
+                    }
+                  ],
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 422,
+                  "title": "VALIDATION_ERROR",
+                  "type": "https://stock-analyze.local/errors/VALIDATION_ERROR",
+                  "user_message": "请求参数有问题。",
+                  "what_to_do": "按 errors[] 修正字段后重试。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Settings",
+        "tags": [
+          "settings"
+        ],
+        "x-async": false,
+        "x-error-codes": [
+          "TOKEN_EXPIRED",
+          "TOKEN_REVOKED",
+          "MULTIPLE_CREDENTIALS",
+          "INSUFFICIENT_SCOPE",
+          "VALIDATION_ERROR"
+        ],
+        "x-idempotent": false,
+        "x-required-scope": "read"
+      },
+      "patch": {
+        "description": "API-096：局部更新偏好（typed 局部列 + JSONB merge patch，CAS 版本）。",
+        "operationId": "patchSettings",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-api-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SettingsPatchIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "appearance": {
+                    "density": "compact",
+                    "theme": "dark",
+                    "trend": "red-up"
+                  },
+                  "benchmark_id": "hs300_tr",
+                  "bill_flags": {
+                    "chase_margin_pct": "1.00%",
+                    "flags_hash": "c425bc5b871f59f5",
+                    "is_default": true,
+                    "near_equal_tolerance_pct": "1.00%",
+                    "short_term_margin_pct": "5.00%",
+                    "stop_loss_margin_pct": "1.00%",
+                    "window_trading_days": "5"
+                  },
+                  "concept_filters": {
+                    "excluded": [],
+                    "mode": "off"
+                  },
+                  "market_sessions": {
+                    "data_ready_after": "16:30",
+                    "session_notice_enabled": true,
+                    "sessions": [
+                      {
+                        "close": "11:30",
+                        "open": "09:30"
+                      },
+                      {
+                        "close": "15:00",
+                        "open": "13:00"
+                      }
+                    ],
+                    "timezone": "Asia/Shanghai"
+                  },
+                  "privacy_flags": {},
+                  "updated_at": "2026-09-30T09:30:00Z",
+                  "version": 2
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/SettingsOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "TOKEN_EXPIRED",
+                  "detail": "访问凭证已过期。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 401,
+                  "title": "TOKEN_EXPIRED",
+                  "type": "https://stock-analyze.local/errors/TOKEN_EXPIRED",
+                  "user_message": "访问凭证已过期。",
+                  "what_to_do": "用 refresh_token 换新 access，或重建 PAT。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "未认证或凭证无效"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "INSUFFICIENT_SCOPE",
+                  "detail": "当前令牌只有只读权限。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 403,
+                  "title": "INSUFFICIENT_SCOPE",
+                  "type": "https://stock-analyze.local/errors/INSUFFICIENT_SCOPE",
+                  "user_message": "当前令牌只有只读权限。",
+                  "what_to_do": "创建带 write scope 的 PAT。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "权限不足"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "VERSION_CONFLICT",
+                  "detail": "这条数据刚被改过。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 409,
+                  "title": "VERSION_CONFLICT",
+                  "type": "https://stock-analyze.local/errors/VERSION_CONFLICT",
+                  "user_message": "这条数据刚被改过。",
+                  "what_to_do": "重新获取最新版本后再提交。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "资源状态冲突"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "example": {
+                  "code": "VALIDATION_ERROR",
+                  "detail": "请求参数有问题。",
+                  "errors": [
+                    {
+                      "code": "invalid",
+                      "field": "body.email",
+                      "message": "邮箱格式不正确。"
+                    }
+                  ],
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 422,
+                  "title": "VALIDATION_ERROR",
+                  "type": "https://stock-analyze.local/errors/VALIDATION_ERROR",
+                  "user_message": "请求参数有问题。",
+                  "what_to_do": "按 errors[] 修正字段后重试。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Patch Settings",
+        "tags": [
+          "settings"
+        ],
+        "x-async": false,
+        "x-error-codes": [
+          "VERSION_CONFLICT",
+          "VALIDATION_ERROR",
+          "IDEMPOTENCY_KEY_REUSED",
+          "IDEMPOTENCY_IN_PROGRESS",
+          "TOKEN_EXPIRED",
+          "TOKEN_REVOKED",
+          "MULTIPLE_CREDENTIALS",
+          "INSUFFICIENT_SCOPE"
+        ],
+        "x-idempotent": true,
+        "x-required-scope": "write"
       }
     },
     "/api/v1/summary-rules": {

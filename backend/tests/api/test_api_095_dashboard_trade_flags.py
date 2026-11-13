@@ -26,6 +26,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine
 from stock_api.app import create_app
 from stock_contracts.clock import FrozenClock
+from stock_contracts.preferences import DEFAULT_FLAGS_HASH
 from stock_core.trade_flags import DEFINITION_VERSION
 
 pytestmark = pytest.mark.api
@@ -59,10 +60,10 @@ insert into review.asset_build_state (
 _INSERT_FLAG_SQL = """
 insert into review.trade_flag (
     id, user_id, trade_dedupe_key, trade_id, security_code, side, trade_date,
-    flag_code, status, reason, lookahead, definition_version, computed_at
+    flag_code, status, reason, lookahead, definition_version, flags_hash, computed_at
 ) values (
     :id, :user_id, :dedupe_key, :trade_id, :security_code, :side, :trade_date,
-    :flag_code, :status, :reason, :lookahead, :definition_version, :computed_at
+    :flag_code, :status, :reason, :lookahead, :definition_version, :flags_hash, :computed_at
 )
 """
 
@@ -102,6 +103,7 @@ async def _seed_flag(
                 "reason": None,
                 "lookahead": code in ("short_term_bottom", "short_term_top"),
                 "definition_version": DEFINITION_VERSION,
+                "flags_hash": DEFAULT_FLAGS_HASH,
                 "computed_at": datetime(2026, 7, 1, tzinfo=UTC),
             },
         )

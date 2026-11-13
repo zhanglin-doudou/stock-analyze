@@ -1250,6 +1250,34 @@ OPERATION_META: dict[str, dict[str, Any]] = {
             "ADMIN_CANNOT_READ_TRADES",
         ],
     },
+    "getSettings": {
+        "api_id": "API-055",
+        "scope": "read",
+        "idempotent": False,
+        "async": False,
+        "error_codes": [
+            "TOKEN_EXPIRED",
+            "TOKEN_REVOKED",
+            "MULTIPLE_CREDENTIALS",
+            "INSUFFICIENT_SCOPE",
+        ],
+    },
+    "patchSettings": {
+        "api_id": "API-096",
+        "scope": "write",
+        "idempotent": True,
+        "async": False,
+        "error_codes": [
+            "VERSION_CONFLICT",
+            "VALIDATION_ERROR",
+            "IDEMPOTENCY_KEY_REUSED",
+            "IDEMPOTENCY_IN_PROGRESS",
+            "TOKEN_EXPIRED",
+            "TOKEN_REVOKED",
+            "MULTIPLE_CREDENTIALS",
+            "INSUFFICIENT_SCOPE",
+        ],
+    },
 }
 
 # 非 JSON 的 2xx 手工示例：SSE（API-063）与 Prometheus 文本（API-074）。
@@ -1359,6 +1387,35 @@ def _metric_item_example() -> dict[str, Any]:
 
 
 # 关键端点手工示例（其余按 schema 递归生成；生成规则见 _example_for_schema）。
+def _settings_example() -> dict[str, Any]:
+    return {
+        "version": 2,
+        "updated_at": _DATETIME,
+        "appearance": {"theme": "dark", "density": "compact", "trend": "red-up"},
+        "bill_flags": {
+            "near_equal_tolerance_pct": "1.00%",
+            "chase_margin_pct": "1.00%",
+            "stop_loss_margin_pct": "1.00%",
+            "short_term_margin_pct": "5.00%",
+            "window_trading_days": "5",
+            "flags_hash": "c425bc5b871f59f5",
+            "is_default": True,
+        },
+        "market_sessions": {
+            "sessions": [
+                {"open": "09:30", "close": "11:30"},
+                {"open": "13:00", "close": "15:00"},
+            ],
+            "data_ready_after": "16:30",
+            "session_notice_enabled": True,
+            "timezone": "Asia/Shanghai",
+        },
+        "concept_filters": {"mode": "off", "excluded": []},
+        "benchmark_id": "hs300_tr",
+        "privacy_flags": {},
+    }
+
+
 EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
     "metrics_batch": {
         "200": {
@@ -1481,6 +1538,9 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
         }
     },
     "getTrade": {"200": _trade_example()},
+    # Period2-19：用户偏好（默认阈值下 flags_hash 固定，窗口也为字符串）。
+    "getSettings": {"200": _settings_example()},
+    "patchSettings": {"200": _settings_example()},
     # Period2-16（API-081）：资产表列表（blocked 行的数值字段是显式 null，示例给正常行）。
     "listAssets": {
         "200": {

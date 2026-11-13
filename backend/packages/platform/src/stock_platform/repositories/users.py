@@ -5,7 +5,8 @@ from __future__ import annotations
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from stock_contracts.enums import Role
 
@@ -72,3 +73,37 @@ class UserSettingRepository:
             self._session.add(setting)
             await self._session.flush()
         return setting
+
+    async def get_for_read(self, user_id: uuid.UUID) -> UserSetting | None:
+        """只读：不落库、不懒创建（GET /settings 无行时返回 `None` 由 API 组默认视图）。"""
+        return await self._session.scalar(select(UserSetting).where(UserSetting.user_id == user_id))
+
+    async def update_patch(
+        self,
+        user_id: uuid.UUID,
+        *,
+        columns: dict[str, object],
+        expected_version: int,
+    ) -> UserSetting | None:
+        """单条 CAS 更新：首次缺行先 `INSERT ... ON CONFLICT DO NOTHING`，版本不 +2。
+
+        返回 `None` 表示版本冲突（调用方映射 409 VERSION_CONFLICT）。
+        """
+        await self._session.execute(
+            pg_insert(UserSetting)
+            .values(
+                user_id=user_id,
+                benchmark_id="hs300_tr",
+                privacy_flags={},
+                display_prefs={},
+                version=1,
+            )
+            .on_conflict_do_nothing(index_elements=[UserSetting.user_id])
+        )
+        result = await self._session.execute(
+            update(UserSetting)
+            .where(UserSetting.user_id == user_id, UserSetting.version == expected_version)
+            .values(**columns, version=UserSetting.version + 1, updated_at=func.now())
+            .returning(UserSetting)
+        )
+        return result.scalar_one_or_none()

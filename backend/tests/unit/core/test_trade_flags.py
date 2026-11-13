@@ -634,3 +634,10 @@ def test_instant_flags_share_short_term_margin() -> None:
         data_as_of=CALENDAR[-1],
     )
     assert _status(outside, "instant_top") == STATUS_MISS
+
+
+def test_status_reason_covers_no_cost_basis_label() -> None:
+    """`no_cost_basis` 的文案映射由 `_status_reason` 统一产出。"""
+    from stock_core.trade_flags.engine import _status_reason
+
+    assert _status_reason(STATUS_NO_COST_BASIS) == "no_cost_basis"

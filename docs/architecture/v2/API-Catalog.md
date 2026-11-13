@@ -48,7 +48,7 @@
 - ETag `W/"<version>"`（列表含查询指纹），写响应返新 ETag；`If-Match` 不匹配 → 409 `VERSION_CONFLICT`（遵循 PRD FR-L4，不采用 412）。
 - 格式：金额**定点字符串 2 位** `"1234.56"`；价格 6 位、数量 4 位；比率十进制小数；时间 ISO 8601 UTC；业务日 `YYYY-MM-DD`（Asia/Shanghai）；`blocked` 时 `value` **字段缺省**。软删默认过滤 `deleted_at NULL`，`include_deleted=true` 仅本人；注销物理级联删除，审计留事件元数据。
 
-## §1 端点总表（94 个；API-089 预留不计数，API-090~095 已实现（2026-11-05/09）；Path 省略公共前缀 `/api/v1`，标注「根」者不在前缀下）
+## §1 端点总表（95 个；API-089 预留不计数，API-090~095 已实现（2026-11-05/09），API-055/096 已实现（2026-11-13）；Path 省略公共前缀 `/api/v1`，标注「根」者不在前缀下）
 | API-ID | Method | Path | 用途 | FR | 认证/scope | 幂等 | 同步/异步 | 优先级 | 主要成功码 |
 |---|---|---|---|---|---|---|---|---|---|
 | API-001 | POST | `/auth/register` | 注册账号 | L2 | 公开 | 支持 | 同步 | P0 | 201 |
@@ -105,7 +105,8 @@
 | API-052 | GET | `/alerts` | 行为规则触发记录 | D6 | read | — | 同步 | P1 | 200 |
 | API-053 | POST | `/alerts/{alert_id}/ack` | 确认提醒 | D6 | write | 幂等 | 同步 | P1 | 200 |
 | API-054 | GET | `/notifications` | 站内通知 | D8 | read | — | 同步 | P2 | 200 |
-| API-055 | GET | `/settings` | 设置总览 | D1 | read | — | 同步 | P0 | 200 |
+| API-055 | GET | `/settings` | 设置总览（四组偏好生效值 + version/ETag） | D1 | read | — | 同步 | P0 | 200 |
+| API-096 | PATCH | `/settings` | 通用偏好局部更新（外观/账单旗标/行情时段/概念过滤，If-Match CAS） | D1 | write | 支持 | 同步 | P0 | 200 |
 | API-056 | PUT | `/settings/benchmark` | 切换基准（历史分段） | R5 | write | 幂等 | 同步 | P1 | 200 |
 | API-057 | PUT | `/settings/privacy` | 隐私与 LLM 开关 | D6 | write | 幂等 | 同步 | P1 | 200 |
 | API-058 | PUT | `/settings/behavior-rules` | 行为规则阈值 | D6 | write | 幂等 | 同步 | P1 | 200 |
@@ -151,7 +152,7 @@
 > **编号说明（2026-11-05）**：**API-089 预留、暂不实现**，不进入 §1 计数；本任务（FIFO 回合分析增强）从 **API-090** 起编号。API-090~094 已于 2026-11-05 **实现并验收**：详细契约见 §2.6，OpenAPI 快照 / SDK / API 测试 / 隔离矩阵 / DEV-PLAN 已同步（commit `8a958d8`）。
 
 ## §2 分域详细契约
-> 下列 39 个端点为**详细契约**（34 个既有 + 5 个已实现 API-090~094）；其余端点的请求/响应字段以 `openapi/openapi.json` 为准（§1 已登记、§6 已配验收用例）。断言均为可脚本执行：状态码 + 字段值 + 状态迁移 + 副作用。
+> 下列 40 个端点为**详细契约**（34 个既有 + 5 个已实现 API-090~094 + API-055/096）；其余端点的请求/响应字段以 `openapi/openapi.json` 为准（§1 已登记、§6 已配验收用例）。断言均为可脚本执行：状态码 + 字段值 + 状态迁移 + 副作用。
 ### 2.1 认证、导入与流水
 #### API-001 POST /auth/register
 - 用途：注册账号；FR-L2；认证：公开；幂等：支持；同步。
@@ -520,6 +521,13 @@
   - **为什么不复用 `/nav` 月度 TWR**：`nav_daily` 是 `GET /nav` 的派生缓存——只覆盖被请求过的日期（按月稀疏），每次请求都会按本次区间重建点集、并在同事务内清理区间内不属于本次点集的陈旧行，点集随请求区间变化，因此不能作为稳定的月度收益序列数据源（该理由取决于派生缓存的写入方式，不依赖 `/nav` 的收益口径是否正确，口径修复后仍成立）；指标目录（18 项）不含月度收益率指标。资产日表逐日收益是看板回撤族已使用的 TWR 数据源，按月复利结果唯一。
 - 错误码：VALIDATION_ERROR(422，`months` 非 6/12/24)、ADMIN_CANNOT_READ_TRADES(403)。
 - 验收：`months=6/12/24` 月边界正确（跨年）；只返回本人数据；未构建月份显式 0 且列入 `months_without_data`；`states[]` 每侧状态互斥（买侧首次建仓与加仓互斥、卖侧清仓与减仓互斥）；只读（调用前后表行数不变）；单月收益按日收益复利且符号/展示串由后端给出，无资产行月份 `available=false`+`value_bp=0`+`amount=null`，blocked/旧口径版本行不参与复利与金额累加，覆盖不足标 `partial`；金额为 `daily_pnl` 当月累加（已剔出入金，含分红/打新损益）。
+#### API-055 GET /settings · API-096 PATCH /settings（2026-11-13 用户偏好 v2.1）
+- 用途：读取/局部更新用户偏好（外观与显示、账单旗标阈值与窗口、行情时段、概念板块过滤）；operationId `getSettings` / `patchSettings`。
+- `GET` 响应 200：`{version,updated_at,appearance{theme,density,trend},bill_flags{near_equal_tolerance_pct,chase_margin_pct,stop_loss_margin_pct,short_term_margin_pct,window_trading_days,flags_hash,is_default},market_sessions{sessions[{open,close}],data_ready_after,session_notice_enabled,timezone},concept_filters{mode,excluded[{code,name,resolved}]},benchmark_id,privacy_flags}`；阈值一律百分比串、窗口为十进制整数字符串；无 `user_setting` 行时返回默认视图（`version=1`、`updated_at=null`）。响应头 `ETag: W/"<version>"`，支持 `If-None-Match` → 304。
+- `PATCH` 请求：header `If-Match: W/"<int>"`（必填，`*`/缺失/非法 422）、可选 `Idempotency-Key`；body 为四组任意子集：typed 列只更新出现键、`null` 恢复默认；JSONB 按 RFC 7396 合并（`null` 删键、数组整体替换）；顶层组 `null` 整组重置；未知键/只读键（`benchmark_id`/`privacy_flags`/`timezone`/`flags_hash`/`is_default`）422；空 body 422；值全等于当前 → 200 不 bump（`X-Settings-Changed: false`）。
+- 并发：`UPDATE ... WHERE user_id=:uid AND version=:expected` 单条 CAS；首次缺行 `INSERT ... ON CONFLICT DO NOTHING` 后 version=2；旧版本 409 `VERSION_CONFLICT`。`Idempotency-Key` 重放返回缓存 body，`Idempotency-Replayed: true`；请求指纹含 If-Match + body。
+- 审计：有实际变更才写 `audit_log(action="settings.patch", meta={changed[],from_version,to_version})`。
+- 错误码：VALIDATION_ERROR(422)、VERSION_CONFLICT(409)、IDEMPOTENCY_KEY_REUSED(422)、IDEMPOTENCY_IN_PROGRESS(409)、INSUFFICIENT_SCOPE(403)。
 
 
 ## §3 错误码总表
@@ -702,7 +710,8 @@ data: {"job_id":"job_01J9Z6","status":"succeeded","result_ref":"/api/v1/reports/
 | API-052 | alerts_trigger_payload | 200 含 rule_code/payload；无建议词 | fx_alert | P1 |
 | API-053 | alerts_ack | 200 acked_at 非空 | fx_alert | P1 |
 | API-054 | notifications_list | 200 仅本人通知 | fx_alert | P2 |
-| API-055 | settings_get | 200 含 benchmark/privacy/behavior_rules | fx_base | P0 |
+| API-055 | settings_get（已实现） | 200 含四组偏好生效值 + version/ETag；无行返回默认视图且 `updated_at=null`；`If-None-Match` → 304；只读 | fx_settings | P0 |
+| API-096 | settings_patch（已实现） | 200 + ETag；If-Match 必填/非法 422；CAS 冲突 409；未知键/只读键/空 body 422；无变更不 bump；幂等重放；审计仅在有变更时写入；跨用户互不影响 | fx_settings | P0 |
 | API-056 | settings_benchmark_switch | 200；GET /nav 的 benchmark_id 随之变化 | fx_base | P1 |
 | API-057 | settings_privacy_llm_off | 200；LLM 关闭后 chat fallback=true | fx_llm_off | P1 |
 | API-058 | settings_behavior_rules_effect | 200；触发后 alerts 增加对应 rule_code | fx_alert | P1 |
