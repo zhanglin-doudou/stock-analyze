@@ -8,6 +8,7 @@ admin 与普通用户一样只能管理**自己的**偏好（不调用 `forbid_a
 from __future__ import annotations
 
 import hashlib
+import re
 from collections.abc import Iterable
 from typing import Annotated, Any
 
@@ -36,14 +37,21 @@ from stock_api.schemas import (
     BillFlagsPrefsOut,
     ConceptExcludedOut,
     ConceptFiltersPrefsOut,
+    JobLinks,
     MarketSessionsPrefsOut,
     SettingsOut,
     SettingsPatchIn,
+    TradeFlagRebuildAccepted,
+    TradeFlagRebuildIn,
 )
 
 router = APIRouter(tags=["settings"], route_class=StrictQueryRoute)
 
 _ENDPOINT_PATCH = "settings.patch"
+_ENDPOINT_REBUILD = "POST /settings/trade-flags/rebuild"
+_JOBS_PREFIX = "/api/v1/jobs"
+_MAX_REBUILD_MONTHS = 120
+_MONTH_LABEL = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
 
 #: `platform.user_setting` 参与偏好解析的列（只读回显列不在此列）。
 _SETTING_COLUMNS: tuple[str, ...] = (
@@ -275,6 +283,144 @@ async def patch_settings(
     response.headers["ETag"] = _etag(version)
     response.headers["X-Settings-Changed"] = str(changed).lower()
     return out
+
+
+def _normalized_months(scope: str, raw: list[str]) -> list[str]:
+    """校验并规范化重建范围：`months` 去重排序、`YYYY-MM`、≤120；`all` 不接受 months。"""
+    if scope == "all":
+        if raw:
+            raise ApiError(
+                ErrorCode.VALIDATION_ERROR,
+                detail="scope=all 时不能指定 months",
+                errors=[FieldError("months", "invalid", "scope=all 覆盖全部历史月份")],
+            )
+        return []
+    if not raw:
+        raise ApiError(
+            ErrorCode.VALIDATION_ERROR,
+            detail="scope=months 时必须给出 months",
+            errors=[FieldError("months", "required", "请至少指定一个月份")],
+        )
+    for index, month in enumerate(raw):
+        if not _MONTH_LABEL.match(month):
+            raise ApiError(
+                ErrorCode.VALIDATION_ERROR,
+                detail=f"months[{index}] 不是 YYYY-MM：{month}",
+                errors=[FieldError("months", "invalid", f"months[{index}] 必须形如 2026-01")],
+            )
+    months = sorted(set(raw))
+    if len(months) > _MAX_REBUILD_MONTHS:
+        raise ApiError(
+            ErrorCode.VALIDATION_ERROR,
+            detail=f"单次最多重建 {_MAX_REBUILD_MONTHS} 个月",
+            errors=[FieldError("months", "too_many", f"最多 {_MAX_REBUILD_MONTHS} 个月")],
+        )
+    return months
+
+
+@router.post(
+    "/settings/trade-flags/rebuild",
+    status_code=202,
+    response_model=TradeFlagRebuildAccepted,
+    responses={
+        202: {
+            "model": TradeFlagRebuildAccepted,
+            "description": "已入队重建；同参数复用已有任务时返回 X-Job-Reused: true",
+            "headers": {
+                "Location": {"description": "任务详情（/api/v1/jobs/{job_id}）"},
+                "Retry-After": {"description": "建议轮询间隔（秒）"},
+                "X-Job-Reused": {"description": "true 表示复用了同参数的在途/已完成任务"},
+            },
+        }
+    },
+    operation_id="rebuildTradeFlags",
+)
+async def rebuild_trade_flags(
+    payload: TradeFlagRebuildIn,
+    request: Request,
+    response: Response,
+    ctx: Annotated[TenantContext, Depends(get_tenant)],
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+) -> TradeFlagRebuildAccepted | JSONResponse:
+    """API-097：按当前生效阈值重建账单旗标（202 + Location）。"""
+    user_id = ctx.require_write()
+    state = get_state(request)
+    if not idempotency_key or not 16 <= len(idempotency_key) <= 128:
+        raise ApiError(
+            ErrorCode.VALIDATION_ERROR,
+            errors=[FieldError("Idempotency-Key", "required", "该操作必须携带幂等键(16~128)")],
+        )
+    months = _normalized_months(payload.scope, payload.months)
+    request_hash = hashlib.sha256(
+        canonical_json(
+            {
+                "method": "POST",
+                "path": "/settings/trade-flags/rebuild",
+                "body": {"scope": payload.scope, "months": months},
+            }
+        ).encode("utf-8")
+    ).hexdigest()
+
+    async with state.db.session(user_id=user_id, begin=True) as session:
+        try:
+            record = await state.idempotency.begin(
+                session,
+                user_id=user_id,
+                endpoint=_ENDPOINT_REBUILD,
+                key=idempotency_key,
+                request_hash=request_hash,
+            )
+        except ApiError as exc:
+            if exc.code is ErrorCode.IDEMPOTENCY_IN_PROGRESS:
+                job_ref = exc.metadata.get("job_id")
+                raise ApiError(
+                    ErrorCode.IDEMPOTENCY_IN_PROGRESS,
+                    detail="该幂等键正在处理中",
+                    headers={"X-Job-Id": str(job_ref)} if job_ref else {},
+                ) from exc
+            raise
+        if record is not None:
+            replayed = IdempotencyStore.payload_of(record)
+            if replayed is not None:
+                return JSONResponse(
+                    content=replayed,
+                    status_code=IdempotencyStore.status_of(record),
+                    headers={
+                        "Idempotency-Replayed": "true",
+                        "Location": f"{_JOBS_PREFIX}/{replayed.get('job_id')}",
+                        "Retry-After": "1",
+                    },
+                )
+
+        job_id, reused = await state.queue.enqueue(
+            session,
+            kind="rebuild_trade_flags",
+            user_id=user_id,
+            scope_key=f"{user_id}:trade_flags",
+            params={"scope": payload.scope, "months": months},
+        )
+        accepted = TradeFlagRebuildAccepted(
+            job_id=job_id,
+            links=JobLinks(
+                self=f"{_JOBS_PREFIX}/{job_id}",
+                events=f"{_JOBS_PREFIX}/{job_id}/events",
+            ),
+        )
+        await state.idempotency.complete(
+            session,
+            user_id=user_id,
+            endpoint=_ENDPOINT_REBUILD,
+            key=idempotency_key,
+            status_code=202,
+            body=accepted.model_dump(mode="json"),
+            job_id=job_id,
+        )
+
+    response.headers["Location"] = f"{_JOBS_PREFIX}/{job_id}"
+    response.headers["Retry-After"] = "1"
+    if reused:
+        response.headers["X-Job-Reused"] = "true"
+    return accepted
 
 
 __all__ = ["router"]

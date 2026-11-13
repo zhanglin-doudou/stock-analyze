@@ -32,6 +32,7 @@ from stock_platform.tenant import TenantContext
 from stock_api.deps import get_state, get_tenant
 from stock_api.routing import StrictQueryRoute
 from stock_api.schemas import (
+    DashboardTradeFlagConfigOut,
     FlagGlossaryOut,
     ForwardReturnOut,
     InsightAddonSummaryOut,
@@ -248,6 +249,21 @@ def _trade_reason_out(dto: Any) -> Any:
     return _reason_out(dto)
 
 
+def _flag_config_out(view: Any) -> DashboardTradeFlagConfigOut | None:
+    if view is None:
+        return None
+    return DashboardTradeFlagConfigOut(
+        window_trading_days=view.window_trading_days,
+        near_equal_tolerance_pct=view.near_equal_tolerance_pct,
+        chase_margin_pct=view.chase_margin_pct,
+        stop_loss_margin_pct=view.stop_loss_margin_pct,
+        short_term_margin_pct=view.short_term_margin_pct,
+        flags_hash=view.flags_hash,
+        is_default=view.is_default,
+        stale=view.stale,
+    )
+
+
 def _item_out(item: Any) -> RoundInsightItemOut:
     return RoundInsightItemOut(
         round_id=item.round_id,
@@ -271,6 +287,7 @@ def _item_out(item: Any) -> RoundInsightItemOut:
         flags=item.flags,
         quality=list(dict.fromkeys(item.quality)),
         status_counts=item.status_counts,
+        flag_config=_flag_config_out(item.flag_config),
     )
 
 
@@ -430,6 +447,7 @@ async def list_round_insights_endpoint(
         assumptions=page.assumptions,
         disclaimer=page.disclaimer,
         flag_glossary=_glossary_out(page.flag_glossary),
+        flag_config=_flag_config_out(page.flag_config),
     )
 
 
@@ -487,6 +505,7 @@ async def get_round_insights_endpoint(
         disclaimer=detail.disclaimer,
         flag_glossary=_glossary_out(detail.flag_glossary),
         trade_flag_glossary=_trade_flag_glossary_out(detail.trade_flag_glossary),
+        flag_config=_flag_config_out(detail.flag_config),
     )
 
 

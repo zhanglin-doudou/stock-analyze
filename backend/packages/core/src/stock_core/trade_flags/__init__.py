@@ -5,6 +5,8 @@ from __future__ import annotations
 from stock_core.trade_flags.constants import (
     BPS_DENOMINATOR,
     CHASE_MARGIN_BPS,
+    CONFIG_COLUMNS,
+    DEFAULT_TRADE_FLAG_CONFIG,
     DEFINITION_VERSION,
     DISPLAY_STATUSES,
     LOOKAHEAD_LABEL_ZH,
@@ -21,6 +23,7 @@ from stock_core.trade_flags.constants import (
     STATUS_PENDING,
     STOP_LOSS_MARGIN_BPS,
     WINDOW_TRADING_DAYS,
+    TradeFlagConfig,
 )
 from stock_core.trade_flags.definitions import (
     BUY_FLAG_CODES,
@@ -32,6 +35,7 @@ from stock_core.trade_flags.definitions import (
     TRADE_FLAG_LOOKAHEAD_CODES,
     TREND_FLAG_CODES,
     TradeFlagDefinition,
+    render_description,
 )
 from stock_core.trade_flags.engine import (
     BarPoint,
@@ -44,6 +48,8 @@ __all__ = [
     "BPS_DENOMINATOR",
     "BUY_FLAG_CODES",
     "CHASE_MARGIN_BPS",
+    "CONFIG_COLUMNS",
+    "DEFAULT_TRADE_FLAG_CONFIG",
     "DEFINITION_VERSION",
     "DISPLAY_STATUSES",
     "LOOKAHEAD_LABEL_ZH",
@@ -70,6 +76,8 @@ __all__ = [
     "BarPoint",
     "FlagResult",
     "TradeContext",
+    "TradeFlagConfig",
     "TradeFlagDefinition",
     "evaluate_trade_flags",
+    "render_description",
 ]

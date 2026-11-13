@@ -31,7 +31,7 @@ from stock_core.insights import aggregate as agg
 from stock_core.insights import calendar as cal
 from stock_core.insights.flags import FLAG_DEFINITIONS, ITEM_FLAG_CODES, FlagDefinition
 from stock_core.insights.forward import ForwardResult, ForwardTrade, compute_forward, price_net
-from stock_core.trade_flags import TradeFlagDefinition
+from stock_core.trade_flags import TradeFlagConfig, TradeFlagDefinition
 from stock_core.trade_flags.constants import STATUS_HIT
 from stock_core.trade_flags.engine import TradeContext, evaluate_trade_flags
 from stock_core.values import Money, Price, Ratio, format_quantity
@@ -39,6 +39,7 @@ from stock_ledger.corporate_actions import is_corporate_action
 from stock_ledger.models import Trade
 from stock_platform.ids import new_id
 from stock_platform.ports import Bar, MarketDataSource
+from stock_platform.repositories.users import UserSettingRepository
 from stock_platform.symbols import classify_symbol, is_convertible_bond
 from stock_review.application.valuation import is_money_fund_row
 from stock_review.insights import reasons
@@ -47,7 +48,10 @@ from stock_review.metrics.context import Period, parse_period_label
 from stock_review.metrics.datasets import DEFAULT_BENCHMARK, benchmark_fetch_symbol
 from stock_review.models import Round, RoundFill, TradeForwardReturn, TradeReason
 from stock_review.trade_flags import (
+    TradeFlagConfigView,
     TradeFlagRecord,
+    config_view,
+    has_stale_flags,
     load_trade_flags,
     trade_flag_glossary,
 )
@@ -150,6 +154,8 @@ class InsightItem:
     status_counts: dict[str, int]
     # 仅内部汇总使用（加仓/加仓后下跌/止盈卖飞/止损后反弹），不序列化。
     summary_flags: set[str]
+    # 当前生效阈值（additive，列表/详情均回显；`stale` 仅详情用于提示重算）。
+    flag_config: TradeFlagConfigView | None = None
 
 
 @dataclass(slots=True)
@@ -285,6 +291,7 @@ class InsightsPage:
     assumptions: list[str]
     disclaimer: str
     flag_glossary: list[FlagDefinition] = field(default_factory=list)
+    flag_config: TradeFlagConfigView | None = None
 
 
 @dataclass(slots=True)
@@ -310,6 +317,7 @@ class RoundInsightDetail:
     disclaimer: str
     flag_glossary: list[FlagDefinition] = field(default_factory=list)
     trade_flag_glossary: list[TradeFlagDefinition] = field(default_factory=list)
+    flag_config: TradeFlagConfigView | None = None
 
 
 @dataclass(slots=True)
@@ -700,6 +708,7 @@ def _trade_flag_statuses(
     *,
     states: dict[str, _PositionState],
     market: _MarketData,
+    config: TradeFlagConfig,
 ) -> dict[str, str]:
     """单笔账单的旗标状态（与账单旗标构建同源的纯判定，不依赖外部构建任务）。"""
     state = states.get(trade.id)
@@ -718,6 +727,7 @@ def _trade_flag_statuses(
         bars=market.bars_by_symbol.get(trade.security_code, ()),
         calendar=market.calendar,
         data_as_of=market.data_as_of,
+        config=config,
     )
     return {item.code: item.status for item in results}
 
@@ -886,6 +896,7 @@ def _round_flags(
     forwards: dict[tuple[str, int], TradeForwardReturn],
     fingerprint: str,
     corporate: dict[str, list[date]],
+    config: TradeFlagConfig,
 ) -> _RoundFlagResult:
     flags: list[str] = []
     quality: list[str] = []
@@ -902,7 +913,7 @@ def _round_flags(
 
     # ── 抄底计数：回合内命中即时抄底或短期抄底的买入账单个数 ──
     for trade in round_buys or [buy_eval]:
-        statuses = _trade_flag_statuses(trade, states=states, market=market)
+        statuses = _trade_flag_statuses(trade, states=states, market=market, config=config)
         if (
             statuses.get("instant_bottom") == STATUS_HIT
             or statuses.get("short_term_bottom") == STATUS_HIT
@@ -911,7 +922,7 @@ def _round_flags(
 
     # ── 卖飞计数：带短期卖飞旗标的卖出账单，再按净卖价与卖出前均价分侧 ──
     for trade in round_sells:
-        statuses = _trade_flag_statuses(trade, states=states, market=market)
+        statuses = _trade_flag_statuses(trade, states=states, market=market, config=config)
         if statuses.get("short_term_sold_early") != STATUS_HIT:
             continue
         sell_state = states.get(trade.id)
@@ -1063,6 +1074,7 @@ def _build_item(
     order_index: dict[str, int],
     day_index: dict[date, list[tuple[str, str, int]]],
     fingerprint: str,
+    config: TradeFlagConfig,
 ) -> InsightItem:
     holding = (
         cal.holding_trading_days(market.calendar, round_row.open_date, round_row.close_date)
@@ -1081,6 +1093,7 @@ def _build_item(
         forwards=forwards,
         fingerprint=fingerprint,
         corporate=corporate,
+        config=config,
     )
     flags, quality = flag_result.flags, flag_result.quality
     buy_view = _side_view(
@@ -1456,6 +1469,8 @@ async def get_insights_page(
     order_index = {trade.id: index for index, trade in enumerate(ordered_trades)}
     states = _position_states(ordered_trades)
     day_index = _trade_day_index(ordered_trades)
+    effective = await UserSettingRepository(session).get_effective(user_id)
+    trade_config = TradeFlagConfig.from_columns(effective.bill_bps)
 
     reason_map = await reasons.active_by_dedupe(
         session, user_id, [trade.dedupe_key for trade in trades if trade.id in symbol_trade_ids]
@@ -1467,22 +1482,23 @@ async def get_insights_page(
     for round_row in rounds:
         buy = by_id.get(round_row.open_trade_id)
         sell = by_id.get(round_row.close_trade_id) if round_row.close_trade_id else None
-        items.append(
-            _build_item(
-                round_row=round_row,
-                buy=buy,
-                sell=sell,
-                reasons_map=reason_map,
-                forwards=cached,
-                market=market,
-                corporate=corporate,
-                states=states,
-                ordered_trades=ordered_trades,
-                order_index=order_index,
-                day_index=day_index,
-                fingerprint=fingerprint,
-            )
+        item = _build_item(
+            round_row=round_row,
+            buy=buy,
+            sell=sell,
+            reasons_map=reason_map,
+            forwards=cached,
+            market=market,
+            corporate=corporate,
+            states=states,
+            ordered_trades=ordered_trades,
+            order_index=order_index,
+            day_index=day_index,
+            fingerprint=fingerprint,
+            config=trade_config,
         )
+        item.flag_config = config_view(effective)
+        items.append(item)
 
     if bucket:
         items = [item for item in items if item.bucket == bucket]
@@ -1583,6 +1599,7 @@ async def get_insights_page(
         ],
         disclaimer=DISCLAIMER,
         flag_glossary=list(FLAG_DEFINITIONS),
+        flag_config=config_view(effective),
     )
 
 
@@ -1617,8 +1634,11 @@ async def get_round_insight(
     states = _position_states(ordered_trades)
     day_index = _trade_day_index(ordered_trades)
     wanted = {trade.dedupe_key for trade in trades}
+    effective = await UserSettingRepository(session).get_effective(user_id)
+    trade_config = TradeFlagConfig.from_columns(effective.bill_bps)
     reason_map = await reasons.active_by_dedupe(session, user_id, wanted)
-    flag_map = await load_trade_flags(session, user_id, wanted)
+    flag_map = await load_trade_flags(session, user_id, wanted, flags_hash=effective.flags_hash)
+    stale = await has_stale_flags(session, user_id, wanted, flags_hash=effective.flags_hash)
     cached = await _cached_forwards(session, user_id, list(wanted))
     buy_view = _side_view(
         buy,
@@ -1651,6 +1671,7 @@ async def get_round_insight(
         order_index=order_index,
         day_index=day_index,
         fingerprint=fingerprint,
+        config=trade_config,
     )
     fills = []
     for fill in await session.scalars(
@@ -1718,7 +1739,8 @@ async def get_round_insight(
         },
         disclaimer=DISCLAIMER,
         flag_glossary=list(FLAG_DEFINITIONS),
-        trade_flag_glossary=trade_flag_glossary(),
+        trade_flag_glossary=trade_flag_glossary(trade_config),
+        flag_config=config_view(effective, stale=stale),
     )
 
 

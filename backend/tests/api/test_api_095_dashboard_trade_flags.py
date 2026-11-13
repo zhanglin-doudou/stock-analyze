@@ -86,6 +86,7 @@ async def _seed_flag(
     status: str,
     side: str,
     security_code: str = "600519",
+    flags_hash: str = DEFAULT_FLAGS_HASH,
 ) -> None:
     async with engine.begin() as conn:
         await conn.execute(
@@ -103,7 +104,7 @@ async def _seed_flag(
                 "reason": None,
                 "lookahead": code in ("short_term_bottom", "short_term_top"),
                 "definition_version": DEFINITION_VERSION,
-                "flags_hash": DEFAULT_FLAGS_HASH,
+                "flags_hash": flags_hash,
                 "computed_at": datetime(2026, 7, 1, tzinfo=UTC),
             },
         )
@@ -610,3 +611,104 @@ async def test_api_095_monthly_return_without_build_state_is_unavailable(
     assert body["has_return_data"] is False
     assert all(item["monthly_return"]["available"] is False for item in body["items"])
     assert all(item["monthly_return"]["value_bp"] == 0 for item in body["items"])
+
+
+async def test_api_095_flag_config_default_and_stale_months(
+    flags_client: httpx.AsyncClient,
+    owner_engine: AsyncEngine,
+    account_factory: Any,
+) -> None:
+    """默认阈值回显 `flag_config`；旧指纹月份进 `stale_months` 且旗标计数为 0。"""
+    account = await account_factory()
+    await _seed_flag(
+        owner_engine,
+        account.user_id,
+        trade_date=date(2026, 4, 8),
+        dedupe_key="old-hash-buy",
+        code="chase",
+        status="hit",
+        side="buy",
+        flags_hash="deadbeefdeadbeef",
+    )
+    await _seed_flag(
+        owner_engine,
+        account.user_id,
+        trade_date=date(2026, 6, 3),
+        dedupe_key="current-hash-buy",
+        code="chase",
+        status="hit",
+        side="buy",
+    )
+
+    resp = await flags_client.get(f"{API_PREFIX}/dashboard/trade-flags", headers=account.headers)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+
+    assert body["flag_config"] == {
+        "window_trading_days": "5",
+        "near_equal_tolerance_pct": "1.00%",
+        "chase_margin_pct": "1.00%",
+        "stop_loss_margin_pct": "1.00%",
+        "short_term_margin_pct": "5.00%",
+        "flags_hash": DEFAULT_FLAGS_HASH,
+        "is_default": True,
+        "stale": False,
+    }
+    assert body["stale_months"] == ["2026-04"]
+    # 旧指纹月份仍有账单笔数（与阈值无关），但没有当前口径的旗标计数。
+    assert _item(body, "2026-04")["buy_count"] == 1
+    assert sum(_flag_counts(_item(body, "2026-04")).values()) == 0
+    assert sum(_state_counts(_item(body, "2026-04")).values()) == 0
+    assert _flag_counts(_item(body, "2026-06"))["chase"] == 1
+    assert "2026-04" not in body["months_without_data"]
+
+
+async def test_api_095_flag_config_follows_user_preference(
+    flags_client: httpx.AsyncClient,
+    owner_engine: AsyncEngine,
+    account_factory: Any,
+) -> None:
+    """改阈值后：`flag_config` 立即反映新值，旧指纹月份的旗标计数归零并列入 `stale_months`。"""
+    account = await account_factory()
+    await _seed_flag(
+        owner_engine,
+        account.user_id,
+        trade_date=date(2026, 6, 3),
+        dedupe_key="built-with-defaults",
+        code="chase",
+        status="hit",
+        side="buy",
+    )
+
+    resp = await flags_client.patch(
+        f"{API_PREFIX}/settings",
+        json={
+            "bill_flags": {
+                "near_equal_tolerance_pct": "2.50%",
+                "short_term_margin_pct": "8.00%",
+                "window_trading_days": "3",
+            }
+        },
+        headers={**account.headers, "If-Match": 'W/"1"'},
+    )
+    assert resp.status_code == 200, resp.text
+    changed = resp.json()["bill_flags"]
+    assert changed["is_default"] is False
+    assert changed["flags_hash"] != DEFAULT_FLAGS_HASH
+
+    body = (
+        await flags_client.get(f"{API_PREFIX}/dashboard/trade-flags", headers=account.headers)
+    ).json()
+    assert body["flag_config"] == {
+        "window_trading_days": "3",
+        "near_equal_tolerance_pct": "2.50%",
+        "chase_margin_pct": "1.00%",
+        "stop_loss_margin_pct": "1.00%",
+        "short_term_margin_pct": "8.00%",
+        "flags_hash": changed["flags_hash"],
+        "is_default": False,
+        "stale": False,
+    }
+    assert body["stale_months"] == ["2026-06"]
+    assert sum(_flag_counts(_item(body, "2026-06")).values()) == 0
+    assert _item(body, "2026-06")["buy_count"] == 1

@@ -392,6 +392,24 @@ OPERATION_META: dict[str, dict[str, Any]] = {
             "ADMIN_CANNOT_READ_TRADES",
         ],
     },
+    "rebuildTradeFlags": {
+        "api_id": "API-097",
+        "scope": "write",
+        "idempotent": True,
+        "async": True,
+        "error_codes": [
+            "IDEMPOTENCY_KEY_REUSED",
+            "IDEMPOTENCY_IN_PROGRESS",
+            "JOB_ALREADY_RUNNING",
+            "QUOTA_EXCEEDED",
+            "VALIDATION_ERROR",
+            "TOKEN_EXPIRED",
+            "TOKEN_REVOKED",
+            "MULTIPLE_CREDENTIALS",
+            "INSUFFICIENT_SCOPE",
+            "ADMIN_CANNOT_READ_TRADES",
+        ],
+    },
     "cancelJob": {
         "api_id": "API-064",
         "scope": "write",
@@ -1587,6 +1605,18 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
         "202": {
             "job_id": "job_" + _ID_SUFFIX,
             "type": "build_assets",
+            "status": "pending",
+            "links": {
+                "self": f"/api/v1/jobs/job_{_ID_SUFFIX}",
+                "events": f"/api/v1/jobs/job_{_ID_SUFFIX}/events",
+            },
+        }
+    },
+    # 2026-11-13（API-097）：202 专用响应（type 必须是 rebuild_trade_flags）。
+    "rebuildTradeFlags": {
+        "202": {
+            "job_id": "job_" + _ID_SUFFIX,
+            "type": "rebuild_trade_flags",
             "status": "pending",
             "links": {
                 "self": f"/api/v1/jobs/job_{_ID_SUFFIX}",

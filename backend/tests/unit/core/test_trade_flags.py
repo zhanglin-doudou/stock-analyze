@@ -641,3 +641,173 @@ def test_status_reason_covers_no_cost_basis_label() -> None:
     from stock_core.trade_flags.engine import _status_reason
 
     assert _status_reason(STATUS_NO_COST_BASIS) == "no_cost_basis"
+
+
+# ── 用户级阈值配置（P1-1）────────────────────────────────────
+def test_default_config_matches_contract_columns_and_hash() -> None:
+    from stock_contracts.preferences import (
+        BILL_FLAG_PCT_FIELDS,
+        BILL_WINDOW_COLUMN,
+        DEFAULT_FLAGS_HASH,
+    )
+    from stock_core.preferences import flags_hash
+    from stock_core.trade_flags import CONFIG_COLUMNS, DEFAULT_TRADE_FLAG_CONFIG, TradeFlagConfig
+
+    contract_columns = {column for _, column, _, _, _ in BILL_FLAG_PCT_FIELDS}
+    contract_columns.add(BILL_WINDOW_COLUMN)
+    assert set(CONFIG_COLUMNS.values()) == contract_columns
+    assert TradeFlagConfig() == DEFAULT_TRADE_FLAG_CONFIG
+    assert flags_hash(TradeFlagConfig().as_columns()) == DEFAULT_FLAGS_HASH
+
+
+def test_config_from_columns_roundtrip_and_defaults() -> None:
+    from stock_core.trade_flags import DEFAULT_TRADE_FLAG_CONFIG, TradeFlagConfig
+
+    assert TradeFlagConfig.from_columns({}) == DEFAULT_TRADE_FLAG_CONFIG
+    partial = TradeFlagConfig.from_columns({"bill_chase_margin_bps": 320})
+    assert partial.chase_margin_bps == 320
+    assert partial.near_equal_tolerance_bps == DEFAULT_TRADE_FLAG_CONFIG.near_equal_tolerance_bps
+    custom = TradeFlagConfig(
+        near_equal_tolerance_bps=250,
+        chase_margin_bps=300,
+        stop_loss_margin_bps=150,
+        short_term_margin_bps=800,
+        window_trading_days=3,
+    )
+    assert TradeFlagConfig.from_columns(custom.as_columns()) == custom
+
+
+def test_render_description_default_is_verbatim() -> None:
+    from stock_core.trade_flags import render_description
+
+    rendered = render_description()
+    assert len(rendered) == len(TRADE_FLAG_CODES)
+    by_code = {item.code: item for item in rendered}
+    assert "上下 1% 以内" in by_code["addon_average"].description_zh
+    assert "前 5 个行情日最高收盘价的 1% 以上" in by_code["chase"].description_zh
+    assert "共 10 个" in by_code["short_term_bottom"].description_zh
+    assert "第 5 个行情日收盘价的 5% 以上" in by_code["short_term_sold_early"].description_zh
+    assert "the 5th trading day after the sale" in by_code["short_term_sold_early"].description_en
+    for item in rendered:
+        assert "{" not in item.description_zh
+        assert "{" not in item.description_en
+
+
+def test_render_description_follows_custom_config() -> None:
+    from stock_core.trade_flags import TradeFlagConfig, render_description
+
+    config = TradeFlagConfig(
+        near_equal_tolerance_bps=250,
+        chase_margin_bps=300,
+        stop_loss_margin_bps=150,
+        short_term_margin_bps=800,
+        window_trading_days=3,
+    )
+    by_code = {item.code: item for item in render_description(config)}
+    assert "上下 2.5% 以内" in by_code["addon_average"].description_zh
+    assert "前 3 个行情日最高收盘价的 3% 以上" in by_code["chase"].description_zh
+    assert "共 6 个" in by_code["short_term_bottom"].description_zh
+    assert "8% 以内" in by_code["short_term_top"].description_zh
+    assert "the 3rd trading day after the sale" in by_code["short_term_sold_early"].description_en
+
+
+def test_render_description_ordinal_teens_and_second() -> None:
+    from stock_core.trade_flags import TradeFlagConfig, render_description
+
+    thirteen = {
+        item.code: item for item in render_description(TradeFlagConfig(window_trading_days=13))
+    }
+    assert "13th trading day" in thirteen["short_term_sold_early"].description_en
+    second = {
+        item.code: item for item in render_description(TradeFlagConfig(window_trading_days=2))
+    }
+    assert "2nd trading day" in second["short_term_sold_early"].description_en
+
+
+def test_non_default_config_changes_near_and_chase_judgement() -> None:
+    from stock_core.trade_flags import TradeFlagConfig
+
+    # 加仓：净买价高于均价 2% —— 默认 1% 容差判「追涨」，2.5% 容差判「平价」。
+    addon = _buy(net_price_units=102_000_000, quantity_before_units=1000, avg_cost_units=PRICE)
+    default_state = _by_code(evaluate_trade_flags(addon, bars=(), calendar=(), data_as_of=None))
+    assert default_state["addon_chase"] == STATUS_HIT
+    assert default_state["addon_average"] == STATUS_MISS
+    wide_state = _by_code(
+        evaluate_trade_flags(
+            addon,
+            bars=(),
+            calendar=(),
+            data_as_of=None,
+            config=TradeFlagConfig(near_equal_tolerance_bps=250),
+        )
+    )
+    assert wide_state["addon_average"] == STATUS_HIT
+    assert wide_state["addon_chase"] == STATUS_MISS
+
+    # 追涨：净买价高于前窗口最高收盘价 2% —— 默认 1% 命中，3% 阈值不命中。
+    bars = [*_flat(5, start_index=9), (TRADE, PRICE), *_flat(5, start_index=15)]
+    chase_ctx = _buy(net_price_units=102_000_000)
+    default_chase = _by_code(
+        evaluate_trade_flags(chase_ctx, bars=bars, calendar=CALENDAR, data_as_of=CALENDAR[-1])
+    )
+    assert default_chase["chase"] == STATUS_HIT
+    strict_chase = _by_code(
+        evaluate_trade_flags(
+            chase_ctx,
+            bars=bars,
+            calendar=CALENDAR,
+            data_as_of=CALENDAR[-1],
+            config=TradeFlagConfig(chase_margin_bps=300),
+        )
+    )
+    assert strict_chase["chase"] == STATUS_MISS
+
+
+def test_non_default_short_term_margin_and_window() -> None:
+    from stock_core.trade_flags import TradeFlagConfig
+
+    # 净买价高于前窗口最低收盘价 6%：默认 5% 容差不命中，8% 命中。
+    bars = [*_bars([PRICE] * 5, 9), (TRADE, PRICE), *_bars([PRICE] * 5, 15)]
+    ctx = _buy(net_price_units=106_000_000)
+    default_res = _by_code(
+        evaluate_trade_flags(ctx, bars=bars, calendar=CALENDAR, data_as_of=CALENDAR[-1])
+    )
+    assert default_res["instant_bottom"] == STATUS_MISS
+    wide = _by_code(
+        evaluate_trade_flags(
+            ctx,
+            bars=bars,
+            calendar=CALENDAR,
+            data_as_of=CALENDAR[-1],
+            config=TradeFlagConfig(short_term_margin_bps=800),
+        )
+    )
+    assert wide["instant_bottom"] == STATUS_HIT
+    assert wide["short_term_bottom"] == STATUS_HIT
+
+    # 窗口 3 时只提供 2 天前史 → 历史不足；默认窗口 5 也历史不足（同一状态）。
+    short_history = [*_bars([PRICE] * 2, 10), (TRADE, PRICE), *_bars([PRICE] * 5, 15)]
+    short_ctx = _buy(net_price_units=PRICE)
+    assert (
+        _by_code(
+            evaluate_trade_flags(
+                short_ctx,
+                bars=short_history,
+                calendar=CALENDAR,
+                data_as_of=CALENDAR[-1],
+                config=TradeFlagConfig(window_trading_days=3),
+            )
+        )["chase"]
+        == STATUS_INSUFFICIENT_HISTORY
+    )
+    # 窗口 1 只需 1 天前史，同一数据即可判定（默认窗口 5 不足）。
+    one_day = _by_code(
+        evaluate_trade_flags(
+            short_ctx,
+            bars=short_history,
+            calendar=CALENDAR,
+            data_as_of=CALENDAR[-1],
+            config=TradeFlagConfig(window_trading_days=1),
+        )
+    )
+    assert one_day["chase"] == STATUS_MISS

@@ -1,7 +1,9 @@
 # 用户偏好配置 v2.1（评审修订版）：扩展 `platform.user_setting` + 通用 PATCH（外观与显示 / 账单旗标阈值与行情时段 / 概念板块过滤）
 
-> 版本：**v2.1（评审修订版，2026-11-13）** ｜ 状态：**P0 已实现（2026-11-13），P1/P2 待验收后继续** ｜ 基线：`5419813`（schema `0013`；API-Catalog 94 端点 / 已实现 62 个 operation / 2xx 示例 56 / `SEED_ERROR_COUNT=47`；旗标 `DEFINITION_VERSION="1.4"`、20 码）
+> 版本：**v2.1（评审修订版，2026-11-13）** ｜ 状态：**P0、P1-1、P1-2 已实现（2026-11-13），P2 待验收后继续** ｜ 基线：`5419813`（schema `0013`；API-Catalog 94 端点 / 已实现 62 个 operation / 2xx 示例 56 / `SEED_ERROR_COUNT=47`；旗标 `DEFINITION_VERSION="1.4"`、20 码）
 > **P0 实现记录（2026-11-13）**：仅交付 P0-1（数据与设置接口）+ P0-2（前端设置页）。实际端点计数为 **95 端点 / 64 operation / 58 个 2xx 示例 / `EXPECTED_PERIOD2=40`**（API-097 未登记，故与 D-16 的「96/65/59/41」相差 1，属 P0 增量）；迁移 `0014_user_setting_preferences`；阈值/窗口与默认值不同时设置页显示「需重建账单旗标」，重建端点与旗标接算留待 P1。
+> **P1-1 实现记录（2026-11-13）**：`TradeFlagConfig` 参数化 `evaluate_trade_flags`；`definitions` 改模板 + `render_description(config)`；`build_trade_flags_for_user(config=)` 落 `flags_hash`，`load_trade_flags`/`monthly_trade_flag_summary` 按 hash 过滤并新增 `stale_months[]`；CLI `build-trade-flags` 逐用户读偏好；API-092/093/095 additive `flag_config`；`core.preferences.resolve` 增 `bill_bps`；`UserSettingRepository.get_effective`。API-097 与前端「立即重算」在 P1-2。
+> **P1-2 实现记录（2026-11-13）**：worker handler `rebuild_trade_flags`（`stock_review.application.trade_flags.rebuild_trade_flags_job`：`scope=all` 按首末交易月、`scope=months` 按给定月，逐月构建、每月检查取消、最近 120 月截断）；API-097 `POST /settings/trade-flags/rebuild`（`Idempotency-Key` 必填、202 + `Location`/`Retry-After`、同 key 重放 `Idempotency-Replayed`、同 scope 单飞 `X-Job-Reused`、异参在途 409、months 格式/去重/上限 422）；计数升至 **96 端点 / 65 operation / 59 个 2xx 示例 / `EXPECTED_PERIOD2=41`**；前端设置页账单旗标卡片新增「立即重算」（`scope=all`，轮询 job 进度，成功后刷新设置以更新指纹）；P0 的「需重建账单旗标」提示即接到该入口。看板/回合详情页的 stale 横幅（§7.4）不在本轮范围，数据已由 P1-1 additive 就绪。
 > **v2.1 修订依据**：2026-11-13 三名独立评审（架构/数据/契约、API/并发、业务口径/测试）均 **REQUEST_CHANGES**；本版按评审 P0/P1 全部修复并**重新对齐 HEAD `5419813`**。评审记录：[2026-11-13-DevDesign-Review-user-preferences](../reviews/2026-11-13-DevDesign-Review-user-preferences.md)。
 > **v2.0（2026-11-12）** 依据人工选型：① 扩展 `platform.user_setting`；② 通用 `PATCH /settings`（typed 列局部更新 + JSONB merge patch）；③ 移除账单字段映射。
 > **2026-11-13 人工决策**：v2.0 的 H-01~H-10 按推荐执行；评审新增的再决策项见 §0.C（HITL-R1~R6，均给出推荐值，未确认前按推荐实现）。
@@ -353,9 +355,9 @@ POST /settings/trade-flags/rebuild (API-097)
   - `load_trade_flags(session, user_id, dedupe_keys, *, flags_hash)`：只返回「当前 `definition_version` + 当前 `flags_hash`」行。
   - `monthly_trade_flag_summary`：买卖笔数查询**不加 hash 条件**；旗标/状态查询加当前 hash。
   - `stale_months`：窗口内存在当前 `definition_version` 行、但**没有任何当前 hash 行**的月份；`months_without_data`：窗口内完全没有行的月份；两者互斥。
-  - API-092/093 `flag_config {thresholds..., flags_hash, is_default, stale}`：`stale=true` 表示「请求涉及的部分账单没有当前 hash 行」；前端展示「阈值已更新，重算后更新」，不展示旧 hash 结果。
+  - API-092/093 `flag_config {thresholds..., flags_hash, is_default, stale}`：`stale=true` 表示「请求涉及的账单中存在**旧 `flags_hash` 行**」（即曾经构建过、但指纹不是当前配置）；从未构建过的账单不置 stale（否则每个未构建回合都会误报）。前端展示「阈值已更新，重算后更新」，不展示旧 hash 结果。
 - **两套读取的一致性**：API-092/093 的 `status_counts` 为**现算**（始终当前配置）；`trade_flags` 为**落库**（按当前 hash 过滤）。`flag_config.stale=true` 只表示落库旗标待重算；此时前端提示「待重算」，不用落库旗标冒充当前口径（`status_counts` 仍可作为当前计数展示）。
-- **术语表**：`definitions.py` 文案改「模板 + 服务端渲染」（`{window}`/`{near_pct}`/`{chase_pct}`/`{stop_pct}`/`{short_pct}`），默认配置下渲染结果**逐字等于当前文案**（逐 code 黄金文本测试）；非默认时填入实际阈值。`trade_flag_glossary` 仅详情端点返回（列表端点现状无该字段）。
+- **术语表**：`definitions.py` 文案改「模板 + 服务端渲染」（`{window}`/`{span}`/`{window_ord}`/`{near_pct}`/`{chase_pct}`/`{stop_pct}`/`{short_pct}`，其中 `span=2×window`、`window_ord` 为英文序数），默认配置下渲染结果**逐字等于当前文案**（逐 code 黄金文本测试）；非默认时填入实际阈值（bps→紧凑百分比，如 250→`2.5`）。`trade_flag_glossary` 仅详情端点返回（列表端点现状无该字段），渲染用用户生效配置。
 - **不联动**：`timing.chase/fly` 与回合洞察 `insights.flags` 保持独立。
 - **regen**：只保留最新 hash（重建覆盖）；不保留旧口径（H-09）。
 
@@ -480,6 +482,7 @@ POST /settings/trade-flags/rebuild (API-097)
 
 - 头 `Idempotency-Key` 必填；body `{"scope":"all"}` 或 `{"scope":"months","months":["2026-01"]}`；范围 ≤120 月。
 - 202 + `Location`；worker kind `rebuild_trade_flags`（同 CLI 函数）；同参复用 job；错误 422/429/409。
+- **实现口径（P1-2）**：`scope=all` 不接受 `months`（422）；`scope=months` 必须非空（422）；月份须 `YYYY-MM`、去重升序、≤120（422）。`scope=all` 取 `min/max(trade_date)` 的自然月区间并截断最近 120 月（`truncated=true`）；无交易 → job `succeeded` + `months=[]`（非失败）。job `result` 为 `{months[], months_count, trades, rows, flags_hash, truncated}`；逐月调用 `build_trade_flags_for_user(config=当前生效阈值)`，每月前检查取消。同 `scope_key=<user>:trade_flags` 且参数相同 → 复用在途 job（`X-Job-Reused: true`）；参数不同且任务在途 → 409 `JOB_ALREADY_RUNNING`。
 
 ### 5.5 additive 变更
 
@@ -622,7 +625,7 @@ PATCH /settings → require_write → _parse_if_match → 租户 session
 | review 板块 | off 严格零变化（字段/ETag/assumptions 逐项比对）；hide 行/TopN/others 排除且聚合不变；exclude `filtered_*` 正确、unclassified 不含被排除、caveat 保留；悬空 code；非 off ETag 变化 |
 | API | API-055/096/097 各 ≥3：默认、局部性、JSONB 合并、null、空 body 422、只读字段 422、未知键 422、If-Match 缺失/`*`/旧版本、304、幂等重放（ETag 由 body.version 重算、不重复 bump、no-op complete）、admin 可读写自身偏好、read PAT 403、rebuild 202/隔离 |
 | 越权 | 三个新端点进 `UNAUTHENTICATED_MATRIX`；`_unauth_kwargs` 补 PATCH/rebuild 最小载荷；API-096/097 read-scope 403 |
-| 前端 | 四组表单、脏字段 PATCH、窗口下拉、外观播种、stale 横幅、概念 `resolved`；零口径 lint |
+| 前端 | 四组表单、脏字段 PATCH、窗口下拉、外观播种、stale 横幅、概念 `resolved`、「立即重算」（API-097 + 轮询成功刷新）；零口径 lint |
 | 回归 | 默认偏好：指标/板块/旗标/资产/回合的 golden 与 API 断言零变化；`test_api_095` 种子行默认 hash 可读 |
 
 ### 8.2 手工验收（可执行版）

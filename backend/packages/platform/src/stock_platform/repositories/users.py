@@ -9,8 +9,21 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from stock_contracts.enums import Role
+from stock_core.preferences import EffectivePreferences, resolve
 
 from stock_platform.models import User, UserSetting
+
+#: `platform.user_setting` 参与偏好解析的列（只读回显列不在此列）。
+PREFERENCE_COLUMNS: tuple[str, ...] = (
+    "display_prefs",
+    "market_session_prefs",
+    "concept_filter_prefs",
+    "bill_near_equal_tolerance_bps",
+    "bill_chase_margin_bps",
+    "bill_stop_loss_margin_bps",
+    "bill_short_term_margin_bps",
+    "bill_window_trading_days",
+)
 
 
 class UserRepository:
@@ -77,6 +90,16 @@ class UserSettingRepository:
     async def get_for_read(self, user_id: uuid.UUID) -> UserSetting | None:
         """只读：不落库、不懒创建（GET /settings 无行时返回 `None` 由 API 组默认视图）。"""
         return await self._session.scalar(select(UserSetting).where(UserSetting.user_id == user_id))
+
+    async def get_effective(self, user_id: uuid.UUID) -> EffectivePreferences:
+        """读取并归一为生效值；无行时返回默认配置（不写库）。"""
+        setting = await self.get_for_read(user_id)
+        stored = (
+            {}
+            if setting is None
+            else {column: getattr(setting, column) for column in PREFERENCE_COLUMNS}
+        )
+        return resolve(stored)
 
     async def update_patch(
         self,

@@ -359,9 +359,10 @@ UNAUTHENTICATED_MATRIX: list[tuple[str, str]] = [
     # 2026-11-05（API-092/094 回合洞察列表/刷新）
     ("get", "/rounds/insights"),
     ("post", "/rounds/insights/refresh"),
-    # 2026-11-13（API-055/096 用户偏好）
+    # 2026-11-13（API-055/096/097 用户偏好）
     ("get", "/settings"),
     ("patch", "/settings"),
+    ("post", "/settings/trade-flags/rebuild"),
 ]
 
 #: 路径参数占位值（只用于越权/401 用例；资源不存在时恰好也走 404 分支）。
@@ -426,6 +427,9 @@ def _unauth_kwargs(method: str, template: str) -> dict[str, Any]:
     elif template == "/settings" and method == "patch":
         kwargs["headers"] = {"If-Match": 'W/"1"'}
         kwargs["json"] = {"appearance": {"theme": "dark"}}
+    elif template == "/settings/trade-flags/rebuild":
+        kwargs["headers"] = {"Idempotency-Key": "unauth-probe-" + "x" * 20}
+        kwargs["json"] = {"scope": "months", "months": ["2026-06"]}
     elif template == "/jobs/rebuild-rounds":
         kwargs["json"] = {"scope": "full"}
     elif template == "/assets/build":

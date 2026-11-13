@@ -48,7 +48,7 @@
 - ETag `W/"<version>"`（列表含查询指纹），写响应返新 ETag；`If-Match` 不匹配 → 409 `VERSION_CONFLICT`（遵循 PRD FR-L4，不采用 412）。
 - 格式：金额**定点字符串 2 位** `"1234.56"`；价格 6 位、数量 4 位；比率十进制小数；时间 ISO 8601 UTC；业务日 `YYYY-MM-DD`（Asia/Shanghai）；`blocked` 时 `value` **字段缺省**。软删默认过滤 `deleted_at NULL`，`include_deleted=true` 仅本人；注销物理级联删除，审计留事件元数据。
 
-## §1 端点总表（95 个；API-089 预留不计数，API-090~095 已实现（2026-11-05/09），API-055/096 已实现（2026-11-13）；Path 省略公共前缀 `/api/v1`，标注「根」者不在前缀下）
+## §1 端点总表（96 个；API-089 预留不计数，API-090~095 已实现（2026-11-05/09），API-055/096/097 已实现（2026-11-13）；Path 省略公共前缀 `/api/v1`，标注「根」者不在前缀下）
 | API-ID | Method | Path | 用途 | FR | 认证/scope | 幂等 | 同步/异步 | 优先级 | 主要成功码 |
 |---|---|---|---|---|---|---|---|---|---|
 | API-001 | POST | `/auth/register` | 注册账号 | L2 | 公开 | 支持 | 同步 | P0 | 201 |
@@ -107,6 +107,7 @@
 | API-054 | GET | `/notifications` | 站内通知 | D8 | read | — | 同步 | P2 | 200 |
 | API-055 | GET | `/settings` | 设置总览（四组偏好生效值 + version/ETag） | D1 | read | — | 同步 | P0 | 200 |
 | API-096 | PATCH | `/settings` | 通用偏好局部更新（外观/账单旗标/行情时段/概念过滤，If-Match CAS） | D1 | write | 支持 | 同步 | P0 | 200 |
+| API-097 | POST | `/settings/trade-flags/rebuild` | 按生效阈值重建账单旗标（异步任务） | D1 | write | 必需 | 异步 | P1 | 202 |
 | API-056 | PUT | `/settings/benchmark` | 切换基准（历史分段） | R5 | write | 幂等 | 同步 | P1 | 200 |
 | API-057 | PUT | `/settings/privacy` | 隐私与 LLM 开关 | D6 | write | 幂等 | 同步 | P1 | 200 |
 | API-058 | PUT | `/settings/behavior-rules` | 行为规则阈值 | D6 | write | 幂等 | 同步 | P1 | 200 |
@@ -152,7 +153,7 @@
 > **编号说明（2026-11-05）**：**API-089 预留、暂不实现**，不进入 §1 计数；本任务（FIFO 回合分析增强）从 **API-090** 起编号。API-090~094 已于 2026-11-05 **实现并验收**：详细契约见 §2.6，OpenAPI 快照 / SDK / API 测试 / 隔离矩阵 / DEV-PLAN 已同步（commit `8a958d8`）。
 
 ## §2 分域详细契约
-> 下列 40 个端点为**详细契约**（34 个既有 + 5 个已实现 API-090~094 + API-055/096）；其余端点的请求/响应字段以 `openapi/openapi.json` 为准（§1 已登记、§6 已配验收用例）。断言均为可脚本执行：状态码 + 字段值 + 状态迁移 + 副作用。
+> 下列 41 个端点为**详细契约**（34 个既有 + 5 个已实现 API-090~094 + API-055/096/097）；其余端点的请求/响应字段以 `openapi/openapi.json` 为准（§1 已登记、§6 已配验收用例）。断言均为可脚本执行：状态码 + 字段值 + 状态迁移 + 副作用。
 ### 2.1 认证、导入与流水
 #### API-001 POST /auth/register
 - 用途：注册账号；FR-L2；认证：公开；幂等：支持；同步。
@@ -469,7 +470,7 @@
 #### API-092 GET /rounds/insights
 - 用途：回合洞察列表 + 汇总；FR-R1/R8；认证 read；同步；operationId `listRoundInsights`。
 - 请求 query：`period`（默认 close_date 归属）/`bucket=all|scalp|short|position|long`/`flag`（`bottom_buy`、`stop_loss_sold_early`、`profit_sold_early`、`sold_too_early`、`drawdown`、`intraday_t`、`swing_t`、`intraday_rebalance_out`、`intraday_rebalance_in`、`reason_missing`、`horizon_pending`、`corporate_action`）/`has_reason`/`reason_code`/`security_code`/`security_type`（`stock`/`fund`/`convertible_bond`/`other`，逗号分隔或重复参数；缺省不过滤，非法值 422）/`sort`（combined_20、buy_excess_20、sell_avoid_20、close_date 及负向）/`limit`/`cursor`/`include_summary`。
-- 响应 200：`period`、`period_basis`、`definition_version`、`bucket_basis="round"`、`data_as_of`、`ranking_as_of`、`benchmark_id`、`basis="benchmark_excess_20d"`、`item_total`、`summary{swing,fill_swing,holding_by_pnl,addon,sell_fly,reason_coverage,ranking,flag_round_counts,pending}`、`items[]`、`next_cursor`、`has_more`、`missing[]`、`assumptions`、`disclaimer`、`flag_glossary[]`。
+- 响应 200：`period`、`period_basis`、`definition_version`、`bucket_basis="round"`、`data_as_of`、`ranking_as_of`、`benchmark_id`、`basis="benchmark_excess_20d"`、`item_total`、`summary{swing,fill_swing,holding_by_pnl,addon,sell_fly,reason_coverage,ranking,flag_round_counts,pending}`、`items[]`、`next_cursor`、`has_more`、`missing[]`、`assumptions`、`disclaimer`、`flag_glossary[]`、`flag_config{window_trading_days,near_equal_tolerance_pct,chase_margin_pct,stop_loss_margin_pct,short_term_margin_pct,flags_hash,is_default,stale}`（additive，2026-11-13：用户生效阈值；列表页与 `items[]` 各带一份，`stale` 恒 false，重算提示见 API-093）。
 - 旗标词表（2026-11-12，breaking）：`flag_glossary[]` 由 `stock_core.insights.flags` 单点维护，覆盖 `items[].flags` 的 8 个回合旗标（`bottom_buy`/`stop_loss_sold_early`/`profit_sold_early`/`drawdown`/`intraday_t`/`swing_t`/`intraday_rebalance_out`/`intraday_rebalance_in`）与 `?flag=` 的 4 个查询别名（`sold_too_early`/`reason_missing`/`horizon_pending`/`corporate_action`），每项含 `code/label_zh/label_en/description_zh/description_en/kind`（`kind=item_flag|filter_alias`）。列表与详情同源返回，前端零口径直接渲染。旧码 `addon`/`dip_sequence`/`below_avg`/`continued_decline`/`profit_taking`/`profit_take_fly`/`stop_loss_rebound`/`rising_sell_sequence`/`full_exit`/`partial_exit`/`same_day` 与别名 `addon_decline` 不再输出。
 - 加仓口径（2026-11-08；2026-11-12 收缩）：加仓 = **买入前该标的已有持仓**（按 FIFO 稳定序 `(trade_date, line_no, summary, quantity, price, id)` 推演，同日多笔以流水文件行号为准）。回合从 0 股开启，因此开仓笔永远不是加仓。加仓/加仓后下跌仅保留在 `summary.addon`（`count`/`declined_after_addon`/`declined_pct`）的内部口径，**不再输出为 `items[].flags`**。
 - 证券类型筛选（2026-11-08）：类型由代码区段判定（`stock_platform.symbols`），货币基金（如 940018，无代码区段）由流水 `money_fund_balance_units` 非空识别并归入 `fund`；国债/企业债及无法识别的标的统一归入 `other`。四类互斥且**完备**（四类计数之和恒等于全量回合，单测/API 测试双重断言），任何标的都不会因分类不出来而从筛选项中消失。筛选作用于 `items`，`summary`/`item_total`/`fill_swing` 全部基于过滤后的集合计算。
@@ -493,7 +494,7 @@
 
 #### API-093 GET /rounds/{round_id}/insights
 - 用途：单回合逐笔理由/前瞻/标签/排序详情；FR-R8；认证 read；同步；operationId `getRoundInsight`。
-- 响应 200：回合基础 + `holding_trading_days` + `fills[]{fill_id,sequence,buy,sell,quantity_display,pnl_display,open_date,close_date,holding_trading_days,bucket}` + 每笔 buy/sell `reason` + `forward{5,10,20}` + `flags` + `status_counts{}` + `ranking` + `quality[]` + `data_as_of` + `flag_glossary[]`（与 API-092 同源同序，供详情页末尾渲染旗标说明）。`fills[].holding_trading_days/bucket` 用真实交易日历，与回合级 `bucket` 同一口径。
+- 响应 200：回合基础 + `holding_trading_days` + `fills[]{fill_id,sequence,buy,sell,quantity_display,pnl_display,open_date,close_date,holding_trading_days,bucket}` + 每笔 buy/sell `reason` + `forward{5,10,20}` + `flags` + `status_counts{}` + `ranking` + `quality[]` + `data_as_of` + `flag_glossary[]`（与 API-092 同源同序，供详情页末尾渲染旗标说明）+ `trade_flag_glossary[]`（按**当前生效阈值**渲染的 20 码账单旗标文案）+ `flag_config{...}`（additive，2026-11-13；`stale=true` 表示该回合账单仍存在旧 `flags_hash` 行，需重算后才是新阈值结果）。`fills[].holding_trading_days/bucket` 用真实交易日历，与回合级 `bucket` 同一口径。
 - 错误码：NOT_FOUND(404)、ADMIN_CANNOT_READ_TRADES(403)。
 - 验收：字段齐全；跨用户 404；理由/前瞻逐笔可追溯；不混旧 `holding_days` 与真实 TD。
 
@@ -508,7 +509,8 @@
 - 用途：看板两张账单旗标图表的数据源；只读 `review.trade_flag`（当前 `definition_version`），不重算、不联网、不建 job；operationId `getDashboardTradeFlags`。
 - 请求 query：`months` ∈ `6|12|24`（默认 6）。
 - 口径：**完整月** = 服务端业务日（东八区）所在月之前、已自然结束的日历月；最新完整月固定为上一个月；区间连续 N 个月（升序，缺失月份显式 0）。
-- 响应 200：`{window_months,start_month,end_month,latest_complete_month,months_basis,definition_version,has_data,has_flag_data,has_state_data,series[],state_series[],total_labels,items[],months_without_data[],has_return_data,return_basis,return_labels}`。
+- 响应 200：`{window_months,start_month,end_month,latest_complete_month,months_basis,definition_version,has_data,has_flag_data,has_state_data,series[],state_series[],total_labels,items[],months_without_data[],stale_months[],flag_config{window_trading_days,near_equal_tolerance_pct,chase_margin_pct,stop_loss_margin_pct,short_term_margin_pct,flags_hash,is_default,stale},has_return_data,return_basis,return_labels}`。
+  - **用户阈值（additive，2026-11-13）**：`flag_config` 回显该用户生效的 4 个 bps 阈值 + 窗口 + `flags_hash` + `is_default`；`flags[]`/`states[]` 只统计 `review.trade_flag.flags_hash` 等于当前生效指纹的行。`stale_months[]` = 区间内「有旗标行（当前 `definition_version`）但没有当前指纹行」的月份（阈值改过但未重算），与 `months_without_data[]`（完全没有旗标行）区分开；`buy_count/sell_count` 与阈值无关，不受过滤影响。
   - `series[]`（折线口径）：`{code,label_zh,label_en,side,lookahead}`（买侧 4 个：`chase/instant_bottom/short_term_bottom/short_term_underwater`；卖侧 5 个：`stop_loss/sell_drawdown/instant_top/short_term_top/short_term_sold_early`）。
   - `state_series[]`（柱状图口径）：买卖两侧的**互斥**状态——买侧 4 个 `first_entry/addon_average/addon_dip/addon_chase`；卖侧 6 个 `reduce_breakeven/reduce_profit/reduce_loss/full_exit_breakeven/full_exit_profit/full_exit_loss`。
   - `items[]`：`{month,label,buy_count,sell_count,flags[]{code,count},states[]{code,count},monthly_return{...}}`；`buy_count/sell_count` = 当月去重账单数；`flags[]`/`states[]` 的 `count` = 当月 `status='hit'` 的账单数（同一账单可命中多个趋势旗标，分别计数；`states[]` 每侧状态互斥）。
@@ -520,7 +522,7 @@
   - **单月收益（additive，2026-11-10）**：`items[].monthly_return = {month,value_bp,pct,display,sign,available,days,partial,note,amount,amount_display}`。口径 = 当前资产口径版本（`asset_build_state.definition_version`）的 `asset_daily.daily_return_units` 在自然月内复利（TWR，已剔除出入金）；`value_bp` 为基点整数（2.35% → 235，供图表柱高）；`pct`/`display` 为后端定点串（`2.35%`/`+2.35%`）；`sign ∈ pos|neg|flat|none`。**无可用日收益的月份显式 `value_bp=0`（图上 0 高度）且 `available=false`、`pct/display=null`、`sign=none`、`amount/amount_display=null`，禁止用 0 冒充 0% 收益或 0 金额**；`partial=true` 表示资产表未覆盖整月（按已覆盖区间复利），`note` 为后端说明文案。**金额（additive，2026-11-10）**：`amount` = 当月每日 `asset_daily.daily_pnl_units` 的累加（**已剔除出入金**：daily_pnl 只剔除银证转账，分红/打新等投资损益仍计入），两位小数定点串；`amount_display` 为千分位展示串；与收益率同源同日行，blocked 行与非当前口径版本行不参与累加。顶层 `has_return_data`、`return_basis`（口径说明，前端展示在图表上方：两者均已剔除出入金）、`return_labels`（`pos/neg/none` 图例文案）、`return_metric_labels`（tooltip 指标名：`return`=收益率、`amount`=金额）均由后端给出。
   - **为什么不复用 `/nav` 月度 TWR**：`nav_daily` 是 `GET /nav` 的派生缓存——只覆盖被请求过的日期（按月稀疏），每次请求都会按本次区间重建点集、并在同事务内清理区间内不属于本次点集的陈旧行，点集随请求区间变化，因此不能作为稳定的月度收益序列数据源（该理由取决于派生缓存的写入方式，不依赖 `/nav` 的收益口径是否正确，口径修复后仍成立）；指标目录（18 项）不含月度收益率指标。资产日表逐日收益是看板回撤族已使用的 TWR 数据源，按月复利结果唯一。
 - 错误码：VALIDATION_ERROR(422，`months` 非 6/12/24)、ADMIN_CANNOT_READ_TRADES(403)。
-- 验收：`months=6/12/24` 月边界正确（跨年）；只返回本人数据；未构建月份显式 0 且列入 `months_without_data`；`states[]` 每侧状态互斥（买侧首次建仓与加仓互斥、卖侧清仓与减仓互斥）；只读（调用前后表行数不变）；单月收益按日收益复利且符号/展示串由后端给出，无资产行月份 `available=false`+`value_bp=0`+`amount=null`，blocked/旧口径版本行不参与复利与金额累加，覆盖不足标 `partial`；金额为 `daily_pnl` 当月累加（已剔出入金，含分红/打新损益）。
+- 验收：`months=6/12/24` 月边界正确（跨年）；只返回本人数据；未构建月份显式 0 且列入 `months_without_data`；旧指纹月份旗标计数为 0 且列入 `stale_months`、笔数不受影响；`flag_config` 回显生效阈值与 `flags_hash`；`states[]` 每侧状态互斥（买侧首次建仓与加仓互斥、卖侧清仓与减仓互斥）；只读（调用前后表行数不变）；单月收益按日收益复利且符号/展示串由后端给出，无资产行月份 `available=false`+`value_bp=0`+`amount=null`，blocked/旧口径版本行不参与复利与金额累加，覆盖不足标 `partial`；金额为 `daily_pnl` 当月累加（已剔出入金，含分红/打新损益）。
 #### API-055 GET /settings · API-096 PATCH /settings（2026-11-13 用户偏好 v2.1）
 - 用途：读取/局部更新用户偏好（外观与显示、账单旗标阈值与窗口、行情时段、概念板块过滤）；operationId `getSettings` / `patchSettings`。
 - `GET` 响应 200：`{version,updated_at,appearance{theme,density,trend},bill_flags{near_equal_tolerance_pct,chase_margin_pct,stop_loss_margin_pct,short_term_margin_pct,window_trading_days,flags_hash,is_default},market_sessions{sessions[{open,close}],data_ready_after,session_notice_enabled,timezone},concept_filters{mode,excluded[{code,name,resolved}]},benchmark_id,privacy_flags}`；阈值一律百分比串、窗口为十进制整数字符串；无 `user_setting` 行时返回默认视图（`version=1`、`updated_at=null`）。响应头 `ETag: W/"<version>"`，支持 `If-None-Match` → 304。
@@ -528,6 +530,17 @@
 - 并发：`UPDATE ... WHERE user_id=:uid AND version=:expected` 单条 CAS；首次缺行 `INSERT ... ON CONFLICT DO NOTHING` 后 version=2；旧版本 409 `VERSION_CONFLICT`。`Idempotency-Key` 重放返回缓存 body，`Idempotency-Replayed: true`；请求指纹含 If-Match + body。
 - 审计：有实际变更才写 `audit_log(action="settings.patch", meta={changed[],from_version,to_version})`。
 - 错误码：VALIDATION_ERROR(422)、VERSION_CONFLICT(409)、IDEMPOTENCY_KEY_REUSED(422)、IDEMPOTENCY_IN_PROGRESS(409)、INSUFFICIENT_SCOPE(403)。
+
+#### API-097 POST /settings/trade-flags/rebuild（2026-11-13 用户偏好 P1）
+
+- 用途：按**当前生效阈值**重建账单旗标；operationId `rebuildTradeFlags`；worker `rebuild_trade_flags` 逐月「先删后插」，每行落当前 `flags_hash`。
+- 请求：header `Idempotency-Key`（必填 16~128）、body `{scope:"all"|"months", months:["YYYY-MM",...]}`。
+  - `scope=months`：必须给 `months`；`YYYY-MM` 格式/去重后 ≤120，否则 422。
+  - `scope=all`：覆盖首笔交易月到最近交易月，服务端只取最近 120 个月（超出在 job result 标 `truncated=true`）；此时传 `months` 422。
+- 响应 202：`{job_id,type:"rebuild_trade_flags",status:"pending",links{self,events}}` + `Location: /api/v1/jobs/{job_id}` + `Retry-After: 1`；同参数复用已有任务 → `X-Job-Reused: true`；同 scope 异参 → 409 `JOB_ALREADY_RUNNING`；配额超限 429。
+- 幂等：`Idempotency-Key` 重放返回缓存 body（`Idempotency-Replayed: true`）；请求指纹含规范化后的 `scope+months`。
+- 口径：`DEFINITION_VERSION` 不升；重建范围只覆盖所选月份（区间外月份保留旧指纹，仍会出现在 API-095 `stale_months[]`）；不改写偏好本身（阈值仍走 API-096）。
+- 错误码：VALIDATION_ERROR(422)、JOB_ALREADY_RUNNING(409)、IDEMPOTENCY_KEY_REUSED(422)、IDEMPOTENCY_IN_PROGRESS(409)、INSUFFICIENT_SCOPE(403)、RATE_LIMITED(429)。
 
 
 ## §3 错误码总表
@@ -712,6 +725,7 @@ data: {"job_id":"job_01J9Z6","status":"succeeded","result_ref":"/api/v1/reports/
 | API-054 | notifications_list | 200 仅本人通知 | fx_alert | P2 |
 | API-055 | settings_get（已实现） | 200 含四组偏好生效值 + version/ETag；无行返回默认视图且 `updated_at=null`；`If-None-Match` → 304；只读 | fx_settings | P0 |
 | API-096 | settings_patch（已实现） | 200 + ETag；If-Match 必填/非法 422；CAS 冲突 409；未知键/只读键/空 body 422；无变更不 bump；幂等重放；审计仅在有变更时写入；跨用户互不影响 | fx_settings | P0 |
+| API-097 | settings_trade_flags_rebuild（已实现） | 202 + Location；Idempotency-Key 必填；months 格式/上限/scope 冲突 422；同参复用 X-Job-Reused；异参 409；重放幂等；重建后行指纹为当前 flags_hash；跨用户互不影响 | fx_settings | P1 |
 | API-056 | settings_benchmark_switch | 200；GET /nav 的 benchmark_id 随之变化 | fx_base | P1 |
 | API-057 | settings_privacy_llm_off | 200；LLM 关闭后 chat fallback=true | fx_llm_off | P1 |
 | API-058 | settings_behavior_rules_effect | 200；触发后 alerts 增加对应 rule_code | fx_alert | P1 |

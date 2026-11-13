@@ -705,6 +705,26 @@ class AssetBuildAccepted(StrictModel):
     links: JobLinks
 
 
+class TradeFlagRebuildIn(StrictModel):
+    """API-097：重建账单旗标范围。
+
+    `scope=months` 必须给 `months`（`YYYY-MM`，去重后 ≤120）；`scope=all` 覆盖首笔交易月
+    到最近交易月（服务端最多取最近 120 个月）。
+    """
+
+    scope: Literal["all", "months"] = "all"
+    months: list[str] = Field(default_factory=list)
+
+
+class TradeFlagRebuildAccepted(StrictModel):
+    """API-097：202 专用响应（同参数复用已有 job 时 `X-Job-Reused: true`）。"""
+
+    job_id: str
+    type: Literal["rebuild_trade_flags"] = "rebuild_trade_flags"
+    status: Literal["pending"] = "pending"
+    links: JobLinks
+
+
 class AssetBuildMissingOut(StrictModel):
     """API-082：缺行情提示项（字段名沿用归因/看板的 `missing[]` 风格）。"""
 
@@ -990,6 +1010,20 @@ class DashboardTradeFlagMonthOut(StrictModel):
     monthly_return: DashboardMonthlyReturnOut
 
 
+class DashboardTradeFlagConfigOut(StrictModel):
+    """API-095/092/093 additive：该用户生效的旗标阈值（百分比为展示字符串）。"""
+
+    window_trading_days: str
+    near_equal_tolerance_pct: str
+    chase_margin_pct: str
+    stop_loss_margin_pct: str
+    short_term_margin_pct: str
+    flags_hash: str
+    is_default: bool
+    # 仅回合洞察（092/093）使用：请求账单存在旧阈值指纹行（需重算）。
+    stale: bool = False
+
+
 class DashboardTradeFlagsOut(StrictModel):
     """API-095：账单旗标月度聚合（最近 6/12/24 个完整月）。"""
 
@@ -1010,6 +1044,10 @@ class DashboardTradeFlagsOut(StrictModel):
     items: list[DashboardTradeFlagMonthOut]
     # 区间内没有任何旗标记录的月份（可能未运行 build-trade-flags，或当月无交易）。
     months_without_data: list[str]
+    # 有旗标行但指纹不是当前生效阈值的月份（阈值改过但未重算）。
+    stale_months: list[str]
+    # 当前生效阈值（additive）。
+    flag_config: DashboardTradeFlagConfigOut
     # 单月收益（additive）：口径说明/图例文案由后端给，前端只渲染。
     has_return_data: bool
     return_basis: str
@@ -1732,6 +1770,8 @@ class RoundInsightItemOut(BaseModel):
     quality: list[str] = Field(default_factory=list)
     # 计数型状态：bottom_buy / stop_loss_sold_early / profit_sold_early 固定三键（可为 0）。
     status_counts: dict[str, int] = Field(default_factory=dict)
+    # 当前生效阈值（additive）。
+    flag_config: DashboardTradeFlagConfigOut | None = None
 
 
 class InsightBucketSummaryOut(BaseModel):
@@ -1875,6 +1915,8 @@ class RoundInsightsPageOut(BaseModel):
     assumptions: list[str] = Field(default_factory=list)
     disclaimer: str
     flag_glossary: list[FlagGlossaryOut] = Field(default_factory=list)
+    # 当前生效阈值（additive）。
+    flag_config: DashboardTradeFlagConfigOut | None = None
 
 
 class RoundInsightDetailOut(BaseModel):
@@ -1899,6 +1941,8 @@ class RoundInsightDetailOut(BaseModel):
     disclaimer: str
     flag_glossary: list[FlagGlossaryOut] = Field(default_factory=list)
     trade_flag_glossary: list[TradeFlagGlossaryOut] = Field(default_factory=list)
+    # 当前生效阈值（additive）；`stale=true` 表示该回合账单仍是旧阈值结果。
+    flag_config: DashboardTradeFlagConfigOut | None = None
 
 
 class RoundInsightsRefreshIn(StrictModel):

@@ -13,9 +13,7 @@ from datetime import date
 
 from stock_core.trade_flags.constants import (
     BPS_DENOMINATOR,
-    CHASE_MARGIN_BPS,
-    NEAR_EQUAL_TOLERANCE_BPS,
-    SHORT_TERM_MARGIN_BPS,
+    DEFAULT_TRADE_FLAG_CONFIG,
     STATUS_HIT,
     STATUS_INSUFFICIENT_HISTORY,
     STATUS_MISS,
@@ -24,8 +22,7 @@ from stock_core.trade_flags.constants import (
     STATUS_NO_COST_BASIS,
     STATUS_NOT_APPLICABLE,
     STATUS_PENDING,
-    STOP_LOSS_MARGIN_BPS,
-    WINDOW_TRADING_DAYS,
+    TradeFlagConfig,
 )
 from stock_core.trade_flags.definitions import (
     BUY_FLAG_CODES,
@@ -85,15 +82,18 @@ def _result(code: str, status: str, reason: str | None = None) -> FlagResult:
 
 
 def _past_status(
-    bars: Sequence[BarPoint], trade_date: date, calendar: Sequence[date]
+    bars: Sequence[BarPoint],
+    trade_date: date,
+    calendar: Sequence[date],
+    window: int,
 ) -> str | None:
-    """前向窗口可用性：返回 None 表示 5 个行情日齐备。"""
+    """前向窗口可用性：返回 None 表示前 `window` 个行情日齐备。"""
     if not calendar:
         return STATUS_NO_CALENDAR
     if not bars:
         return STATUS_NO_BAR
     count = sum(1 for day, _ in bars if day < trade_date)
-    if count < WINDOW_TRADING_DAYS:
+    if count < window:
         return STATUS_INSUFFICIENT_HISTORY
     return None
 
@@ -103,15 +103,16 @@ def _future_status(
     trade_date: date,
     calendar: Sequence[date],
     data_as_of: date | None,
+    window: int,
 ) -> str | None:
-    """未来窗口可用性：返回 None 表示 5 个行情日齐备。"""
+    """未来窗口可用性：返回 None 表示后 `window` 个行情日齐备。"""
     if not calendar:
         return STATUS_NO_CALENDAR
     count = sum(1 for day, _ in bars if day > trade_date)
-    if count >= WINDOW_TRADING_DAYS:
+    if count >= window:
         return None
     pos = bisect_right(calendar, trade_date)
-    required_index = pos + WINDOW_TRADING_DAYS - 1
+    required_index = pos + window - 1
     if required_index >= len(calendar):
         return STATUS_PENDING
     required = calendar[required_index]
@@ -120,27 +121,27 @@ def _future_status(
     return STATUS_INSUFFICIENT_HISTORY
 
 
-def _past_closes(bars: Sequence[BarPoint], trade_date: date) -> list[int]:
+def _past_closes(bars: Sequence[BarPoint], trade_date: date, window: int) -> list[int]:
     closes = [close for day, close in bars if day < trade_date]
-    return closes[-WINDOW_TRADING_DAYS:]
+    return closes[-window:]
 
 
-def _future_closes(bars: Sequence[BarPoint], trade_date: date) -> list[int]:
+def _future_closes(bars: Sequence[BarPoint], trade_date: date, window: int) -> list[int]:
     closes = [close for day, close in bars if day > trade_date]
-    return closes[:WINDOW_TRADING_DAYS]
+    return closes[:window]
 
 
-def _price_bucket(price: int, avg: int) -> str:
-    """含费净价相对持仓均价的桶：`above` / `below` / `near`（±1% 以内）。"""
+def _price_bucket(price: int, avg: int, tolerance_bps: int) -> str:
+    """含费净价相对持仓均价的桶：`above` / `below` / `near`（±容差以内）。"""
     diff = price - avg
-    if diff * BPS_DENOMINATOR > avg * NEAR_EQUAL_TOLERANCE_BPS:
+    if diff * BPS_DENOMINATOR > avg * tolerance_bps:
         return "above"
-    if diff * BPS_DENOMINATOR < -avg * NEAR_EQUAL_TOLERANCE_BPS:
+    if diff * BPS_DENOMINATOR < -avg * tolerance_bps:
         return "below"
     return "near"
 
 
-def _state_flags(ctx: TradeContext) -> list[FlagResult]:
+def _state_flags(ctx: TradeContext, config: TradeFlagConfig) -> list[FlagResult]:
     """买入侧「首次建仓」+「加仓状态」三选一（四者互斥）。"""
     codes = ("addon_average", "addon_dip", "addon_chase")
     if ctx.quantity_before_units <= 0:
@@ -155,7 +156,7 @@ def _state_flags(ctx: TradeContext) -> list[FlagResult]:
             first,
             *[_result(code, STATUS_NO_COST_BASIS, "no_cost_basis") for code in codes],
         ]
-    bucket = _price_bucket(ctx.net_price_units, avg)
+    bucket = _price_bucket(ctx.net_price_units, avg, config.near_equal_tolerance_bps)
     if bucket == "above":
         statuses = (STATUS_MISS, STATUS_MISS, STATUS_HIT)
     elif bucket == "below":
@@ -183,7 +184,7 @@ def _cost_gap_reason(ctx: TradeContext, avg: int | None) -> str:
     return "no_cost_basis"
 
 
-def _reduce_flags(ctx: TradeContext) -> list[FlagResult]:
+def _reduce_flags(ctx: TradeContext, config: TradeFlagConfig) -> list[FlagResult]:
     """卖出侧「减仓状态」与「清仓状态」互斥：清仓时减仓三态不适用。
 
     成本口径：`avg > 0` 为正常成本，`avg == 0` 为零成本持仓（送转/红利再投），
@@ -200,7 +201,9 @@ def _reduce_flags(ctx: TradeContext) -> list[FlagResult]:
             reason = _cost_gap_reason(ctx, avg)
             exits = [_result(code, STATUS_NO_COST_BASIS, reason) for code in exit_codes]
         else:
-            statuses = _exit_statuses(_price_bucket(ctx.net_price_units, avg))
+            statuses = _exit_statuses(
+                _price_bucket(ctx.net_price_units, avg, config.near_equal_tolerance_bps)
+            )
             exits = [
                 _result(code, status) for code, status in zip(exit_codes, statuses, strict=True)
             ]
@@ -214,7 +217,7 @@ def _reduce_flags(ctx: TradeContext) -> list[FlagResult]:
         reason = _cost_gap_reason(ctx, avg)
         reduced = [_result(code, STATUS_NO_COST_BASIS, reason) for code in codes]
         return [*reduced, _result("full_exit", STATUS_MISS), *exits]
-    bucket = _price_bucket(ctx.net_price_units, avg)
+    bucket = _price_bucket(ctx.net_price_units, avg, config.near_equal_tolerance_bps)
     # 减仓与清仓的桶→三态映射一致：near→回本、above→止盈、below→止损。
     statuses = _exit_statuses(bucket)
     reduced = [_result(code, status) for code, status in zip(codes, statuses, strict=True)]
@@ -244,15 +247,26 @@ def _buy_price_flags(
     bars: Sequence[BarPoint],
     calendar: Sequence[date],
     data_as_of: date | None,
+    config: TradeFlagConfig,
 ) -> list[FlagResult]:
-    past_status = _past_status(bars, ctx.trade_date, calendar)
-    future_status = _future_status(bars, ctx.trade_date, calendar, data_as_of)
-    past = _past_closes(bars, ctx.trade_date) if past_status is None else []
-    future = _future_closes(bars, ctx.trade_date) if future_status is None else []
+    past_status = _past_status(bars, ctx.trade_date, calendar, config.window_trading_days)
+    future_status = _future_status(
+        bars, ctx.trade_date, calendar, data_as_of, config.window_trading_days
+    )
+    past = (
+        _past_closes(bars, ctx.trade_date, config.window_trading_days)
+        if past_status is None
+        else []
+    )
+    future = (
+        _future_closes(bars, ctx.trade_date, config.window_trading_days)
+        if future_status is None
+        else []
+    )
 
-    chase_hit = past_status is None and _gt(ctx.net_price_units, max(past), CHASE_MARGIN_BPS)
+    chase_hit = past_status is None and _gt(ctx.net_price_units, max(past), config.chase_margin_bps)
     bottom_hit = past_status is None and _le_within(
-        ctx.net_price_units, min(past), SHORT_TERM_MARGIN_BPS
+        ctx.net_price_units, min(past), config.short_term_margin_bps
     )
 
     if past_status is not None:
@@ -262,7 +276,7 @@ def _buy_price_flags(
     else:
         short_status = None
     short_hit = short_status is None and _le_within(
-        ctx.net_price_units, min([*past, *future]), SHORT_TERM_MARGIN_BPS
+        ctx.net_price_units, min([*past, *future]), config.short_term_margin_bps
     )
     # 短期被套：窗口内每个交易日收盘价都低于含费净买价（收益持续为负）。
     underwater_hit = short_status is None and all(close < ctx.net_price_units for close in future)
@@ -280,15 +294,26 @@ def _sell_price_flags(
     bars: Sequence[BarPoint],
     calendar: Sequence[date],
     data_as_of: date | None,
+    config: TradeFlagConfig,
 ) -> list[FlagResult]:
-    past_status = _past_status(bars, ctx.trade_date, calendar)
-    future_status = _future_status(bars, ctx.trade_date, calendar, data_as_of)
-    past = _past_closes(bars, ctx.trade_date) if past_status is None else []
-    future = _future_closes(bars, ctx.trade_date) if future_status is None else []
+    past_status = _past_status(bars, ctx.trade_date, calendar, config.window_trading_days)
+    future_status = _future_status(
+        bars, ctx.trade_date, calendar, data_as_of, config.window_trading_days
+    )
+    past = (
+        _past_closes(bars, ctx.trade_date, config.window_trading_days)
+        if past_status is None
+        else []
+    )
+    future = (
+        _future_closes(bars, ctx.trade_date, config.window_trading_days)
+        if future_status is None
+        else []
+    )
 
-    # 破位条件：净卖价低于前 5 个行情日最低价 1% 以上（原止损判据）。
+    # 破位条件：净卖价低于前 N 个行情日最低价容差以上（原止损判据）。
     breakdown_hit = past_status is None and _lt(
-        ctx.net_price_units, min(past), STOP_LOSS_MARGIN_BPS
+        ctx.net_price_units, min(past), config.stop_loss_margin_bps
     )
     avg = ctx.avg_cost_units
     # 成本三态：`None` = 无成本数据（无持仓/超卖或成本缺失）、`0` = 零成本持仓（有效成本）、
@@ -308,7 +333,7 @@ def _sell_price_flags(
     # 回撤：破位但净卖价不低于均价（仍在成本线上方，或恰好持平）；零成本恒成立。
     drawdown_hit = breakdown_hit and avg is not None and avg >= 0 and ctx.net_price_units >= avg
     top_hit = past_status is None and _ge_within(
-        ctx.net_price_units, max(past), SHORT_TERM_MARGIN_BPS
+        ctx.net_price_units, max(past), config.short_term_margin_bps
     )
 
     if past_status is not None:
@@ -318,11 +343,11 @@ def _sell_price_flags(
     else:
         short_status = None
     short_hit = short_status is None and _ge_within(
-        ctx.net_price_units, max([*past, *future]), SHORT_TERM_MARGIN_BPS
+        ctx.net_price_units, max([*past, *future]), config.short_term_margin_bps
     )
-    # 短期卖飞：净卖价低于未来窗口最后一日收盘价的 5% 以上（恰低 5% 不命中）。
+    # 短期卖飞：净卖价低于未来窗口最后一个收盘价的容差以上（恰低容差不命中）。
     sold_early_hit = short_status is None and _lt(
-        ctx.net_price_units, future[-1], SHORT_TERM_MARGIN_BPS
+        ctx.net_price_units, future[-1], config.short_term_margin_bps
     )
 
     return [
@@ -340,14 +365,18 @@ def evaluate_trade_flags(
     bars: Sequence[BarPoint],
     calendar: Sequence[date],
     data_as_of: date | None,
+    config: TradeFlagConfig = DEFAULT_TRADE_FLAG_CONFIG,
 ) -> list[FlagResult]:
-    """评估单笔账单的全部旗标（按词表顺序返回，含 miss/not_applicable 状态）。"""
+    """评估单笔账单的全部旗标（按词表顺序返回，含 miss/not_applicable 状态）。
+
+    `config` 为用户级生效阈值；缺省等于 1.4 常量，默认配置下结果逐字段不变。
+    """
     if ctx.side == "buy":
-        state = _state_flags(ctx)
-        price = _buy_price_flags(ctx, bars, calendar, data_as_of)
+        state = _state_flags(ctx, config)
+        price = _buy_price_flags(ctx, bars, calendar, data_as_of, config)
     else:
-        state = _reduce_flags(ctx)
-        price = _sell_price_flags(ctx, bars, calendar, data_as_of)
+        state = _reduce_flags(ctx, config)
+        price = _sell_price_flags(ctx, bars, calendar, data_as_of, config)
 
     by_code = {item.code: item for item in [*state, *price]}
     codes = BUY_FLAG_CODES if ctx.side == "buy" else SELL_FLAG_CODES

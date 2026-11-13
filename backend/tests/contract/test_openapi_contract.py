@@ -82,11 +82,11 @@ def test_validate_contract_returns_no_violations(spec: dict[str, Any]) -> None:
 
 
 def test_covers_all_registered_operations(spec: dict[str, Any]) -> None:
-    """64 个 operation（P2-12 API-084 + 2026-10-28 API-085/086 + 2026-10-31 API-087/088 + 2026-11-02 API-036 + 2026-11-05 API-090~094 + 2026-11-09 API-095 + 2026-11-13 API-055/096）全部登记且与 OPERATION_META 一致。"""
+    """65 个 operation（P2-12 API-084 + 2026-10-28 API-085/086 + 2026-10-31 API-087/088 + 2026-11-02 API-036 + 2026-11-05 API-090~094 + 2026-11-09 API-095 + 2026-11-13 API-055/096/097）全部登记且与 OPERATION_META 一致。"""
     operations = _operations(spec)
     operation_ids = [operation["operationId"] for _, _, operation in operations]
-    assert len(operations) == 64
-    assert len(set(operation_ids)) == 64
+    assert len(operations) == 65
+    assert len(set(operation_ids)) == 65
     assert set(operation_ids) == set(OPERATION_META), "OPERATION_META 与实现端点漂移"
     paths = {path for _, path, _ in operations}
     # 探针/元数据端点（/api/v1/openapi.json 由 FastAPI 自引用，不在 paths 中）。
@@ -126,11 +126,11 @@ def test_every_2xx_has_example(spec: dict[str, Any]) -> None:
                     json_count += 1
                 else:
                     text_count += 1
-    # 64 个 operation：2 个文本响应（SSE / Prometheus），204 无 body 若干；
-    # 其余 58 个 2xx JSON 响应必须各带确定性示例（新增端点漏示例即失败）。
-    # 58 = 55 + POST /assets/build 的 200（缺行情时返回失败状态与 missing[]）
-    #       + GET/PATCH /settings（API-055/096）。
-    assert json_count == 58
+    # 65 个 operation：2 个文本响应（SSE / Prometheus），204 无 body 若干；
+    # 其余 59 个 2xx JSON 响应必须各带确定性示例（新增端点漏示例即失败）。
+    # 59 = 55 + POST /assets/build 的 200（缺行情时返回失败状态与 missing[]）
+    #       + GET/PATCH /settings（API-055/096）+ POST /settings/trade-flags/rebuild（API-097）。
+    assert json_count == 59
     assert text_count == 2  # SSE（API-063）+ Prometheus 文本（API-074）
     stream = _find_operation(spec, "streamJobEvents")["responses"]["200"]["content"]
     assert "text/event-stream" in stream

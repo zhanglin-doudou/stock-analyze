@@ -516,6 +516,39 @@ async def test_api_093_detail_and_cross_user_404(client, api_prefix, user, scena
     assert missing.json()["code"] == ErrorCode.NOT_FOUND
 
 
+async def test_api_092_093_flag_config_additive(client, api_prefix, user, scenario):
+    """列表/详情都附加 `flag_config`；改阈值后详情词表按生效配置重渲染。"""
+    list_body = (await _list(client, api_prefix, user.headers, "?period=2026-06")).json()
+    assert list_body["flag_config"]["flags_hash"]
+    assert list_body["flag_config"]["is_default"] is True
+    assert list_body["items"][0]["flag_config"] == list_body["flag_config"]
+
+    detail = await _detail(client, api_prefix, user.headers, scenario["round"]["round_id"])
+    assert detail.status_code == 200, detail.text
+    body = detail.json()
+    assert body["flag_config"]["flags_hash"] == list_body["flag_config"]["flags_hash"]
+    assert body["flag_config"]["stale"] is False
+    glossary = {item["code"]: item for item in body["trade_flag_glossary"]}
+    assert "上下 1% 以内" in glossary["addon_average"]["description_zh"]
+
+    patched = await client.patch(
+        f"{api_prefix}/settings",
+        json={"bill_flags": {"near_equal_tolerance_pct": "2.50%", "window_trading_days": "3"}},
+        headers={**user.headers, "If-Match": 'W/"1"'},
+    )
+    assert patched.status_code == 200, patched.text
+    changed = patched.json()["bill_flags"]
+
+    detail = await _detail(client, api_prefix, user.headers, scenario["round"]["round_id"])
+    body = detail.json()
+    assert body["flag_config"]["flags_hash"] == changed["flags_hash"]
+    assert body["flag_config"]["is_default"] is False
+    assert body["flag_config"]["window_trading_days"] == "3"
+    glossary = {item["code"]: item for item in body["trade_flag_glossary"]}
+    assert "上下 2.5% 以内" in glossary["addon_average"]["description_zh"]
+    assert "前 3 个行情日最高收盘价的 1% 以上" in glossary["chase"]["description_zh"]
+
+
 async def test_api_092_093_display_scale_6dp_and_2dp(
     client, api_prefix, user, owner_engine, settings
 ):

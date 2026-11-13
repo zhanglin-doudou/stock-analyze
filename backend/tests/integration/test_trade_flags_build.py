@@ -180,8 +180,68 @@ async def test_build_is_idempotent_and_hits_expected_flags(owner_engine: AsyncEn
     assert len(again) == first.rows
 
     async with AsyncSession(owner_engine) as session:
-        flagged = await load_trade_flags(session, user_id, [rows[0].trade_dedupe_key])
+        flagged = await load_trade_flags(
+            session, user_id, [rows[0].trade_dedupe_key], flags_hash=rows[0].flags_hash
+        )
     assert flagged
+
+
+@pytest.mark.asyncio
+async def test_build_records_flags_hash_and_filters_by_current_config(
+    owner_engine: AsyncEngine,
+) -> None:
+    """默认构建落 `DEFAULT_FLAGS_HASH`；改阈值重建后旧指纹行被覆盖，旧 hash 读不到。"""
+    from stock_contracts.preferences import DEFAULT_FLAGS_HASH
+    from stock_core.preferences import flags_hash
+    from stock_core.trade_flags import TradeFlagConfig
+    from stock_review.trade_flags import has_stale_flags
+
+    user_id = await _insert_user(owner_engine)
+    await _seed_trade(
+        owner_engine,
+        user_id,
+        trade_date=date(2026, 9, 10),
+        side="buy",
+        quantity_units=1000,
+        amount_units=100,
+        line_no=1,
+    )
+    async with AsyncSession(owner_engine) as session:
+        await _build(session, user_id)
+        await session.commit()
+
+    async with AsyncSession(owner_engine) as session:
+        rows = list(await session.scalars(select(TradeFlag).where(TradeFlag.user_id == user_id)))
+        key = rows[0].trade_dedupe_key
+    assert {row.flags_hash for row in rows} == {DEFAULT_FLAGS_HASH}
+
+    async with AsyncSession(owner_engine) as session:
+        assert await load_trade_flags(session, user_id, [key], flags_hash=DEFAULT_FLAGS_HASH)
+        assert await load_trade_flags(session, user_id, [key], flags_hash="0" * 16) == {}
+        assert not await has_stale_flags(session, user_id, [key], flags_hash=DEFAULT_FLAGS_HASH)
+        assert await has_stale_flags(session, user_id, [key], flags_hash="0" * 16)
+
+    custom = TradeFlagConfig(chase_margin_bps=200, window_trading_days=3)
+    custom_hash = flags_hash(custom.as_columns())
+    async with AsyncSession(owner_engine) as session:
+        result = await build_trade_flags_for_user(
+            session,
+            user_id,
+            period=parse_period_label("2026-09", today=CLOCK.today()),
+            market_data=FakeMarket(close_units=10_000_000),
+            clock=CLOCK,
+            config=custom,
+        )
+        await session.commit()
+    assert custom_hash != DEFAULT_FLAGS_HASH
+    assert result.rows > 0
+
+    async with AsyncSession(owner_engine) as session:
+        rows = list(await session.scalars(select(TradeFlag).where(TradeFlag.user_id == user_id)))
+        assert {row.flags_hash for row in rows} == {custom_hash}
+        assert await load_trade_flags(session, user_id, [key], flags_hash=custom_hash)
+        assert await load_trade_flags(session, user_id, [key], flags_hash=DEFAULT_FLAGS_HASH) == {}
+        assert await has_stale_flags(session, user_id, [key], flags_hash=DEFAULT_FLAGS_HASH)
 
 
 @pytest.mark.asyncio

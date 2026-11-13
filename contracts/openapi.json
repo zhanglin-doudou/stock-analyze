@@ -3167,6 +3167,56 @@
         "title": "DashboardTradeCountOut",
         "type": "object"
       },
+      "DashboardTradeFlagConfigOut": {
+        "additionalProperties": false,
+        "description": "API-095/092/093 additive：该用户生效的旗标阈值（百分比为展示字符串）。",
+        "properties": {
+          "chase_margin_pct": {
+            "title": "Chase Margin Pct",
+            "type": "string"
+          },
+          "flags_hash": {
+            "title": "Flags Hash",
+            "type": "string"
+          },
+          "is_default": {
+            "title": "Is Default",
+            "type": "boolean"
+          },
+          "near_equal_tolerance_pct": {
+            "title": "Near Equal Tolerance Pct",
+            "type": "string"
+          },
+          "short_term_margin_pct": {
+            "title": "Short Term Margin Pct",
+            "type": "string"
+          },
+          "stale": {
+            "default": false,
+            "title": "Stale",
+            "type": "boolean"
+          },
+          "stop_loss_margin_pct": {
+            "title": "Stop Loss Margin Pct",
+            "type": "string"
+          },
+          "window_trading_days": {
+            "title": "Window Trading Days",
+            "type": "string"
+          }
+        },
+        "required": [
+          "window_trading_days",
+          "near_equal_tolerance_pct",
+          "chase_margin_pct",
+          "stop_loss_margin_pct",
+          "short_term_margin_pct",
+          "flags_hash",
+          "is_default"
+        ],
+        "title": "DashboardTradeFlagConfigOut",
+        "type": "object"
+      },
       "DashboardTradeFlagCountOut": {
         "additionalProperties": false,
         "properties": {
@@ -3287,6 +3337,9 @@
             "title": "End Month",
             "type": "string"
           },
+          "flag_config": {
+            "$ref": "#/components/schemas/DashboardTradeFlagConfigOut"
+          },
           "has_data": {
             "title": "Has Data",
             "type": "boolean"
@@ -3350,6 +3403,13 @@
             "title": "Series",
             "type": "array"
           },
+          "stale_months": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Stale Months",
+            "type": "array"
+          },
           "start_month": {
             "title": "Start Month",
             "type": "string"
@@ -3388,6 +3448,8 @@
           "total_labels",
           "items",
           "months_without_data",
+          "stale_months",
+          "flag_config",
           "has_return_data",
           "return_basis",
           "return_labels",
@@ -6994,6 +7056,16 @@
             "title": "Fills",
             "type": "array"
           },
+          "flag_config": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DashboardTradeFlagConfigOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "flag_glossary": {
             "items": {
               "$ref": "#/components/schemas/FlagGlossaryOut"
@@ -7161,6 +7233,16 @@
             ],
             "title": "Combined Pct"
           },
+          "flag_config": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DashboardTradeFlagConfigOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "flags": {
             "items": {
               "type": "string"
@@ -7325,6 +7407,16 @@
           "disclaimer": {
             "title": "Disclaimer",
             "type": "string"
+          },
+          "flag_config": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/DashboardTradeFlagConfigOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "flag_glossary": {
             "items": {
@@ -9354,6 +9446,61 @@
           "status_label"
         ],
         "title": "TradeFlagOut",
+        "type": "object"
+      },
+      "TradeFlagRebuildAccepted": {
+        "additionalProperties": false,
+        "description": "API-097：202 专用响应（同参数复用已有 job 时 `X-Job-Reused: true`）。",
+        "properties": {
+          "job_id": {
+            "title": "Job Id",
+            "type": "string"
+          },
+          "links": {
+            "$ref": "#/components/schemas/JobLinks"
+          },
+          "status": {
+            "const": "pending",
+            "default": "pending",
+            "title": "Status",
+            "type": "string"
+          },
+          "type": {
+            "const": "rebuild_trade_flags",
+            "default": "rebuild_trade_flags",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "job_id",
+          "links"
+        ],
+        "title": "TradeFlagRebuildAccepted",
+        "type": "object"
+      },
+      "TradeFlagRebuildIn": {
+        "additionalProperties": false,
+        "description": "API-097：重建账单旗标范围。\n\n`scope=months` 必须给 `months`（`YYYY-MM`，去重后 ≤120）；`scope=all` 覆盖首笔交易月\n到最近交易月（服务端最多取最近 120 个月）。",
+        "properties": {
+          "months": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Months",
+            "type": "array"
+          },
+          "scope": {
+            "default": "all",
+            "enum": [
+              "all",
+              "months"
+            ],
+            "title": "Scope",
+            "type": "string"
+          }
+        },
+        "title": "TradeFlagRebuildIn",
         "type": "object"
       },
       "TradeHistoryItem": {
@@ -12480,6 +12627,16 @@
                 "example": {
                   "definition_version": "1.0",
                   "end_month": "示例",
+                  "flag_config": {
+                    "chase_margin_pct": "示例",
+                    "flags_hash": "示例",
+                    "is_default": false,
+                    "near_equal_tolerance_pct": "示例",
+                    "short_term_margin_pct": "示例",
+                    "stale": false,
+                    "stop_loss_margin_pct": "示例",
+                    "window_trading_days": "示例"
+                  },
                   "has_data": false,
                   "has_flag_data": false,
                   "has_return_data": false,
@@ -12537,6 +12694,9 @@
                       "lookahead": false,
                       "side": "buy"
                     }
+                  ],
+                  "stale_months": [
+                    "示例"
                   ],
                   "start_month": "示例",
                   "state_series": [
@@ -20607,6 +20767,240 @@
           "TOKEN_REVOKED",
           "MULTIPLE_CREDENTIALS",
           "INSUFFICIENT_SCOPE"
+        ],
+        "x-idempotent": true,
+        "x-required-scope": "write"
+      }
+    },
+    "/api/v1/settings/trade-flags/rebuild": {
+      "post": {
+        "description": "API-097：按当前生效阈值重建账单旗标（202 + Location）。",
+        "operationId": "rebuildTradeFlags",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "Idempotency-Key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Idempotency-Key"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-api-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TradeFlagRebuildIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "job_id": "job_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "links": {
+                    "events": "/api/v1/jobs/job_01J9Z6ABCDEFGHJKMNPQRSTVWX/events",
+                    "self": "/api/v1/jobs/job_01J9Z6ABCDEFGHJKMNPQRSTVWX"
+                  },
+                  "status": "pending",
+                  "type": "rebuild_trade_flags"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/TradeFlagRebuildAccepted"
+                }
+              }
+            },
+            "description": "已入队重建；同参数复用已有任务时返回 X-Job-Reused: true",
+            "headers": {
+              "Location": {
+                "description": "任务详情（/api/v1/jobs/{job_id}）"
+              },
+              "Retry-After": {
+                "description": "建议轮询间隔（秒）"
+              },
+              "X-Job-Reused": {
+                "description": "true 表示复用了同参数的在途/已完成任务"
+              }
+            }
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "TOKEN_EXPIRED",
+                  "detail": "访问凭证已过期。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 401,
+                  "title": "TOKEN_EXPIRED",
+                  "type": "https://stock-analyze.local/errors/TOKEN_EXPIRED",
+                  "user_message": "访问凭证已过期。",
+                  "what_to_do": "用 refresh_token 换新 access，或重建 PAT。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "未认证或凭证无效"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "INSUFFICIENT_SCOPE",
+                  "detail": "当前令牌只有只读权限。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 403,
+                  "title": "INSUFFICIENT_SCOPE",
+                  "type": "https://stock-analyze.local/errors/INSUFFICIENT_SCOPE",
+                  "user_message": "当前令牌只有只读权限。",
+                  "what_to_do": "创建带 write scope 的 PAT。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "权限不足"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "IDEMPOTENCY_IN_PROGRESS",
+                  "detail": "这个请求正在处理中。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": true,
+                  "status": 409,
+                  "title": "IDEMPOTENCY_IN_PROGRESS",
+                  "type": "https://stock-analyze.local/errors/IDEMPOTENCY_IN_PROGRESS",
+                  "user_message": "这个请求正在处理中。",
+                  "what_to_do": "用返回的 job_id 轮询结果。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "资源状态冲突"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "example": {
+                  "code": "IDEMPOTENCY_KEY_REUSED",
+                  "detail": "幂等键被用于了不同请求。",
+                  "errors": [
+                    {
+                      "code": "invalid",
+                      "field": "body.email",
+                      "message": "邮箱格式不正确。"
+                    }
+                  ],
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 422,
+                  "title": "IDEMPOTENCY_KEY_REUSED",
+                  "type": "https://stock-analyze.local/errors/IDEMPOTENCY_KEY_REUSED",
+                  "user_message": "幂等键被用于了不同请求。",
+                  "what_to_do": "换一个新的 Idempotency-Key。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "QUOTA_EXCEEDED",
+                  "detail": "同时运行的任务已达上限。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": true,
+                  "status": 429,
+                  "title": "QUOTA_EXCEEDED",
+                  "type": "https://stock-analyze.local/errors/QUOTA_EXCEEDED",
+                  "user_message": "同时运行的任务已达上限。",
+                  "what_to_do": "等运行中的任务结束。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "请求过于频繁"
+          }
+        },
+        "summary": "Rebuild Trade Flags",
+        "tags": [
+          "settings"
+        ],
+        "x-async": true,
+        "x-error-codes": [
+          "IDEMPOTENCY_KEY_REUSED",
+          "IDEMPOTENCY_IN_PROGRESS",
+          "JOB_ALREADY_RUNNING",
+          "QUOTA_EXCEEDED",
+          "VALIDATION_ERROR",
+          "TOKEN_EXPIRED",
+          "TOKEN_REVOKED",
+          "MULTIPLE_CREDENTIALS",
+          "INSUFFICIENT_SCOPE",
+          "ADMIN_CANNOT_READ_TRADES"
         ],
         "x-idempotent": true,
         "x-required-scope": "write"

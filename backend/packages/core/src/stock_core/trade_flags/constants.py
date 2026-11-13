@@ -6,6 +6,10 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import Final
+
 # 词表/判定口径版本：随判定逻辑变化递增，参与幂等唯一键。
 # 1.1（2026-11-09）：新增 `first_entry` 与三个清仓状态（`full_exit_*`）。
 # 1.2（2026-11-12）：新增 `short_term_underwater` / `short_term_sold_early`；
@@ -35,6 +39,45 @@ SHORT_TERM_MARGIN_BPS = 500
 
 # 行情日窗口（不含当日）：前后各 5 个行情日。
 WINDOW_TRADING_DAYS = 5
+
+# ── 用户级阈值配置（设计 2026-11-11 §3.2.2）────────────────────
+#: 配置字段 → `platform.user_setting` 列名（与 `stock_contracts.preferences` 一致，
+#: 由单测锁定）。`flags_hash` 的规范 JSON 用去前缀的短键。
+CONFIG_COLUMNS: Final[dict[str, str]] = {
+    "near_equal_tolerance_bps": "bill_near_equal_tolerance_bps",
+    "chase_margin_bps": "bill_chase_margin_bps",
+    "stop_loss_margin_bps": "bill_stop_loss_margin_bps",
+    "short_term_margin_bps": "bill_short_term_margin_bps",
+    "window_trading_days": "bill_window_trading_days",
+}
+
+
+@dataclass(frozen=True, slots=True)
+class TradeFlagConfig:
+    """单用户生效的旗标阈值（bps 整数域 + 行情日窗口），默认值等于 1.4 常量。"""
+
+    near_equal_tolerance_bps: int = NEAR_EQUAL_TOLERANCE_BPS
+    chase_margin_bps: int = CHASE_MARGIN_BPS
+    stop_loss_margin_bps: int = STOP_LOSS_MARGIN_BPS
+    short_term_margin_bps: int = SHORT_TERM_MARGIN_BPS
+    window_trading_days: int = WINDOW_TRADING_DAYS
+
+    def as_columns(self) -> dict[str, int]:
+        """转成 DB 列名映射（供 `stock_core.preferences.flags_hash` 计算指纹）。"""
+        return {column: int(getattr(self, field)) for field, column in CONFIG_COLUMNS.items()}
+
+    @classmethod
+    def from_columns(cls, values: Mapping[str, int]) -> TradeFlagConfig:
+        """从 DB 列名映射构造（缺键回落默认，非法值由调用方先行归一）。"""
+        return cls(
+            **{
+                field: int(values.get(column, getattr(cls(), field)))
+                for field, column in CONFIG_COLUMNS.items()
+            }
+        )
+
+
+DEFAULT_TRADE_FLAG_CONFIG: Final[TradeFlagConfig] = TradeFlagConfig()
 
 # ── 评估状态 ───────────────────────────────────────────────
 STATUS_HIT = "hit"

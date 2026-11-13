@@ -38,6 +38,8 @@ class EffectivePreferences:
     concept_filters: dict[str, Any]
     flags_hash: str
     concept_filter_hash: str
+    #: 生效阈值（bps 整数域，键为 DB 列名）；供旗标判定构造 `TradeFlagConfig`。
+    bill_bps: dict[str, int]
 
 
 def _pick_enum(raw: Mapping[str, Any], key: str, allowed: Iterable[str]) -> str:
@@ -170,6 +172,7 @@ def resolve(stored: Mapping[str, Any]) -> EffectivePreferences:
             str(concept_filters["mode"]),
             [str(item["code"]) for item in concept_filters["excluded"]],
         ),
+        bill_bps=bps,
     )
 
 
