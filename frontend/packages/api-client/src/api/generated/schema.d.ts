@@ -4100,6 +4100,11 @@ export interface components {
             coverage_basis: string;
             /** Coverage Pct */
             coverage_pct: string;
+            /** Filtered Holding Count */
+            filtered_holding_count?: number | null;
+            /** Filtered Market Value */
+            filtered_market_value?: string | null;
+            filters?: components["schemas"]["SectorConceptFiltersOut"] | null;
             /** Hhi Tag */
             hhi_tag?: string | null;
             /** Multi Tag Market Value */
@@ -4113,6 +4118,33 @@ export interface components {
             top1_concept?: components["schemas"]["SectorConceptTopOut"] | null;
             /** Top5 Concepts */
             top5_concepts: components["schemas"]["SectorConceptTopOut"][];
+        };
+        /**
+         * SectorConceptFilterItemOut
+         * @description 用户排除的概念；`resolved=false` 表示概念目录中已不存在（悬空 code）。
+         */
+        SectorConceptFilterItemOut: {
+            /** Code */
+            code: string;
+            /** Name */
+            name: string;
+            /** Resolved */
+            resolved: boolean;
+        };
+        /**
+         * SectorConceptFiltersOut
+         * @description 概念过滤披露（仅 `mode != off` 输出）；`applied=false` 表示排除项为空。
+         */
+        SectorConceptFiltersOut: {
+            /** Applied */
+            applied: boolean;
+            /** Excluded */
+            excluded: components["schemas"]["SectorConceptFilterItemOut"][];
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode: "off" | "hide" | "exclude";
         };
         /**
          * SectorConceptTopOut
@@ -4137,7 +4169,7 @@ export interface components {
              * Code
              * @enum {string}
              */
-            code: "SECTOR_ASSET_BUILD_MISSING" | "SECTOR_ASSET_BUILD_BLOCKED" | "SECTOR_ASSET_BUILD_STALE" | "SECTOR_DATA_MISSING" | "SECTOR_DATA_STALE" | "SECTOR_SYNC_FAILED" | "SECTOR_MEMBERSHIP_MISSING" | "SECTOR_NON_STOCK_HOLDINGS" | "SECTOR_NO_STOCK_POSITIONS" | "SECTOR_BENCHMARK_WEIGHTS_MISSING" | "SECTOR_BENCHMARK_WEIGHTS_STALE" | "SECTOR_CONCEPT_MULTI_MEMBERSHIP" | "SECTOR_CONCEPT_COVERAGE_LOW" | "SECTOR_CONCEPT_HHI_UNAVAILABLE" | "SECTOR_HISTORY_NOT_COVERED" | "SECTOR_ASSET_MISMATCH" | "SECTOR_TRUNCATED" | "SECTOR_HOLDING_TRUNCATED" | "SECTOR_PRICE_MISSING" | "SECTOR_AS_OF_NOT_AVAILABLE";
+            code: "SECTOR_ASSET_BUILD_MISSING" | "SECTOR_ASSET_BUILD_BLOCKED" | "SECTOR_ASSET_BUILD_STALE" | "SECTOR_DATA_MISSING" | "SECTOR_DATA_STALE" | "SECTOR_SYNC_FAILED" | "SECTOR_MEMBERSHIP_MISSING" | "SECTOR_NON_STOCK_HOLDINGS" | "SECTOR_NO_STOCK_POSITIONS" | "SECTOR_BENCHMARK_WEIGHTS_MISSING" | "SECTOR_BENCHMARK_WEIGHTS_STALE" | "SECTOR_CONCEPT_MULTI_MEMBERSHIP" | "SECTOR_CONCEPT_COVERAGE_LOW" | "SECTOR_CONCEPT_HHI_UNAVAILABLE" | "SECTOR_HISTORY_NOT_COVERED" | "SECTOR_ASSET_MISMATCH" | "SECTOR_TRUNCATED" | "SECTOR_HOLDING_TRUNCATED" | "SECTOR_PRICE_MISSING" | "SECTOR_AS_OF_NOT_AVAILABLE" | "SECTOR_CONCEPT_FILTER_APPLIED" | "SECTOR_CONCEPT_FILTER_UNRESOLVED";
             /** Field */
             field: string;
             /** Reason */

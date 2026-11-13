@@ -2,13 +2,14 @@
 
 面向个人投资者的交易复盘系统：导入券商对账单，自动落库/分类/对账，建立 FIFO 回合、净值/资产序列与三域指标，并在 Dashboard 中聚合展示。
 
-> **当前阶段（2026-11-05）**
+> **当前阶段（2026-11-13）**
 >
 > - **一期**：已完成（认证/多租户/RLS、导入、任务队列、流水维护、契约链路）。
 > - **二期核心**：已完成验收或已落地——FIFO 回合、`GET /nav`、资产表、18 指标引擎与 `/metrics`、**Dashboard 两板块（API-084）**、`POST /jobs/rebuild-period`（API-083）、**板块数据底座（API-087/088 + `/sectors`）**。
 > - **Period2-08 五因子归因**：**08a~08g 已交付并验收（2026-11-02）**，2026-11-04 完成口径收口——[设计 v1.0](docs/architecture/2026-11-02-five-factor-attribution.md) / [交叉评审](docs/reviews/2026-11-02-DevDesign-Review-five-factor-attribution.md)；含 `GET /attribution`（API-036）与 [`/attribution` 页](http://127.0.0.1:5173/attribution)。月报同源接入仍属 Period2-09（09b），未开始。
 > - **Period2-18 FIFO 回合洞察增强**：**已交付并验收（2026-11-05）**——迁移 `0012_review_round_insights`、真实交易日历 B0~B3 前瞻收益、持有期分桶/旗标、`/rounds/insights` 页、回合详情洞察区块、逐笔理由编辑；含 `PUT/DELETE /trades/{trade_id}/reason`（API-090/091）、`GET /rounds/insights`（API-092）、`GET /rounds/{round_id}/insights`（API-093）、`POST /rounds/insights/refresh`（API-094）。设计见 [2026-11-04-fifo-round-insights.md](docs/architecture/2026-11-04-fifo-round-insights.md)。未覆盖：>5000 笔转后台 202 分支（构造方式见验收记录）。
-> - **二期剩余**：月报、导出、设置增强、报告/导出前端页按计划**暂停**；前端已预留 `/reports`、`/exports` 占位入口，验收中按缺失清单 SKIP，不伪造数据。
+> - **Period2-19 用户偏好配置**：**P0 + P1-1 + P1-2 + P1-3 已交付（2026-11-13）**——迁移 `0014_user_setting_preferences`、`GET /settings`（API-055）与 `PATCH /settings`（API-096）、`POST /settings/trade-flags/rebuild`（API-097）；账单旗标阈值/窗口参数化并带 `flags_hash` 过期识别与「立即重算」、看板/回合 stale 横幅；概念过滤 `off/hide/exclude` 接入 API-087（additive `concept.filters`/`filtered_*`/条件 ETag 与 `Cache-Control`）。设计见 [2026-11-11-user-preferences.md](docs/architecture/2026-11-11-user-preferences.md)。
+> - **二期剩余**：月报、导出、报告/导出前端页按计划**暂停**；前端已预留 `/reports`、`/exports` 占位入口，验收中按缺失清单 SKIP，不伪造数据。
 > - **三期**：未开始。
 >
 > 设计与验收记录见 [Dashboard 设计](docs/architecture/2026-10-28-dashboard.md)、[月度报告设计](docs/architecture/2026-10-28-monthly-report.md)、[S10 验收记录](docs/reviews/2026-10-27-p207-S10-acceptance.md)、[回合洞察设计](docs/architecture/2026-11-04-fifo-round-insights.md)。
@@ -34,6 +35,7 @@
 - **五因子归因**：`GET /attribution`（API-036）+ `/attribution` 页——选股/板块/买点/卖点/费用五因子，`Σ因子 + 残差 = 区间损益`；残差七桶（公司行动/未归因价格/无持仓股息/利息/打新收益/其他/估值差）。`new_stock` 按本期窗口判定，打新损益进账户级 `ipo_pnl`；降级只由「未归因标的损益」超容差（期末总资产 0.2%）触发，其余桶与 `VALUATION_GAP_ABOVE_TOLERANCE`（info）只披露；期初缺板块指数 bar 可回退节后首根并标 `SECTOR_BAR_FALLBACK`（info）；lookahead 仅在 `SECTOR_LOOKAHEAD_ENABLED=true` + 请求 `classification_lookahead=allow` 时启用（info 披露）。
 - **Dashboard 看板**：`/dashboard` 两个板块——资产概览（持仓/现金/仓位/总收益/峰值成本/费用 + 板块配置子块）与历史概览（平仓统计/盈亏占比/最大收益/最大回撤）；旧五卡以子块合并；未完成功能有占位入口。
 - **板块数据**：同花顺 THS 行业（扁平一级，互斥，Σ权重=1，分母 `E_map`）+ 概念板块（THS，多归属，不可加总）；`GET /sectors/overview`（集中度 HHI/TopK/主动权重/概念暴露 + `caveat`）、`GET /sectors`（公共目录树）；Dashboard 子块 + `/sectors` 详情页（行业一级、概念警示）；公共缓存落 `market.sector*`，replay 夹具 `fixtures/market/sectors.json`。
+- **用户偏好**：`/settings` 配置账单贴近阈值/追涨止损阈值/短线窗口、市场时段偏好与概念过滤；保存即按偏好版本重算账单旗标（`flags_hash` + `stale_months`，可「立即重算」），概念过滤在读路径生效（`off` 严格零变化，`hide/exclude` 只裁剪行/TopN 并显式披露 `filters`/`filtered_*`）；前端只渲染后端结论。
 - **质量与契约**：OpenAPI 快照 → `api-check` → 前端 SDK；标度整数零 float；RLS/越权/端点/租户/金标门禁；pytest/vitest。
 
 ## 技术栈
@@ -303,7 +305,7 @@ STOCK_DB_PORT=5433 make test-p2     # 显式指向 Docker 库（不改 .env 的 
 
 ## 已知未完成（二期暂停项）
 
-- Period2-09 月报（含归因同源接入 09b）、Period2-10 导出、Period2-11 设置增强、Period2-13 报告/导出页、Period2-14 `verify-p2`、Period2-15 零口径 ESLint 门禁。
+- Period2-09 月报（含归因同源接入 09b）、Period2-10 导出、Period2-13 报告/导出页、Period2-14 `verify-p2`、Period2-15 零口径 ESLint 门禁。
 - G8 金标审批仍有 22 个 COVERAGE 骨架 + `perf.fee_breakeven` 口径待收尾；`make gate-golden` 可能红。
 - 具体缺失/占位/验收 SKIP 见 [Dashboard 设计 §7](docs/architecture/2026-10-28-dashboard.md)。
 
@@ -320,6 +322,7 @@ STOCK_DB_PORT=5433 make test-p2     # 显式指向 Docker 库（不改 .env 的 
 - [Dashboard 设计（Period2-12）](docs/architecture/2026-10-28-dashboard.md)
 - [五因子归因设计（Period2-08，已交付）](docs/architecture/2026-11-02-five-factor-attribution.md) · [交叉评审](docs/reviews/2026-11-02-DevDesign-Review-five-factor-attribution.md)
 - [板块数据接入设计（2026-10-31，API-087/088）](docs/architecture/2026-10-31-sector-data.md)
+- [用户偏好配置设计（Period2-19，已交付）](docs/architecture/2026-11-11-user-preferences.md)
 - [月度报告设计（Period2-09，暂停）](docs/architecture/2026-10-28-monthly-report.md)
 - [S10 验收记录](docs/reviews/2026-10-27-p207-S10-acceptance.md)
 - [Period2-01/02 实施日志](docs/reviews/Period2-01-02-Implementation-Log.md)

@@ -1082,6 +1082,8 @@ SectorMissingCode = Literal[
     "SECTOR_HOLDING_TRUNCATED",
     "SECTOR_PRICE_MISSING",
     "SECTOR_AS_OF_NOT_AVAILABLE",
+    "SECTOR_CONCEPT_FILTER_APPLIED",
+    "SECTOR_CONCEPT_FILTER_UNRESOLVED",
 ]
 
 
@@ -1206,6 +1208,22 @@ class SectorConceptTopOut(StrictModel):
     exposure_pct: str
 
 
+class SectorConceptFilterItemOut(StrictModel):
+    """用户排除的概念；`resolved=false` 表示概念目录中已不存在（悬空 code）。"""
+
+    code: str
+    name: str
+    resolved: bool
+
+
+class SectorConceptFiltersOut(StrictModel):
+    """概念过滤披露（仅 `mode != off` 输出）；`applied=false` 表示排除项为空。"""
+
+    mode: Literal["off", "hide", "exclude"]
+    applied: bool
+    excluded: list[SectorConceptFilterItemOut]
+
+
 class SectorConceptBlockOut(StrictModel):
     """概念块（多归属；overlap 为 Σexposure 比率，非权重）。"""
 
@@ -1220,6 +1238,9 @@ class SectorConceptBlockOut(StrictModel):
     top1_concept: SectorConceptTopOut | None = None
     top5_concepts: list[SectorConceptTopOut]
     caveat: str | None = None
+    filters: SectorConceptFiltersOut | None = None
+    filtered_market_value: str | None = None
+    filtered_holding_count: int | None = None
 
 
 class SectorOverviewLinksOut(StrictModel):

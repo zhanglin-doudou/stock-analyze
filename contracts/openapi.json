@@ -8031,6 +8031,38 @@
             "title": "Coverage Pct",
             "type": "string"
           },
+          "filtered_holding_count": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filtered Holding Count"
+          },
+          "filtered_market_value": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Filtered Market Value"
+          },
+          "filters": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/SectorConceptFiltersOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "hhi_tag": {
             "anyOf": [
               {
@@ -8089,6 +8121,64 @@
         "title": "SectorConceptBlockOut",
         "type": "object"
       },
+      "SectorConceptFilterItemOut": {
+        "additionalProperties": false,
+        "description": "用户排除的概念；`resolved=false` 表示概念目录中已不存在（悬空 code）。",
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "resolved": {
+            "title": "Resolved",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "code",
+          "name",
+          "resolved"
+        ],
+        "title": "SectorConceptFilterItemOut",
+        "type": "object"
+      },
+      "SectorConceptFiltersOut": {
+        "additionalProperties": false,
+        "description": "概念过滤披露（仅 `mode != off` 输出）；`applied=false` 表示排除项为空。",
+        "properties": {
+          "applied": {
+            "title": "Applied",
+            "type": "boolean"
+          },
+          "excluded": {
+            "items": {
+              "$ref": "#/components/schemas/SectorConceptFilterItemOut"
+            },
+            "title": "Excluded",
+            "type": "array"
+          },
+          "mode": {
+            "enum": [
+              "off",
+              "hide",
+              "exclude"
+            ],
+            "title": "Mode",
+            "type": "string"
+          }
+        },
+        "required": [
+          "mode",
+          "applied",
+          "excluded"
+        ],
+        "title": "SectorConceptFiltersOut",
+        "type": "object"
+      },
       "SectorConceptTopOut": {
         "additionalProperties": false,
         "description": "概念 TopN（按 exposure 降序，不是 tag_share）。",
@@ -8144,7 +8234,9 @@
               "SECTOR_TRUNCATED",
               "SECTOR_HOLDING_TRUNCATED",
               "SECTOR_PRICE_MISSING",
-              "SECTOR_AS_OF_NOT_AVAILABLE"
+              "SECTOR_AS_OF_NOT_AVAILABLE",
+              "SECTOR_CONCEPT_FILTER_APPLIED",
+              "SECTOR_CONCEPT_FILTER_UNRESOLVED"
             ],
             "title": "Code",
             "type": "string"
@@ -20069,6 +20161,19 @@
                     "coverage": "0.123",
                     "coverage_basis": "mapped_equity_market_value / equity_market_value",
                     "coverage_pct": "96.00%",
+                    "filtered_holding_count": 1,
+                    "filtered_market_value": "1234.56",
+                    "filters": {
+                      "applied": false,
+                      "excluded": [
+                        {
+                          "code": "MISSING_CASH_BALANCE",
+                          "name": "示例名称",
+                          "resolved": false
+                        }
+                      ],
+                      "mode": "off"
+                    },
                     "hhi_tag": "0.1234",
                     "multi_tag_market_value": "示例",
                     "multi_tag_pct": "36.00%",

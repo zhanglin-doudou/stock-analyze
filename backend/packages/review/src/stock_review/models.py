@@ -574,6 +574,7 @@ class TradeFlag(Base):
         ),
         Index("ix_trade_flag_user_date", "user_id", "trade_date"),
         Index("ix_trade_flag_user_code", "user_id", "flag_code", "status"),
+        Index("ix_trade_flag_user_hash", "user_id", "flags_hash", "definition_version"),
         {"schema": SCHEMA},
     )
 

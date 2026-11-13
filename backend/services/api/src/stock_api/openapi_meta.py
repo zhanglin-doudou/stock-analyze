@@ -97,6 +97,8 @@ MONEY_FIELDS = frozenset(
         "account_level_total",
         "listed_total",
         "others_total",
+        # 2026-11-13（API-087）：概念过滤的被排除概念市值合计
+        "filtered_market_value",
     }
 )
 PRICE_FIELDS = frozenset({"price", "unit_nav"})

@@ -383,6 +383,7 @@ async def _concept(
     *,
     limit: int = 100,
     statuses: Sequence[str] = ("current",),
+    concept_filter: app.ConceptFilter | None = None,
 ) -> app._Body:  # type: ignore[name-defined]
     return await app._concept_overview(
         sector_data=StubSectorData(catalog=_CONCEPT_CATALOG, memberships=memberships),
@@ -400,6 +401,7 @@ async def _concept(
         coverage_ok_min_units=_BASE["ok_min"],
         coverage_degraded_min_units=_BASE["deg_min"],
         statuses=list(statuses),
+        concept_filter=concept_filter or app.ConceptFilter(),
     )
 
 
@@ -506,6 +508,114 @@ async def test_concept_limit_truncates_with_others() -> None:
     assert body.others.market_value_units == cents(56)
     assert body.others.exposure_units == 56_000_000
     assert any(item.code == "SECTOR_TRUNCATED" for item in body.missing)
+
+
+def _filter(mode: str, *codes: tuple[str, str], digest: str = "f" * 16) -> app.ConceptFilter:
+    return app.ConceptFilter(
+        mode=mode,
+        excluded=tuple(app.ConceptFilterItem(code=code, name=name) for code, name in codes),
+        hash=digest,
+    )
+
+
+def _inputs_hash(digest: str = "") -> str:
+    return app._inputs_hash(
+        as_of=_AS_OF,
+        taxonomy=_CONCEPT,
+        level=0,
+        parent=None,
+        provenance="stub:replay#sha256:" + "a" * 64,
+        definition_version=app.DEFINITION_VERSION,
+        total_assets_units=cents(110),
+        holding_market_value_units=cents(104),
+        concept_filter_hash=digest,
+    )
+
+
+async def test_concept_filter_off_is_strict_noop() -> None:
+    """§4.6：off 不加 filters/filtered_*/assumptions/missing 码，指纹也不进 inputs_hash。"""
+    default = await _concept(_CONCEPT_MEMBERSHIPS)
+    explicit_off = await _concept(_CONCEPT_MEMBERSHIPS, concept_filter=_filter("off"))
+
+    for body in (default, explicit_off):
+        block = body.concept
+        assert block is not None
+        assert block.filters is None
+        assert block.filtered_market_value_units is None
+        assert block.filtered_holding_count is None
+        assert "concept_filter_hash" not in body.assumptions
+        codes = {item.code for item in body.missing}
+        assert "SECTOR_CONCEPT_FILTER_APPLIED" not in codes
+        assert "SECTOR_CONCEPT_FILTER_UNRESOLVED" not in codes
+    assert _inputs_hash() == _inputs_hash("")
+
+
+async def test_concept_filter_hide_trims_rows_but_keeps_aggregates() -> None:
+    body = await _concept(
+        _CONCEPT_MEMBERSHIPS,
+        concept_filter=_filter("hide", ("BK1010", "新能源")),
+    )
+
+    block = body.concept
+    assert block is not None
+    # 行/TopN/n_sectors 只含未被排除的概念。
+    assert [row.sector_code for row in body.sectors] == ["BK0999"]
+    assert body.others is None
+    assert block.top1_concept is not None
+    assert block.top1_concept.sector_code == "BK0999"
+    assert [item.sector_code for item in block.top5_concepts] == ["BK0999"]
+    assert body.concentration.n_sectors == 1
+    # 覆盖度/重叠/多归属/caveat/tagged/unclassified 保持全量口径。
+    assert block.coverage_units == 86_000_000
+    assert block.overlap_units == 136_000_000
+    assert block.multi_tag_units == 50_000_000
+    assert block.hhi_tag_units == 51_557_093
+    assert block.tagged_market_value_units == cents(86)
+    assert block.caveat is not None
+    assert body.unclassified is not None
+    assert body.unclassified.market_value_units == cents(14)
+    # 披露：filters 有值、exclude 专属字段为空、assumptions 带指纹。
+    assert block.filters is not None
+    assert block.filters.mode == "hide"
+    assert block.filters.applied is True
+    assert [(item.code, item.name) for item in block.filters.excluded] == [("BK1010", "新能源")]
+    assert block.filters.unresolved == ()
+    assert block.filtered_market_value_units is None
+    assert block.filtered_holding_count is None
+    assert body.assumptions["concept_filter_hash"] == "f" * 16
+    assert any(item.code == "SECTOR_CONCEPT_FILTER_APPLIED" for item in body.missing)
+    assert _inputs_hash("f" * 16) != _inputs_hash()
+
+
+async def test_concept_filter_exclude_reports_filtered_values() -> None:
+    body = await _concept(
+        _CONCEPT_MEMBERSHIPS,
+        concept_filter=_filter("exclude", ("BK0999", "人工智能")),
+    )
+
+    block = body.concept
+    assert block is not None
+    assert [row.sector_code for row in body.sectors] == ["BK1010"]
+    # 被排除概念市值合计 80 元；持仓去重后 2 只（600001 同时属于未排除概念，仍按定义计入）。
+    assert block.filtered_market_value_units == cents(80)
+    assert block.filtered_holding_count == 2
+    assert block.filters is not None
+    assert block.filters.mode == "exclude"
+    assert block.coverage_units == 86_000_000
+
+
+async def test_concept_filter_unresolved_code_is_disclosed_not_fatal() -> None:
+    body = await _concept(
+        _CONCEPT_MEMBERSHIPS,
+        concept_filter=_filter("hide", ("BK9999", "已下线概念")),
+    )
+
+    block = body.concept
+    assert block is not None
+    assert block.filters is not None
+    assert block.filters.unresolved == ("BK9999",)
+    assert [row.sector_code for row in block.top5_concepts] == ["BK0999", "BK1010"]
+    assert any(item.code == "SECTOR_CONCEPT_FILTER_UNRESOLVED" for item in body.missing)
 
 
 async def test_sector_overview_dataclass_shape() -> None:

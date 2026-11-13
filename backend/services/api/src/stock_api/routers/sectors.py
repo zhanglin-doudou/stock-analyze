@@ -17,6 +17,7 @@ from stock_contracts.errors import ApiError, ErrorCode
 from stock_core.metrics.policy import SECTOR_FLAT_ACTIVE_UNITS
 from stock_core.values import Money, Ratio
 from stock_platform.ports import SectorDataSource
+from stock_platform.repositories.users import UserSettingRepository
 from stock_platform.tenant import TenantContext
 from stock_review.application.sectors import (
     CATALOG_DEFAULT_LIMIT,
@@ -29,6 +30,7 @@ from stock_review.application.sectors import (
     SectorOverview,
     SectorRow,
     build_sector_overview,
+    concept_filter_from_preferences,
     list_sector_catalog,
 )
 
@@ -40,6 +42,8 @@ from stock_api.schemas import (
     SectorCatalogPathOut,
     SectorConcentrationOut,
     SectorConceptBlockOut,
+    SectorConceptFilterItemOut,
+    SectorConceptFiltersOut,
     SectorConceptTopOut,
     SectorMissingOut,
     SectorOthersOut,
@@ -206,6 +210,24 @@ def _concept_out(block: ConceptBlock) -> SectorConceptBlockOut:
             for row in block.top5_concepts
         ],
         caveat=block.caveat,
+        filters=(
+            None
+            if block.filters is None
+            else SectorConceptFiltersOut(
+                mode=block.filters.mode,
+                applied=block.filters.applied,
+                excluded=[
+                    SectorConceptFilterItemOut(
+                        code=item.code,
+                        name=item.name,
+                        resolved=item.code not in block.filters.unresolved,
+                    )
+                    for item in block.filters.excluded
+                ],
+            )
+        ),
+        filtered_market_value=_money(block.filtered_market_value_units),
+        filtered_holding_count=block.filtered_holding_count,
     )
 
 
@@ -382,6 +404,12 @@ async def get_sectors_overview_endpoint(
         raise ApiError(ErrorCode.UNKNOWN_BENCHMARK, detail=f"未知基准: {resolved_benchmark}")
 
     async with state.db.session(user_id=user_id, begin=True) as session:
+        concept_filter = None
+        if taxonomy == TAXONOMY_CONCEPT:
+            effective = await UserSettingRepository(session).get_effective(user_id)
+            concept_filter = concept_filter_from_preferences(
+                effective.concept_filters, effective.concept_filter_hash
+            )
         result = await build_sector_overview(
             session,
             user_id,
@@ -400,6 +428,7 @@ async def get_sectors_overview_endpoint(
             benchmark_max_age_days=state.settings.sector_benchmark_max_age_days,
             industry_stale_days=state.settings.sector_industry_stale_days,
             concept_stale_days=state.settings.sector_concept_stale_days,
+            concept_filter=concept_filter,
         )
 
     etag_value = (
@@ -409,6 +438,8 @@ async def get_sectors_overview_endpoint(
     if _if_none_match_hit(request.headers.get("if-none-match"), etag_value):
         return Response(status_code=304, headers={"ETag": etag_header})
     response.headers["ETag"] = etag_header
+    if concept_filter is not None and concept_filter.active:
+        response.headers["Cache-Control"] = "private, no-cache"
     return _to_out(result)
 
 
