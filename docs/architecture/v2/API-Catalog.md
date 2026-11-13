@@ -153,7 +153,7 @@
 > **编号说明（2026-11-05）**：**API-089 预留、暂不实现**，不进入 §1 计数；本任务（FIFO 回合分析增强）从 **API-090** 起编号。API-090~094 已于 2026-11-05 **实现并验收**：详细契约见 §2.6，OpenAPI 快照 / SDK / API 测试 / 隔离矩阵 / DEV-PLAN 已同步（commit `8a958d8`）。
 
 ## §2 分域详细契约
-> 下列 42 个端点为**详细契约**（34 个既有 + 5 个已实现 API-090~094 + API-055/096/097）；其余端点的请求/响应字段以 `openapi/openapi.json` 为准（§1 已登记、§6 已配验收用例）。断言均为可脚本执行：状态码 + 字段值 + 状态迁移 + 副作用。
+> 下列端点均有**详细契约**（以本节各 `####` 小节为准；一个小节可覆盖一个或一组端点，如 API-055/096 合并在一节）；未在此列出的端点，请求/响应字段以 `contracts/openapi.json` 为准（§1 已登记、§6 已配验收用例）。断言均为可脚本执行：状态码 + 字段值 + 状态迁移 + 副作用。
 ### 2.1 认证、导入与流水
 #### API-001 POST /auth/register
 - 用途：注册账号；FR-L2；认证：公开；幂等：支持；同步。
@@ -439,7 +439,7 @@
 - 概念过滤（2026-11-13 additive，P1-3）：仅 `taxonomy=concept` 且用户偏好 `concept_filters.mode != off` 时输出。`filters{mode(off|hide|exclude),applied,excluded[]{code,name,resolved}}`；`applied = mode != off && excluded 非空`；`resolved=false` 表示概念目录中已不存在（悬空 code）。`hide` 只裁剪 `sectors[]`/`top1_concept`/`top5_concepts`/`others`/`n_sectors`，`coverage/overlap/multi_tag/hhi_tag/caveat/tagged/unclassified` 保持**全量**；`exclude` 同 hide 且额外输出 `filtered_market_value`（被排除概念市值合计，可重叠、不宣称可加总）与 `filtered_holding_count`（被排除概念下持仓去重数）。非 off 时 `assumptions.concept_filter_hash` 出现并进入 `inputs_hash`/ETag；`off` 时以上字段全部不出现（严格零变化）。
 - `sectors[]`（SectorRow）口径：industry 用 `weight/active_weight/direction`；concept 用 `exposure/overlap`，并携带 additive 字段 `holdings[]{symbol,name}`（该概念下的持仓标的明细，按成分股市值降序；同一标的属于多个概念时每个概念行各计一次，合计可大于持仓数；行业行为 `null`）。
 - 错误码：TOKEN_EXPIRED/TOKEN_REVOKED/MULTIPLE_CREDENTIALS(401)、ADMIN_CANNOT_READ_TRADES(403)、UNKNOWN_QUERY_PARAM(400)、VALIDATION_ERROR(422)、UNKNOWN_BENCHMARK(422)。降级码走 200 `missing[].code`（`SECTOR_*` 22 码，不新增 ErrorCode；概念过滤新增 `SECTOR_CONCEPT_FILTER_APPLIED`/`SECTOR_CONCEPT_FILTER_UNRESOLVED`）。
-- ETag：`W/"<as_of>-<sector_checksum>-<asset_fingerprint>"`；概念过滤非 off 时指纹追加 `concept_filter_hash`（ETag/`inputs_hash` 随之变化），并带 `Cache-Control: private, no-cache`（off 不加，避免默认行为变化）；`If-None-Match` 命中 → 304 空 body。
+- ETag：`W/"<as_of>-<sector_checksum>-<inputs_hash 前 16 位>"`。中间段为板块数据源 provenance 中 `sha256:` 标记后、`#` 前部分的前 16 位；replay/缓存源 provenance 不含 `sha256:` 时该段为空（出现连续 `--`，如 `W/"2026-11-12--d1295be24206a430"`），属正常形态。末段为 `inputs_hash` 前 16 位（含资产/持仓指纹）；概念过滤非 off 时 `inputs_hash` 追加 `concept_filter_hash`（ETag 随之变化），并带 `Cache-Control: private, no-cache`（off 不加，避免默认行为变化）；`If-None-Match` 命中 → 304 空 body。
 - 验收断言：① 行业互斥分区 `Σ sector.market_value + unclassified == equity_market_value`，`Σ weight == 1`（差 ≤ n/2 units）；② 概念 `Σ exposure > 1` 时 `caveat` 非空且 `weight_mode=="overlapping"`；③ 未同步 → 200 + `sector_data_state="missing"` + 数字全 `null`；④ `coverage<0.90` → `status="insufficient"` + `hhi=null`；⑤ 未来 `as_of`/`level`/`taxonomy` 非法 → 422；`benchmark=nope` → 422 UNKNOWN_BENCHMARK；⑥ 前后 `job/asset_daily/sector_member` 计数不变（只读）；⑦ concept 每个 `sectors[]` 行 `holdings[].symbol` 均为该概念成分且 `len(holdings)==holding_count`，多归属标的在各概念行重复出现（行业行 `holdings=null`）；⑧ 偏好 `hide/exclude` 后行/TopN/`n_sectors` 不含被排除概念、`coverage/overlap/caveat` 不变，`exclude` 的 `filtered_market_value`/`filtered_holding_count` 与手算一致，悬空 code → `resolved=false` + `SECTOR_CONCEPT_FILTER_UNRESOLVED`，ETag 变化且带 `Cache-Control: private, no-cache`；`off` 时无 `filters`/无 `assumptions.concept_filter_hash`/ETag 不变。
 #### API-088 GET /sectors
 - 用途：板块目录树（行业多级/概念列表），供筛选、面包屑、三级钻取与深链参数校验；FR-D1；认证：read；同步、只读、公共数据。
@@ -604,7 +604,7 @@
 | MetricResult | metric_id / definition_version | string | 是 | 稳定指标 ID / 口径版本 `^\d+\.\d+$` | `win_rate` / `2.1` |
 | MetricResult | value / n / sample_status / status | decimal-string / integer / enum | 否/是 | blocked 时 value 缺省；样本数；`ok/insufficient/pending_window/blocked`；`ok/stale/blocked/unreliable` | `0.4321` / `12` / `ok` / `ok` |
 | MetricResult | data_as_of / inputs_hash / computed_at | date / string / datetime | 是 | 血缘四件套 | `2026-10-01` / `sha256:9f…` / `2026-10-19T08:00:00Z` |
-| Job | job_id / type | string / enum | 是 | `import_commit/rebuild_rounds/diagnostics_selection/report_generate/export_create/backup/restore_drill/reclassify/build_assets` | `job_01J9Z6` / `report_generate` |
+| Job | job_id / type | string / enum | 是 | `import_commit/rebuild_rounds/rebuild_period/diagnostics_selection/report_generate/export_create/backup/restore_drill/reclassify/build_assets/rebuild_trade_flags` | `job_01J9Z6` / `report_generate` |
 | Job | status / progress / stage | enum / integer / string | 是 | `pending/running/succeeded/failed/cancelled`；0–100 单调；阶段码 | `running` / `60` / `rendering` |
 | Job | result_ref / error | string\|null / Error\|null | 否 | 终态资源链接 / 失败原因（含 code/user_message/what_to_do） | `/api/v1/reports/rpt_…` |
 | ImportPreview | preview_id / file | string / object | 是 | 24h TTL；`name/sha256/bytes` | `prv_01J9Z6` |
@@ -648,6 +648,8 @@ enqueue ─▶ pending ─claim(SKIP LOCKED)─▶ running ─成功─▶ succe
 |---|---|---|
 | `import_commit` / `reclassify` | 是（检查点） | 写事务前取消无副作用；写事务内不可中断，完成后按幂等回滚批次 |
 | `rebuild_rounds` / `diagnostics_selection` | 是 | 计算阶段检查点取消；已提交派生数据保留并可重算 |
+| `rebuild_period` | 是（阶段边界） | rounds→assets→nav→metrics 四阶段之间检查取消；整 job 单事务，取消即回滚，重跑按阶段幂等恢复 |
+| `rebuild_trade_flags` | 是（逐月检查点） | 逐月「先删后插」；取消后已完成月份保留，重跑幂等 |
 | `report_generate` / `export_create` | 是 | 渲染/打包前检查点取消 |
 | `build_assets` | 是（写事务前检查点） | 派生重建；写事务前取消无副作用，写事务内不可中断（与 `rebuild_rounds` 一致） |
 | `backup` / `restore_drill` | 否（running 后） | 一致性快照，取消即损坏风险 |

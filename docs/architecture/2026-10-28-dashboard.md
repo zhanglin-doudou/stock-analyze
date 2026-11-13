@@ -6,7 +6,7 @@
 > 事实基线（2026-10-28）：
 > - 前端**没有** `Dashboard` 页面；`/` 目前重定向 `/trades`（`frontend/apps/web/src/router.tsx`）。
 > - 后端已有 `GET /nav`、`GET /metrics`、`GET /rounds`、`GET /reconciliation/bridge`、`GET /assets`、`POST /jobs/rebuild-period`（API-083）；**没有** Dashboard 聚合端点。
-> - Period2-08（归因）**已交付并验收**（08a~08g，2026-11-02；2026-11-04 口径收口）、Period2-09（月报）、Period2-10（导出）、Period2-11（设置）、Period2-13（报告/导出页）、Period2-14/15（验收/零口径门禁）未完成；`make rebuild`、`make demo-broken`、`make verify-p2` 不存在。
+> - Period2-08（归因）**已交付并验收**（08a~08g，2026-11-02；2026-11-04 口径收口）；Period2-11（设置）已被 **Period2-19** 取代——`GET/PATCH /settings`（API-055/096）与账单旗标重建（API-097）已交付，但基准切换（API-056）、隐私设置（API-057）仍未实现；Period2-09（月报）、Period2-10（导出）、Period2-13（报告/导出页）、Period2-14/15（验收/零口径门禁）未完成；`make rebuild`、`make demo-broken`、`make verify-p2` 不存在。
 > - 因此本设计同时交付：**Dashboard 页面 + 验收剧本修订 + 未完成功能的前端入口预留 + 缺失内容清单**；剩余二期任务不实现。
 
 ---
@@ -433,7 +433,7 @@ def max_drawdown_window(...) -> DrawdownWindow:
 | 生成本月复盘 | Dashboard 页头按钮 → `/reports` | 占位页 | Period2-09/13 | 点击进入占位页，显示"报告功能暂停"，无假 HTML 下载 |
 | 导出数据 | Dashboard 页头按钮 → `/exports` | 占位页 | Period2-10/13 | 同上 |
 | 归因 | 历史概览"归因"子块 → `/attribution` | 实页（08f，2026-11-02） | Period2-08（已完成） | 渲染后端因子/残差；blocked 不显示金额；无前端口径换算 |
-| 基准/隐私设置 | Settings 页新增"偏好设置（建设中）"卡片 | 占位 | Period2-11 | 卡片存在，无假保存 |
+| 基准/隐私设置 | Settings 页「偏好设置」卡片（外观/账单旗标/行情时段/概念过滤，API-055/096/097）已交付；基准/隐私（API-056/057）无入口 | 部分交付 | Period2-19（已交付）/ Period2-11（剩余 056/057） | 偏好设置可保存并回读、不自动重算旗标；基准/隐私不渲染假保存/假切换 |
 | 月报列表/下载 | `/reports` 占位页可含未来入口说明 | 占位 | Period2-09 | 无 404/白屏 |
 | 导出任务/下载 | `/exports` 占位页 | 占位 | Period2-10 | 无 404/白屏 |
 | 趋势/日志/对话/审计 | 不放入 Dashboard；保留缺失清单 | 不做入口 | P3 | 本期不验收 |
@@ -500,7 +500,7 @@ curl -fsS "$BASE/dashboard" -H "$AUTH" | tee /tmp/dashboard.json | jq -e '
 # 5) 明确 SKIP（缺失项不伪装通过）
 SKIPS+=("make verify-p2 不存在（Period2-14 暂停）")
 SKIPS+=("make rebuild / make demo-broken / D-19 demo 数据未完成")
-SKIPS+=("Period2-09/10/11/13/15 功能未实现，仅占位；Period2-08 归因已交付")
+SKIPS+=("Period2-09/10/13/15 功能未实现，仅占位；Period2-11 已由 Period2-19 交付偏好设置（API-055/096/097），基准/隐私（API-056/057）未实现；Period2-08 归因已交付")
 printf 'SKIP: %s\n' "${SKIPS[@]}"
 ```
 
@@ -549,7 +549,7 @@ printf 'SKIP: %s\n' "${SKIPS[@]}"
 |---|---|---|---|---|---|---|
 | 1 | API-036 `/attribution` + 五因子 | **已实现（08a~08f，2026-11-02）**；月报同源接入属 09b | 否 | 否（本任务外） | `/attribution` 实页；历史子块链接可用 | [Period2-08 设计](2026-11-02-five-factor-attribution.md) |
 | 2 | API-039~042 报告 + report 表/异步/HTML | 未实现 | 否（入口占位） | 否 | `/reports` 占位；Dashboard 按钮 | Period2-09 暂停 |
-| 3 | API-055~057 设置（基准/隐私） | 仅 PAT 设置 | 否（基准缺失已入第 11 项） | 否 | Settings "偏好设置（建设中）" | Period2-11 暂停 |
+| 3 | API-056/057 设置（基准/隐私） | API-055/096/097 已交付（Period2-19）；**API-056 基准切换、API-057 隐私未实现** | 否（基准缺失已入第 8 项） | 否 | Settings「偏好设置」卡片（外观/账单旗标/行情时段/概念过滤）已可用；基准/隐私无入口 | Period2-19 已交付；Period2-11 剩余 056/057 |
 | 4 | API-058 行为规则阈值 | 未实现；**属三期**（不是 055~057） | 否 | 否 | 不做入口 | DEV-PLAN A.1：Period3-03 |
 | 5 | API-059/060 导出 | 未实现 | 否 | 否 | `/exports` 占位；Dashboard 按钮 | Period2-10 暂停 |
 | 6 | API-038 选股诊断 | 未实现（E-18 延后） | 否 | 否 | 无（不在 Dashboard） | 历史 design |

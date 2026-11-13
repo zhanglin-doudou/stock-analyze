@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from copy import deepcopy
 from typing import Any
 
@@ -2377,6 +2378,31 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
 }
 
 
+# ── 生成后示例后处理（按 operationId）────────────────────────
+# 约定：schema 递归生成会给所有字段填示例，遇到「按模式互斥出现」的字段需显式收敛。
+def _sector_overview_example_postprocess(example: Any) -> None:
+    """API-087：`filters` 仅 concept 且非 off 出现；`filtered_*` 仅 exclude 出现。"""
+    if not isinstance(example, dict):
+        return
+    concept = example.get("concept")
+    if not isinstance(concept, dict):
+        return
+    filters = concept.get("filters")
+    mode = filters.get("mode") if isinstance(filters, dict) else None
+    if example.get("taxonomy") != "concept" or mode in (None, "off"):
+        concept.pop("filters", None)
+        concept.pop("filtered_market_value", None)
+        concept.pop("filtered_holding_count", None)
+    elif mode != "exclude":
+        concept.pop("filtered_market_value", None)
+        concept.pop("filtered_holding_count", None)
+
+
+EXAMPLE_POSTPROCESS: dict[str, Callable[[Any], None]] = {
+    "getSectorsOverview": _sector_overview_example_postprocess,
+}
+
+
 # ── 确定性示例生成 ────────────────────────────────────────────
 
 
@@ -2682,7 +2708,11 @@ def _enrich_operation(
             if manual is not None and media_type == JSON_CONTENT_TYPE:
                 media["example"] = deepcopy(manual)
             else:
-                media["example"] = _example_for_schema(media.get("schema"), schemas)
+                generated = _example_for_schema(media.get("schema"), schemas)
+                postprocess = EXAMPLE_POSTPROCESS.get(operation_id)
+                if postprocess is not None:
+                    postprocess(generated)
+                media["example"] = generated
 
 
 def apply_contract_metadata(spec: dict[str, Any]) -> dict[str, Any]:
@@ -2838,6 +2868,70 @@ def _validate_operation(operation: dict[str, Any], label: str, problems: list[st
             problems.append(f"{label}: responses {status} 未被 x-error-codes 覆盖")
 
 
+def _validate_sector_overview_example(
+    operation: dict[str, Any], label: str, problems: list[str]
+) -> None:
+    """API-087 互斥字段断言：off/industry 不输出 filters；`filtered_*` 仅 exclude。"""
+    responses = operation.get("responses")
+    response = responses.get("200") if isinstance(responses, dict) else None
+    content = response.get("content") if isinstance(response, dict) else None
+    media = content.get(JSON_CONTENT_TYPE) if isinstance(content, dict) else None
+    example = media.get("example") if isinstance(media, dict) else None
+    if not isinstance(example, dict):
+        return  # 缺示例由通用校验报错
+    concept = example.get("concept")
+    if not isinstance(concept, dict):
+        return
+    filters = concept.get("filters")
+    filtered = [
+        key for key in ("filtered_market_value", "filtered_holding_count") if key in concept
+    ]
+    if filters is None:
+        if filtered:
+            problems.append(f"{label}: 200 示例未输出 filters 却出现 {'/'.join(filtered)}")
+        return
+    if not isinstance(filters, dict):
+        problems.append(f"{label}: 200 示例 concept.filters 不是对象")
+        return
+    mode = filters.get("mode")
+    if mode == "off":
+        problems.append(f"{label}: 200 示例 filters.mode 不得为 off（off 时不输出 filters）")
+    elif mode not in {"hide", "exclude"}:
+        problems.append(f"{label}: 200 示例 filters.mode 非法（{mode!r}）")
+    if example.get("taxonomy") != "concept":
+        problems.append(
+            f"{label}: 200 示例 filters 仅 concept 请求出现（taxonomy={example.get('taxonomy')!r}）"
+        )
+    if filtered and mode != "exclude":
+        problems.append(
+            f"{label}: 200 示例 {mode!r} 模式不应出现 {'/'.join(filtered)}（仅 exclude）"
+        )
+    if ("filtered_market_value" in concept) != ("filtered_holding_count" in concept):
+        problems.append(
+            f"{label}: 200 示例 filtered_market_value/filtered_holding_count 必须同时出现"
+        )
+    excluded = filters.get("excluded")
+    applied = filters.get("applied")
+    if not isinstance(excluded, list):
+        problems.append(f"{label}: 200 示例 filters.excluded 不是数组")
+        return
+    if not isinstance(applied, bool):
+        problems.append(f"{label}: 200 示例 filters.applied 不是 bool")
+    elif applied != (mode != "off" and bool(excluded)):
+        problems.append(f"{label}: 200 示例 filters.applied 与 mode/excluded 不一致")
+    for item in excluded:
+        if not isinstance(item, dict):
+            problems.append(f"{label}: 200 示例 filters.excluded[] 不是对象")
+            continue
+        code = item.get("code")
+        if not isinstance(code, str):
+            problems.append(f"{label}: 200 示例 filters.excluded[].code 缺失")
+        elif _status_of(code) is not None or code.startswith("SECTOR_"):
+            problems.append(
+                f"{label}: 200 示例 filters.excluded[].code 不得使用错误/降级码（{code}）"
+            )
+
+
 def validate_contract(spec: dict[str, Any]) -> list[str]:
     """校验 §7.4 强制项；返回违规列表（空列表 = 通过）。无副作用。"""
     problems: list[str] = []
@@ -2869,4 +2963,6 @@ def validate_contract(spec: dict[str, Any]) -> list[str]:
             else:
                 seen_operation_ids[operation_id] = label
             _validate_operation(operation, label, problems)
+            if operation_id == "getSectorsOverview":
+                _validate_sector_overview_example(operation, label, problems)
     return problems

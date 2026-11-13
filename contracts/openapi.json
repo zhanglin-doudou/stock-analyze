@@ -20161,19 +20161,6 @@
                     "coverage": "0.123",
                     "coverage_basis": "mapped_equity_market_value / equity_market_value",
                     "coverage_pct": "96.00%",
-                    "filtered_holding_count": 1,
-                    "filtered_market_value": "1234.56",
-                    "filters": {
-                      "applied": false,
-                      "excluded": [
-                        {
-                          "code": "MISSING_CASH_BALANCE",
-                          "name": "示例名称",
-                          "resolved": false
-                        }
-                      ],
-                      "mode": "off"
-                    },
                     "hhi_tag": "0.1234",
                     "multi_tag_market_value": "示例",
                     "multi_tag_pct": "36.00%",

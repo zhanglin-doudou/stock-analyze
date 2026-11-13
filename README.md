@@ -35,7 +35,7 @@
 - **五因子归因**：`GET /attribution`（API-036）+ `/attribution` 页——选股/板块/买点/卖点/费用五因子，`Σ因子 + 残差 = 区间损益`；残差七桶（公司行动/未归因价格/无持仓股息/利息/打新收益/其他/估值差）。`new_stock` 按本期窗口判定，打新损益进账户级 `ipo_pnl`；降级只由「未归因标的损益」超容差（期末总资产 0.2%）触发，其余桶与 `VALUATION_GAP_ABOVE_TOLERANCE`（info）只披露；期初缺板块指数 bar 可回退节后首根并标 `SECTOR_BAR_FALLBACK`（info）；lookahead 仅在 `SECTOR_LOOKAHEAD_ENABLED=true` + 请求 `classification_lookahead=allow` 时启用（info 披露）。
 - **Dashboard 看板**：`/dashboard` 两个板块——资产概览（持仓/现金/仓位/总收益/峰值成本/费用 + 板块配置子块）与历史概览（平仓统计/盈亏占比/最大收益/最大回撤）；旧五卡以子块合并；未完成功能有占位入口。
 - **板块数据**：同花顺 THS 行业（扁平一级，互斥，Σ权重=1，分母 `E_map`）+ 概念板块（THS，多归属，不可加总）；`GET /sectors/overview`（集中度 HHI/TopK/主动权重/概念暴露 + `caveat`）、`GET /sectors`（公共目录树）；Dashboard 子块 + `/sectors` 详情页（行业一级、概念警示）；公共缓存落 `market.sector*`，replay 夹具 `fixtures/market/sectors.json`。
-- **用户偏好**：`/settings` 配置账单贴近阈值/追涨止损阈值/短线窗口、市场时段偏好与概念过滤；保存即按偏好版本重算账单旗标（`flags_hash` + `stale_months`，可「立即重算」），概念过滤在读路径生效（`off` 严格零变化，`hide/exclude` 只裁剪行/TopN 并显式披露 `filters`/`filtered_*`）；前端只渲染后端结论。
+- **用户偏好**：`/settings` 配置账单贴近阈值/追涨止损阈值/短线窗口、市场时段偏好与概念过滤；保存偏好**不会自动重算**历史账单旗标——新偏好写入独立 `flags_hash`，旧行由 `stale_months` 标为过期，需在设置页点「立即重算」（API-097）重建；概念过滤在读路径生效（`off` 严格零变化，`hide/exclude` 只裁剪行/TopN 并显式披露 `filters`/`filtered_*`）；前端只渲染后端结论。
 - **质量与契约**：OpenAPI 快照 → `api-check` → 前端 SDK；标度整数零 float；RLS/越权/端点/租户/金标门禁；pytest/vitest。
 
 ## 技术栈

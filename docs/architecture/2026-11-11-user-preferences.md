@@ -1,6 +1,6 @@
 # 用户偏好配置 v2.1（评审修订版）：扩展 `platform.user_setting` + 通用 PATCH（外观与显示 / 账单旗标阈值与行情时段 / 概念板块过滤）
 
-> 版本：**v2.1（评审修订版，2026-11-13）** ｜ 状态：**P0、P1-1、P1-2、P1-3、P2-1 已实现并完成门禁（2026-11-13）；代码留在工作区未提交** ｜ 基线：`5419813`（schema `0013`；API-Catalog 94 端点 / 已实现 62 个 operation / 2xx 示例 56 / `SEED_ERROR_COUNT=47`；旗标 `DEFINITION_VERSION="1.4"`、20 码）
+> 版本：**v2.1（评审修订版，2026-11-13）** ｜ 状态：**P0、P1-1、P1-2、P1-3、P2-1 已实现并完成门禁（2026-11-13）；代码已提交（后端 `e1aca2e`、前端 `9cb2915`）** ｜ 基线：`5419813`（schema `0013`；API-Catalog 94 端点 / 已实现 62 个 operation / 2xx 示例 56 / `SEED_ERROR_COUNT=47`；旗标 `DEFINITION_VERSION="1.4"`、20 码）
 > **P0 实现记录（2026-11-13）**：仅交付 P0-1（数据与设置接口）+ P0-2（前端设置页）。实际端点计数为 **95 端点 / 64 operation / 58 个 2xx 示例 / `EXPECTED_PERIOD2=40`**（API-097 未登记，故与 D-16 的「96/65/59/41」相差 1，属 P0 增量）；迁移 `0014_user_setting_preferences`；阈值/窗口与默认值不同时设置页显示「需重建账单旗标」，重建端点与旗标接算留待 P1。
 > **P1-1 实现记录（2026-11-13）**：`TradeFlagConfig` 参数化 `evaluate_trade_flags`；`definitions` 改模板 + `render_description(config)`；`build_trade_flags_for_user(config=)` 落 `flags_hash`，`load_trade_flags`/`monthly_trade_flag_summary` 按 hash 过滤并新增 `stale_months[]`；CLI `build-trade-flags` 逐用户读偏好；API-092/093/095 additive `flag_config`；`core.preferences.resolve` 增 `bill_bps`；`UserSettingRepository.get_effective`。API-097 与前端「立即重算」在 P1-2。
 > **P1-2 实现记录（2026-11-13）**：worker handler `rebuild_trade_flags`（`stock_review.application.trade_flags.rebuild_trade_flags_job`：`scope=all` 按首末交易月、`scope=months` 按给定月，逐月构建、每月检查取消、最近 120 月截断）；API-097 `POST /settings/trade-flags/rebuild`（`Idempotency-Key` 必填、202 + `Location`/`Retry-After`、同 key 重放 `Idempotency-Replayed`、同 scope 单飞 `X-Job-Reused`、异参在途 409、months 格式/去重/上限 422）；计数升至 **96 端点 / 65 operation / 59 个 2xx 示例 / `EXPECTED_PERIOD2=41`**；前端设置页账单旗标卡片新增「立即重算」（`scope=all`，轮询 job 进度，成功后刷新设置以更新指纹）；P0 的「需重建账单旗标」提示即接到该入口。看板/回合详情页的 stale 横幅（§7.4）不在本轮范围，数据已由 P1-1 additive 就绪。
@@ -606,7 +606,7 @@ PATCH /settings → require_write → _parse_if_match → 租户 session
 
 - `stale_months[]` 非空：看板旗标图上方显示「以下月份按旧阈值计算：…」+ 重算入口；
 - API-092/093 `flag_config.stale=true`：回合洞察显示「阈值刚更新，旗标待重算」，**不展示旧 hash 旗标**；
-- 概念 `filters`/caveat 原样渲染（铁律 6）；`filtered_market_value` 由后端给文案。
+- 概念 `filters`/caveat 原样渲染（铁律 6）；`filtered_market_value` 的**数值由后端给出**，说明文案由前端固定拼接（后端不返回文案字段）。
 
 ### 7.5 测试锚点
 

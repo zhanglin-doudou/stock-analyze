@@ -885,7 +885,7 @@ def concept_exposure(mv_by_symbol: Mapping[str, int], memberships: Mapping[str, 
 | `sectors[]`（concept） | `sector_code`, `sector_name`, `level=0`, `parent_code=null`, `exposure`, `exposure_pct`, `market_value`, `market_value_display`, `holding_count`, `overlap`(bool) |
 | `preference` | `deviation`(nullable), `max_overweight`(nullable), `max_underweight`(nullable), `top_overweight[]`, `top_underweight[]`；每项 `{sector_code,sector_name,active_weight,active_weight_pct,direction}` |
 | `concentration` | `method`(`industry_single_membership`/`concept_overlap`), `status`, `hhi`(nullable), `effective_n`(nullable), `top1_weight`(nullable), `top3_weight`(nullable), `benchmark_hhi`(nullable), `n_sectors`(int) |
-| `concept` | `coverage`, `coverage_pct`, `coverage_basis`, `tagged_market_value`, `multi_tag_market_value`, `multi_tag_pct`, `overlap`, `hhi_tag`, `top1_concept`(nullable), `top5_concepts[]`, `caveat`；每项 top `{sector_code,sector_name,exposure,exposure_pct}` |
+| `concept` | `coverage`, `coverage_pct`, `coverage_basis`, `tagged_market_value`, `multi_tag_market_value`, `multi_tag_pct`, `overlap`, `hhi_tag`, `top1_concept`(nullable), `top5_concepts[]`, `caveat`, `filters`(nullable，非 off 时出现), `filtered_market_value`/`filtered_holding_count`(nullable，仅 exclude)；每项 top `{sector_code,sector_name,exposure,exposure_pct}` |
 | `others` | `null` 或 `{market_value,weight,weight_pct,holding_count}`（industry）/`{market_value,exposure,exposure_pct,holding_count}`（concept） |
 | `missing[]` | `{field, code, reason, what_to_do}`（字段路径 + 机读码 + 人话） |
 | `inputs_hash` | **64 hex（不带 `sha256:` 前缀，与 API-084 一致）**；内容 = as_of + taxonomy/level/parent + 板块 checksum + 资产/持仓指纹 |
@@ -908,9 +908,10 @@ def concept_exposure(mv_by_symbol: Mapping[str, int], memberships: Mapping[str, 
 | `SECTOR_CONCEPT_MULTI_MEMBERSHIP` | 概念多归属 | `concept.overlap` |
 | `SECTOR_CONCEPT_COVERAGE_LOW` | 概念覆盖度 < 0.5（仍出暴露） | `concept.coverage` |
 | `SECTOR_CONCEPT_HHI_UNAVAILABLE` | 概念请求集中度 | `concentration.hhi` |
+| `SECTOR_CONCEPT_FILTER_APPLIED` | 已按偏好排除概念（`hide`/`exclude`），行/TopN/others 不含这些概念 | `concept.filters` |
+| `SECTOR_CONCEPT_FILTER_UNRESOLVED` | 已排除概念在概念目录中不存在（`resolved=false`） | `concept.filters.excluded` |
 | `SECTOR_HISTORY_NOT_COVERED` | 请求 `as_of` 早于首次板块同步日（fail-closed） | `sector_data_as_of` |
 | `SECTOR_ASSET_MISMATCH` | 持仓重建市值与 `asset_daily` 不一致（导致 non_stock 偏差） | `portfolio.non_stock_market_value` |
-| `SECTOR_SYNC_FAILED` | 最近一次同步失败，仍展示上次成功数据 | `sector_data_as_of` |
 | `SECTOR_TRUNCATED` | `limit` 截断 | `others` |
 | `SECTOR_HOLDING_TRUNCATED` | 持仓超上限（沿用 `HOLDINGS_MAX=200`） | `portfolio.holding_count` |
 | `SECTOR_PRICE_MISSING` | 部分持仓缺价 | `portfolio.mapped_market_value` |
