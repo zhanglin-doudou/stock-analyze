@@ -349,6 +349,8 @@ export type SectorConcentration = ApiSchemas["SectorConcentrationOut"];
 export type SectorPreference = ApiSchemas["SectorPreferenceOut"];
 export type SectorPreferenceItem = ApiSchemas["SectorPreferenceItemOut"];
 export type SectorConceptBlock = ApiSchemas["SectorConceptBlockOut"];
+/** 概念过滤披露（仅 mode != off 输出；`resolved=false` 为悬空 code）。 */
+export type SectorConceptFilters = NonNullable<SectorConceptBlock["filters"]>;
 export type SectorConceptTop = ApiSchemas["SectorConceptTopOut"];
 export type SectorMissing = ApiSchemas["SectorMissingOut"];
 export type SectorOthers = ApiSchemas["SectorOthersOut"];

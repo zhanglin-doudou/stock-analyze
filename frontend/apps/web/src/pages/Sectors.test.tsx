@@ -221,6 +221,42 @@ describe("Sectors 板块分析页", () => {
     expect(screen.queryByText("主动权重")).toBeNull();
   });
 
+  it("概念过滤披露：chips + 失效标记 + exclude 汇总（off 不渲染）", async () => {
+    getOverview.mockImplementation(async ({ taxonomy }) =>
+      taxonomy === "concept"
+        ? concept({
+            concept: {
+              ...concept().concept!,
+              filters: {
+                mode: "exclude",
+                applied: true,
+                excluded: [
+                  { code: "BK0999", name: "人工智能", resolved: true },
+                  { code: "BK9999", name: "已下线概念", resolved: false },
+                ],
+              },
+              filtered_market_value: "12345.00",
+              filtered_holding_count: 2,
+            },
+          })
+        : industry(),
+    );
+    renderPage("/sectors?taxonomy=concept");
+
+    const notice = await screen.findByTestId("sector-concept-filters");
+    expect(notice.textContent).toContain("人工智能");
+    expect(notice.textContent).toContain("已失效");
+    const summary = screen.getByTestId("sector-filtered-summary");
+    expect(summary.textContent).toContain("12345.00");
+    expect(summary.textContent).toContain("2");
+  });
+
+  it("概念未过滤（off）不渲染过滤块", async () => {
+    renderPage("/sectors?taxonomy=concept");
+    await screen.findByTestId("sector-concept-view");
+    expect(screen.queryByTestId("sector-concept-filters")).toBeNull();
+  });
+
   it("深链回填：level/parent 进入请求且展示下钻面包屑", async () => {
     renderPage("/sectors?taxonomy=industry&level=2&parent=801120.SI");
     await screen.findByTestId("sectors-page");
