@@ -30,9 +30,12 @@ from stock_platform.ports import Bar, MarketDataSource
 from stock_platform.symbols import is_bond, is_convertible_bond
 
 # 持仓影响类：这些 category 会改变持仓数量（buy/bonus/rights/new_stock 加，sell 减）。
+# broker_action（申购中签/新股入账/证券清理等登记动作）不在其中：数量与市值都不受影响。
 HOLDING_CATEGORIES: frozenset[str] = frozenset({"buy", "sell", "bonus", "rights", "new_stock"})
-# 外部现金流：transfer（银证转账）。
-CASHFLOW_CATEGORIES: frozenset[str] = frozenset({"transfer"})
+# 外部现金流：transfer（银证转账）与 broker_action（券商行为）。
+# broker_action 按**金额**判定资金属性：登记行金额为 0 → 对现金零影响；若账单确实带了非 0
+# 金额（如「申购还款」回款），按外部现金流从收益中剔除，避免虚增。
+CASHFLOW_CATEGORIES: frozenset[str] = frozenset({"transfer", "broker_action"})
 # 增加持仓成本的类别：buy/rights/new_stock 的 amount_units 为负（带费净额），取负即含费成本。
 # 不得再叠加 commission/stamp_tax/other_fee 字段（解析器已折算进净额，重复计会虚高成本）。
 COST_ADD_CATEGORIES: frozenset[str] = frozenset({"buy", "rights", "new_stock"})
@@ -220,9 +223,10 @@ def bond_face_divisors(trades: list[Trade]) -> dict[str, int]:
 def holding_delta(category: str, quantity_units: int, *, amount_units: int = 0) -> int:
     """单笔 trade 对持仓数量的增量（buy/bonus/rights/new_stock 加，sell 减）。
 
-    新股例外：`new_stock` 且发生金额为 0 的行是「申购中签 / 新股入帐」通知行——同一批
-    中签会先后出现中签、入帐、缴款三行，只有缴款行（金额非 0）才是真正的建仓，通知行
-    一律不计持仓，否则持仓会被重复计数。
+    `broker_action`（券商行为：申购中签/新股入账/证券清理/托管等）与 `transfer` 一样
+    不计持仓：它们是券商的份额登记/锁定动作，不是真实成交。
+    新股例外：`new_stock` 且发生金额为 0 的行按通知行处理、不计持仓（新口径下 new_stock
+    只匹配「新股/认购/申购」扣款行，此判断仅作防御，避免零金额行重复计数）。
     """
     if category == "new_stock" and amount_units == 0:
         return 0

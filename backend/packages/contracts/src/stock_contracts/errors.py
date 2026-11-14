@@ -353,7 +353,7 @@ CATALOG: dict[ErrorCode, Problem] = dict(
             ErrorCode.IMPORT_CATEGORY_INVALID,
             422,
             "账单分类不合法。",
-            "从系统提供的 10 个分类中选择。",
+            "从系统提供的 11 个分类中选择。",
             False,
         ),
         _p(

@@ -256,6 +256,15 @@ NON_TRADE_SUMMARY_SIDE: tuple[tuple[str, str], ...] = (
     ("转存管转入", Side.UNKNOWN.value),
     ("转存管转出", Side.UNKNOWN.value),
     ("资管转让资金上账", Side.SELL.value),
+    # 打新/可转债申购的资金腿（新口径：只有中签缴款建仓，其余一律不建仓、归资金划转）：
+    # 冻结/缴款是资金流出（buy），解冻/还款/退款是资金退回（sell）。这些行在部分券商
+    # 账单里没有证券代码，纳入非交易词汇后用 CASH 占位导入，避免被当成字段缺失行隔离、
+    # 打断资金余额链。
+    ("申购冻结", Side.BUY.value),
+    ("申购解冻", Side.SELL.value),
+    ("申购还款", Side.SELL.value),
+    ("申购退款", Side.SELL.value),
+    ("中签退款", Side.SELL.value),
 )
 
 # 资金划转（银证转账 / 转存管）摘要关键词：分类规则与方向识别共用同一词表。

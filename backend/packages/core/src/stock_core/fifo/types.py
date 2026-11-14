@@ -24,6 +24,8 @@ class EventKind(StrEnum):
     FEE = "fee"
     TRANSFER = "transfer"
     NEW_STOCK = "new_stock"
+    #: 券商行为（申购中签/新股入账/证券清理等登记动作）：引擎无对应分支，显式忽略。
+    BROKER_ACTION = "broker_action"
     OTHER = "other"
 
 

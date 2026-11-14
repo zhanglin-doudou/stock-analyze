@@ -30,6 +30,7 @@ def test_event_kind_enum_values() -> None:
         "fee",
         "transfer",
         "new_stock",
+        "broker_action",
         "other",
     }
     assert EventKind("buy") is EventKind.BUY

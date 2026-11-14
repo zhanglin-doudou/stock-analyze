@@ -119,8 +119,14 @@ def _money_fund_codes(rows: list[ParsedRow]) -> set[str]:
     return {row.security_code for row in rows if _is_money_fund_row(row)}
 
 
-# 零金额信息行（纯通知，无资金意义）：申购中签/新股入账/托管转出/托管转入。
-_ZERO_AMOUNT_INFO_KEYWORDS: tuple[str, ...] = ("申购中签", "新股入账", "托管转出", "托管转入")
+# 零金额信息行（纯通知，无资金意义）：申购中签/新股入账（帐）/托管转出/托管转入。
+_ZERO_AMOUNT_INFO_KEYWORDS: tuple[str, ...] = (
+    "申购中签",
+    "新股入账",
+    "新股入帐",
+    "托管转出",
+    "托管转入",
+)
 # 省心投（华泰基金投顾）摘要（归一化后精确匹配，2026-10-30 用户确认口径，设计 D14）：
 # 资金在主账户与省心投投顾账户之间划转，但**转出动作不在账单留记录**——账单里只有
 # 「[省心投]申购确认」（主账户资金流出买省心投货基）与「[省心投]红利发放」（省心投
@@ -648,6 +654,9 @@ def _build_candidate_from_values(
     # 「申购中签/新股入账/托管转出」等纯通知行：无发生金额且无资金余额 → 隔离为
     # ZERO_AMOUNT_INFO，不进明细（否则会形成无意义持仓/回合噪音，如中签通知行使
     # 持仓形成日早于真实缴款日）。同类摘要但有金额的行（真实缴款）不受影响。
+    # 打新各分支在新口径下的落点：真正扣款的「新股/认购/申购」行 → new_stock 建仓；
+    # 申购中签/申购还款/新股入账/证券清理/托管等登记动作 → broker_action（不影响持仓与成本）；
+    # 申购冻结/解冻/退款等资金腿 → transfer（外部现金流，不进收益）。
     if (
         amount_units == 0
         and cash_balance_units is None

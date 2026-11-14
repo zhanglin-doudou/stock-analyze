@@ -56,6 +56,8 @@ _KIND_BY_CATEGORY: dict[str, EventKind] = {
     "fee": EventKind.FEE,
     "transfer": EventKind.TRANSFER,
     "new_stock": EventKind.NEW_STOCK,
+    # 券商行为（申购中签/新股入账/证券清理/托管等登记动作）：引擎无分支，显式忽略。
+    "broker_action": EventKind.BROKER_ACTION,
     "other": EventKind.OTHER,
 }
 

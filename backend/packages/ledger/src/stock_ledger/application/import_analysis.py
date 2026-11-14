@@ -250,7 +250,7 @@ def apply_type_resolutions(
                     FieldError(
                         key,
                         "INVALID_CATEGORY",
-                        f"分类 {category!r} 不在 10 个系统分类内",
+                        f"分类 {category!r} 不在 11 个系统分类内",
                     )
                 )
                 continue

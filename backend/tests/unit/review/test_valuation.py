@@ -153,7 +153,8 @@ def test_constants_match_design() -> None:
     assert QTY_PRICE_SCALE == 10**8
     assert PRICE_LOOKBACK.days == 45
     assert frozenset({"buy", "rights", "new_stock"}) == COST_ADD_CATEGORIES
-    assert frozenset({"transfer"}) == CASHFLOW_CATEGORIES
+    # broker_action（券商行为）按金额计外部现金流：登记行金额为 0，回款行不计收益。
+    assert frozenset({"transfer", "broker_action"}) == CASHFLOW_CATEGORIES
 
 
 # ── 价格阶梯 ────────────────────────────────────────────────

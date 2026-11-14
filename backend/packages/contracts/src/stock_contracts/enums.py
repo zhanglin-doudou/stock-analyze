@@ -122,7 +122,7 @@ class QuarantineReason(StrEnum):
 
 
 class BillCategory(StrEnum):
-    """账单业务分类（10 值，设计 D-15）。DB 仍以 text 存储，新增值免迁移。"""
+    """账单业务分类（11 值，设计 D-15）。DB 仍以 text 存储，新增值免迁移。"""
 
     BUY = "buy"
     SELL = "sell"
@@ -132,7 +132,11 @@ class BillCategory(StrEnum):
     INTEREST = "interest"
     FEE = "fee"
     TRANSFER = "transfer"
+    #: 新股/可转债**中签**（特殊买入）：只有中签缴款行建仓，上市后卖出归 `sell`。
     NEW_STOCK = "new_stock"
+    #: 券商行为（登记类）：申购中签/申购还款/新股入账/证券清理/托管等份额锁定与登记动作，
+    #: 不扣款、不影响持仓、不计成本、不产生回合与收益。
+    BROKER_ACTION = "broker_action"
     OTHER = "other"
 
 
@@ -140,13 +144,14 @@ class BillCategory(StrEnum):
 BILL_CATEGORY_LABELS: dict[str, str] = {
     BillCategory.BUY.value: "买入",
     BillCategory.SELL.value: "卖出",
-    BillCategory.BONUS.value: "送转",
+    BillCategory.BONUS.value: "送转",  # 只有股权变更，不扣费
     BillCategory.DIVIDEND.value: "分红",
-    BillCategory.RIGHTS.value: "配股",
-    BillCategory.INTEREST.value: "利息",
+    BillCategory.RIGHTS.value: "配股",  # 股票变更和扣费
+    BillCategory.INTEREST.value: "利息",  # 货币基金利息
     BillCategory.FEE.value: "费用",
     BillCategory.TRANSFER.value: "资金划转",
-    BillCategory.NEW_STOCK.value: "新股",
+    BillCategory.NEW_STOCK.value: "新股/可转债中签",
+    BillCategory.BROKER_ACTION.value: "券商行为",
     BillCategory.OTHER.value: "其他",
 }
 

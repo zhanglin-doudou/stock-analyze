@@ -11,6 +11,9 @@
   `pnl - dividend` 之和），期末未平仓 lot 成本进 `open_cost`；
 - `dividend` 计净股息、`interest` 计利息、`fee` 计正费用（amount 为负，取反）、
   `transfer` 计外部资金流；
+- `broker_action`（券商行为）按金额计入外部资金流 `cashflows`：登记行金额为 0 时无影响；
+  若账单确实带非 0 金额（如「申购还款」回款），必须作为外部现金流剔除出收益，否则会虚增
+  收益并让桥接失衡；它不进 `other`，因此不产生残差、不触发降级；
 - `new_stock/other/missing/NULL` 等未分类现金流进 `other` 并把状态降级为 `degraded`
   （打新冻结/解冻、对账补差等语义无法拆分，只能整体补差）；
 - `rights`（配股缴款）**不进 other**：其缴款额已被 FIFO 计入买入 lot 成本
@@ -46,6 +49,7 @@ from stock_ledger.repositories.trades import TradeRepository
 
 from stock_review.application.bond_alias import build_bond_alias
 from stock_review.application.rebuild import trades_to_events
+from stock_review.application.valuation import CASHFLOW_CATEGORIES as _CASHFLOW_CATEGORIES
 from stock_review.application.valuation import category as _category
 from stock_review.application.valuation import is_cash_balance as _is_cash_balance
 
@@ -264,7 +268,9 @@ async def bridge_for_period(
         elif category == "fee":
             # fee 行 amount 为负（资金流出），桥接公式里 fees 是正数费用。
             fees += -trade.amount_units
-        elif category == "transfer":
+        elif category in _CASHFLOW_CATEGORIES:
+            # transfer（银证转账）与 broker_action（券商行为，金额非 0 时即真实回款）
+            # 都是外部现金流，不计入投资收益。
             cashflows += trade.amount_units
         else:
             other += trade.amount_units

@@ -91,12 +91,13 @@ def test_money_fund_summaries_all_match(summary: str, side: str, category: str, 
 
 def test_money_fund_rules_beat_generic_rules_without_swallowing_others() -> None:
     rules = _rules()
-    # 「申购确认」必须命中货基买入，而不是被通用 contains「申购」→新股的规则吃掉。
+    # 「申购确认」必须命中货基买入：单字「申购」→new_stock 的规则(16)晚于货基(15)，
+    # 避免把货基申购确认抢成打新。
     buy_confirm = match_rule(rules, "申购确认", "buy")
     assert buy_confirm is not None and buy_confirm.code == "sys_fund_buy"
-    # 新股申购（无「确认」）仍归打新，不被货基规则抢走。
-    new_apply = match_rule(rules, "申购", "buy")
-    assert new_apply is not None and new_apply.code == "sys_new_apply"
+    # 新股申购（无「确认」）仍归打新建仓，不被货基规则抢走。
+    new_apply = match_rule(rules, "新股申购", "buy")
+    assert new_apply is not None and new_apply.code == "sys_new_stock"
     # 只认「赎回确认」形态：赎回费属于费用，不能被赎回规则误吞。
     redeem_fee = match_rule(rules, "赎回费", "buy")
     assert redeem_fee is not None and redeem_fee.code == "sys_fee"
@@ -119,13 +120,14 @@ def test_fund_rules_reuse_parser_vocabulary() -> None:
         ("[省心投]红\n利发放", "unknown", "dividend", "sys_div_paid"),
         # [省心投]申购确认视同银行转出（设计 D14）：exact 规则优先于货基「申购确认」。
         ("[省心投]申\n购确认", "buy", "transfer", "sys_sxt_out"),
-        ("[省心投]转\n托管确认", "unknown", "transfer", "sys_rehold"),
-        ("托管转出", "unknown", "transfer", "sys_hold_out"),
-        ("证券清理", "unknown", "other", "sys_cleanup"),
-        # 打新缴款折行后含「申购确认」，必须仍归新股而不是货基买入。
+        ("[省心投]转\n托管确认", "unknown", "broker_action", "sys_brk_rehold"),
+        ("托管转出", "unknown", "broker_action", "sys_brk_hold_out"),
+        ("证券清理", "unknown", "broker_action", "sys_brk_cleanup"),
+        # 打新缴款折行后含「申购确认」，必须仍归新股建仓而不是货基买入。
         ("新股申购确\n认缴款", "buy", "new_stock", "sys_new_stock"),
-        ("市值申购中\n签", "unknown", "new_stock", "sys_new_win"),
-        ("新股入帐", "unknown", "new_stock", "sys_new_stock"),
+        # 中签/入账是券商登记动作：不扣款、不建仓、不计成本。
+        ("市值申购中\n签", "unknown", "broker_action", "sys_brk_win"),
+        ("新股入帐", "unknown", "broker_action", "sys_brk_arrive_t"),
     ],
 )
 def test_wrapped_real_statement_summaries_all_match(
@@ -138,12 +140,45 @@ def test_wrapped_real_statement_summaries_all_match(
 
 
 def test_new_stock_rule_beats_fund_buy_rule_for_ipo_payment() -> None:
-    """「新股申购确认缴款」含「申购确认」子串，新股规则优先级必须更高。"""
+    """「新股申购确认缴款」含「申购确认」子串，新股建仓规则(14)必须早于货基(15)。"""
     rules = _rules()
     rule = match_rule(rules, "新股申购确认缴款", "buy")
     assert rule is not None and rule.code == "sys_new_stock"
     fund = match_rule(rules, "申购确认", "buy")
     assert fund is not None and fund.code == "sys_fund_buy"
+
+
+@pytest.mark.parametrize(
+    ("summary", "side", "category", "code"),
+    [
+        # 新口径：只有真正扣款的「新股/认购/申购」建仓；上市后卖出统一走 sell。
+        ("新股卖出", "sell", "sell", "sys_new_sell"),
+        # 券商行为：份额锁定与登记，不扣款、不影响持仓、不计成本。
+        ("申购中签", "unknown", "broker_action", "sys_brk_win"),
+        ("申购还款", "both", "broker_action", "sys_brk_repay"),
+        ("新股入账", "unknown", "broker_action", "sys_brk_arrive"),
+        ("新股入帐", "unknown", "broker_action", "sys_brk_arrive_t"),
+        ("证券清理", "unknown", "broker_action", "sys_brk_cleanup"),
+        # 未中签/未成交的资金腿：不建仓，归资金划转（只有现金进出，没有持仓与成本）。
+        ("申购冻结", "both", "transfer", "sys_sub_freeze"),
+        ("申购解冻", "both", "transfer", "sys_sub_unfreeze"),
+        ("申购退款", "both", "transfer", "sys_sub_refund"),
+        ("中签退款", "both", "transfer", "sys_win_refund"),
+        # 配股（含配股缴款）既有股票变更也有扣费：归 rights，不被新股/申购规则抢走。
+        ("配股缴款", "buy", "rights", "sys_rights"),
+        # 真实扣款的打新/可转债认购仍是特殊买入，按缴款金额（含费）建仓。
+        ("新股申购确认缴款", "buy", "new_stock", "sys_new_stock"),
+        ("可转债认购", "buy", "new_stock", "sys_new_sub"),
+        ("申购", "both", "new_stock", "sys_new_apply"),
+    ],
+)
+def test_new_stock_narrowed_to_winning_lots(
+    summary: str, side: str, category: str, code: str
+) -> None:
+    rule = match_rule(_rules(), summary, side)
+    assert rule is not None, summary
+    assert rule.category == category
+    assert rule.code == code
 
 
 @pytest.mark.parametrize(
@@ -276,8 +311,8 @@ def test_real_statement_excerpt_parse_and_classify() -> None:
     assert categories == {
         # [省心投]申购确认视同银行转出（设计 D14）→ 资金划转。
         "[省心投]申\n购确认": {"transfer"},
-        "托管转出": {"transfer"},
+        "托管转出": {"broker_action"},
         "新股申购确\n认缴款": {"new_stock"},
-        "新股入帐": {"new_stock"},
+        "新股入帐": {"broker_action"},
         "赎回确认": {"sell"},
     }
