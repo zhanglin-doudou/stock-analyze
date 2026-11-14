@@ -13,6 +13,7 @@ import uuid
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from datetime import date
+from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from stock_contracts.clock import Clock
@@ -38,6 +39,7 @@ from stock_core.sector import (
 from stock_core.stats.numeric import div_round
 from stock_ledger.repositories.trades import TradeRepository
 from stock_platform.cursor import decode_cursor, encode_cursor
+from stock_platform.obs import get_logger
 from stock_platform.ports import (
     MarketDataSource,
     SectorDataSource,
@@ -111,6 +113,22 @@ DATASET_KEY = "sector_all"
 # 概念覆盖度低提示阈值（scale=8，0.5）与多归属判定阈值（overlap > 1.0，scale=8）。
 CONCEPT_COVERAGE_LOW_UNITS = 50_000_000
 RATIO_ONE_UNITS = 100_000_000
+
+log = get_logger("stock_review.sectors")
+
+# 降级/阻断日志里代码清单的展示上限：只截断样本，总数单独给出，避免大盘持仓刷屏。
+LOG_SYMBOL_LIMIT = 20
+# 被规则阻断（fail-closed）的 missing 码：与「数据本身不足」区分，便于按类排查。
+_RULE_BLOCKED_CODES = frozenset({SECTOR_HISTORY_NOT_COVERED, SECTOR_ASSET_BUILD_BLOCKED})
+# 结构性提示（多归属/集中度不可用/概念过滤），本身不代表降级。
+_CAVEAT_CODES = frozenset(
+    {
+        SECTOR_CONCEPT_MULTI_MEMBERSHIP,
+        SECTOR_CONCEPT_HHI_UNAVAILABLE,
+        SECTOR_CONCEPT_FILTER_APPLIED,
+        SECTOR_CONCEPT_FILTER_UNRESOLVED,
+    }
+)
 
 
 @dataclass(slots=True, frozen=True)
@@ -327,6 +345,81 @@ class _Body:
 
 def _status_priority(statuses: Sequence[str]) -> str:
     return min(statuses, key=lambda item: _STATUS_PRIORITY.get(item, 99))
+
+
+def _reason_kind(codes: Sequence[str]) -> str:
+    """降级原因归类：`rule_blocked`（被规则阻断）/ `caveat`（结构性提示）/ `data_gap`。"""
+    if any(code in _RULE_BLOCKED_CODES for code in codes):
+        return "rule_blocked"
+    if codes and all(code in _CAVEAT_CODES for code in codes):
+        return "caveat"
+    return "data_gap"
+
+
+def _log_overview_not_ok(
+    result: SectorOverview,
+    *,
+    user_id: uuid.UUID,
+    taxonomy: str,
+    level: int,
+    parent: str | None,
+    requested_as_of: date | None,
+    stale_days: int,
+    missing_prices: Sequence[str] = (),
+) -> None:
+    """降级/阻断路径的结构化日志（每次请求至多一条，status=ok 不输出）。
+
+    一条日志即可回答：哪个账号、什么请求参数、触发条件、缺哪类数据/缺多少/哪些代码、
+    最终状态；`reason_kind` 区分「数据本身不足」与「被规则阻断」。金额一律不落日志
+    （NFR-1），只输出计数与代码样本。
+    """
+    if result.status == STATUS_OK:
+        return
+    codes = [item.code for item in result.missing]
+    unclassified = result.unclassified.symbols if result.unclassified is not None else ()
+    snapshot_age = (
+        (result.as_of - result.sector_data_as_of).days
+        if result.sector_data_as_of is not None
+        else None
+    )
+    fields: dict[str, Any] = {
+        "user_id": str(user_id),
+        "taxonomy": taxonomy,
+        "level": level,
+        "parent": parent,
+        "requested_as_of": requested_as_of.isoformat() if requested_as_of else None,
+        "resolved_as_of": result.as_of.isoformat(),
+        "status": result.status,
+        "reason_kind": _reason_kind(codes),
+        "asset_build_state": result.asset_build_state,
+        "sector_data_state": result.sector_data_state,
+        "data_as_of": result.data_as_of.isoformat() if result.data_as_of else None,
+        "sector_data_as_of": (
+            result.sector_data_as_of.isoformat() if result.sector_data_as_of else None
+        ),
+        "sector_snapshot_age_days": snapshot_age,
+        "sector_stale_days": stale_days,
+        "missing_codes": codes,
+        "holding_count": result.portfolio.holding_count,
+        "classified_holding_count": result.portfolio.classified_holding_count,
+        "missing_price_count": len(missing_prices),
+        "missing_price_symbols": list(missing_prices[:LOG_SYMBOL_LIMIT]),
+        "unclassified_count": len(unclassified),
+        "unclassified_symbols": list(unclassified[:LOG_SYMBOL_LIMIT]),
+    }
+    if result.benchmark_id is not None:
+        fields["benchmark_id"] = result.benchmark_id
+        fields["benchmark_as_of"] = (
+            result.benchmark_as_of.isoformat() if result.benchmark_as_of else None
+        )
+    if result.concept is not None:
+        fields["concept_coverage"] = f"{result.concept.coverage_units / RATIO_ONE_UNITS:.2%}"
+    severity = (
+        log.warning
+        if result.status in {STATUS_BLOCKED, STATUS_MISSING, STATUS_INSUFFICIENT}
+        else log.info
+    )
+    severity("sectors.overview_not_ok", **fields)
 
 
 def _ratio_or_none(numerator: int | None, denominator: int | None) -> int | None:
@@ -598,7 +691,7 @@ async def build_sector_overview(
                 )
             )
         empty_status = STATUS_BLOCKED if asset_state == STATE_BLOCKED else STATUS_MISSING
-        return SectorOverview(
+        overview = SectorOverview(
             as_of=target_date or as_of or today,
             taxonomy=taxonomy,
             level=level,
@@ -635,6 +728,16 @@ async def build_sector_overview(
             classification_version=classification_version,
             assumptions={"non_stock_excluded": "true"},
         )
+        _log_overview_not_ok(
+            overview,
+            user_id=user_id,
+            taxonomy=taxonomy,
+            level=level,
+            parent=parent,
+            requested_as_of=as_of,
+            stale_days=stale_days,
+        )
+        return overview
 
     assert latest is not None
     snapshot = latest.trade_date
@@ -793,7 +896,7 @@ async def build_sector_overview(
         body.concept = None
         body.benchmark_as_of = None
 
-    return SectorOverview(
+    result = SectorOverview(
         as_of=snapshot,
         taxonomy=taxonomy,
         level=level,
@@ -833,6 +936,18 @@ async def build_sector_overview(
         classification_version=classification_version,
         assumptions=body.assumptions,
     )
+
+    _log_overview_not_ok(
+        result,
+        user_id=user_id,
+        taxonomy=taxonomy,
+        level=level,
+        parent=parent,
+        requested_as_of=as_of,
+        stale_days=stale_days,
+        missing_prices=missing_prices,
+    )
+    return result
 
 
 async def _industry_overview(

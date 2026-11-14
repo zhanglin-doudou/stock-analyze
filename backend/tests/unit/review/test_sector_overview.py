@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from datetime import date
+from uuid import UUID
 
 from stock_platform.ports import (
     BenchmarkMember,
@@ -17,6 +18,7 @@ from stock_platform.ports import (
     SectorMembership,
 )
 from stock_review.application import sectors as app
+from structlog.testing import capture_logs
 
 _AS_OF = date(2026, 6, 30)
 _TAXONOMY = "industry_sw"
@@ -624,3 +626,124 @@ async def test_sector_overview_dataclass_shape() -> None:
     assert isinstance(body, app._Body)  # type: ignore[attr-defined]
     assert isinstance(body.portfolio, app.SectorPortfolio)
     assert isinstance(body.concentration, app.SectorConcentration)
+
+
+_USER_ID = UUID("0705a4d3-f306-4fed-ad0f-421866d67896")
+
+
+def _overview(
+    *,
+    status: str,
+    missing: list[app.SectorMissing],
+    unclassified: app.SectorUnclassified | None = None,
+) -> app.SectorOverview:
+    return app.SectorOverview(
+        as_of=date(2026, 11, 13),
+        taxonomy=_CONCEPT,
+        level=1,
+        status=status,
+        asset_build_state=app.STATE_CURRENT,
+        sector_data_state="stale",
+        definition_version="1.0",
+        sector_dataset_version="v1",
+        data_as_of=date(2026, 11, 13),
+        sector_data_as_of=date(2026, 11, 3),
+        benchmark_id=None,
+        benchmark_as_of=None,
+        weight_mode="overlapping",
+        portfolio=app._empty_portfolio(),  # type: ignore[attr-defined]
+        sectors=[],
+        others=None,
+        unclassified=unclassified,
+        concentration=app._empty_concentration("concept_overlap"),  # type: ignore[attr-defined]
+        preference=None,
+        concept=None,
+        missing=missing,
+        inputs_hash="hash",
+        classification_version="v1",
+    )
+
+
+def _missing(code: str) -> app.SectorMissing:
+    return app.SectorMissing(field="data", code=code, reason="r", what_to_do="w")
+
+
+def test_overview_log_silent_when_ok() -> None:
+    """status=ok 不输出降级日志，避免看板轮询刷屏。"""
+    with capture_logs() as logs:
+        app._log_overview_not_ok(  # type: ignore[attr-defined]
+            _overview(status=app.STATUS_OK, missing=[]),
+            user_id=_USER_ID,
+            taxonomy=_CONCEPT,
+            level=1,
+            parent=None,
+            requested_as_of=date(2026, 11, 13),
+            stale_days=7,
+        )
+    assert logs == []
+
+
+def test_overview_log_data_gap_carries_gap_details() -> None:
+    """数据不足：一条日志带账号/参数/快照年龄/缺失标的样本，代码清单按上限截断。"""
+    prices = [f"60{i:04d}" for i in range(25)]
+    overview = _overview(
+        status=app.STATUS_STALE,
+        missing=[_missing(app.SECTOR_DATA_STALE), _missing(app.SECTOR_PRICE_MISSING)],
+        unclassified=app.SectorUnclassified(
+            market_value_units=100,
+            ratio_of_equity_units=None,
+            holding_count=2,
+            symbols=["600001", "600002"],
+        ),
+    )
+    with capture_logs() as logs:
+        app._log_overview_not_ok(  # type: ignore[attr-defined]
+            overview,
+            user_id=_USER_ID,
+            taxonomy=_CONCEPT,
+            level=1,
+            parent=None,
+            requested_as_of=date(2026, 11, 13),
+            stale_days=7,
+            missing_prices=prices,
+        )
+    (entry,) = logs
+    assert entry["event"] == "sectors.overview_not_ok"
+    assert entry["log_level"] == "info"
+    assert entry["user_id"] == "0705a4d3-f306-4fed-ad0f-421866d67896"
+    assert entry["status"] == app.STATUS_STALE
+    assert entry["reason_kind"] == "data_gap"
+    assert entry["missing_codes"] == [app.SECTOR_DATA_STALE, app.SECTOR_PRICE_MISSING]
+    assert entry["sector_data_as_of"] == "2026-11-03"
+    assert entry["sector_snapshot_age_days"] == 10
+    assert entry["sector_stale_days"] == 7
+    # 缺口规模：总数与样本分离，样本截断到上限。
+    assert entry["missing_price_count"] == 25
+    assert entry["missing_price_symbols"] == prices[: app.LOG_SYMBOL_LIMIT]  # type: ignore[attr-defined]
+    assert entry["unclassified_count"] == 2
+    assert entry["unclassified_symbols"] == ["600001", "600002"]
+
+
+def test_overview_log_rule_blocked_is_warning() -> None:
+    """被规则阻断（PIT 未覆盖）与数据不足分开：reason_kind=rule_blocked 且升级为 warning。"""
+    overview = _overview(
+        status=app.STATUS_BLOCKED,
+        missing=[_missing(app.SECTOR_HISTORY_NOT_COVERED)],
+    )
+    with capture_logs() as logs:
+        app._log_overview_not_ok(  # type: ignore[attr-defined]
+            overview,
+            user_id=_USER_ID,
+            taxonomy=_CONCEPT,
+            level=1,
+            parent=None,
+            requested_as_of=date(2026, 11, 13),
+            stale_days=7,
+        )
+    (entry,) = logs
+    assert entry["reason_kind"] == "rule_blocked"
+    assert entry["log_level"] == "warning"
+    assert entry["missing_codes"] == [app.SECTOR_HISTORY_NOT_COVERED]
+    # 阻断时不臆造缺口：未传持仓/行情则计数为 0。
+    assert entry["missing_price_count"] == 0
+    assert entry["unclassified_count"] == 0
