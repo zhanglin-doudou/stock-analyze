@@ -45,7 +45,7 @@ from stock_platform.ports import MarketDataSource
 from stock_platform.symbols import is_convertible_bond
 
 from stock_review.application.bond_alias import build_bond_alias, canonical_code
-from stock_review.application.bridge import _initial_cash
+from stock_review.application.bridge import _initial_cash, oversell_initial_units
 from stock_review.application.rebuild import trades_to_events
 from stock_review.application.valuation import (
     BOND_COST_FALLBACK_PREFIX,
@@ -276,6 +276,7 @@ def compute_daily_valuations(
     fifo_error_codes: set[str],
     rebuilt_at: datetime,
     bond_alias: dict[str, str] | None = None,
+    oversell_units: int = 0,
 ) -> _DailyValuations:
     """内存重放 `[start, end]`，为 `[rebuild_from, end]` 生成资产日行（纯计算，无 I/O）。
 
@@ -295,7 +296,9 @@ def compute_daily_valuations(
     initial_cash, _assumption = initial
     initial_money_fund = initial_money_fund_balances(trades, start)
     bond_divisors = bond_face_divisors(trades)
-    initial_total = initial_cash + sum(initial_money_fund.values())
+    # 超卖未配对卖款并入期初资产（不计收益）；模拟起始现金仍用未补记的锚点，
+    # 否则当日卖款会在「期初 + 当日现金流」里被双算。
+    initial_total = initial_cash + sum(initial_money_fund.values()) + oversell_units
 
     by_date = _group_trades_by_date(trades)
     cash_units = initial_cash
@@ -934,6 +937,7 @@ async def build_assets(
         fifo_error_codes=fifo_error_codes,
         rebuilt_at=clock.now(),
         bond_alias=bond_alias,
+        oversell_units=oversell_initial_units(fifo_result, period_start=start, period_end=end),
     )
     build_mode = BUILD_MODE_FULL if full else BUILD_MODE_INCREMENTAL
 

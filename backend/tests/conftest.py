@@ -23,6 +23,7 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from stock_api.app import create_app
 from stock_api.version import API_PREFIX
+from stock_ledger.models import LEDGER_TABLES
 from stock_platform.config import Settings, get_settings
 from stock_platform.security import hasher_for
 
@@ -50,15 +51,7 @@ _PLATFORM_TABLES = (
     "login_attempt",
     "backup_run",
 )
-_LEDGER_TABLES = (
-    "import_batch",
-    "import_preview",
-    "trade",
-    "trade_history",
-    "quarantine_row",
-    "summary_rule",
-    "reconciliation",
-)
+_LEDGER_TABLES = LEDGER_TABLES
 # review 表由迁移 0003/0004/0006 建立（Period2-02/03/16）；都带 RLS，按 user 级联清理。
 _REVIEW_TABLES = (
     "round",

@@ -28,7 +28,7 @@ function makeBatch(overrides: Partial<ImportBatch> = {}): ImportBatch {
     mode: "full",
     broker: "huatai",
     file_name: "huatai_2024.xlsx",
-    counts: { parsed: 328, inserted: 326, skipped: 0, quarantined: 2 },
+    counts: { parsed: 328, inserted: 326, skipped: 0, quarantined: 2, discarded: 0 },
     filled_count: 0,
     warnings: [],
     assumptions: {},
@@ -36,6 +36,7 @@ function makeBatch(overrides: Partial<ImportBatch> = {}): ImportBatch {
     finished_at: "2026-10-21T00:00:05Z",
     revoked_at: null,
     can_revoke: true,
+    mapping_source: "legacy",
     ...overrides,
   };
 }
@@ -83,7 +84,7 @@ describe("Imports 导入记录页", () => {
           status: "revoked",
           can_revoke: false,
           revoked_at: "2026-10-20T00:00:00Z",
-          counts: { parsed: 10, inserted: 8, skipped: 1, quarantined: 1 },
+          counts: { parsed: 10, inserted: 8, skipped: 1, quarantined: 1, discarded: 0 },
         }),
       ]),
     );

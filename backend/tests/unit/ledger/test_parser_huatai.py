@@ -329,6 +329,34 @@ def test_non_trade_bank_transfer_out() -> None:
     assert r.amount_units == -800_00
 
 
+@pytest.mark.parametrize(
+    ("summary", "amount", "expected_side"),
+    [
+        ("银证转入", "100.00", "sell"),
+        ("跨行转入", "100.00", "sell"),
+        ("跨行转出", "-100.00", "buy"),
+        ("带资金补登", "0.00", "unknown"),
+        ("资产账户币种开户", "0.00", "unknown"),
+    ],
+)
+def test_non_trade_cash_business_summary_aliases(
+    summary: str, amount: str, expected_side: str
+) -> None:
+    """券商资金业务无证券代码时使用 CASH，不因缺少股票代码误隔离。"""
+    row = _buy_row(
+        证券代码="",
+        证券名称="",
+        买卖标志="",
+        摘要=summary,
+        成交金额=amount,
+    )
+    bill = _parse(_xlsx(_HEADERS, [row]))
+    assert len(bill.rows) == 1
+    assert bill.quarantined == []
+    assert bill.rows[0].security_code == "CASH"
+    assert bill.rows[0].side == expected_side
+
+
 def test_non_trade_dividend_with_code() -> None:
     """股息入帐：有证券代码，资金流入 → side=sell。"""
     row = _buy_row(
@@ -797,8 +825,8 @@ def test_mapping_override_resolves_custom_header() -> None:
 
 
 def test_account_stored_as_md5_digest() -> None:
-    # 股东账号只落 MD5 摘要，不落明文。
-    headers = [*_HEADERS, "股东账号"]
+    # 资金账号只落 MD5 摘要，不落明文。
+    headers = [*_HEADERS, "资金账号"]
     row = [*_buy_row(), "0327201469"]
     bill = _parse(_xlsx(headers, [row]))
     account_masked = bill.rows[0].account_masked
@@ -806,9 +834,18 @@ def test_account_stored_as_md5_digest() -> None:
     assert len(account_masked) == 32
 
 
+def test_shareholder_code_is_not_account() -> None:
+    # 股东代码是沪/深股东号，不是资金账号：不得落成账户，但明文仍须脱敏。
+    headers = [*_HEADERS, "股东代码"]
+    row = [*_buy_row(), "0249753237"]
+    bill = _parse(_xlsx(headers, [row]))
+    assert bill.rows[0].account_masked is None
+    assert bill.rows[0].raw["股东代码"] == hashlib.md5(b"0249753237").hexdigest()
+
+
 def test_blank_account_stays_none() -> None:
     # 空账号保持 None：否则所有空账号同哈希，去重键会把不同行误判为重复。
-    headers = [*_HEADERS, "股东账号"]
+    headers = [*_HEADERS, "资金账号"]
     row = [*_buy_row(), ""]
     bill = _parse(_xlsx(headers, [row]))
     assert bill.rows[0].account_masked is None

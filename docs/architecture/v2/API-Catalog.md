@@ -48,7 +48,7 @@
 - ETag `W/"<version>"`（列表含查询指纹），写响应返新 ETag；`If-Match` 不匹配 → 409 `VERSION_CONFLICT`（遵循 PRD FR-L4，不采用 412）。
 - 格式：金额**定点字符串 2 位** `"1234.56"`；价格 6 位、数量 4 位；比率十进制小数；时间 ISO 8601 UTC；业务日 `YYYY-MM-DD`（Asia/Shanghai）；`blocked` 时 `value` **字段缺省**。软删默认过滤 `deleted_at NULL`，`include_deleted=true` 仅本人；注销物理级联删除，审计留事件元数据。
 
-## §1 端点总表（96 个；API-089 预留不计数，API-090~095 已实现（2026-11-05/09），API-055/096/097 已实现（2026-11-13）；Path 省略公共前缀 `/api/v1`，标注「根」者不在前缀下）
+## §1 端点总表（105 个；API-089 预留不计数，API-090~095 已实现（2026-11-05/09），API-055/096/097 已实现（2026-11-13），API-098~106 已实现（2026-11-13 导入映射重构）；Path 省略公共前缀 `/api/v1`，标注「根」者不在前缀下）
 | API-ID | Method | Path | 用途 | FR | 认证/scope | 幂等 | 同步/异步 | 优先级 | 主要成功码 |
 |---|---|---|---|---|---|---|---|---|---|
 | API-001 | POST | `/auth/register` | 注册账号 | L2 | 公开 | 支持 | 同步 | P0 | 201 |
@@ -147,6 +147,15 @@
 | API-093 | GET | `/rounds/{round_id}/insights` | 单回合洞察详情（逐笔理由/5/10/20 日四口径） | R8 | read | — | 同步 | P1 | 200 |
 | API-094 | POST | `/rounds/insights/refresh` | 补算/失效重算前瞻收益（手动/后续自动化同函数） | R8 | write | 必需 | 同步/异步 | P1 | 200/202 |
 | API-095 | GET | `/dashboard/trade-flags` | 账单旗标月度聚合（最近 6/12/24 个完整月 × 旗标码 + 买卖笔数 + 单月收益，看板图表数据源） | R1 | read | — | 同步 | P1 | 200 |
+| API-098 | PUT | `/imports/previews/{preview_id}/mapping` | 保存列对应并重跑类型分析（If-Match 乐观锁） | L3 | write | 支持 | 同步 | P0 | 200 |
+| API-099 | PUT | `/imports/previews/{preview_id}/types` | 保存账单类型分类（全部确认后进入 ready） | L3 | write | 支持 | 同步 | P0 | 200 |
+| API-100 | GET | `/imports/templates` | 本人字段模板列表（按表头签名） | L3 | read | — | 同步 | P1 | 200 |
+| API-101 | DELETE | `/imports/templates/{template_id}` | 删除本人字段模板 | L3 | write | 幂等 | 同步 | P1 | 204 |
+| API-102 | GET | `/admin/import-column-rules` | 管理员查看导入列规则（系统/用户覆盖） | L3 | admin | — | 同步 | P1 | 200 |
+| API-103 | POST | `/admin/import-column-rules` | 管理员新建全局列规则 | L3 | admin | 支持 | 同步 | P1 | 201 |
+| API-104 | PATCH | `/admin/import-column-rules/{rule_id}` | 管理员修改/禁用列规则（If-Match） | L3 | admin | 支持 | 同步 | P1 | 200 |
+| API-105 | DELETE | `/admin/import-column-rules/{rule_id}` | 管理员删除自定义列规则（系统行禁止） | L3 | admin | 幂等 | 同步 | P1 | 204 |
+| API-106 | GET | `/imports/previews/{preview_id}` | 刷新导入预览（映射/类型/就绪三阶段状态） | L3 | read | — | 同步 | P1 | 200 |
 
 
 
@@ -209,6 +218,49 @@
 - 响应 200：`batch_id` / `status:"revoked"` / `reverted{inserted,updated}` / `revoked_at` / `affected_metrics[]{metric_id,status:"stale"}`。
 - 错误码：NOT_FOUND(404)、IMPORT_ALREADY_REVOKED(409)、VALIDATION_ERROR(422)。
 - 验收断言：① 200 后 GET /trades 行数 == 导入前行数（含补差行一起回退）；② batch.status=="revoked"；③ 再次 revoke → 409 IMPORT_ALREADY_REVOKED；④ GET /trades?include_deleted=true 可见被软删行且 batch_id 匹配；⑤ 审计出现 action=="import.revoke"；⑥ 本批次补差行被一并软删（`GET /trades?side=missing&batch_id=…` 为空，`include_deleted=true` 可见），`reverted.inserted` 包含补差行数。
+#### API-098 PUT /imports/previews/{preview_id}/mapping（2026-11-13 导入映射 v2）
+- 用途：保存列映射并重跑类型分析（两阶段确认的第 1 步）；认证：write；同步；乐观锁 `If-Match: "<mapping_version>"`（缺省回退 body `mapping_version`）。
+- 请求：`items[]{column_key,target_field,options}`（`other_fee` 可多列合并 ≤8；`amount_signed` 仅 amount）/ `ignored[]` / `acknowledge_unmapped`（存在未确认列时必填 true）/ `date_format` / `broker`。
+- 响应 200：完整 PreviewOut（additive：`stage/broker/signature/mapping_version/mapping_fingerprint/mapping_items/ignored_columns/catalog/categories/types/verification/blocking/discarded_count/requires_reimport_ack`）；`mapping_version` 递增，`stage` 依结果为 `mapping|types|ready`。
+- 错误码：VERSION_CONFLICT(409)、IMPORT_PREVIEW_NOT_FOUND(404)、IMPORT_MAPPING_INVALID(422)、IMPORT_UNMAPPED_COLUMNS_UNCONFIRMED(422)、IMPORT_FEE_MERGE_INVALID(422)、IMPORT_STAGE_CONFLICT(409)、IMPORT_PROFILE_REQUIRED(422)、VALIDATION_ERROR(422)。
+- 验收断言：① 保存后 mapping_version+1 且 items 原样回显；② 过期 If-Match → 409 VERSION_CONFLICT；③ 未映射必需列 → 200 但 stage=="mapping" 且 blocking 非空；④ 未确认列且 acknowledge_unmapped=false → 422；⑤ 用户 B 的 preview → 404。
+#### API-099 PUT /imports/previews/{preview_id}/types
+- 用途：保存账单类型确认（Category / 废弃二选一）；认证：write；同步；`If-Match` 同 API-098。
+- 请求：`resolutions[]{type_key,category,discard}`。
+- 响应 200：PreviewOut；全部类型已确认 → `stage=="ready"`，否则停留 `types`。
+- 错误码：VERSION_CONFLICT(409)、IMPORT_PREVIEW_NOT_FOUND(404)、IMPORT_BILL_TYPES_UNRESOLVED(422)、IMPORT_CATEGORY_INVALID(422)、IMPORT_STAGE_CONFLICT(409)、VALIDATION_ERROR(422)。
+- 验收断言：① 全确认后 stage=="ready" 且 can_commit==true；② 存在未确认类型 → 422 IMPORT_BILL_TYPES_UNRESOLVED；③ 非法 category → 422 IMPORT_CATEGORY_INVALID；④ 过期版本 → 409。
+#### API-100 GET /imports/templates
+- 用途：本人列映射模板列表（表头指纹 → MappingPlan）；认证：read；同步；游标分页。
+- 响应 200：`items[]{template_id,broker,signature,header_count,date_format,items[],ignored[],origin_batch_id,last_batch_id,created_at,updated_at}` / `next_cursor` / `has_more`。
+- 错误码：VALIDATION_ERROR(422)、INVALID_CURSOR(400)。
+- 验收断言：① commit 后新增/更新一条模板且 header_count 等于文件列数；② 用户 B 列表为空（不串号）。
+#### API-101 DELETE /imports/templates/{template_id}
+- 用途：删除本人模板（下次同格式账单回到系统建议）；认证：write；幂等；同步。
+- 响应 204；错误码：IMPORT_TEMPLATE_NOT_FOUND(404)。
+- 验收断言：① 删除后同文件 preview 不再复用模板；② 用户 B 删 A 的模板 → 404。
+#### API-102 GET /admin/import-column-rules
+- 用途：管理员查看列规则（系统行 + 用户自定义行，RLS 允许 user_id IS NULL 全局行）；认证：admin；同步；游标分页。
+- 响应 200：`items[]{rule_id,broker,header_norm,match_type,is_fingerprint,priority,target_field,options,version,is_system}` / `next_cursor` / `has_more`。
+- 错误码：VALIDATION_ERROR(422)、INVALID_CURSOR(400)、INSUFFICIENT_SCOPE(403)。
+- 验收断言：① 非 admin → 403；② 返回包含 seed 的通用别名（priority 300）与华泰指纹（priority 100）。
+#### API-103 POST /admin/import-column-rules
+- 用途：新增列规则；认证：admin；同步。
+- 请求：`broker/header_norm/match_type/exact|prefix|regex/is_fingerprint/priority/target_field/options`；`target_field` 必须在字段目录内，`options` 仅 amount 允许 `amount_signed`。
+- 响应 201：ImportRuleOut；错误码：VALIDATION_ERROR(422)、IMPORT_RULE_CONFLICT(409)。
+- 验收断言：① 重复（broker,header_norm,match_type）→ 409；② 非法 target_field/options → 422；③ 审计留痕 `import_rule.create`。
+#### API-104 PATCH /admin/import-column-rules/{rule_id}
+- 用途：修改列规则（系统行禁改 target_field）；认证：admin；同步；`If-Match` 必填。
+- 响应 200：ImportRuleOut（version 递增）；错误码：VERSION_CONFLICT(409)、NOT_FOUND(404)、IMPORT_RULE_CONFLICT(409)、VALIDATION_ERROR(422)。
+- 验收断言：① 缺 If-Match → 422；② 过期版本 → 409；③ 系统行改 target_field → 422。
+#### API-105 DELETE /admin/import-column-rules/{rule_id}
+- 用途：删除自定义列规则（系统行 422）；认证：admin；幂等；同步。
+- 响应 204；错误码：NOT_FOUND(404)、VALIDATION_ERROR(422)。
+- 验收断言：① 系统行删除 → 422；② 删除后建议不再命中该别名。
+#### API-106 GET /imports/previews/{preview_id}
+- 用途：刷新预览（只读落库状态，不重算）；认证：read；同步。
+- 响应 200：PreviewOut（含 mapping_items/ignored_columns/blocking）；错误码：IMPORT_PREVIEW_NOT_FOUND(404)。
+- 验收断言：① 与保存后返回的 mapping_version/stage 一致；② 用户 B 访问 → 404。
 #### API-017 GET /trades
 - 用途：交易流水查询（完整 REST）；FR-L8/L4；认证：read；同步；游标分页。
 - 请求：query `limit`(1~200) / `cursor` / `sort`(白名单 trade_date,-trade_date,amount,-amount,created_at) / `trade_date_from`、`trade_date_to` / `security_code` / `side`(∈{buy,sell,unknown,missing}) / `batch_id` / `include_deleted`(默认 false) / `fields` / `include_total`。
@@ -596,6 +648,21 @@
 | LLM_UNAVAILABLE | 503 | LLM 故障且无兜底 | 智能问答暂时不可用。 | 稍后重试；金额类问题可用模板回答。 | 是 |
 | SAMPLE_INSUFFICIENT | 200 | n<10（降级码） | 样本太少，先给你原始值。 | 继续记录交易，样本≥10 后给结论。 | 否 |
 | NAV_UNRELIABLE | 200 | 期初反推失败（降级码） | 这段时间的数据不敢给你算收益。 | 补全资金余额列或修正首行后重算。 | 是（修正后） |
+| JOB_LEASE_EXPIRED | 500 | worker 租约过期 | 任务执行中断了。 | 系统会自动重试；持续失败联系支持。 | 是 |
+| IMPORT_PREVIEW_NOT_FOUND | 404 | 预览不存在/跨用户 | 找不到这次预览。 | 重新上传并预览。 | 否 |
+| IMPORT_TEMPLATE_NOT_FOUND | 404 | 模板不存在/跨用户 | 找不到这个对应关系。 | 刷新列表。 | 否 |
+| IMPORT_REIMPORT_CONFLICT | 409 | 同文件不同映射重导未确认 | 同一文件已用不同映射导入过。 | 用区间替换重导或显式确认。 | 否 |
+| IMPORT_STAGE_CONFLICT | 409 | 阶段不允许该操作 | 当前导入阶段不允许该操作。 | 先完成列对应/类型确认。 | 否 |
+| IMPORT_RULE_CONFLICT | 409 | 管理员规则重复 | 规则已存在。 | 修改已有规则或换表头/字段。 | 否 |
+| IMPORT_MAPPING_INVALID | 422 | 列对应重复/未知字段/多列非费用 | 列对应不合法。 | 检查重复字段与多列合并规则。 | 否 |
+| IMPORT_UNMAPPED_COLUMNS_UNCONFIRMED | 422 | 有列未映射且未确认忽略 | 还有表格列没有对应。 | 忽略或指定字段。 | 否 |
+| IMPORT_FEE_MERGE_INVALID | 422 | 其他费多列含非金额 | 其他费多列合并失败。 | 检查费用列是否都是金额。 | 否 |
+| IMPORT_FEE_MERGE_VERIFY_FAILED | 422 | 费用合并后余额对不上 | 费用合并后与资金余额对不上。 | 改为只映射一列费用。 | 否 |
+| IMPORT_BILL_TYPES_UNRESOLVED | 422 | 类型未确认/缺分类 | 还有账单类型没有分类。 | 为每个类型选择分类或废弃。 | 否 |
+| IMPORT_CATEGORY_INVALID | 422 | 分类不在 10 值枚举 | 账单分类不合法。 | 从系统分类中选择。 | 否 |
+| IMPORT_CLASSIFICATION_SOURCE_MISSING | 422 | 缺买卖标志与摘要 | 无法判断买卖方向或账单类型。 | 映射买卖标志或摘要列。 | 否 |
+| IMPORT_PROFILE_REQUIRED | 422 | 画像要求映射缺失（货基余额/省心投） | 这张账单需要券商能力才能处理。 | 选择正确券商画像或补映射。 | 否 |
+| IMPORT_LAYOUT_UNSUPPORTED | 422 | 多层表头布局不支持 | 这个表格布局暂不支持。 | 导出单行表头 CSV 后重试。 | 否 |
 | IMPORT_MISSING_CASH_BALANCE | 200 | 缺资金余额列（警告码） | 账单缺少资金余额，暂时无法对账。 | 上传含资金余额列的账单。 | 是（补数据） |
 
 ## §4 关键资源 Schema（16 个；完整字段见 OpenAPI `components.schemas`）
@@ -688,6 +755,15 @@ data: {"job_id":"job_01J9Z6","status":"succeeded","result_ref":"/api/v1/reports/
 | API-014 | imports_quarantine_rows | 行号精确、raw 原样；跨用户 404 | fx_quarantine | P0 |
 | API-015 | imports_revoke_restore_count | 200 后 trades 行数回退（含 side=missing 补差一并软删）；再撤销 409 | fx_base/fx_broken | P0 |
 | API-016 | imports_reclassify | 202；新规则后隔离区条目减少；跨用户 batch 404 | fx_quarantine | P1 |
+| API-098 | imports_save_mapping | 200 且 mapping_version+1；If-Match 不符 409 VERSION_CONFLICT；未确认未映射列 422 IMPORT_UNMAPPED_COLUMNS_UNCONFIRMED；跨用户 404 | fx_base | P0 |
+| API-099 | imports_save_types | 200 且全部类型确认后 stage=ready；未知 type_key/category 422 IMPORT_BILL_TYPES_UNRESOLVED/IMPORT_CATEGORY_INVALID | fx_base | P0 |
+| API-100 | imports_templates_list | 200 仅本人模板；签名/映射项完整 | fx_base | P1 |
+| API-101 | imports_template_delete | 204 后列表为空；跨用户/不存在 404 IMPORT_TEMPLATE_NOT_FOUND | fx_base | P1 |
+| API-102 | admin_import_rules_list | 200 含系统规则；非 admin 403 FORBIDDEN | fx_base | P1 |
+| API-103 | admin_import_rules_create | 201 version=1；重复规则 409 IMPORT_RULE_CONFLICT；非法 target_field/options 422 | fx_base | P1 |
+| API-104 | admin_import_rules_update | 200 version+1；If-Match 缺失/过期 422/409；系统行改 target_field 422 | fx_base | P1 |
+| API-105 | admin_import_rules_delete | 自定义规则 204；系统行 422；跨用户不影响 | fx_base | P1 |
+| API-106 | imports_preview_get | 200 回填 stage/mapping_version/types；过期 410；跨用户 404 IMPORT_PREVIEW_NOT_FOUND | fx_base | P1 |
 | API-017 | trades_cursor_sort_fields | 游标无重无漏；非法 sort 400；fields 裁剪；304 | fx_round30 | P0 |
 | API-018 | trades_patch_version | version+1；旧 version 409；跨用户 404 | fx_base | P0 |
 | API-019 | trades_soft_delete | 204；默认不可见；include_deleted=true 可见 | fx_base | P1 |

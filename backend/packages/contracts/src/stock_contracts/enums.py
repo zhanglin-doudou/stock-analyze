@@ -113,6 +113,59 @@ class QuarantineReason(StrEnum):
     # 申购中签/新股入账/托管转出、[省心投]红利发放（省心投账户内部份额通知，与主账户
     # 资金无关）等纯通知行：无资金意义，不进明细（可审计可恢复）。
     ZERO_AMOUNT_INFO = "ZERO_AMOUNT_INFO"
+    # 用户把该账单类型标记为「废弃」（噪音）：整类行落隔离区，单独计 `discarded_count`，
+    # 不并入 `quarantined`（设计 D-12 / §4.3）。
+    BILL_TYPE_DISCARDED = "BILL_TYPE_DISCARDED"
+    # 与上一行余额接不上（资金余额链断裂）：先隔离该行、继续向后尝试接上。
+    # 与 INVALID_ROW（字段本身解析失败）区分，便于前端提示与恢复策略不同。
+    RECONCILIATION_BREAK = "RECONCILIATION_BREAK"
+
+
+class BillCategory(StrEnum):
+    """账单业务分类（10 值，设计 D-15）。DB 仍以 text 存储，新增值免迁移。"""
+
+    BUY = "buy"
+    SELL = "sell"
+    BONUS = "bonus"
+    DIVIDEND = "dividend"
+    RIGHTS = "rights"
+    INTEREST = "interest"
+    FEE = "fee"
+    TRANSFER = "transfer"
+    NEW_STOCK = "new_stock"
+    OTHER = "other"
+
+
+#: 中文标签由 contracts 提供，前端/文档不再硬编码（设计 D-15）。
+BILL_CATEGORY_LABELS: dict[str, str] = {
+    BillCategory.BUY.value: "买入",
+    BillCategory.SELL.value: "卖出",
+    BillCategory.BONUS.value: "送转",
+    BillCategory.DIVIDEND.value: "分红",
+    BillCategory.RIGHTS.value: "配股",
+    BillCategory.INTEREST.value: "利息",
+    BillCategory.FEE.value: "费用",
+    BillCategory.TRANSFER.value: "资金划转",
+    BillCategory.NEW_STOCK.value: "新股",
+    BillCategory.OTHER.value: "其他",
+}
+
+
+class ImportStage(StrEnum):
+    """v2 导入草稿阶段；`legacy` 供迁移前的旧预览使用（设计 D-19）。"""
+
+    MAPPING = "mapping"
+    TYPES = "types"
+    READY = "ready"
+    LEGACY = "legacy"
+
+
+class ImportMappingSource(StrEnum):
+    """批次映射来源（`import_batch.mapping_source`）。"""
+
+    TEMPLATE = "template"
+    MANUAL = "manual"
+    LEGACY = "legacy"
 
 
 class WarningCode(StrEnum):
@@ -126,6 +179,23 @@ class WarningCode(StrEnum):
     RECONCILIATION_AUTOFILLED = "RECONCILIATION_AUTOFILLED"
     # 可转债「数量(手) × 10 × 单张价」与发生金额偏差超容差：口径异常留痕（不阻断）。
     CBOND_AMOUNT_INCONSISTENT = "CBOND_AMOUNT_INCONSISTENT"
+    # ── v2 导入映射（2026-11-13 设计）──────────────────────────
+    # 未映射 summary 列时由方向/金额符号派生的账单类型键。
+    BILL_TYPE_DERIVED = "BILL_TYPE_DERIVED"
+    # `other_fee` 多列合并已生效（求和）。
+    FEE_MERGE_APPLIED = "FEE_MERGE_APPLIED"
+    # 合并费用但未映射 `cash_balance`：跳过余额链校验（不阻断）。
+    FEE_MERGE_UNVERIFIED = "FEE_MERGE_UNVERIFIED"
+    # 本批次使用了合并费用且收尾对账补了差：费用映射可能不对，建议重新对应。
+    FEE_MERGE_SUSPECT = "FEE_MERGE_SUSPECT"
+    # 本次预览命中了用户模板并直接套用。
+    TEMPLATE_REUSED = "TEMPLATE_REUSED"
+    # 模板签名命中但日期格式解析失败：回退到映射步骤重新确认。
+    TEMPLATE_DATE_FORMAT_MISMATCH = "TEMPLATE_DATE_FORMAT_MISMATCH"
+    # 仍有未映射列，提交时需 `acknowledge_unmapped=true`。
+    MAPPING_UNMAPPED_COLUMNS = "MAPPING_UNMAPPED_COLUMNS"
+    # 同一文件曾用不同映射导入过：重导需 `replace_range` 或显式确认。
+    MAPPING_CHANGED_REIMPORT = "MAPPING_CHANGED_REIMPORT"
 
 
 # ── 回合洞察（Period2-09，设计 2026-11-04）────────────────────────

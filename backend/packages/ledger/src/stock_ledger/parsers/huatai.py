@@ -13,26 +13,21 @@
 
 from __future__ import annotations
 
-import csv
 import hashlib
-import io
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from datetime import date
 from decimal import Decimal, InvalidOperation
-from pathlib import Path
 from typing import Any
 
-import xlrd  # type: ignore[import-untyped]  # 第三方 xlrd 无类型桩（types-xlrd 未安装）
-from openpyxl import load_workbook  # type: ignore[import-untyped]  # 第三方 openpyxl 无类型桩
 from stock_contracts.clock import Clock
-from stock_contracts.constants import FILE_MAX_BYTES
 from stock_contracts.enums import QuarantineReason, Side, WarningCode
 from stock_contracts.errors import ApiError, ErrorCode, FieldError
 from stock_core.values import Money, Price, Qty
 from stock_platform.symbols import is_convertible_bond
 
 from stock_ledger.parsers.columns import (
-    ColumnMapping,
+    SENSITIVE_ACCOUNT_ALIASES,
     detect_date_format,
     is_non_trade_summary,
     is_signed_amount_header,
@@ -44,8 +39,10 @@ from stock_ledger.parsers.columns import (
     resolve_side,
 )
 from stock_ledger.parsers.dedupe import core_signature, dedupe_key
+from stock_ledger.parsers.mapping import MappingPlan, column_keys, merge_fee_units, validate_plan
+from stock_ledger.parsers.profiles import profile_for
+from stock_ledger.parsers.table import SUPPORTED_SUFFIXES, read_rows, validate_file
 
-SUPPORTED_SUFFIXES: frozenset[str] = frozenset({".xlsx", ".xls", ".csv"})
 _HEADER_SCAN_ROWS = 30
 _CURRENCY_NOISE = ("¥", "￥", "元", " ", ",", "\u3000")
 
@@ -239,15 +236,15 @@ _MONEY_FUND_SHARE_ONLY_SUMMARIES: frozenset[str] = frozenset({"红利发放", "�
 
 def _share_only_money_fund_row(
     raw: dict[str, str],
-    field_headers: dict[str, str],
+    values: Callable[[str], Sequence[str]],
     date_format_code: str,
     line_no: int,
 ) -> ParsedRow | None:
     """识别「零金额、带份额」的货基行，仅供余额推演，不进入流水。"""
 
     def value(name: str) -> str:
-        header = field_headers.get(name)
-        return raw.get(header, "") if header is not None else ""
+        items = values(name)
+        return items[0] if items else ""
 
     code = value("security_code")
     name = value("security_name")
@@ -490,49 +487,6 @@ class _Candidate:
     raw_values: tuple[str, ...]
 
 
-def _validate_file(data: bytes, file_name: str) -> str:
-    suffix = Path(file_name).suffix.lower()
-    if suffix not in SUPPORTED_SUFFIXES:
-        raise ApiError(
-            ErrorCode.IMPORT_UNSUPPORTED_FILE,
-            detail=f"不支持的扩展名: {suffix or file_name!r}",
-        )
-    if len(data) > FILE_MAX_BYTES:
-        raise ApiError(ErrorCode.IMPORT_FILE_TOO_LARGE, detail="文件超过 20MB")
-    return suffix
-
-
-def _decode_csv(data: bytes) -> str:
-    for encoding in ("utf-8-sig", "gbk"):
-        try:
-            return data.decode(encoding)
-        except UnicodeDecodeError:
-            continue
-    return data.decode("utf-8", errors="replace")
-
-
-def _read_rows(data: bytes, suffix: str) -> list[list[str]]:
-    """把三种文件格式统一读成字符串二维表（数值单元格经 str，不引入 float）。"""
-    if suffix == ".xlsx":
-        workbook = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
-        try:
-            sheet = workbook.worksheets[0]
-            return [
-                [normalize_cell(cell) for cell in row] for row in sheet.iter_rows(values_only=True)
-            ]
-        finally:
-            workbook.close()
-    if suffix == ".xls":
-        book = xlrd.open_workbook(file_contents=data)
-        sheet = book.sheet_by_index(0)
-        return [
-            [normalize_cell(sheet.cell_value(r, c)) for c in range(sheet.ncols)]
-            for r in range(sheet.nrows)
-        ]
-    reader = csv.reader(io.StringIO(_decode_csv(data)))
-    return [[normalize_cell(cell) for cell in row] for row in reader]
-
-
 def _locate_header(
     rows: list[list[str]], mapping: dict[str, str] | None
 ) -> tuple[int, list[str], list[list[str]]]:
@@ -541,7 +495,7 @@ def _locate_header(
     best_count = 0
     best_headers: list[str] = rows[0] if rows else []
     for idx in range(min(len(rows), _HEADER_SCAN_ROWS)):
-        found: ColumnMapping = map_columns(rows[idx], mapping=mapping)
+        found = map_columns(rows[idx], mapping=mapping)
         count = len(found.columns)
         if count > best_count:
             best_idx, best_count, best_headers = idx, count, rows[idx]
@@ -594,6 +548,10 @@ def _net_amount_units(
     return _net_from_gross_units(raw_units, side, fees_units)
 
 
+class _ProfileRequiredError(Exception):
+    """通用画像遇到券商特有语义（省心投等）→ 调用方转 `IMPORT_PROFILE_REQUIRED`。"""
+
+
 def _build_candidate(
     raw: dict[str, str],
     field_headers: dict[str, str],
@@ -602,14 +560,39 @@ def _build_candidate(
     *,
     amount_signed: bool,
 ) -> tuple[ParsedRow, bool, bool]:
+    """legacy 入口：表头 → 字段的取值闭包，再走统一的 plan 口径构建。"""
+
+    def values(name: str) -> tuple[str, ...]:
+        header = field_headers.get(name)
+        return (raw.get(header, ""),) if header is not None else ()
+
+    return _build_candidate_from_values(
+        raw,
+        values,
+        date_format_code,
+        line_no,
+        amount_signed=amount_signed,
+        apply_sxt=True,
+    )
+
+
+def _build_candidate_from_values(
+    raw: dict[str, str],
+    values: Callable[[str], Sequence[str]],
+    date_format_code: str,
+    line_no: int,
+    *,
+    amount_signed: bool,
+    apply_sxt: bool,
+) -> tuple[ParsedRow, bool, bool]:
     """单行 → ParsedRow；失败抛 _RowError 由调用方隔离。
 
     返回 `(行, 金额是否按量×价派生, 金额是否因方向未知而无法定号)`。
     """
 
     def value(name: str) -> str:
-        header = field_headers.get(name)
-        return raw.get(header, "") if header is not None else ""
+        items = values(name)
+        return items[0] if items else ""
 
     code = value("security_code")
     if not code:
@@ -629,9 +612,10 @@ def _build_candidate(
     quantity_units = _units(value("quantity"), Qty)
     price_units = _units(value("price"), Price)
 
-    commission_units = _units(value("commission"), Money)
-    stamp_tax_units = _units(value("stamp_tax"), Money)
-    other_fee_units = _units(value("other_fee"), Money)
+    commission_units = merge_fee_units([_units(item, Money) for item in values("commission")])
+    stamp_tax_units = merge_fee_units([_units(item, Money) for item in values("stamp_tax")])
+    # other_fee 支持多列合并（D-08）：每列先转标度整数，再在 int 域求和。
+    other_fee_units = merge_fee_units([_units(item, Money) for item in values("other_fee")])
     fees_units = commission_units + stamp_tax_units + other_fee_units
 
     amount_text = value("amount")
@@ -655,7 +639,10 @@ def _build_candidate(
 
     # 「[省心投]红利发放」：省心投账户内部的份额红利通知（金额恒 0），与主账户资金
     # 无关——不论金额字段形态一律直接隔离（设计 D14），不进明细。
-    if normalize_summary(value("summary")) == _SXT_DIVIDEND_SUMMARY:
+    normalized_summary = normalize_summary(value("summary"))
+    if normalized_summary == _SXT_DIVIDEND_SUMMARY:
+        if not apply_sxt:
+            raise _ProfileRequiredError(_SXT_DIVIDEND_SUMMARY)
         raise _RowError(QuarantineReason.ZERO_AMOUNT_INFO)
 
     # 「申购中签/新股入账/托管转出」等纯通知行：无发生金额且无资金余额 → 隔离为
@@ -691,6 +678,8 @@ def _build_candidate(
     # 「银行转取」同构）：无份额语义（qty/price 清零，原始值留 raw 可溯源）、不进持仓、
     # 不打货基余额；发生金额（负值）即主账户流出额，分类走 transfer（sys_sxt_out）。
     if summary is not None and normalize_summary(summary) == _SXT_SUBSCRIBE_SUMMARY:
+        if not apply_sxt:
+            raise _ProfileRequiredError(_SXT_SUBSCRIBE_SUMMARY)
         code = "CASH"
         security_name = summary
         quantity_units = 0
@@ -720,19 +709,22 @@ def _build_candidate(
     return row, amount_derived, amount_unsigned
 
 
-def parse_bill(
-    data: bytes,
-    file_name: str,
-    *,
-    mapping: dict[str, str] | None,
-    date_format: str | None,
-    clock: Clock,
-) -> ParsedBill:
-    """解析华泰账单；所有业务失败以 ApiError/隔离行表达，不抛裸异常。"""
-    suffix = _validate_file(data, file_name)
-    raw_rows = _read_rows(data, suffix)
-    header_idx, headers, data_rows = _locate_header(raw_rows, mapping)
+@dataclass(slots=True)
+class _ParseContext:
+    """一次解析的列上下文（legacy 与 plan 两条入口归一到这里）。"""
 
+    headers: list[str]
+    raw_headers: list[str]
+    field_indices: dict[str, list[int]]
+    columns: dict[str, str]
+    unresolved: list[str]
+    amount_signed: bool
+    apply_sxt: bool
+    require_money_fund_balance: bool
+    broker: str
+
+
+def _legacy_context(headers: list[str], mapping: dict[str, str] | None) -> _ParseContext:
     found = map_columns(headers, mapping=mapping)
     missing_required = found.missing_required()
     if missing_required:
@@ -745,14 +737,100 @@ def parse_bill(
             detail="账单缺少必需列",
         )
     field_headers = found.field_headers()
-    # 金额列语义由原始表头决定：「发生金额/发生额」带符号直接用，其余按毛额+方向换算。
-    amount_signed = is_signed_amount_header(field_headers.get("amount"))
+    return _ParseContext(
+        headers=headers,
+        raw_headers=headers,
+        field_indices={name: [headers.index(header)] for name, header in field_headers.items()},
+        columns=found.columns,
+        unresolved=found.unresolved,
+        amount_signed=is_signed_amount_header(field_headers.get("amount")),
+        apply_sxt=True,
+        require_money_fund_balance=False,
+        broker="huatai",
+    )
+
+
+def _plan_context(headers: list[str], plan: MappingPlan, broker: str) -> _ParseContext:
+    keys = column_keys(headers)
+    key_to_idx = {key: idx for idx, key in enumerate(keys)}
+    unknown = [item.column_key for item in plan.items if item.column_key not in key_to_idx]
+    if unknown:
+        raise ApiError(
+            ErrorCode.IMPORT_MAPPING_INVALID,
+            errors=[
+                FieldError("mapping", "unknown_column", f"列键不在当前文件中: {key}")
+                for key in unknown
+            ],
+            detail="映射引用了不存在的列",
+        )
+    field_indices: dict[str, list[int]] = {}
+    columns: dict[str, str] = {}
+    for item in plan.items:
+        idx = key_to_idx[item.column_key]
+        field_indices.setdefault(item.field, []).append(idx)
+        columns[headers[idx]] = item.field
+    mapped_keys = {item.column_key for item in plan.items}
+    profile = profile_for(broker)
+    return _ParseContext(
+        headers=headers,
+        raw_headers=headers,
+        field_indices=field_indices,
+        columns=columns,
+        unresolved=[header for idx, header in enumerate(headers) if keys[idx] not in mapped_keys],
+        amount_signed=plan.amount_signed(),
+        apply_sxt=profile.apply_sxt,
+        require_money_fund_balance=profile.require_money_fund_balance,
+        broker=profile.code,
+    )
+
+
+def _parse_bill_impl(
+    data: bytes,
+    file_name: str,
+    *,
+    mapping: dict[str, str] | None = None,
+    plan: MappingPlan | None = None,
+    date_format: str | None,
+    clock: Clock,
+    broker: str = "huatai",
+) -> ParsedBill:
+    """解析实现：legacy（表头→字段字典）与 v2（MappingPlan）共用全部业务口径。"""
+    suffix = validate_file(data, file_name)
+    raw_rows = read_rows(data, suffix)
+    if plan is None:
+        header_idx, headers, data_rows = _locate_header(raw_rows, mapping)
+        context = _legacy_context(headers, mapping)
+    else:
+        validate_plan(plan)
+        if plan.header_row_index >= len(raw_rows):
+            raise ApiError(
+                ErrorCode.IMPORT_MAPPING_INVALID,
+                errors=[
+                    FieldError(
+                        "header_row_index",
+                        "header_row_out_of_range",
+                        f"表头行 {plan.header_row_index} 超出文件范围",
+                    )
+                ],
+                detail="表头行超出文件范围",
+            )
+        if "trade_date" not in plan.mapped_fields():
+            raise ApiError(
+                ErrorCode.IMPORT_MAPPING_INVALID,
+                errors=[FieldError("mapping", "missing_trade_date", "必须映射成交日期")],
+                detail="缺少成交日期映射",
+            )
+        header_idx = plan.header_row_index
+        headers = [normalize_header(cell) for cell in raw_rows[header_idx]]
+        data_rows = raw_rows[header_idx + 1 :]
+        context = _plan_context(headers, plan, broker)
 
     warnings: list[WarningCode] = []
     assumptions: dict[str, Any] = {}
 
-    trade_date_header = field_headers.get("trade_date")
-    trade_date_idx = headers.index(trade_date_header) if trade_date_header is not None else None
+    trade_date_idx = (
+        context.field_indices["trade_date"][0] if context.field_indices.get("trade_date") else None
+    )
     samples: list[str] = []
     if trade_date_idx is not None:
         for row in data_rows:
@@ -777,6 +855,26 @@ def parse_bill(
         ) or WarningCode.DATE_FORMAT_AMBIGUOUS in detected_warnings:
             assumptions["date_format"] = effective_format
 
+    def make_values(row: list[str]) -> Callable[[str], Sequence[str]]:
+        def values(name: str) -> Sequence[str]:
+            cells = tuple(
+                row[idx] if idx < len(row) else "" for idx in context.field_indices.get(name, ())
+            )
+            if plan is not None and name == "other_fee":
+                return tuple("" if cell in {"--", "—"} else cell for cell in cells)
+            return cells
+
+        return values
+
+    account_indices = context.field_indices.get("account", [])
+    # 脱敏口径独立于字段映射：股东代码/股东账号不再当作 account，但仍是敏感列，
+    # 明文不得进入隔离区 raw 或预览 sample。
+    sensitive = {
+        index
+        for index, header in enumerate(context.headers)
+        if normalize_header(header) in SENSITIVE_ACCOUNT_ALIASES
+    }
+    account_indices = sorted({*account_indices, *sensitive})
     candidates: list[_Candidate] = []
     share_only_rows: list[ParsedRow] = []
     quarantined: list[QuarantineCandidate] = []
@@ -785,39 +883,46 @@ def parse_bill(
     # 流水明细以「合计」行收尾；其后的持仓区块用于货币基金余额锚点（见 §5.3）。
     stop_row_index: int | None = None
 
-    for offset, row in enumerate(data_rows):
+    for offset, original_row in enumerate(data_rows):
         line_no = header_idx + offset + 2
-        if not any(cell for cell in row):
+        if not any(cell for cell in original_row):
             continue
         # 流水明细以「合计」行收尾：其后是股票/基金持仓、声明等非交易区块。
         # 不在这里停止的话，上百行持仓会被当成坏行写进隔离区，污染“隔离数据”。
         if (
             trade_date_idx is not None
-            and trade_date_idx < len(row)
-            and normalize_header(row[trade_date_idx]) == "合计"
+            and trade_date_idx < len(original_row)
+            and normalize_header(original_row[trade_date_idx]) == "合计"
         ):
             stop_row_index = header_idx + offset + 1
             break
-        raw = {header: (row[i] if i < len(row) else "") for i, header in enumerate(headers)}
+        row = list(original_row)
         # 把账号列明文替换成 MD5 摘要：隔离区 raw 和预览 columns_detail.sample
         # 都从这里拿原始行字典，源头抹一次即可，下游都安全。
-        account_header = field_headers.get("account")
-        if account_header is not None:
-            account_text = raw.get(account_header, "")
-            raw[account_header] = (
-                hashlib.md5(account_text.encode("utf-8")).hexdigest() if account_text else ""
-            )
+        for idx in account_indices:
+            if idx < len(row) and row[idx]:
+                row[idx] = hashlib.md5(row[idx].encode("utf-8")).hexdigest()
+        raw = {
+            header: (row[i] if i < len(row) else "") for i, header in enumerate(context.raw_headers)
+        }
+        values = make_values(row)
         try:
-            parsed, amount_derived, amount_unsigned = _build_candidate(
+            parsed, amount_derived, amount_unsigned = _build_candidate_from_values(
                 raw,
-                field_headers,
+                values,
                 effective_format,
                 line_no,
-                amount_signed=amount_signed,
+                amount_signed=context.amount_signed,
+                apply_sxt=context.apply_sxt,
             )
+        except _ProfileRequiredError as exc:
+            raise ApiError(
+                ErrorCode.IMPORT_PROFILE_REQUIRED,
+                detail=f"账单包含券商特有语义（{exc}），请选择对应券商画像",
+            ) from exc
         except _RowError as err:
             share_only = (
-                _share_only_money_fund_row(raw, field_headers, effective_format, line_no)
+                _share_only_money_fund_row(raw, values, effective_format, line_no)
                 if err.reason == QuarantineReason.INVALID_AMOUNT
                 else None
             )
@@ -832,9 +937,8 @@ def parse_bill(
             derived_count += 1
         if amount_unsigned:
             unsigned_amount_count += 1
-        candidates.append(
-            _Candidate(parsed=parsed, raw_values=tuple(raw.get(h, "") for h in headers))
-        )
+        raw_values = tuple(raw.get(header, "") for header in context.headers)
+        candidates.append(_Candidate(parsed=parsed, raw_values=raw_values))
 
     kept: list[_Candidate] = []
     seen_full: set[tuple[str, ...]] = set()
@@ -870,13 +974,23 @@ def parse_bill(
     # 严格 Excel 行序：line_no 即原表行号；同日多笔买卖保持表格自上而下顺序。
     rows.sort(key=lambda row: row.line_no)
 
-    if "cash_balance" not in field_headers:
+    if "cash_balance" not in context.field_indices:
         warnings.append(WarningCode.MISSING_CASH_BALANCE)
     # 货币基金余额：按份额累计推演；若账单含「基金持仓」区块，用其参考市值作期末锚点
     # 反推期初（设计 §5.3）。无锚点且账单内有净赎回的代码按「-min(累计净额)」反推期初下界
     # （赎回行自证期初持仓），其余无锚点代码期初按 0；均写 assumptions 留痕，不伪造余额。
     fund_rows = raw_rows[stop_row_index + 1 :] if stop_row_index is not None else []
     fund_anchors = _read_fund_holding_anchors(fund_rows, _money_fund_codes(rows))
+    # 通用画像：货基行没有「货基余额」映射 → fail-closed（设计 D-09），不猜期初。
+    if (
+        context.require_money_fund_balance
+        and "money_fund_balance" not in context.field_indices
+        and any(_is_money_fund_name(row.security_name) for row in rows + share_only_rows)
+    ):
+        raise ApiError(
+            ErrorCode.IMPORT_PROFILE_REQUIRED,
+            detail="账单包含货币基金行，请选择券商画像或映射「货基余额」列",
+        )
     mf_inferred, mf_zero, mf_clamped, mf_interest = _apply_money_fund_balances(
         rows, fund_anchors, extra_rows=share_only_rows
     )
@@ -914,12 +1028,39 @@ def parse_bill(
 
     return ParsedBill(
         rows=rows,
-        columns=found.columns,
-        unresolved=found.unresolved,
+        columns=context.columns,
+        unresolved=context.unresolved,
         date_format=effective_format,
         warnings=warnings,
         quarantined=quarantined,
         assumptions=assumptions,
+    )
+
+
+def parse_bill(
+    data: bytes,
+    file_name: str,
+    *,
+    mapping: dict[str, str] | None,
+    date_format: str | None,
+    clock: Clock,
+) -> ParsedBill:
+    """解析华泰账单（legacy 入口）；业务失败以 ApiError/隔离行表达，不抛裸异常。"""
+    return _parse_bill_impl(data, file_name, mapping=mapping, date_format=date_format, clock=clock)
+
+
+def parse_bill_with_plan(
+    data: bytes,
+    file_name: str,
+    *,
+    plan: MappingPlan,
+    date_format: str | None,
+    clock: Clock,
+    broker: str = "generic",
+) -> ParsedBill:
+    """按映射计划解析（v2 入口）；与 legacy 共用业务口径，差异只在列取值与画像。"""
+    return _parse_bill_impl(
+        data, file_name, plan=plan, date_format=date_format, clock=clock, broker=broker
     )
 
 
@@ -929,4 +1070,5 @@ __all__ = [
     "ParsedRow",
     "QuarantineCandidate",
     "parse_bill",
+    "parse_bill_with_plan",
 ]

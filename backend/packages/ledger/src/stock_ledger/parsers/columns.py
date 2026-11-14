@@ -26,10 +26,24 @@ COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
     "other_fee": ("其他费", "过户费", "其他费用"),
     "cash_balance": ("资金余额", "余额"),
     "summary": ("摘要", "业务名称", "备注"),
-    "account": ("资金账号", "股东代码", "客户号", "资金账户", "股东账号"),
+    # account 只认资金账号类列：股东代码/股东账号是沪/深股东号，一张账单会有两个，
+    # 当作账户会误拆对账链；客户号也不是资金账号（口径与 v2 FIELD_ALIASES 一致）。
+    "account": ("资金账号", "资金帐号", "资金账户", "资金帐户"),
 }
 
 REQUIRED_FIELDS: tuple[str, ...] = ("trade_date", "security_code", "quantity", "price")
+
+#: 需要脱敏的账户类表头：即使这些列不再映射 `account`（如沪/深股东代码），
+#: 其明文也不能落到隔离区 raw 或预览 sample 里，源头统一抹成 MD5。
+SENSITIVE_ACCOUNT_ALIASES: tuple[str, ...] = (
+    "资金账号",
+    "资金帐号",
+    "资金账户",
+    "资金帐户",
+    "股东代码",
+    "股东账号",
+    "客户号",
+)
 
 # 金额列语义：这些表头原生就是「带符号的发生金额/净现金流」（买入为负、卖出为正、已含费用），
 # 解析器直接使用；其余（典型是「成交金额」毛额）必须按方向 + 费用换算成带符号净额。
@@ -231,6 +245,11 @@ def classify_side_from_summary(raw: str) -> str | None:
 NON_TRADE_SUMMARY_SIDE: tuple[tuple[str, str], ...] = (
     ("银行转存", Side.SELL.value),
     ("银行转取", Side.BUY.value),
+    ("银证转入", Side.SELL.value),
+    ("跨行转入", Side.SELL.value),
+    ("跨行转出", Side.BUY.value),
+    ("带资金补登", Side.UNKNOWN.value),
+    ("资产账户币种开户", Side.UNKNOWN.value),
     ("股息入帐", Side.SELL.value),
     ("利息归本", Side.SELL.value),
     ("股息红利税", Side.BUY.value),

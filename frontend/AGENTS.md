@@ -131,6 +131,14 @@ export default defineConfig({
 - **概念警示**：概念表无“基准/主动”列，`concept.caveat` 由后端提供并原样渲染（`ui/Caveat.tsx`），前端不拼结论文案。
 - **深链**：`/sectors?taxonomy=industry&level=1|2|3&parent=<code>&as_of=<date>`；`level` 用字符串比较回填，不做数值解析。
 
+### 10. `/import` 向导的 Tailwind + shadcn 限定例外（2026-11-13，设计 H-1 已批准）
+
+- **范围**：Tailwind 3.4 与 shadcn 风格 Radix 组件只服务 `/import`；其余页面继续手写 CSS + 语义 token，不得扩散引入。
+- **隔离**：`tailwind.config.ts` 必须保持 `prefix: "tw-"`、`preflight: false`，content 只覆盖 `Import.tsx`、`components/ui` 与 `features/import`；`features/import/import.css` 只由 Import 页引入，作用域为 `[data-import-ui]`。
+- **组件**：组件源码入 `apps/web/src/components/ui`（不跑 shadcn CLI），`components.json` 保留生成约定；Tailwind 颜色只映射 `tokens.css` 语义变量。
+- **Portal**：Radix Portal 必须挂到 `#import-portal[data-import-ui]`，通过 `components/ui/portal.ts` 的 context 注入，避免弹出层逃离样式作用域。
+- **测试**：jsdom polyfill 集中在 `src/test/setup.ts`；不得注入 `matchMedia` stub（会改变 AppShell 无该 API 时的默认紧凑布局行为）。
+
 ## 文件清单
 
 | 路径 | 职责 |

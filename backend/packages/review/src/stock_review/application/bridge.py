@@ -34,7 +34,13 @@ from datetime import date, datetime
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from stock_contracts.clock import Clock
-from stock_core.fifo import BridgeIdentity, BridgeLedger, build_rounds, compute_bridge
+from stock_core.fifo import (
+    BridgeIdentity,
+    BridgeLedger,
+    FifoResult,
+    build_rounds,
+    compute_bridge,
+)
 from stock_ledger.models import Trade
 from stock_ledger.repositories.trades import TradeRepository
 
@@ -110,7 +116,9 @@ def _to_result(
     )
 
 
-def _initial_cash(trades: list[Trade], period_start: date) -> tuple[int, str] | None:
+def _initial_cash(
+    trades: list[Trade], period_start: date, *, extra_units: int = 0
+) -> tuple[int, str] | None:
     """期初现金锚点：返回 (期初现金, 来源)；全历史无余额行 → None（blocked）。
 
     来源口径（PRD 附录 A1 / API-Catalog API-032）：
@@ -121,6 +129,10 @@ def _initial_cash(trades: list[Trade], period_start: date) -> tuple[int, str] | 
         期初 = B.balance − B.amount − Σ{t.amount : period_start ≤ t.date 且 t 稳定序在 B 之前}
 
       B=全历史首行时 Σ 为空，退化为原「首行反推」口径。
+
+    `extra_units` 用于把「超卖未配对份额的分摊净卖款」并入期初资产：
+    这部分不是交易损益，但对应账单期前已持有、成本未知的资产（口径见
+    `oversell_initial_units`）。
     """
     anchor_before: Trade | None = None
     anchor_after: Trade | None = None
@@ -132,7 +144,7 @@ def _initial_cash(trades: list[Trade], period_start: date) -> tuple[int, str] | 
         elif anchor_after is None:
             anchor_after = trade  # 区间当日或之后第一条
     if anchor_before is not None:
-        return int(anchor_before.cash_balance_units or 0), "statement"
+        return int(anchor_before.cash_balance_units or 0) + extra_units, "statement"
     if anchor_after is None:
         return None
     # 反推：B 行之前的现金（B.balance − B.amount）减去 [period_start, B) 内流水发生额。
@@ -142,7 +154,19 @@ def _initial_cash(trades: list[Trade], period_start: date) -> tuple[int, str] | 
             break
         if trade.trade_date >= period_start:
             cash -= trade.amount_units
-    return cash, "back_solved"
+    return cash + extra_units, "back_solved"
+
+
+def oversell_initial_units(result: FifoResult, *, period_start: date, period_end: date) -> int:
+    """区间内超卖未配对份额的分摊净卖款（分，已含费），按口径并入期初资产。
+
+    只取区间内的事件：区间之前的超卖已经体现在期初现金锚点里，重复计入会双算。
+    """
+    return sum(
+        error.proceeds_units
+        for error in result.data_errors
+        if error.kind == "oversell" and period_start <= error.trade_date <= period_end
+    )
 
 
 def _ending_cash(
@@ -193,6 +217,15 @@ async def bridge_for_period(
         trades_to_events([t for t in trades if t.trade_date < period_start], bond_alias=bond_alias)
     )
     result_end = build_rounds(trades_to_events(trades, bond_alias=bond_alias))
+    # 超卖未配对卖款并入期初资产（不计交易损益）：期初加 P，期末现金本就含 P，
+    # 两边同增，恒等式不被破坏；`trading_pnl` 只来自 fills，天然不含这部分。
+    oversell_units = oversell_initial_units(
+        result_end, period_start=period_start, period_end=period_end
+    )
+    base_initial_cash = initial[0]
+    adjusted = _initial_cash(trades, period_start, extra_units=oversell_units)
+    assert adjusted is not None
+    initial_cash = adjusted[0]
     initial_open_cost = sum(lot.cost_units for lot in result_start.open_lots)
     open_cost = sum(lot.cost_units for lot in result_end.open_lots)
     # 新引擎：round = 0→非0→0 仓位周期；open round 内含部分卖出的 fills（做T）。
@@ -204,8 +237,9 @@ async def bridge_for_period(
         if period_start <= fill.close_date <= period_end
     )
 
+    # 期末现金用**未加超卖补记**的期初推导，避免「期初 + P」与推导式里的卖款 P 双算。
     ending_cash, cash_source = _ending_cash(
-        trades, period_start, period_end, initial_cash=initial_cash
+        trades, period_start, period_end, initial_cash=base_initial_cash
     )
     degraded = cash_source != "statement"
 

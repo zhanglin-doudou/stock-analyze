@@ -31,7 +31,7 @@ from stock_platform.ports import MarketDataSource
 from stock_platform.symbols import is_bond, is_convertible_bond
 
 from stock_review.application.bond_alias import build_bond_alias, canonical_code
-from stock_review.application.bridge import _initial_cash
+from stock_review.application.bridge import _initial_cash, oversell_initial_units
 from stock_review.application.rebuild import trades_to_events
 from stock_review.application.valuation import (
     CASHFLOW_CATEGORIES as _CASHFLOW_CATEGORIES,
@@ -209,6 +209,11 @@ async def compute_nav_points(
     # 2. FIFO 结果用于检测 data_error（降级）
     fifo_all = build_rounds(trades_to_events(trades, bond_alias=bond_alias))
     degraded = any(r.status == "data_error" for r in fifo_all.rounds)
+    # 超卖未配对卖款并入期初净值（不计收益）；逐日现金状态仍用未补记的锚点，避免双算。
+    oversell_units = oversell_initial_units(
+        fifo_all, period_start=period_start, period_end=period_end
+    )
+    initial_capital = initial_cash + oversell_units
 
     # 3. 期初持仓（区间前 open lots）+ 成本；货基行不进持仓（按余额计）
     money_fund_codes = {t.security_code for t in trades if _is_money_fund_row(t)}
@@ -281,7 +286,7 @@ async def compute_nav_points(
     if any(not is_convertible_bond(s) for s in prev_day_fallback):
         bond_fallback_any = True
     prev_day_value_units: int | None = (
-        None if prev_day_missing else initial_cash + initial_money_fund_units + prev_day_value
+        None if prev_day_missing else initial_capital + initial_money_fund_units + prev_day_value
     )
 
     points: list[tuple[date, int, int]] = []
@@ -329,7 +334,9 @@ async def compute_nav_points(
                 assumption,
                 prev_day_value_units,
             )
-        points.append((baseline_date, initial_cash + initial_money_fund_units + baseline_value, 0))
+        points.append(
+            (baseline_date, initial_capital + initial_money_fund_units + baseline_value, 0)
+        )
         holdings_by_date[baseline_date] = _build_holding_snapshots(
             dict(initial_holdings),
             dict(initial_cost),

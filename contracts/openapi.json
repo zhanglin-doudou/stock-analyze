@@ -1424,6 +1424,11 @@
       },
       "BatchCounts": {
         "properties": {
+          "discarded": {
+            "default": 0,
+            "title": "Discarded",
+            "type": "integer"
+          },
           "inserted": {
             "title": "Inserted",
             "type": "integer"
@@ -1505,6 +1510,26 @@
               }
             ],
             "title": "Finished At"
+          },
+          "mapping": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/BatchMappingInfo"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "mapping_source": {
+            "default": "legacy",
+            "enum": [
+              "legacy",
+              "manual",
+              "template"
+            ],
+            "title": "Mapping Source",
+            "type": "string"
           },
           "mode": {
             "enum": [
@@ -1615,6 +1640,55 @@
         "title": "BatchFill",
         "type": "object"
       },
+      "BatchMappingInfo": {
+        "description": "批次映射来源（API-013，决定撤销对话框文案）。",
+        "properties": {
+          "is_origin": {
+            "default": false,
+            "title": "Is Origin",
+            "type": "boolean"
+          },
+          "remap_required": {
+            "default": false,
+            "title": "Remap Required",
+            "type": "boolean"
+          },
+          "signature": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signature"
+          },
+          "source": {
+            "default": "legacy",
+            "enum": [
+              "legacy",
+              "manual",
+              "template"
+            ],
+            "title": "Source",
+            "type": "string"
+          },
+          "template_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Template Id"
+          }
+        },
+        "title": "BatchMappingInfo",
+        "type": "object"
+      },
       "BatchOut": {
         "properties": {
           "assumptions": {
@@ -1663,6 +1737,16 @@
               }
             ],
             "title": "Finished At"
+          },
+          "mapping_source": {
+            "default": "legacy",
+            "enum": [
+              "legacy",
+              "manual",
+              "template"
+            ],
+            "title": "Mapping Source",
+            "type": "string"
           },
           "mode": {
             "enum": [
@@ -1862,6 +1946,12 @@
       },
       "Body_previewImport": {
         "properties": {
+          "broker": {
+            "default": "auto",
+            "description": "auto|huatai|generic",
+            "title": "Broker",
+            "type": "string"
+          },
           "date_format": {
             "anyOf": [
               {
@@ -1890,6 +1980,12 @@
             ],
             "description": "表头→字段 的 JSON 字符串",
             "title": "Mapping"
+          },
+          "reuse_template": {
+            "default": true,
+            "description": "复用同签名模板",
+            "title": "Reuse Template",
+            "type": "boolean"
           }
         },
         "required": [
@@ -3753,6 +3849,11 @@
       "ImportCommitIn": {
         "additionalProperties": false,
         "properties": {
+          "acknowledge_reimport": {
+            "default": false,
+            "title": "Acknowledge Reimport",
+            "type": "boolean"
+          },
           "mapping": {
             "anyOf": [
               {
@@ -3766,6 +3867,18 @@
               }
             ],
             "title": "Mapping"
+          },
+          "mapping_version": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mapping Version"
           },
           "mode": {
             "default": "full",
@@ -3811,6 +3924,99 @@
         "title": "ImportCommitIn",
         "type": "object"
       },
+      "ImportMappingIn": {
+        "additionalProperties": false,
+        "properties": {
+          "acknowledge_unmapped": {
+            "default": false,
+            "title": "Acknowledge Unmapped",
+            "type": "boolean"
+          },
+          "broker": {
+            "anyOf": [
+              {
+                "maxLength": 16,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Broker"
+          },
+          "date_format": {
+            "anyOf": [
+              {
+                "maxLength": 32,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date Format"
+          },
+          "ignored": {
+            "items": {
+              "type": "string"
+            },
+            "maxItems": 64,
+            "title": "Ignored",
+            "type": "array"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ImportMappingItemIn"
+            },
+            "maxItems": 64,
+            "title": "Items",
+            "type": "array"
+          },
+          "mapping_version": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mapping Version"
+          }
+        },
+        "title": "ImportMappingIn",
+        "type": "object"
+      },
+      "ImportMappingItemIn": {
+        "additionalProperties": false,
+        "properties": {
+          "column_key": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Column Key",
+            "type": "string"
+          },
+          "options": {
+            "additionalProperties": true,
+            "title": "Options",
+            "type": "object"
+          },
+          "target_field": {
+            "maxLength": 24,
+            "minLength": 1,
+            "title": "Target Field",
+            "type": "string"
+          }
+        },
+        "required": [
+          "column_key",
+          "target_field"
+        ],
+        "title": "ImportMappingItemIn",
+        "type": "object"
+      },
       "ImportRange": {
         "additionalProperties": false,
         "properties": {
@@ -3830,6 +4036,404 @@
           "to"
         ],
         "title": "ImportRange",
+        "type": "object"
+      },
+      "ImportRuleIn": {
+        "additionalProperties": false,
+        "properties": {
+          "broker": {
+            "maxLength": 16,
+            "minLength": 1,
+            "title": "Broker",
+            "type": "string"
+          },
+          "enabled": {
+            "default": true,
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "header_norm": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Header Norm",
+            "type": "string"
+          },
+          "is_fingerprint": {
+            "default": false,
+            "title": "Is Fingerprint",
+            "type": "boolean"
+          },
+          "match_type": {
+            "default": "exact",
+            "enum": [
+              "exact",
+              "prefix",
+              "contains"
+            ],
+            "title": "Match Type",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "options": {
+            "additionalProperties": true,
+            "title": "Options",
+            "type": "object"
+          },
+          "priority": {
+            "default": 100,
+            "maximum": 999.0,
+            "minimum": 1.0,
+            "title": "Priority",
+            "type": "integer"
+          },
+          "target_field": {
+            "maxLength": 24,
+            "minLength": 1,
+            "title": "Target Field",
+            "type": "string"
+          },
+          "weight": {
+            "default": 1,
+            "maximum": 10.0,
+            "minimum": 1.0,
+            "title": "Weight",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "broker",
+          "header_norm",
+          "target_field"
+        ],
+        "title": "ImportRuleIn",
+        "type": "object"
+      },
+      "ImportRuleOut": {
+        "properties": {
+          "broker": {
+            "title": "Broker",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "header_norm": {
+            "title": "Header Norm",
+            "type": "string"
+          },
+          "is_fingerprint": {
+            "title": "Is Fingerprint",
+            "type": "boolean"
+          },
+          "is_system": {
+            "title": "Is System",
+            "type": "boolean"
+          },
+          "match_type": {
+            "enum": [
+              "exact",
+              "prefix",
+              "contains"
+            ],
+            "title": "Match Type",
+            "type": "string"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "options": {
+            "additionalProperties": true,
+            "title": "Options",
+            "type": "object"
+          },
+          "priority": {
+            "title": "Priority",
+            "type": "integer"
+          },
+          "rule_id": {
+            "title": "Rule Id",
+            "type": "string"
+          },
+          "target_field": {
+            "title": "Target Field",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "version": {
+            "title": "Version",
+            "type": "integer"
+          },
+          "weight": {
+            "title": "Weight",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "rule_id",
+          "broker",
+          "header_norm",
+          "match_type",
+          "target_field",
+          "priority",
+          "enabled",
+          "is_system",
+          "is_fingerprint",
+          "weight",
+          "version",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ImportRuleOut",
+        "type": "object"
+      },
+      "ImportRulePage": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ImportRuleOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "title": "ImportRulePage",
+        "type": "object"
+      },
+      "ImportRulePatchIn": {
+        "additionalProperties": false,
+        "properties": {
+          "enabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Enabled"
+          },
+          "is_fingerprint": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Fingerprint"
+          },
+          "match_type": {
+            "anyOf": [
+              {
+                "enum": [
+                  "exact",
+                  "prefix",
+                  "contains"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Match Type"
+          },
+          "note": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Note"
+          },
+          "options": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Options"
+          },
+          "priority": {
+            "anyOf": [
+              {
+                "maximum": 999.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Priority"
+          },
+          "target_field": {
+            "anyOf": [
+              {
+                "maxLength": 24,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Target Field"
+          },
+          "weight": {
+            "anyOf": [
+              {
+                "maximum": 10.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weight"
+          }
+        },
+        "title": "ImportRulePatchIn",
+        "type": "object"
+      },
+      "ImportTemplatePage": {
+        "properties": {
+          "has_more": {
+            "default": false,
+            "title": "Has More",
+            "type": "boolean"
+          },
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PreviewTemplateOut"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "next_cursor": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Cursor"
+          }
+        },
+        "title": "ImportTemplatePage",
+        "type": "object"
+      },
+      "ImportTypeResolutionIn": {
+        "additionalProperties": false,
+        "properties": {
+          "category": {
+            "anyOf": [
+              {
+                "maxLength": 24,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "discard": {
+            "default": false,
+            "title": "Discard",
+            "type": "boolean"
+          },
+          "type_key": {
+            "maxLength": 64,
+            "minLength": 1,
+            "title": "Type Key",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type_key"
+        ],
+        "title": "ImportTypeResolutionIn",
+        "type": "object"
+      },
+      "ImportTypesIn": {
+        "additionalProperties": false,
+        "properties": {
+          "mapping_version": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mapping Version"
+          },
+          "resolutions": {
+            "items": {
+              "$ref": "#/components/schemas/ImportTypeResolutionIn"
+            },
+            "maxItems": 200,
+            "title": "Resolutions",
+            "type": "array"
+          }
+        },
+        "title": "ImportTypesIn",
         "type": "object"
       },
       "InsightAddonSummaryOut": {
@@ -4626,6 +5230,22 @@
           }
         },
         "title": "LogoutIn",
+        "type": "object"
+      },
+      "MappingRevoked": {
+        "properties": {
+          "mapping_deleted": {
+            "default": false,
+            "title": "Mapping Deleted",
+            "type": "boolean"
+          },
+          "types_deleted": {
+            "default": 0,
+            "title": "Types Deleted",
+            "type": "integer"
+          }
+        },
+        "title": "MappingRevoked",
         "type": "object"
       },
       "MarketSessionOut": {
@@ -6129,6 +6749,46 @@
         "title": "PatMetaWithSecret",
         "type": "object"
       },
+      "PreviewBlocking": {
+        "properties": {
+          "code": {
+            "title": "Code",
+            "type": "string"
+          },
+          "field": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Field"
+          },
+          "line_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line No"
+          },
+          "message": {
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code",
+          "message"
+        ],
+        "title": "PreviewBlocking",
+        "type": "object"
+      },
       "PreviewColumn": {
         "properties": {
           "confidence": {
@@ -6139,6 +6799,28 @@
           "index": {
             "title": "Index",
             "type": "integer"
+          },
+          "key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key"
+          },
+          "level": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Level"
           },
           "name": {
             "title": "Name",
@@ -6151,6 +6833,13 @@
             "title": "Sample",
             "type": "array"
           },
+          "samples": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Samples",
+            "type": "array"
+          },
           "suggested_field": {
             "anyOf": [
               {
@@ -6161,6 +6850,11 @@
               }
             ],
             "title": "Suggested Field"
+          },
+          "suggested_options": {
+            "additionalProperties": true,
+            "title": "Suggested Options",
+            "type": "object"
           }
         },
         "required": [
@@ -6172,6 +6866,16 @@
       },
       "PreviewEstimated": {
         "properties": {
+          "discarded": {
+            "default": 0,
+            "title": "Discarded",
+            "type": "integer"
+          },
+          "estimated_available": {
+            "default": true,
+            "title": "Estimated Available",
+            "type": "boolean"
+          },
           "inserted": {
             "title": "Inserted",
             "type": "integer"
@@ -6221,11 +6925,51 @@
         "title": "PreviewFile",
         "type": "object"
       },
+      "PreviewMappingItem": {
+        "properties": {
+          "column_key": {
+            "title": "Column Key",
+            "type": "string"
+          },
+          "field": {
+            "title": "Field",
+            "type": "string"
+          },
+          "options": {
+            "additionalProperties": true,
+            "title": "Options",
+            "type": "object"
+          }
+        },
+        "required": [
+          "column_key",
+          "field"
+        ],
+        "title": "PreviewMappingItem",
+        "type": "object"
+      },
       "PreviewOut": {
         "properties": {
           "assumptions": {
             "additionalProperties": true,
             "title": "Assumptions",
+            "type": "object"
+          },
+          "blocking": {
+            "items": {
+              "$ref": "#/components/schemas/PreviewBlocking"
+            },
+            "title": "Blocking",
+            "type": "array"
+          },
+          "broker": {
+            "default": "huatai",
+            "title": "Broker",
+            "type": "string"
+          },
+          "broker_detection": {
+            "additionalProperties": true,
+            "title": "Broker Detection",
             "type": "object"
           },
           "can_commit": {
@@ -6235,6 +6979,24 @@
           "cash_balance_available": {
             "title": "Cash Balance Available",
             "type": "boolean"
+          },
+          "catalog": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Catalog",
+            "type": "array"
+          },
+          "categories": {
+            "items": {
+              "additionalProperties": {
+                "type": "string"
+              },
+              "type": "object"
+            },
+            "title": "Categories",
+            "type": "array"
           },
           "columns": {
             "items": {
@@ -6254,6 +7016,11 @@
             ],
             "title": "Date Format"
           },
+          "discarded_count": {
+            "default": 0,
+            "title": "Discarded Count",
+            "type": "integer"
+          },
           "estimated": {
             "$ref": "#/components/schemas/PreviewEstimated"
           },
@@ -6265,9 +7032,44 @@
           "file": {
             "$ref": "#/components/schemas/PreviewFile"
           },
+          "ignored_columns": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Ignored Columns",
+            "type": "array"
+          },
+          "mapping_fingerprint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mapping Fingerprint"
+          },
+          "mapping_items": {
+            "items": {
+              "$ref": "#/components/schemas/PreviewMappingItem"
+            },
+            "title": "Mapping Items",
+            "type": "array"
+          },
+          "mapping_version": {
+            "default": 0,
+            "title": "Mapping Version",
+            "type": "integer"
+          },
           "preview_id": {
             "title": "Preview Id",
             "type": "string"
+          },
+          "requires_reimport_ack": {
+            "default": false,
+            "title": "Requires Reimport Ack",
+            "type": "boolean"
           },
           "sample": {
             "items": {
@@ -6276,6 +7078,65 @@
             },
             "title": "Sample",
             "type": "array"
+          },
+          "signature": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Signature"
+          },
+          "stage": {
+            "default": "legacy",
+            "enum": [
+              "mapping",
+              "types",
+              "ready",
+              "legacy"
+            ],
+            "title": "Stage",
+            "type": "string"
+          },
+          "system_categories": {
+            "items": {
+              "type": "string"
+            },
+            "title": "System Categories",
+            "type": "array"
+          },
+          "template": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PreviewTemplateOut"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "types": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Types",
+            "type": "array"
+          },
+          "unmapped_columns": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Unmapped Columns",
+            "type": "array"
+          },
+          "verification": {
+            "additionalProperties": true,
+            "title": "Verification",
+            "type": "object"
           },
           "warnings": {
             "items": {
@@ -6295,6 +7156,106 @@
           "expires_at"
         ],
         "title": "PreviewOut",
+        "type": "object"
+      },
+      "PreviewTemplateOut": {
+        "properties": {
+          "broker": {
+            "title": "Broker",
+            "type": "string"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "date_format": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date Format"
+          },
+          "header_count": {
+            "title": "Header Count",
+            "type": "integer"
+          },
+          "ignored": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Ignored",
+            "type": "array"
+          },
+          "items": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "last_batch_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Batch Id"
+          },
+          "origin_batch_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Origin Batch Id"
+          },
+          "signature": {
+            "title": "Signature",
+            "type": "string"
+          },
+          "template_id": {
+            "title": "Template Id",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "template_id",
+          "broker",
+          "signature",
+          "header_count"
+        ],
+        "title": "PreviewTemplateOut",
         "type": "object"
       },
       "PreviewWarning": {
@@ -6909,6 +7870,16 @@
           "batch_id": {
             "title": "Batch Id",
             "type": "string"
+          },
+          "mapping_revoked": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/MappingRevoked"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "reverted": {
             "additionalProperties": {
@@ -10614,6 +11585,858 @@
         "x-required-scope": "write"
       }
     },
+    "/api/v1/admin/import-column-rules": {
+      "get": {
+        "description": "API-102：管理员查看系统规则（全局 + 用户覆盖，按创建时间倒序）。",
+        "operationId": "listImportColumnRules",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "broker",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 16,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Broker"
+            }
+          },
+          {
+            "in": "query",
+            "name": "enabled",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Enabled"
+            }
+          },
+          {
+            "in": "query",
+            "name": "q",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 128,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Q"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-api-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "items": [
+                    {
+                      "broker": "huatai",
+                      "created_at": "2026-09-30T09:30:00Z",
+                      "enabled": false,
+                      "header_norm": "示例",
+                      "is_fingerprint": false,
+                      "is_system": false,
+                      "match_type": "exact",
+                      "note": "示例备注",
+                      "options": {},
+                      "priority": 1,
+                      "rule_id": "rul_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                      "target_field": "示例",
+                      "updated_at": "2026-09-30T09:30:00Z",
+                      "version": 2,
+                      "weight": 1
+                    }
+                  ],
+                  "next_cursor": "cursor_01J9Z6ABCDEFGHJKMNPQRSTVWX"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ImportRulePage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "INVALID_CURSOR",
+                  "detail": "分页游标无效。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 400,
+                  "title": "INVALID_CURSOR",
+                  "type": "https://stock-analyze.local/errors/INVALID_CURSOR",
+                  "user_message": "分页游标无效。",
+                  "what_to_do": "从第一页重新翻页。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "请求参数错误"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "TOKEN_EXPIRED",
+                  "detail": "访问凭证已过期。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 401,
+                  "title": "TOKEN_EXPIRED",
+                  "type": "https://stock-analyze.local/errors/TOKEN_EXPIRED",
+                  "user_message": "访问凭证已过期。",
+                  "what_to_do": "用 refresh_token 换新 access，或重建 PAT。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "未认证或凭证无效"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "INSUFFICIENT_SCOPE",
+                  "detail": "当前令牌只有只读权限。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 403,
+                  "title": "INSUFFICIENT_SCOPE",
+                  "type": "https://stock-analyze.local/errors/INSUFFICIENT_SCOPE",
+                  "user_message": "当前令牌只有只读权限。",
+                  "what_to_do": "创建带 write scope 的 PAT。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "权限不足"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "example": {
+                  "code": "VALIDATION_ERROR",
+                  "detail": "请求参数有问题。",
+                  "errors": [
+                    {
+                      "code": "invalid",
+                      "field": "body.email",
+                      "message": "邮箱格式不正确。"
+                    }
+                  ],
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 422,
+                  "title": "VALIDATION_ERROR",
+                  "type": "https://stock-analyze.local/errors/VALIDATION_ERROR",
+                  "user_message": "请求参数有问题。",
+                  "what_to_do": "按 errors[] 修正字段后重试。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Import Column Rules",
+        "tags": [
+          "admin"
+        ],
+        "x-async": false,
+        "x-error-codes": [
+          "VALIDATION_ERROR",
+          "INVALID_CURSOR",
+          "TOKEN_EXPIRED",
+          "TOKEN_REVOKED",
+          "MULTIPLE_CREDENTIALS",
+          "INSUFFICIENT_SCOPE"
+        ],
+        "x-idempotent": false,
+        "x-required-scope": "admin"
+      },
+      "post": {
+        "description": "API-103：新建全局规则；重复 `(broker, header_norm, target_field)` → 409。",
+        "operationId": "createImportColumnRule",
+        "parameters": [
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-api-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportRuleIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "broker": "huatai",
+                  "created_at": "2026-09-30T09:30:00Z",
+                  "enabled": false,
+                  "header_norm": "示例",
+                  "is_fingerprint": false,
+                  "is_system": false,
+                  "match_type": "exact",
+                  "note": "示例备注",
+                  "options": {},
+                  "priority": 1,
+                  "rule_id": "rul_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "target_field": "示例",
+                  "updated_at": "2026-09-30T09:30:00Z",
+                  "version": 2,
+                  "weight": 1
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ImportRuleOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "TOKEN_EXPIRED",
+                  "detail": "访问凭证已过期。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 401,
+                  "title": "TOKEN_EXPIRED",
+                  "type": "https://stock-analyze.local/errors/TOKEN_EXPIRED",
+                  "user_message": "访问凭证已过期。",
+                  "what_to_do": "用 refresh_token 换新 access，或重建 PAT。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "未认证或凭证无效"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "INSUFFICIENT_SCOPE",
+                  "detail": "当前令牌只有只读权限。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 403,
+                  "title": "INSUFFICIENT_SCOPE",
+                  "type": "https://stock-analyze.local/errors/INSUFFICIENT_SCOPE",
+                  "user_message": "当前令牌只有只读权限。",
+                  "what_to_do": "创建带 write scope 的 PAT。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "权限不足"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "IMPORT_RULE_CONFLICT",
+                  "detail": "规则已存在。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 409,
+                  "title": "IMPORT_RULE_CONFLICT",
+                  "type": "https://stock-analyze.local/errors/IMPORT_RULE_CONFLICT",
+                  "user_message": "规则已存在。",
+                  "what_to_do": "编辑已有规则或换一个表头。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "资源状态冲突"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "example": {
+                  "code": "VALIDATION_ERROR",
+                  "detail": "请求参数有问题。",
+                  "errors": [
+                    {
+                      "code": "invalid",
+                      "field": "body.email",
+                      "message": "邮箱格式不正确。"
+                    }
+                  ],
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 422,
+                  "title": "VALIDATION_ERROR",
+                  "type": "https://stock-analyze.local/errors/VALIDATION_ERROR",
+                  "user_message": "请求参数有问题。",
+                  "what_to_do": "按 errors[] 修正字段后重试。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Create Import Column Rule",
+        "tags": [
+          "admin"
+        ],
+        "x-async": false,
+        "x-error-codes": [
+          "VALIDATION_ERROR",
+          "IMPORT_RULE_CONFLICT",
+          "TOKEN_EXPIRED",
+          "TOKEN_REVOKED",
+          "MULTIPLE_CREDENTIALS",
+          "INSUFFICIENT_SCOPE"
+        ],
+        "x-idempotent": false,
+        "x-required-scope": "admin"
+      }
+    },
+    "/api/v1/admin/import-column-rules/{rule_id}": {
+      "delete": {
+        "description": "API-105：删除自定义规则；系统内置行 → 422（请禁用）。",
+        "operationId": "deleteImportColumnRule",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rule_id",
+            "required": true,
+            "schema": {
+              "title": "Rule Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-api-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "TOKEN_EXPIRED",
+                  "detail": "访问凭证已过期。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 401,
+                  "title": "TOKEN_EXPIRED",
+                  "type": "https://stock-analyze.local/errors/TOKEN_EXPIRED",
+                  "user_message": "访问凭证已过期。",
+                  "what_to_do": "用 refresh_token 换新 access，或重建 PAT。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "未认证或凭证无效"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "INSUFFICIENT_SCOPE",
+                  "detail": "当前令牌只有只读权限。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 403,
+                  "title": "INSUFFICIENT_SCOPE",
+                  "type": "https://stock-analyze.local/errors/INSUFFICIENT_SCOPE",
+                  "user_message": "当前令牌只有只读权限。",
+                  "what_to_do": "创建带 write scope 的 PAT。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "权限不足"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "NOT_FOUND",
+                  "detail": "找不到该资源。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 404,
+                  "title": "NOT_FOUND",
+                  "type": "https://stock-analyze.local/errors/NOT_FOUND",
+                  "user_message": "找不到该资源。",
+                  "what_to_do": "确认 ID；跨账号资源按不存在处理。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "资源不存在"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "example": {
+                  "code": "VALIDATION_ERROR",
+                  "detail": "请求参数有问题。",
+                  "errors": [
+                    {
+                      "code": "invalid",
+                      "field": "body.email",
+                      "message": "邮箱格式不正确。"
+                    }
+                  ],
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 422,
+                  "title": "VALIDATION_ERROR",
+                  "type": "https://stock-analyze.local/errors/VALIDATION_ERROR",
+                  "user_message": "请求参数有问题。",
+                  "what_to_do": "按 errors[] 修正字段后重试。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Import Column Rule",
+        "tags": [
+          "admin"
+        ],
+        "x-async": false,
+        "x-error-codes": [
+          "NOT_FOUND",
+          "VALIDATION_ERROR",
+          "TOKEN_EXPIRED",
+          "TOKEN_REVOKED",
+          "MULTIPLE_CREDENTIALS",
+          "INSUFFICIENT_SCOPE"
+        ],
+        "x-idempotent": true,
+        "x-required-scope": "admin"
+      },
+      "patch": {
+        "description": "API-104：修改/禁用规则（`If-Match` 乐观锁；系统行不可改 `target_field`）。",
+        "operationId": "updateImportColumnRule",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rule_id",
+            "required": true,
+            "schema": {
+              "title": "Rule Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-api-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportRulePatchIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "broker": "huatai",
+                  "created_at": "2026-09-30T09:30:00Z",
+                  "enabled": false,
+                  "header_norm": "示例",
+                  "is_fingerprint": false,
+                  "is_system": false,
+                  "match_type": "exact",
+                  "note": "示例备注",
+                  "options": {},
+                  "priority": 1,
+                  "rule_id": "rul_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "target_field": "示例",
+                  "updated_at": "2026-09-30T09:30:00Z",
+                  "version": 2,
+                  "weight": 1
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ImportRuleOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "TOKEN_EXPIRED",
+                  "detail": "访问凭证已过期。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 401,
+                  "title": "TOKEN_EXPIRED",
+                  "type": "https://stock-analyze.local/errors/TOKEN_EXPIRED",
+                  "user_message": "访问凭证已过期。",
+                  "what_to_do": "用 refresh_token 换新 access，或重建 PAT。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "未认证或凭证无效"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "INSUFFICIENT_SCOPE",
+                  "detail": "当前令牌只有只读权限。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 403,
+                  "title": "INSUFFICIENT_SCOPE",
+                  "type": "https://stock-analyze.local/errors/INSUFFICIENT_SCOPE",
+                  "user_message": "当前令牌只有只读权限。",
+                  "what_to_do": "创建带 write scope 的 PAT。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "权限不足"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "NOT_FOUND",
+                  "detail": "找不到该资源。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 404,
+                  "title": "NOT_FOUND",
+                  "type": "https://stock-analyze.local/errors/NOT_FOUND",
+                  "user_message": "找不到该资源。",
+                  "what_to_do": "确认 ID；跨账号资源按不存在处理。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "资源不存在"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "IMPORT_RULE_CONFLICT",
+                  "detail": "规则已存在。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 409,
+                  "title": "IMPORT_RULE_CONFLICT",
+                  "type": "https://stock-analyze.local/errors/IMPORT_RULE_CONFLICT",
+                  "user_message": "规则已存在。",
+                  "what_to_do": "编辑已有规则或换一个表头。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "资源状态冲突"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "example": {
+                  "code": "VALIDATION_ERROR",
+                  "detail": "请求参数有问题。",
+                  "errors": [
+                    {
+                      "code": "invalid",
+                      "field": "body.email",
+                      "message": "邮箱格式不正确。"
+                    }
+                  ],
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 422,
+                  "title": "VALIDATION_ERROR",
+                  "type": "https://stock-analyze.local/errors/VALIDATION_ERROR",
+                  "user_message": "请求参数有问题。",
+                  "what_to_do": "按 errors[] 修正字段后重试。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Update Import Column Rule",
+        "tags": [
+          "admin"
+        ],
+        "x-async": false,
+        "x-error-codes": [
+          "VALIDATION_ERROR",
+          "IMPORT_RULE_CONFLICT",
+          "VERSION_CONFLICT",
+          "NOT_FOUND",
+          "TOKEN_EXPIRED",
+          "TOKEN_REVOKED",
+          "MULTIPLE_CREDENTIALS",
+          "INSUFFICIENT_SCOPE"
+        ],
+        "x-idempotent": false,
+        "x-required-scope": "admin"
+      }
+    },
     "/api/v1/assets": {
       "get": {
         "description": "API-081：每日资产快照列表（日期倒序默认；闭区间过滤；游标分页）。",
@@ -13067,6 +14890,7 @@
                       "broker": "huatai",
                       "can_revoke": false,
                       "counts": {
+                        "discarded": 0,
                         "inserted": 118,
                         "parsed": 120,
                         "quarantined": 1,
@@ -13076,6 +14900,7 @@
                       "file_name": "huatai_2026-09.xlsx",
                       "filled_count": 0,
                       "finished_at": "2026-09-30T09:30:00Z",
+                      "mapping_source": "legacy",
                       "mode": "full",
                       "revoked_at": "2026-09-30T09:30:00Z",
                       "status": "pending",
@@ -13455,9 +15280,25 @@
     },
     "/api/v1/imports/preview": {
       "post": {
-        "description": "API-010：解析账单、列映射建议、质量预检；同步 200，不写 ledger.trade。",
+        "description": "API-010：解析账单、列映射建议、质量预检；同步 200，不写 ledger.trade。\n\n默认走 legacy（严格 422、直接可提交），保持旧客户端/脚本行为；带\n`X-Import-Flow: v2` 时进入「映射 → 类型 → 就绪」两段式，缺列不再 422。",
         "operationId": "previewImport",
         "parameters": [
+          {
+            "in": "header",
+            "name": "X-Import-Flow",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Import-Flow"
+            }
+          },
           {
             "in": "header",
             "name": "authorization",
@@ -13509,21 +15350,48 @@
                   "assumptions": {
                     "benchmark_id": "hs300_tr"
                   },
+                  "blocking": [
+                    {
+                      "code": "MISSING_CASH_BALANCE",
+                      "field": "示例",
+                      "line_no": 7,
+                      "message": "处理中"
+                    }
+                  ],
+                  "broker": "huatai",
+                  "broker_detection": {},
                   "can_commit": true,
                   "cash_balance_available": true,
+                  "catalog": [
+                    {}
+                  ],
+                  "categories": [
+                    {
+                      "key": "示例"
+                    }
+                  ],
                   "columns": [
                     {
                       "confidence": 0.0,
                       "index": 0,
+                      "key": "示例",
+                      "level": "示例",
                       "name": "示例名称",
                       "sample": [
                         "示例"
                       ],
-                      "suggested_field": "trade_date"
+                      "samples": [
+                        "示例"
+                      ],
+                      "suggested_field": "trade_date",
+                      "suggested_options": {}
                     }
                   ],
                   "date_format": "%Y-%m-%d",
+                  "discarded_count": 0,
                   "estimated": {
+                    "discarded": 0,
+                    "estimated_available": true,
                     "inserted": 118,
                     "parsed": 120,
                     "quarantined": 1,
@@ -13535,7 +15403,20 @@
                     "name": "示例名称",
                     "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
                   },
+                  "ignored_columns": [
+                    "示例"
+                  ],
+                  "mapping_fingerprint": "示例",
+                  "mapping_items": [
+                    {
+                      "column_key": "示例",
+                      "field": "示例",
+                      "options": {}
+                    }
+                  ],
+                  "mapping_version": 0,
                   "preview_id": "prv_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "requires_reimport_ack": false,
                   "sample": [
                     {
                       "security_code": "600519",
@@ -13543,6 +15424,35 @@
                       "trade_date": "2026-09-30"
                     }
                   ],
+                  "signature": "示例",
+                  "stage": "legacy",
+                  "system_categories": [
+                    "示例"
+                  ],
+                  "template": {
+                    "broker": "huatai",
+                    "created_at": "2026-09-30T09:30:00Z",
+                    "date_format": "%Y-%m-%d",
+                    "header_count": 1,
+                    "ignored": [
+                      "示例"
+                    ],
+                    "items": [
+                      {}
+                    ],
+                    "last_batch_id": "obj_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                    "origin_batch_id": "obj_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                    "signature": "示例",
+                    "template_id": "obj_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                    "updated_at": "2026-09-30T09:30:00Z"
+                  },
+                  "types": [
+                    {}
+                  ],
+                  "unmapped_columns": [
+                    "示例"
+                  ],
+                  "verification": {},
                   "warnings": [
                     {
                       "code": "MISSING_CASH_BALANCE",
@@ -13718,6 +15628,1358 @@
         "x-required-scope": "write"
       }
     },
+    "/api/v1/imports/previews/{preview_id}": {
+      "get": {
+        "description": "API-106：刷新预览（不重算映射/类型，直接读落库状态）。",
+        "operationId": "getImportPreview",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "preview_id",
+            "required": true,
+            "schema": {
+              "title": "Preview Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-api-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "assumptions": {
+                    "benchmark_id": "hs300_tr"
+                  },
+                  "blocking": [
+                    {
+                      "code": "MISSING_CASH_BALANCE",
+                      "field": "示例",
+                      "line_no": 7,
+                      "message": "处理中"
+                    }
+                  ],
+                  "broker": "huatai",
+                  "broker_detection": {},
+                  "can_commit": true,
+                  "cash_balance_available": true,
+                  "catalog": [
+                    {}
+                  ],
+                  "categories": [
+                    {
+                      "key": "示例"
+                    }
+                  ],
+                  "columns": [
+                    {
+                      "confidence": 0.0,
+                      "index": 0,
+                      "key": "示例",
+                      "level": "示例",
+                      "name": "示例名称",
+                      "sample": [
+                        "示例"
+                      ],
+                      "samples": [
+                        "示例"
+                      ],
+                      "suggested_field": "trade_date",
+                      "suggested_options": {}
+                    }
+                  ],
+                  "date_format": "%Y-%m-%d",
+                  "discarded_count": 0,
+                  "estimated": {
+                    "discarded": 0,
+                    "estimated_available": true,
+                    "inserted": 118,
+                    "parsed": 120,
+                    "quarantined": 1,
+                    "skipped": 2
+                  },
+                  "expires_at": "2026-09-30T09:30:00Z",
+                  "file": {
+                    "bytes": 1024,
+                    "name": "示例名称",
+                    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                  },
+                  "ignored_columns": [
+                    "示例"
+                  ],
+                  "mapping_fingerprint": "示例",
+                  "mapping_items": [
+                    {
+                      "column_key": "示例",
+                      "field": "示例",
+                      "options": {}
+                    }
+                  ],
+                  "mapping_version": 0,
+                  "preview_id": "prv_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "requires_reimport_ack": false,
+                  "sample": [
+                    {
+                      "security_code": "600519",
+                      "summary": "证券买入",
+                      "trade_date": "2026-09-30"
+                    }
+                  ],
+                  "signature": "示例",
+                  "stage": "legacy",
+                  "system_categories": [
+                    "示例"
+                  ],
+                  "template": {
+                    "broker": "huatai",
+                    "created_at": "2026-09-30T09:30:00Z",
+                    "date_format": "%Y-%m-%d",
+                    "header_count": 1,
+                    "ignored": [
+                      "示例"
+                    ],
+                    "items": [
+                      {}
+                    ],
+                    "last_batch_id": "obj_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                    "origin_batch_id": "obj_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                    "signature": "示例",
+                    "template_id": "obj_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                    "updated_at": "2026-09-30T09:30:00Z"
+                  },
+                  "types": [
+                    {}
+                  ],
+                  "unmapped_columns": [
+                    "示例"
+                  ],
+                  "verification": {},
+                  "warnings": [
+                    {
+                      "code": "MISSING_CASH_BALANCE",
+                      "column": "示例",
+                      "message": "处理中",
+                      "row": 1
+                    }
+                  ]
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/PreviewOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "TOKEN_EXPIRED",
+                  "detail": "访问凭证已过期。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 401,
+                  "title": "TOKEN_EXPIRED",
+                  "type": "https://stock-analyze.local/errors/TOKEN_EXPIRED",
+                  "user_message": "访问凭证已过期。",
+                  "what_to_do": "用 refresh_token 换新 access，或重建 PAT。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "未认证或凭证无效"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "INSUFFICIENT_SCOPE",
+                  "detail": "当前令牌只有只读权限。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 403,
+                  "title": "INSUFFICIENT_SCOPE",
+                  "type": "https://stock-analyze.local/errors/INSUFFICIENT_SCOPE",
+                  "user_message": "当前令牌只有只读权限。",
+                  "what_to_do": "创建带 write scope 的 PAT。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "权限不足"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "IMPORT_PREVIEW_NOT_FOUND",
+                  "detail": "找不到这次预览。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 404,
+                  "title": "IMPORT_PREVIEW_NOT_FOUND",
+                  "type": "https://stock-analyze.local/errors/IMPORT_PREVIEW_NOT_FOUND",
+                  "user_message": "找不到这次预览。",
+                  "what_to_do": "重新上传并预览。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "资源不存在"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "example": {
+                  "code": "VALIDATION_ERROR",
+                  "detail": "请求参数有问题。",
+                  "errors": [
+                    {
+                      "code": "invalid",
+                      "field": "body.email",
+                      "message": "邮箱格式不正确。"
+                    }
+                  ],
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 422,
+                  "title": "VALIDATION_ERROR",
+                  "type": "https://stock-analyze.local/errors/VALIDATION_ERROR",
+                  "user_message": "请求参数有问题。",
+                  "what_to_do": "按 errors[] 修正字段后重试。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Get Import Preview",
+        "tags": [
+          "imports"
+        ],
+        "x-async": false,
+        "x-error-codes": [
+          "IMPORT_PREVIEW_NOT_FOUND",
+          "TOKEN_EXPIRED",
+          "TOKEN_REVOKED",
+          "MULTIPLE_CREDENTIALS",
+          "INSUFFICIENT_SCOPE",
+          "ADMIN_CANNOT_READ_TRADES",
+          "VALIDATION_ERROR"
+        ],
+        "x-idempotent": false,
+        "x-required-scope": "read"
+      }
+    },
+    "/api/v1/imports/previews/{preview_id}/mapping": {
+      "put": {
+        "description": "API-098：保存列映射并重跑类型分析；映射变更使旧类型确认失效。",
+        "operationId": "saveImportMapping",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "preview_id",
+            "required": true,
+            "schema": {
+              "title": "Preview Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-api-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportMappingIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "assumptions": {
+                    "benchmark_id": "hs300_tr"
+                  },
+                  "blocking": [
+                    {
+                      "code": "MISSING_CASH_BALANCE",
+                      "field": "示例",
+                      "line_no": 7,
+                      "message": "处理中"
+                    }
+                  ],
+                  "broker": "huatai",
+                  "broker_detection": {},
+                  "can_commit": true,
+                  "cash_balance_available": true,
+                  "catalog": [
+                    {}
+                  ],
+                  "categories": [
+                    {
+                      "key": "示例"
+                    }
+                  ],
+                  "columns": [
+                    {
+                      "confidence": 0.0,
+                      "index": 0,
+                      "key": "示例",
+                      "level": "示例",
+                      "name": "示例名称",
+                      "sample": [
+                        "示例"
+                      ],
+                      "samples": [
+                        "示例"
+                      ],
+                      "suggested_field": "trade_date",
+                      "suggested_options": {}
+                    }
+                  ],
+                  "date_format": "%Y-%m-%d",
+                  "discarded_count": 0,
+                  "estimated": {
+                    "discarded": 0,
+                    "estimated_available": true,
+                    "inserted": 118,
+                    "parsed": 120,
+                    "quarantined": 1,
+                    "skipped": 2
+                  },
+                  "expires_at": "2026-09-30T09:30:00Z",
+                  "file": {
+                    "bytes": 1024,
+                    "name": "示例名称",
+                    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                  },
+                  "ignored_columns": [
+                    "示例"
+                  ],
+                  "mapping_fingerprint": "示例",
+                  "mapping_items": [
+                    {
+                      "column_key": "示例",
+                      "field": "示例",
+                      "options": {}
+                    }
+                  ],
+                  "mapping_version": 0,
+                  "preview_id": "prv_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "requires_reimport_ack": false,
+                  "sample": [
+                    {
+                      "security_code": "600519",
+                      "summary": "证券买入",
+                      "trade_date": "2026-09-30"
+                    }
+                  ],
+                  "signature": "示例",
+                  "stage": "legacy",
+                  "system_categories": [
+                    "示例"
+                  ],
+                  "template": {
+                    "broker": "huatai",
+                    "created_at": "2026-09-30T09:30:00Z",
+                    "date_format": "%Y-%m-%d",
+                    "header_count": 1,
+                    "ignored": [
+                      "示例"
+                    ],
+                    "items": [
+                      {}
+                    ],
+                    "last_batch_id": "obj_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                    "origin_batch_id": "obj_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                    "signature": "示例",
+                    "template_id": "obj_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                    "updated_at": "2026-09-30T09:30:00Z"
+                  },
+                  "types": [
+                    {}
+                  ],
+                  "unmapped_columns": [
+                    "示例"
+                  ],
+                  "verification": {},
+                  "warnings": [
+                    {
+                      "code": "MISSING_CASH_BALANCE",
+                      "column": "示例",
+                      "message": "处理中",
+                      "row": 1
+                    }
+                  ]
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/PreviewOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "TOKEN_EXPIRED",
+                  "detail": "访问凭证已过期。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 401,
+                  "title": "TOKEN_EXPIRED",
+                  "type": "https://stock-analyze.local/errors/TOKEN_EXPIRED",
+                  "user_message": "访问凭证已过期。",
+                  "what_to_do": "用 refresh_token 换新 access，或重建 PAT。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "未认证或凭证无效"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "INSUFFICIENT_SCOPE",
+                  "detail": "当前令牌只有只读权限。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 403,
+                  "title": "INSUFFICIENT_SCOPE",
+                  "type": "https://stock-analyze.local/errors/INSUFFICIENT_SCOPE",
+                  "user_message": "当前令牌只有只读权限。",
+                  "what_to_do": "创建带 write scope 的 PAT。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "权限不足"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "IMPORT_PREVIEW_NOT_FOUND",
+                  "detail": "找不到这次预览。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 404,
+                  "title": "IMPORT_PREVIEW_NOT_FOUND",
+                  "type": "https://stock-analyze.local/errors/IMPORT_PREVIEW_NOT_FOUND",
+                  "user_message": "找不到这次预览。",
+                  "what_to_do": "重新上传并预览。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "资源不存在"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "VERSION_CONFLICT",
+                  "detail": "这条数据刚被改过。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 409,
+                  "title": "VERSION_CONFLICT",
+                  "type": "https://stock-analyze.local/errors/VERSION_CONFLICT",
+                  "user_message": "这条数据刚被改过。",
+                  "what_to_do": "重新获取最新版本后再提交。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "资源状态冲突"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "example": {
+                  "code": "VALIDATION_ERROR",
+                  "detail": "请求参数有问题。",
+                  "errors": [
+                    {
+                      "code": "invalid",
+                      "field": "body.email",
+                      "message": "邮箱格式不正确。"
+                    }
+                  ],
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 422,
+                  "title": "VALIDATION_ERROR",
+                  "type": "https://stock-analyze.local/errors/VALIDATION_ERROR",
+                  "user_message": "请求参数有问题。",
+                  "what_to_do": "按 errors[] 修正字段后重试。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Import Mapping",
+        "tags": [
+          "imports"
+        ],
+        "x-async": false,
+        "x-error-codes": [
+          "VALIDATION_ERROR",
+          "VERSION_CONFLICT",
+          "IMPORT_PREVIEW_NOT_FOUND",
+          "IMPORT_MAPPING_INVALID",
+          "IMPORT_UNMAPPED_COLUMNS_UNCONFIRMED",
+          "IMPORT_FEE_MERGE_INVALID",
+          "IMPORT_STAGE_CONFLICT",
+          "IMPORT_PROFILE_REQUIRED",
+          "TOKEN_EXPIRED",
+          "TOKEN_REVOKED",
+          "MULTIPLE_CREDENTIALS",
+          "INSUFFICIENT_SCOPE",
+          "ADMIN_CANNOT_READ_TRADES"
+        ],
+        "x-idempotent": false,
+        "x-required-scope": "write"
+      }
+    },
+    "/api/v1/imports/previews/{preview_id}/types": {
+      "put": {
+        "description": "API-099：保存类型确认；全部确认后预览进入 `ready` 可提交。",
+        "operationId": "saveImportTypes",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "preview_id",
+            "required": true,
+            "schema": {
+              "title": "Preview Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "If-Match",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "If-Match"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-api-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ImportTypesIn"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "assumptions": {
+                    "benchmark_id": "hs300_tr"
+                  },
+                  "blocking": [
+                    {
+                      "code": "MISSING_CASH_BALANCE",
+                      "field": "示例",
+                      "line_no": 7,
+                      "message": "处理中"
+                    }
+                  ],
+                  "broker": "huatai",
+                  "broker_detection": {},
+                  "can_commit": true,
+                  "cash_balance_available": true,
+                  "catalog": [
+                    {}
+                  ],
+                  "categories": [
+                    {
+                      "key": "示例"
+                    }
+                  ],
+                  "columns": [
+                    {
+                      "confidence": 0.0,
+                      "index": 0,
+                      "key": "示例",
+                      "level": "示例",
+                      "name": "示例名称",
+                      "sample": [
+                        "示例"
+                      ],
+                      "samples": [
+                        "示例"
+                      ],
+                      "suggested_field": "trade_date",
+                      "suggested_options": {}
+                    }
+                  ],
+                  "date_format": "%Y-%m-%d",
+                  "discarded_count": 0,
+                  "estimated": {
+                    "discarded": 0,
+                    "estimated_available": true,
+                    "inserted": 118,
+                    "parsed": 120,
+                    "quarantined": 1,
+                    "skipped": 2
+                  },
+                  "expires_at": "2026-09-30T09:30:00Z",
+                  "file": {
+                    "bytes": 1024,
+                    "name": "示例名称",
+                    "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                  },
+                  "ignored_columns": [
+                    "示例"
+                  ],
+                  "mapping_fingerprint": "示例",
+                  "mapping_items": [
+                    {
+                      "column_key": "示例",
+                      "field": "示例",
+                      "options": {}
+                    }
+                  ],
+                  "mapping_version": 0,
+                  "preview_id": "prv_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "requires_reimport_ack": false,
+                  "sample": [
+                    {
+                      "security_code": "600519",
+                      "summary": "证券买入",
+                      "trade_date": "2026-09-30"
+                    }
+                  ],
+                  "signature": "示例",
+                  "stage": "legacy",
+                  "system_categories": [
+                    "示例"
+                  ],
+                  "template": {
+                    "broker": "huatai",
+                    "created_at": "2026-09-30T09:30:00Z",
+                    "date_format": "%Y-%m-%d",
+                    "header_count": 1,
+                    "ignored": [
+                      "示例"
+                    ],
+                    "items": [
+                      {}
+                    ],
+                    "last_batch_id": "obj_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                    "origin_batch_id": "obj_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                    "signature": "示例",
+                    "template_id": "obj_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                    "updated_at": "2026-09-30T09:30:00Z"
+                  },
+                  "types": [
+                    {}
+                  ],
+                  "unmapped_columns": [
+                    "示例"
+                  ],
+                  "verification": {},
+                  "warnings": [
+                    {
+                      "code": "MISSING_CASH_BALANCE",
+                      "column": "示例",
+                      "message": "处理中",
+                      "row": 1
+                    }
+                  ]
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/PreviewOut"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "TOKEN_EXPIRED",
+                  "detail": "访问凭证已过期。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 401,
+                  "title": "TOKEN_EXPIRED",
+                  "type": "https://stock-analyze.local/errors/TOKEN_EXPIRED",
+                  "user_message": "访问凭证已过期。",
+                  "what_to_do": "用 refresh_token 换新 access，或重建 PAT。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "未认证或凭证无效"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "INSUFFICIENT_SCOPE",
+                  "detail": "当前令牌只有只读权限。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 403,
+                  "title": "INSUFFICIENT_SCOPE",
+                  "type": "https://stock-analyze.local/errors/INSUFFICIENT_SCOPE",
+                  "user_message": "当前令牌只有只读权限。",
+                  "what_to_do": "创建带 write scope 的 PAT。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "权限不足"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "IMPORT_PREVIEW_NOT_FOUND",
+                  "detail": "找不到这次预览。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 404,
+                  "title": "IMPORT_PREVIEW_NOT_FOUND",
+                  "type": "https://stock-analyze.local/errors/IMPORT_PREVIEW_NOT_FOUND",
+                  "user_message": "找不到这次预览。",
+                  "what_to_do": "重新上传并预览。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "资源不存在"
+          },
+          "409": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "VERSION_CONFLICT",
+                  "detail": "这条数据刚被改过。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 409,
+                  "title": "VERSION_CONFLICT",
+                  "type": "https://stock-analyze.local/errors/VERSION_CONFLICT",
+                  "user_message": "这条数据刚被改过。",
+                  "what_to_do": "重新获取最新版本后再提交。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "资源状态冲突"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "example": {
+                  "code": "VALIDATION_ERROR",
+                  "detail": "请求参数有问题。",
+                  "errors": [
+                    {
+                      "code": "invalid",
+                      "field": "body.email",
+                      "message": "邮箱格式不正确。"
+                    }
+                  ],
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 422,
+                  "title": "VALIDATION_ERROR",
+                  "type": "https://stock-analyze.local/errors/VALIDATION_ERROR",
+                  "user_message": "请求参数有问题。",
+                  "what_to_do": "按 errors[] 修正字段后重试。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Save Import Types",
+        "tags": [
+          "imports"
+        ],
+        "x-async": false,
+        "x-error-codes": [
+          "VALIDATION_ERROR",
+          "VERSION_CONFLICT",
+          "IMPORT_PREVIEW_NOT_FOUND",
+          "IMPORT_BILL_TYPES_UNRESOLVED",
+          "IMPORT_CATEGORY_INVALID",
+          "IMPORT_STAGE_CONFLICT",
+          "TOKEN_EXPIRED",
+          "TOKEN_REVOKED",
+          "MULTIPLE_CREDENTIALS",
+          "INSUFFICIENT_SCOPE",
+          "ADMIN_CANNOT_READ_TRADES"
+        ],
+        "x-idempotent": false,
+        "x-required-scope": "write"
+      }
+    },
+    "/api/v1/imports/templates": {
+      "get": {
+        "description": "API-100：本人字段模板列表（按签名索引，游标分页）。",
+        "operationId": "listImportTemplates",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 200,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "cursor",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Cursor"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-api-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "example": {
+                  "has_more": false,
+                  "items": [
+                    {
+                      "broker": "huatai",
+                      "created_at": "2026-09-30T09:30:00Z",
+                      "date_format": "%Y-%m-%d",
+                      "header_count": 1,
+                      "ignored": [
+                        "示例"
+                      ],
+                      "items": [
+                        {}
+                      ],
+                      "last_batch_id": "obj_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                      "origin_batch_id": "obj_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                      "signature": "示例",
+                      "template_id": "obj_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                      "updated_at": "2026-09-30T09:30:00Z"
+                    }
+                  ],
+                  "next_cursor": "cursor_01J9Z6ABCDEFGHJKMNPQRSTVWX"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ImportTemplatePage"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "400": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "INVALID_CURSOR",
+                  "detail": "分页游标无效。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 400,
+                  "title": "INVALID_CURSOR",
+                  "type": "https://stock-analyze.local/errors/INVALID_CURSOR",
+                  "user_message": "分页游标无效。",
+                  "what_to_do": "从第一页重新翻页。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "请求参数错误"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "TOKEN_EXPIRED",
+                  "detail": "访问凭证已过期。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 401,
+                  "title": "TOKEN_EXPIRED",
+                  "type": "https://stock-analyze.local/errors/TOKEN_EXPIRED",
+                  "user_message": "访问凭证已过期。",
+                  "what_to_do": "用 refresh_token 换新 access，或重建 PAT。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "未认证或凭证无效"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "INSUFFICIENT_SCOPE",
+                  "detail": "当前令牌只有只读权限。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 403,
+                  "title": "INSUFFICIENT_SCOPE",
+                  "type": "https://stock-analyze.local/errors/INSUFFICIENT_SCOPE",
+                  "user_message": "当前令牌只有只读权限。",
+                  "what_to_do": "创建带 write scope 的 PAT。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "权限不足"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "example": {
+                  "code": "VALIDATION_ERROR",
+                  "detail": "请求参数有问题。",
+                  "errors": [
+                    {
+                      "code": "invalid",
+                      "field": "body.email",
+                      "message": "邮箱格式不正确。"
+                    }
+                  ],
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 422,
+                  "title": "VALIDATION_ERROR",
+                  "type": "https://stock-analyze.local/errors/VALIDATION_ERROR",
+                  "user_message": "请求参数有问题。",
+                  "what_to_do": "按 errors[] 修正字段后重试。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "List Import Templates",
+        "tags": [
+          "imports"
+        ],
+        "x-async": false,
+        "x-error-codes": [
+          "VALIDATION_ERROR",
+          "INVALID_CURSOR",
+          "TOKEN_EXPIRED",
+          "TOKEN_REVOKED",
+          "MULTIPLE_CREDENTIALS",
+          "INSUFFICIENT_SCOPE",
+          "ADMIN_CANNOT_READ_TRADES"
+        ],
+        "x-idempotent": false,
+        "x-required-scope": "read"
+      }
+    },
+    "/api/v1/imports/templates/{template_id}": {
+      "delete": {
+        "description": "API-101：删除本人模板；跨账号/不存在一律 404。",
+        "operationId": "deleteImportTemplate",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "template_id",
+            "required": true,
+            "schema": {
+              "title": "Template Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "header",
+            "name": "authorization",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Authorization"
+            }
+          },
+          {
+            "in": "header",
+            "name": "x-api-key",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "X-Api-Key"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "TOKEN_EXPIRED",
+                  "detail": "访问凭证已过期。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 401,
+                  "title": "TOKEN_EXPIRED",
+                  "type": "https://stock-analyze.local/errors/TOKEN_EXPIRED",
+                  "user_message": "访问凭证已过期。",
+                  "what_to_do": "用 refresh_token 换新 access，或重建 PAT。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "未认证或凭证无效"
+          },
+          "403": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "INSUFFICIENT_SCOPE",
+                  "detail": "当前令牌只有只读权限。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 403,
+                  "title": "INSUFFICIENT_SCOPE",
+                  "type": "https://stock-analyze.local/errors/INSUFFICIENT_SCOPE",
+                  "user_message": "当前令牌只有只读权限。",
+                  "what_to_do": "创建带 write scope 的 PAT。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "权限不足"
+          },
+          "404": {
+            "content": {
+              "application/problem+json": {
+                "example": {
+                  "code": "IMPORT_TEMPLATE_NOT_FOUND",
+                  "detail": "找不到这个对应关系。",
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 404,
+                  "title": "IMPORT_TEMPLATE_NOT_FOUND",
+                  "type": "https://stock-analyze.local/errors/IMPORT_TEMPLATE_NOT_FOUND",
+                  "user_message": "找不到这个对应关系。",
+                  "what_to_do": "刷新列表。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "资源不存在"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              },
+              "application/problem+json": {
+                "example": {
+                  "code": "VALIDATION_ERROR",
+                  "detail": "请求参数有问题。",
+                  "errors": [
+                    {
+                      "code": "invalid",
+                      "field": "body.email",
+                      "message": "邮箱格式不正确。"
+                    }
+                  ],
+                  "request_id": "01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "retryable": false,
+                  "status": 422,
+                  "title": "VALIDATION_ERROR",
+                  "type": "https://stock-analyze.local/errors/VALIDATION_ERROR",
+                  "user_message": "请求参数有问题。",
+                  "what_to_do": "按 errors[] 修正字段后重试。"
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Delete Import Template",
+        "tags": [
+          "imports"
+        ],
+        "x-async": false,
+        "x-error-codes": [
+          "IMPORT_TEMPLATE_NOT_FOUND",
+          "TOKEN_EXPIRED",
+          "TOKEN_REVOKED",
+          "MULTIPLE_CREDENTIALS",
+          "INSUFFICIENT_SCOPE",
+          "ADMIN_CANNOT_READ_TRADES",
+          "VALIDATION_ERROR"
+        ],
+        "x-idempotent": true,
+        "x-required-scope": "write"
+      }
+    },
     "/api/v1/imports/{batch_id}": {
       "get": {
         "description": "API-013：批次详情与计数，并列出导入收尾对账自动写入的系统补差；跨账号 404。",
@@ -13777,6 +17039,7 @@
                   "broker": "huatai",
                   "can_revoke": false,
                   "counts": {
+                    "discarded": 0,
                     "inserted": 118,
                     "parsed": 120,
                     "quarantined": 1,
@@ -13796,6 +17059,14 @@
                     }
                   ],
                   "finished_at": "2026-09-30T09:30:00Z",
+                  "mapping": {
+                    "is_origin": false,
+                    "remap_required": false,
+                    "signature": "示例",
+                    "source": "legacy",
+                    "template_id": "obj_01J9Z6ABCDEFGHJKMNPQRSTVWX"
+                  },
+                  "mapping_source": "legacy",
                   "mode": "full",
                   "revoked_at": "2026-09-30T09:30:00Z",
                   "status": "pending",
@@ -14538,6 +17809,10 @@
                     }
                   ],
                   "batch_id": "imp_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "mapping_revoked": {
+                    "mapping_deleted": false,
+                    "types_deleted": 0
+                  },
                   "reverted": {
                     "inserted": 118,
                     "updated": 0

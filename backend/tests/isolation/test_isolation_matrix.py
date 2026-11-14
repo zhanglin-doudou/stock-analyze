@@ -19,7 +19,7 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from stock_contracts.errors import ErrorCode
-from stock_ledger.models import ImportBatch, SummaryRule, Trade
+from stock_ledger.models import ImportBatch, ImportPreview, ImportTemplate, SummaryRule, Trade
 from stock_platform.models import ApiToken, Job, JobEvent
 from stock_review.application.assets import ASSET_DEFINITION_VERSION
 
@@ -91,6 +91,44 @@ async def _seed_batch(engine: AsyncEngine, *, user_id: uuid.UUID) -> str:
         )
         await session.commit()
     return batch_id
+
+
+async def _seed_preview(engine: AsyncEngine, *, user_id: uuid.UUID) -> str:
+    preview_id = f"prv_{uuid.uuid4().hex[:12]}"
+    async with AsyncSession(engine) as session:
+        session.add(
+            ImportPreview(
+                id=preview_id,
+                user_id=user_id,
+                file_name="bill.csv",
+                file_sha256=uuid.uuid4().hex * 2,
+                file_bytes=128,
+                object_key=f"tests/{preview_id}.csv",
+                expires_at=datetime(2027, 1, 1, tzinfo=UTC),
+                stage="mapping",
+                mapping_version=1,
+            )
+        )
+        await session.commit()
+    return preview_id
+
+
+async def _seed_template(engine: AsyncEngine, *, user_id: uuid.UUID) -> str:
+    template_id = f"imt_{uuid.uuid4().hex[:12]}"
+    async with AsyncSession(engine) as session:
+        session.add(
+            ImportTemplate(
+                id=template_id,
+                user_id=user_id,
+                broker="huatai",
+                signature=uuid.uuid4().hex * 2,
+                header_count=1,
+                items=[],
+                ignored=[],
+            )
+        )
+        await session.commit()
+    return template_id
 
 
 async def _seed_job(engine: AsyncEngine, *, user_id: uuid.UUID) -> str:
@@ -231,6 +269,11 @@ RESOURCE_MATRIX: list[tuple[str, str]] = [
     ("put", "/trades/{trade_id}/reason"),
     ("delete", "/trades/{trade_id}/reason"),
     ("get", "/rounds/{round_id}/insights"),
+    # 2026-11-13（API-098/099/101/106）：导入预览与用户模板
+    ("get", "/imports/previews/{preview_id}"),
+    ("put", "/imports/previews/{preview_id}/mapping"),
+    ("put", "/imports/previews/{preview_id}/types"),
+    ("delete", "/imports/templates/{template_id}"),
 ]
 
 #: 业务数据端点：admin 一律 403（运维角色不碰明细）
@@ -270,6 +313,12 @@ ADMIN_FORBIDDEN: list[tuple[str, str]] = [
     ("get", "/rounds/insights"),
     ("get", "/rounds/{round_id}/insights"),
     ("post", "/rounds/insights/refresh"),
+    # 2026-11-13：预览/模板仍是业务数据；管理员列规则是全局配置，不在此矩阵。
+    ("get", "/imports/previews/{preview_id}"),
+    ("put", "/imports/previews/{preview_id}/mapping"),
+    ("put", "/imports/previews/{preview_id}/types"),
+    ("get", "/imports/templates"),
+    ("delete", "/imports/templates/{template_id}"),
 ]
 
 #: 列表型端点：A/B 各自造数据，B 的列表不得包含 A 的行（跨租户列表隔离）
@@ -289,6 +338,8 @@ LIST_ISOLATION_MATRIX: list[tuple[str, str]] = [
     ("get", "/dashboard"),
     # 2026-11-05（API-092）：回合洞察列表（period=2026-06 命中隔离种子回合）
     ("get", "/rounds/insights"),
+    # 2026-11-13（API-100）：用户列映射模板列表
+    ("get", "/imports/templates"),
 ]
 
 #: 无凭证 → 401：覆盖全部受保护端点（gate_tenant_coverage.py 校验 23/23 完整）。
@@ -363,6 +414,16 @@ UNAUTHENTICATED_MATRIX: list[tuple[str, str]] = [
     ("get", "/settings"),
     ("patch", "/settings"),
     ("post", "/settings/trade-flags/rebuild"),
+    # 2026-11-13（API-098~106 导入映射）
+    ("get", "/imports/previews/{preview_id}"),
+    ("put", "/imports/previews/{preview_id}/mapping"),
+    ("put", "/imports/previews/{preview_id}/types"),
+    ("get", "/imports/templates"),
+    ("delete", "/imports/templates/{template_id}"),
+    ("get", "/admin/import-column-rules"),
+    ("post", "/admin/import-column-rules"),
+    ("patch", "/admin/import-column-rules/{rule_id}"),
+    ("delete", "/admin/import-column-rules/{rule_id}"),
 ]
 
 #: 路径参数占位值（只用于越权/401 用例；资源不存在时恰好也走 404 分支）。
@@ -374,6 +435,8 @@ _PLACEHOLDERS = {
     "rule_id": "rul_01J9Z6PLACEHOLDER",
     "round_id": "rnd_01J9Z6PLACEHOLDER",
     "metric_id": "perf.placeholder",
+    "preview_id": "prv_01J9Z6PLACEHOLDER",
+    "template_id": "imt_01J9Z6PLACEHOLDER",
 }
 
 #: 必填 query 参数的端点（矩阵里的通用请求需要补最小合法 query）。
@@ -442,6 +505,17 @@ def _unauth_kwargs(method: str, template: str) -> dict[str, Any]:
     elif template == "/rounds/insights/refresh":
         kwargs["headers"] = {"Idempotency-Key": "unauth-probe-" + "x" * 20}
         kwargs["json"] = {"period": "2026-06"}
+    elif template == "/imports/previews/{preview_id}/mapping":
+        kwargs["headers"] = {"If-Match": "1"}
+        kwargs["json"] = {"items": [], "ignored": [], "acknowledge_unmapped": False}
+    elif template == "/imports/previews/{preview_id}/types":
+        kwargs["headers"] = {"If-Match": "1"}
+        kwargs["json"] = {"resolutions": []}
+    elif template == "/admin/import-column-rules" and method == "post":
+        kwargs["json"] = {"broker": "generic", "header_norm": "probe", "target_field": "note"}
+    elif template == "/admin/import-column-rules/{rule_id}" and method == "patch":
+        kwargs["headers"] = {"If-Match": "1"}
+        kwargs["json"] = {"enabled": False}
     return kwargs
 
 
@@ -474,6 +548,8 @@ async def test_cross_account_returns_404(
         "token_id": await _seed_token(owner_engine, user_id=owner.user_id),
         "rule_id": await _seed_rule(owner_engine, user_id=owner.user_id),
         "round_id": await _seed_round(owner_engine, user_id=owner.user_id),
+        "preview_id": await _seed_preview(owner_engine, user_id=owner.user_id),
+        "template_id": await _seed_template(owner_engine, user_id=owner.user_id),
     }
     headers = dict(intruder.headers)
     json_body: dict[str, Any] | None = None
@@ -484,6 +560,12 @@ async def test_cross_account_returns_404(
             if template == "/summary-rules/{rule_id}"
             else {"note": "跨租户越权尝试"}
         )
+    elif template == "/imports/previews/{preview_id}/mapping":
+        headers["If-Match"] = "1"
+        json_body = {"items": [], "ignored": [], "acknowledge_unmapped": False}
+    elif template == "/imports/previews/{preview_id}/types":
+        headers["If-Match"] = "1"
+        json_body = {"resolutions": []}
     elif method == "put":
         # 2026-11-05（API-090）：理由写入需通过 body 校验才能抵达资源归属判定
         json_body = {"reason_code": "plan_build"}
@@ -491,7 +573,14 @@ async def test_cross_account_returns_404(
     url = api_prefix + _fill(template, **ids)
     resp = await _call(client, method, url, headers, json_body=json_body)
     assert resp.status_code == 404, f"{method.upper()} {template} → {resp.status_code}"
-    assert resp.json()["code"] == ErrorCode.NOT_FOUND.value
+    expected_code = (
+        ErrorCode.IMPORT_TEMPLATE_NOT_FOUND
+        if template == "/imports/templates/{template_id}"
+        else ErrorCode.IMPORT_PREVIEW_NOT_FOUND
+        if template.startswith("/imports/previews/")
+        else ErrorCode.NOT_FOUND
+    )
+    assert resp.json()["code"] == expected_code.value
 
 
 @pytest.mark.parametrize(("method", "template"), LIST_ISOLATION_MATRIX)
@@ -516,6 +605,7 @@ async def test_cross_account_list_isolated(
     job_id = await _seed_job(owner_engine, user_id=owner.user_id)
     rule_id = await _seed_rule(owner_engine, user_id=owner.user_id)
     round_id = await _seed_round(owner_engine, user_id=owner.user_id)
+    template_id = await _seed_template(owner_engine, user_id=owner.user_id)
     asset_date = await _seed_asset_row(owner_engine, user_id=owner.user_id)
 
     url = api_prefix + template + _REQUIRED_QUERY.get(template, "")
@@ -584,6 +674,7 @@ async def test_cross_account_list_isolated(
         "/summary-rules": "rule_id",
         "/rounds": "round_id",
         "/rounds/insights": "round_id",
+        "/imports/templates": "template_id",
     }[template]
     expected = {
         "trade_id": trade_id,
@@ -591,6 +682,7 @@ async def test_cross_account_list_isolated(
         "job_id": job_id,
         "rule_id": rule_id,
         "round_id": round_id,
+        "template_id": template_id,
     }[id_field]
     assert body["items"] == [], f"B 的 {template} 泄露了 A 的数据"
     owner_resp = await _call(client, method, url, owner.headers)
@@ -610,7 +702,13 @@ async def test_admin_forbidden_on_business_data(
     url = api_prefix + template + _REQUIRED_QUERY.get(template, "")
     headers = dict(admin.headers)
     json_body: dict[str, Any] | None = None
-    if method == "put":
+    if template == "/imports/previews/{preview_id}/mapping":
+        headers["If-Match"] = "1"
+        json_body = {"items": [], "ignored": [], "acknowledge_unmapped": False}
+    elif template == "/imports/previews/{preview_id}/types":
+        headers["If-Match"] = "1"
+        json_body = {"resolutions": []}
+    elif method == "put":
         json_body = {"reason_code": "plan_build"}
     elif template == "/rounds/insights/refresh":
         headers["Idempotency-Key"] = "admin-probe-" + "x" * 20

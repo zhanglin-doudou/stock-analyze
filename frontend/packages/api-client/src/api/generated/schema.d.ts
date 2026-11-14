@@ -24,6 +24,54 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/admin/import-column-rules": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Import Column Rules
+         * @description API-102：管理员查看系统规则（全局 + 用户覆盖，按创建时间倒序）。
+         */
+        get: operations["listImportColumnRules"];
+        put?: never;
+        /**
+         * Create Import Column Rule
+         * @description API-103：新建全局规则；重复 `(broker, header_norm, target_field)` → 409。
+         */
+        post: operations["createImportColumnRule"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/admin/import-column-rules/{rule_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Import Column Rule
+         * @description API-105：删除自定义规则；系统内置行 → 422（请禁用）。
+         */
+        delete: operations["deleteImportColumnRule"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Import Column Rule
+         * @description API-104：修改/禁用规则（`If-Match` 乐观锁；系统行不可改 `target_field`）。
+         */
+        patch: operations["updateImportColumnRule"];
+        trace?: never;
+    };
     "/api/v1/assets": {
         parameters: {
             query?: never;
@@ -297,9 +345,112 @@ export interface paths {
         /**
          * Preview Import
          * @description API-010：解析账单、列映射建议、质量预检；同步 200，不写 ledger.trade。
+         *
+         *     默认走 legacy（严格 422、直接可提交），保持旧客户端/脚本行为；带
+         *     `X-Import-Flow: v2` 时进入「映射 → 类型 → 就绪」两段式，缺列不再 422。
          */
         post: operations["previewImport"];
         delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/imports/previews/{preview_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Import Preview
+         * @description API-106：刷新预览（不重算映射/类型，直接读落库状态）。
+         */
+        get: operations["getImportPreview"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/imports/previews/{preview_id}/mapping": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save Import Mapping
+         * @description API-098：保存列映射并重跑类型分析；映射变更使旧类型确认失效。
+         */
+        put: operations["saveImportMapping"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/imports/previews/{preview_id}/types": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Save Import Types
+         * @description API-099：保存类型确认；全部确认后预览进入 `ready` 可提交。
+         */
+        put: operations["saveImportTypes"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/imports/templates": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Import Templates
+         * @description API-100：本人字段模板列表（按签名索引，游标分页）。
+         */
+        get: operations["listImportTemplates"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/imports/templates/{template_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Import Template
+         * @description API-101：删除本人模板；跨账号/不存在一律 404。
+         */
+        delete: operations["deleteImportTemplate"];
         options?: never;
         head?: never;
         patch?: never;
@@ -1722,6 +1873,11 @@ export interface components {
         };
         /** BatchCounts */
         BatchCounts: {
+            /**
+             * Discarded
+             * @default 0
+             */
+            discarded: number;
             /** Inserted */
             inserted: number;
             /** Parsed */
@@ -1763,6 +1919,13 @@ export interface components {
             fills?: components["schemas"]["BatchFill"][];
             /** Finished At */
             finished_at?: string | null;
+            mapping?: components["schemas"]["BatchMappingInfo"] | null;
+            /**
+             * Mapping Source
+             * @default legacy
+             * @enum {string}
+             */
+            mapping_source: "legacy" | "manual" | "template";
             /**
              * Mode
              * @enum {string}
@@ -1799,6 +1962,32 @@ export interface components {
             /** Trade Id */
             trade_id: string;
         };
+        /**
+         * BatchMappingInfo
+         * @description 批次映射来源（API-013，决定撤销对话框文案）。
+         */
+        BatchMappingInfo: {
+            /**
+             * Is Origin
+             * @default false
+             */
+            is_origin: boolean;
+            /**
+             * Remap Required
+             * @default false
+             */
+            remap_required: boolean;
+            /** Signature */
+            signature?: string | null;
+            /**
+             * Source
+             * @default legacy
+             * @enum {string}
+             */
+            source: "legacy" | "manual" | "template";
+            /** Template Id */
+            template_id?: string | null;
+        };
         /** BatchOut */
         BatchOut: {
             /** Assumptions */
@@ -1829,6 +2018,12 @@ export interface components {
             filled_count: number;
             /** Finished At */
             finished_at?: string | null;
+            /**
+             * Mapping Source
+             * @default legacy
+             * @enum {string}
+             */
+            mapping_source: "legacy" | "manual" | "template";
             /**
              * Mode
              * @enum {string}
@@ -1891,6 +2086,12 @@ export interface components {
         };
         /** Body_previewImport */
         Body_previewImport: {
+            /**
+             * Broker
+             * @description auto|huatai|generic
+             * @default auto
+             */
+            broker: string;
             /** Date Format */
             date_format?: string | null;
             /**
@@ -1903,6 +2104,12 @@ export interface components {
              * @description 表头→字段 的 JSON 字符串
              */
             mapping?: string | null;
+            /**
+             * Reuse Template
+             * @description 复用同签名模板
+             * @default true
+             */
+            reuse_template: boolean;
         };
         /**
          * BridgeIdentityOut
@@ -2528,10 +2735,17 @@ export interface components {
         };
         /** ImportCommitIn */
         ImportCommitIn: {
+            /**
+             * Acknowledge Reimport
+             * @default false
+             */
+            acknowledge_reimport: boolean;
             /** Mapping */
             mapping?: {
                 [key: string]: string;
             } | null;
+            /** Mapping Version */
+            mapping_version?: number | null;
             /**
              * Mode
              * @default full
@@ -2543,6 +2757,35 @@ export interface components {
             /** Preview Id */
             preview_id: string;
             range?: components["schemas"]["ImportRange"] | null;
+        };
+        /** ImportMappingIn */
+        ImportMappingIn: {
+            /**
+             * Acknowledge Unmapped
+             * @default false
+             */
+            acknowledge_unmapped: boolean;
+            /** Broker */
+            broker?: string | null;
+            /** Date Format */
+            date_format?: string | null;
+            /** Ignored */
+            ignored?: string[];
+            /** Items */
+            items?: components["schemas"]["ImportMappingItemIn"][];
+            /** Mapping Version */
+            mapping_version?: number | null;
+        };
+        /** ImportMappingItemIn */
+        ImportMappingItemIn: {
+            /** Column Key */
+            column_key: string;
+            /** Options */
+            options?: {
+                [key: string]: unknown;
+            };
+            /** Target Field */
+            target_field: string;
         };
         /** ImportRange */
         ImportRange: {
@@ -2556,6 +2799,150 @@ export interface components {
              * Format: date
              */
             to: string;
+        };
+        /** ImportRuleIn */
+        ImportRuleIn: {
+            /** Broker */
+            broker: string;
+            /**
+             * Enabled
+             * @default true
+             */
+            enabled: boolean;
+            /** Header Norm */
+            header_norm: string;
+            /**
+             * Is Fingerprint
+             * @default false
+             */
+            is_fingerprint: boolean;
+            /**
+             * Match Type
+             * @default exact
+             * @enum {string}
+             */
+            match_type: "exact" | "prefix" | "contains";
+            /** Note */
+            note?: string | null;
+            /** Options */
+            options?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Priority
+             * @default 100
+             */
+            priority: number;
+            /** Target Field */
+            target_field: string;
+            /**
+             * Weight
+             * @default 1
+             */
+            weight: number;
+        };
+        /** ImportRuleOut */
+        ImportRuleOut: {
+            /** Broker */
+            broker: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Enabled */
+            enabled: boolean;
+            /** Header Norm */
+            header_norm: string;
+            /** Is Fingerprint */
+            is_fingerprint: boolean;
+            /** Is System */
+            is_system: boolean;
+            /**
+             * Match Type
+             * @enum {string}
+             */
+            match_type: "exact" | "prefix" | "contains";
+            /** Note */
+            note?: string | null;
+            /** Options */
+            options?: {
+                [key: string]: unknown;
+            };
+            /** Priority */
+            priority: number;
+            /** Rule Id */
+            rule_id: string;
+            /** Target Field */
+            target_field: string;
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+            /** Version */
+            version: number;
+            /** Weight */
+            weight: number;
+        };
+        /** ImportRulePage */
+        ImportRulePage: {
+            /** Items */
+            items?: components["schemas"]["ImportRuleOut"][];
+            /** Next Cursor */
+            next_cursor?: string | null;
+        };
+        /** ImportRulePatchIn */
+        ImportRulePatchIn: {
+            /** Enabled */
+            enabled?: boolean | null;
+            /** Is Fingerprint */
+            is_fingerprint?: boolean | null;
+            /** Match Type */
+            match_type?: ("exact" | "prefix" | "contains") | null;
+            /** Note */
+            note?: string | null;
+            /** Options */
+            options?: {
+                [key: string]: unknown;
+            } | null;
+            /** Priority */
+            priority?: number | null;
+            /** Target Field */
+            target_field?: string | null;
+            /** Weight */
+            weight?: number | null;
+        };
+        /** ImportTemplatePage */
+        ImportTemplatePage: {
+            /**
+             * Has More
+             * @default false
+             */
+            has_more: boolean;
+            /** Items */
+            items?: components["schemas"]["PreviewTemplateOut"][];
+            /** Next Cursor */
+            next_cursor?: string | null;
+        };
+        /** ImportTypeResolutionIn */
+        ImportTypeResolutionIn: {
+            /** Category */
+            category?: string | null;
+            /**
+             * Discard
+             * @default false
+             */
+            discard: boolean;
+            /** Type Key */
+            type_key: string;
+        };
+        /** ImportTypesIn */
+        ImportTypesIn: {
+            /** Mapping Version */
+            mapping_version?: number | null;
+            /** Resolutions */
+            resolutions?: components["schemas"]["ImportTypeResolutionIn"][];
         };
         /**
          * InsightAddonSummaryOut
@@ -2834,6 +3221,19 @@ export interface components {
         LogoutIn: {
             /** Refresh Token */
             refresh_token?: string | null;
+        };
+        /** MappingRevoked */
+        MappingRevoked: {
+            /**
+             * Mapping Deleted
+             * @default false
+             */
+            mapping_deleted: boolean;
+            /**
+             * Types Deleted
+             * @default 0
+             */
+            types_deleted: number;
         };
         /** MarketSessionOut */
         MarketSessionOut: {
@@ -3403,6 +3803,17 @@ export interface components {
             /** Token Id */
             token_id: string;
         };
+        /** PreviewBlocking */
+        PreviewBlocking: {
+            /** Code */
+            code: string;
+            /** Field */
+            field?: string | null;
+            /** Line No */
+            line_no?: number | null;
+            /** Message */
+            message: string;
+        };
         /** PreviewColumn */
         PreviewColumn: {
             /**
@@ -3412,15 +3823,35 @@ export interface components {
             confidence: number;
             /** Index */
             index: number;
+            /** Key */
+            key?: string | null;
+            /** Level */
+            level?: string | null;
             /** Name */
             name: string;
             /** Sample */
             sample?: string[];
+            /** Samples */
+            samples?: string[];
             /** Suggested Field */
             suggested_field?: string | null;
+            /** Suggested Options */
+            suggested_options?: {
+                [key: string]: unknown;
+            };
         };
         /** PreviewEstimated */
         PreviewEstimated: {
+            /**
+             * Discarded
+             * @default 0
+             */
+            discarded: number;
+            /**
+             * Estimated Available
+             * @default true
+             */
+            estimated_available: boolean;
             /** Inserted */
             inserted: number;
             /** Parsed */
@@ -3439,20 +3870,55 @@ export interface components {
             /** Sha256 */
             sha256: string;
         };
+        /** PreviewMappingItem */
+        PreviewMappingItem: {
+            /** Column Key */
+            column_key: string;
+            /** Field */
+            field: string;
+            /** Options */
+            options?: {
+                [key: string]: unknown;
+            };
+        };
         /** PreviewOut */
         PreviewOut: {
             /** Assumptions */
             assumptions?: {
                 [key: string]: unknown;
             };
+            /** Blocking */
+            blocking?: components["schemas"]["PreviewBlocking"][];
+            /**
+             * Broker
+             * @default huatai
+             */
+            broker: string;
+            /** Broker Detection */
+            broker_detection?: {
+                [key: string]: unknown;
+            };
             /** Can Commit */
             can_commit: boolean;
             /** Cash Balance Available */
             cash_balance_available: boolean;
+            /** Catalog */
+            catalog?: {
+                [key: string]: unknown;
+            }[];
+            /** Categories */
+            categories?: {
+                [key: string]: string;
+            }[];
             /** Columns */
             columns: components["schemas"]["PreviewColumn"][];
             /** Date Format */
             date_format?: string | null;
+            /**
+             * Discarded Count
+             * @default 0
+             */
+            discarded_count: number;
             estimated: components["schemas"]["PreviewEstimated"];
             /**
              * Expires At
@@ -3460,14 +3926,78 @@ export interface components {
              */
             expires_at: string;
             file: components["schemas"]["PreviewFile"];
+            /** Ignored Columns */
+            ignored_columns?: string[];
+            /** Mapping Fingerprint */
+            mapping_fingerprint?: string | null;
+            /** Mapping Items */
+            mapping_items?: components["schemas"]["PreviewMappingItem"][];
+            /**
+             * Mapping Version
+             * @default 0
+             */
+            mapping_version: number;
             /** Preview Id */
             preview_id: string;
+            /**
+             * Requires Reimport Ack
+             * @default false
+             */
+            requires_reimport_ack: boolean;
             /** Sample */
             sample?: {
                 [key: string]: unknown;
             }[];
+            /** Signature */
+            signature?: string | null;
+            /**
+             * Stage
+             * @default legacy
+             * @enum {string}
+             */
+            stage: "mapping" | "types" | "ready" | "legacy";
+            /** System Categories */
+            system_categories?: string[];
+            template?: components["schemas"]["PreviewTemplateOut"] | null;
+            /** Types */
+            types?: {
+                [key: string]: unknown;
+            }[];
+            /** Unmapped Columns */
+            unmapped_columns?: string[];
+            /** Verification */
+            verification?: {
+                [key: string]: unknown;
+            };
             /** Warnings */
             warnings?: components["schemas"]["PreviewWarning"][];
+        };
+        /** PreviewTemplateOut */
+        PreviewTemplateOut: {
+            /** Broker */
+            broker: string;
+            /** Created At */
+            created_at?: string | null;
+            /** Date Format */
+            date_format?: string | null;
+            /** Header Count */
+            header_count: number;
+            /** Ignored */
+            ignored?: string[];
+            /** Items */
+            items?: {
+                [key: string]: unknown;
+            }[];
+            /** Last Batch Id */
+            last_batch_id?: string | null;
+            /** Origin Batch Id */
+            origin_batch_id?: string | null;
+            /** Signature */
+            signature: string;
+            /** Template Id */
+            template_id: string;
+            /** Updated At */
+            updated_at?: string | null;
         };
         /** PreviewWarning */
         PreviewWarning: {
@@ -3696,6 +4226,7 @@ export interface components {
             affected_metrics?: components["schemas"]["AffectedMetric"][];
             /** Batch Id */
             batch_id: string;
+            mapping_revoked?: components["schemas"]["MappingRevoked"] | null;
             /** Reverted */
             reverted: {
                 [key: string]: number;
@@ -4954,6 +5485,272 @@ export interface operations {
             };
         };
     };
+    listImportColumnRules: {
+        parameters: {
+            query?: {
+                broker?: string | null;
+                enabled?: boolean | null;
+                q?: string | null;
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportRulePage"];
+                };
+            };
+            /** @description 请求参数错误 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    createImportColumnRule: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImportRuleIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportRuleOut"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 资源状态冲突 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    deleteImportColumnRule: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path: {
+                rule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    updateImportColumnRule: {
+        parameters: {
+            query?: never;
+            header?: {
+                "If-Match"?: string | null;
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path: {
+                rule_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImportRulePatchIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportRuleOut"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 资源状态冲突 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     listAssets: {
         parameters: {
             query?: {
@@ -5769,6 +6566,7 @@ export interface operations {
         parameters: {
             query?: never;
             header?: {
+                "X-Import-Flow"?: string | null;
                 authorization?: string | null;
                 "x-api-key"?: string | null;
             };
@@ -5842,6 +6640,343 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getImportPreview: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path: {
+                preview_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PreviewOut"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    saveImportMapping: {
+        parameters: {
+            query?: never;
+            header?: {
+                "If-Match"?: string | null;
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path: {
+                preview_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImportMappingIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PreviewOut"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 资源状态冲突 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    saveImportTypes: {
+        parameters: {
+            query?: never;
+            header?: {
+                "If-Match"?: string | null;
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path: {
+                preview_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ImportTypesIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PreviewOut"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 资源状态冲突 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    listImportTemplates: {
+        parameters: {
+            query?: {
+                limit?: number;
+                cursor?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ImportTemplatePage"];
+                };
+            };
+            /** @description 请求参数错误 */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    deleteImportTemplate: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path: {
+                template_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                     "application/problem+json": components["schemas"]["Error"];
                 };
             };

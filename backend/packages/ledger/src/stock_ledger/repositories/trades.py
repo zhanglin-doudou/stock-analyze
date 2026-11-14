@@ -306,17 +306,27 @@ class TradeRepository:
         return count
 
     async def soft_delete_range(
-        self, user_id: uuid.UUID, *, date_from: date, date_to: date, at: datetime
+        self,
+        user_id: uuid.UUID,
+        *,
+        date_from: date,
+        date_to: date,
+        at: datetime,
+        account: str | None = None,
     ) -> int:
-        """replace_range：软删区间内旧行，避免新账单与旧数据重复计入。"""
-        trades = await self._session.scalars(
-            select(Trade).where(
-                Trade.user_id == user_id,
-                Trade.trade_date >= date_from,
-                Trade.trade_date <= date_to,
-                Trade.deleted_at.is_(None),
-            )
+        """replace_range：软删区间内旧行，避免新账单与旧数据重复计入。
+
+        `account` 非空时只删该资金子账户的旧行（多子账户账单各自覆盖自己的区段）。
+        """
+        stmt = select(Trade).where(
+            Trade.user_id == user_id,
+            Trade.trade_date >= date_from,
+            Trade.trade_date <= date_to,
+            Trade.deleted_at.is_(None),
         )
+        if account is not None:
+            stmt = stmt.where(Trade.account_masked == account)
+        trades = await self._session.scalars(stmt)
         count = 0
         for trade in trades:
             trade.deleted_at = at
@@ -424,6 +434,88 @@ class TradeRepository:
             Trade.id.asc(),
         )
         return list(await self._session.scalars(stmt))
+
+    async def first_bill(self, user_id: uuid.UUID, *, account: str | None = None) -> Trade | None:
+        """库内首条账单（未删除），顺序与 `balances_ordered` 一致。"""
+        stmt = select(Trade).where(Trade.user_id == user_id, Trade.deleted_at.is_(None))
+        if account is not None:
+            stmt = stmt.where(Trade.account_masked == account)
+        stmt = stmt.order_by(
+            Trade.trade_date.asc(),
+            Trade.line_no.asc().nulls_first(),
+            case((Trade.side == Side.MISSING.value, 0), else_=1).asc(),
+            Trade.id.asc(),
+        ).limit(1)
+        return await self._session.scalar(stmt)
+
+    async def last_bill(self, user_id: uuid.UUID, *, account: str | None = None) -> Trade | None:
+        """库内最后一条账单（未删除），与 `first_bill` 严格逆序。"""
+        stmt = select(Trade).where(Trade.user_id == user_id, Trade.deleted_at.is_(None))
+        if account is not None:
+            stmt = stmt.where(Trade.account_masked == account)
+        stmt = stmt.order_by(
+            Trade.trade_date.desc(),
+            Trade.line_no.desc().nulls_last(),
+            case((Trade.side == Side.MISSING.value, 0), else_=1).desc(),
+            Trade.id.desc(),
+        ).limit(1)
+        return await self._session.scalar(stmt)
+
+    async def bill_on_date(
+        self, user_id: uuid.UUID, day: date, *, account: str | None = None
+    ) -> Trade | None:
+        """库内该日期是否已有账单（用于判断文件首日是否已被覆盖）。"""
+        stmt = select(Trade).where(
+            Trade.user_id == user_id,
+            Trade.deleted_at.is_(None),
+            Trade.trade_date == day,
+        )
+        if account is not None:
+            stmt = stmt.where(Trade.account_masked == account)
+        stmt = stmt.order_by(
+            Trade.line_no.asc().nulls_first(),
+            case((Trade.side == Side.MISSING.value, 0), else_=1).asc(),
+            Trade.id.asc(),
+        ).limit(1)
+        return await self._session.scalar(stmt)
+
+    async def bill_before(
+        self, user_id: uuid.UUID, day: date, *, account: str | None = None
+    ) -> Trade | None:
+        """库内早于 `day` 的最后一条账单（覆盖区段前接缝）。"""
+        stmt = select(Trade).where(
+            Trade.user_id == user_id,
+            Trade.deleted_at.is_(None),
+            Trade.trade_date < day,
+        )
+        if account is not None:
+            stmt = stmt.where(Trade.account_masked == account)
+        stmt = stmt.order_by(
+            Trade.trade_date.desc(),
+            Trade.line_no.desc().nulls_last(),
+            case((Trade.side == Side.MISSING.value, 0), else_=1).desc(),
+            Trade.id.desc(),
+        ).limit(1)
+        return await self._session.scalar(stmt)
+
+    async def bill_after(
+        self, user_id: uuid.UUID, day: date, *, account: str | None = None
+    ) -> Trade | None:
+        """库内晚于 `day` 的第一条账单（覆盖区段后接缝）。"""
+        stmt = select(Trade).where(
+            Trade.user_id == user_id,
+            Trade.deleted_at.is_(None),
+            Trade.trade_date > day,
+        )
+        if account is not None:
+            stmt = stmt.where(Trade.account_masked == account)
+        stmt = stmt.order_by(
+            Trade.trade_date.asc(),
+            Trade.line_no.asc().nulls_first(),
+            case((Trade.side == Side.MISSING.value, 0), else_=1).asc(),
+            Trade.id.asc(),
+        ).limit(1)
+        return await self._session.scalar(stmt)
 
     async def list_by_batch(
         self,

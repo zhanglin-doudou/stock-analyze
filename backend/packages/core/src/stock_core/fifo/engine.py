@@ -245,6 +245,7 @@ def _apply_sell(
                 kind="oversell",
                 quantity_units=oversell_units,
                 detail="卖出数量超过可用持仓，无可配对买入",
+                proceeds_units=event.amount_units,
             )
         )
         return None, oversell_units
@@ -315,6 +316,8 @@ def _apply_sell(
                     kind="oversell",
                     quantity_units=oversell_units,
                     detail="卖出数量超过可用持仓，超出部分未配对",
+                    # 未配对份额按数量比例分摊到的净卖款（含费，不再二次扣费）。
+                    proceeds_units=event.amount_units - proceeds_total,
                 )
             )
     lots[:] = [lot for lot in lots if lot.quantity_units > 0]

@@ -16,8 +16,10 @@ from stock_contracts.clock import Clock
 from stock_contracts.enums import JobStatus, QuarantineReason
 from stock_platform.jobs import JobQueue
 
-from stock_ledger.models import SummaryRule
+from stock_ledger.models import ImportBillType, SummaryRule
 from stock_ledger.parsers.columns import normalize_summary
+from stock_ledger.parsers.mapping import derive_type_key, normalize_type_key
+from stock_ledger.repositories.import_mapping import ImportBillTypeRepository
 from stock_ledger.repositories.quarantine import QuarantineRepository
 from stock_ledger.repositories.rules import (
     SummaryRuleRepository,
@@ -68,6 +70,27 @@ def match_rule(rules: list[SummaryRule], summary: str | None, side: str) -> Summ
     return None
 
 
+def resolve_type_category(
+    type_key: str,
+    *,
+    known_types: dict[str, ImportBillType],
+    rules: list[SummaryRule],
+    summary: str | None,
+    side: str,
+) -> tuple[str | None, str | None, bool]:
+    """返回 `(category, summary_code, discarded)`；用户类型记忆优先于摘要规则。"""
+    known = known_types.get(normalize_type_key(type_key))
+    rule = match_rule(rules, summary, side)
+    summary_code = rule_summary_code(rule) if rule is not None else None
+    if known is not None:
+        if known.discarded:
+            return None, None, True
+        return known.category, summary_code, False
+    if rule is not None:
+        return rule.category, summary_code, False
+    return None, None, False
+
+
 def suggest_rule(rules: list[SummaryRule], summary: str | None, side: str) -> str | None:
     """给未命中摘要推荐一条“最接近”的规则 id（无则 None）。"""
     if not summary:
@@ -108,6 +131,14 @@ async def reclassify_user(
     if batch_id is not None:
         # 只动目标批次，避免一次规则调整把历史其它批次的行一起重写。
         trades = [trade for trade in trades if trade.batch_id == batch_id]
+    type_keys = {
+        trade.id: normalize_type_key(trade.summary)
+        or derive_type_key(trade.side, trade.amount_units, trade.cash_balance_units or 0)
+        for trade in trades
+    }
+    known_types = await ImportBillTypeRepository(session).by_keys(
+        user_id, sorted(set(type_keys.values()))
+    )
     existing_quarantine = await quarantine_repo.page(user_id, resolved=False, limit=200)
     already_flagged = {
         str(row.raw.get("trade_id")) for row in existing_quarantine if row.raw.get("trade_id")
@@ -117,11 +148,19 @@ async def reclassify_user(
     updated = 0
     quarantined = 0
     for index, trade in enumerate(trades):
-        rule = match_rule(rules, trade.summary, trade.side)
-        if rule is not None:
-            summary_code = rule_summary_code(rule)
-            if trade.category != rule.category or trade.summary_code != summary_code:
-                trade.category = rule.category
+        category, summary_code, discarded = resolve_type_category(
+            type_keys[trade.id],
+            known_types=known_types,
+            rules=rules,
+            summary=trade.summary,
+            side=trade.side,
+        )
+        if discarded:
+            # 废弃只影响后续导入；复算不删除、不改写已经存在的历史流水。
+            continue
+        if category is not None:
+            if trade.category != category or trade.summary_code != summary_code:
+                trade.category = category
                 trade.summary_code = summary_code
                 updated += 1
         elif trade.id not in already_flagged:
@@ -175,6 +214,7 @@ __all__ = [
     "load_rules",
     "match_rule",
     "reclassify_user",
+    "resolve_type_category",
     "seed_system_rules",
     "suggest_rule",
 ]

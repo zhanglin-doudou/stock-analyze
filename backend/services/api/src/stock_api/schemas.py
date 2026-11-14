@@ -105,9 +105,13 @@ class PatListOut(BaseModel):
 # ── 导入（API-010~016）──────────────────────────────────────
 class PreviewColumn(BaseModel):
     index: int
+    key: str | None = None
     name: str
     sample: list[str] = Field(default_factory=list)
+    samples: list[str] = Field(default_factory=list)
     suggested_field: str | None = None
+    suggested_options: dict[str, Any] = Field(default_factory=dict)
+    level: str | None = None
     confidence: float = 0.0
 
 
@@ -123,12 +127,41 @@ class PreviewEstimated(BaseModel):
     inserted: int
     skipped: int
     quarantined: int
+    discarded: int = 0
+    estimated_available: bool = True
 
 
 class PreviewFile(BaseModel):
     name: str
     sha256: str
     bytes: int
+
+
+class PreviewTemplateOut(BaseModel):
+    template_id: str
+    broker: str
+    signature: str
+    header_count: int
+    date_format: str | None = None
+    items: list[dict[str, Any]] = Field(default_factory=list)
+    ignored: list[str] = Field(default_factory=list)
+    origin_batch_id: str | None = None
+    last_batch_id: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class PreviewBlocking(BaseModel):
+    field: str | None = None
+    code: str
+    message: str
+    line_no: int | None = None
+
+
+class PreviewMappingItem(BaseModel):
+    column_key: str
+    field: str
+    options: dict[str, Any] = Field(default_factory=dict)
 
 
 class PreviewOut(BaseModel):
@@ -143,6 +176,25 @@ class PreviewOut(BaseModel):
     assumptions: dict[str, Any] = Field(default_factory=dict)
     sample: list[dict[str, Any]] = Field(default_factory=list)
     expires_at: datetime
+    # ── v2 两步确认（additive）──────────────────────────────
+    stage: Literal["mapping", "types", "ready", "legacy"] = "legacy"
+    broker: str = "huatai"
+    broker_detection: dict[str, Any] = Field(default_factory=dict)
+    signature: str | None = None
+    mapping_version: int = 0
+    mapping_fingerprint: str | None = None
+    template: PreviewTemplateOut | None = None
+    catalog: list[dict[str, Any]] = Field(default_factory=list)
+    categories: list[dict[str, str]] = Field(default_factory=list)
+    system_categories: list[str] = Field(default_factory=list)
+    types: list[dict[str, Any]] = Field(default_factory=list)
+    verification: dict[str, Any] = Field(default_factory=dict)
+    blocking: list[PreviewBlocking] = Field(default_factory=list)
+    unmapped_columns: list[str] = Field(default_factory=list)
+    mapping_items: list[PreviewMappingItem] = Field(default_factory=list)
+    ignored_columns: list[str] = Field(default_factory=list)
+    discarded_count: int = 0
+    requires_reimport_ack: bool = False
 
 
 class ImportRange(StrictModel):
@@ -157,6 +209,87 @@ class ImportCommitIn(StrictModel):
     mode: Literal["full", "replace_range"] = "full"
     range: ImportRange | None = None
     mapping: dict[str, str] | None = None
+    note: str | None = Field(default=None, max_length=200)
+    mapping_version: int | None = Field(default=None, ge=0)
+    acknowledge_reimport: bool = False
+
+
+class ImportMappingItemIn(StrictModel):
+    column_key: str = Field(min_length=1, max_length=64)
+    target_field: str = Field(min_length=1, max_length=24)
+    options: dict[str, Any] = Field(default_factory=dict)
+
+
+class ImportMappingIn(StrictModel):
+    mapping_version: int | None = Field(default=None, ge=0)
+    items: list[ImportMappingItemIn] = Field(default_factory=list, max_length=64)
+    ignored: list[str] = Field(default_factory=list, max_length=64)
+    acknowledge_unmapped: bool = False
+    date_format: str | None = Field(default=None, max_length=32)
+    broker: str | None = Field(default=None, min_length=1, max_length=16)
+
+
+class ImportTypeResolutionIn(StrictModel):
+    type_key: str = Field(min_length=1, max_length=64)
+    category: str | None = Field(default=None, max_length=24)
+    discard: bool = False
+
+
+class ImportTypesIn(StrictModel):
+    mapping_version: int | None = Field(default=None, ge=0)
+    resolutions: list[ImportTypeResolutionIn] = Field(default_factory=list, max_length=200)
+
+
+class ImportTemplatePage(BaseModel):
+    items: list[PreviewTemplateOut] = Field(default_factory=list)
+    next_cursor: str | None = None
+    has_more: bool = False
+
+
+class ImportRuleOut(BaseModel):
+    rule_id: str
+    broker: str
+    header_norm: str
+    match_type: Literal["exact", "prefix", "contains"]
+    target_field: str
+    options: dict[str, Any] = Field(default_factory=dict)
+    priority: int
+    enabled: bool
+    is_system: bool
+    is_fingerprint: bool
+    weight: int
+    version: int
+    note: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ImportRulePage(BaseModel):
+    items: list[ImportRuleOut] = Field(default_factory=list)
+    next_cursor: str | None = None
+
+
+class ImportRuleIn(StrictModel):
+    broker: str = Field(min_length=1, max_length=16)
+    header_norm: str = Field(min_length=1, max_length=128)
+    match_type: Literal["exact", "prefix", "contains"] = "exact"
+    target_field: str = Field(min_length=1, max_length=24)
+    options: dict[str, Any] = Field(default_factory=dict)
+    priority: int = Field(default=100, ge=1, le=999)
+    enabled: bool = True
+    is_fingerprint: bool = False
+    weight: int = Field(default=1, ge=1, le=10)
+    note: str | None = Field(default=None, max_length=200)
+
+
+class ImportRulePatchIn(StrictModel):
+    match_type: Literal["exact", "prefix", "contains"] | None = None
+    target_field: str | None = Field(default=None, min_length=1, max_length=24)
+    options: dict[str, Any] | None = None
+    priority: int | None = Field(default=None, ge=1, le=999)
+    enabled: bool | None = None
+    is_fingerprint: bool | None = None
+    weight: int | None = Field(default=None, ge=1, le=10)
     note: str | None = Field(default=None, max_length=200)
 
 
@@ -178,6 +311,17 @@ class BatchCounts(BaseModel):
     inserted: int
     skipped: int
     quarantined: int
+    discarded: int = 0
+
+
+class BatchMappingInfo(BaseModel):
+    """批次映射来源（API-013，决定撤销对话框文案）。"""
+
+    source: Literal["legacy", "manual", "template"] = "legacy"
+    template_id: str | None = None
+    signature: str | None = None
+    remap_required: bool = False
+    is_origin: bool = False
 
 
 class BatchOut(BaseModel):
@@ -195,6 +339,7 @@ class BatchOut(BaseModel):
     finished_at: datetime | None = None
     revoked_at: datetime | None = None
     can_revoke: bool = False
+    mapping_source: Literal["legacy", "manual", "template"] = "legacy"
 
 
 class BatchFill(BaseModel):
@@ -210,6 +355,7 @@ class BatchFill(BaseModel):
 
 class BatchDetailOut(BatchOut):
     fills: list[BatchFill] = Field(default_factory=list)
+    mapping: BatchMappingInfo | None = None
 
 
 class BatchPage(BaseModel):
@@ -252,12 +398,18 @@ class AffectedMetric(BaseModel):
     status: Literal["stale", "blocked", "unreliable", "ok"]
 
 
+class MappingRevoked(BaseModel):
+    mapping_deleted: bool = False
+    types_deleted: int = 0
+
+
 class RevokeOut(BaseModel):
     batch_id: str
     status: Literal["revoked"] = "revoked"
     reverted: dict[str, int]
     revoked_at: datetime
     affected_metrics: list[AffectedMetric] = Field(default_factory=list)
+    mapping_revoked: MappingRevoked | None = None
 
 
 # ── 任务（API-061~064）──────────────────────────────────────

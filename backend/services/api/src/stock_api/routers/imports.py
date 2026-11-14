@@ -24,11 +24,21 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.responses import JSONResponse
-from stock_contracts.enums import ImportBatchStatus, Side
+from stock_contracts.enums import ImportBatchStatus, Side, WarningCode
 from stock_contracts.errors import ApiError, ErrorCode, FieldError, NotFoundError
 from stock_core.values import Money
 from stock_ledger.application.imports import revoke_batch_now
-from stock_ledger.application.preview import ImportPreviewDTO, create_preview
+from stock_ledger.application.preview import (
+    ImportPreviewDTO,
+    create_preview,
+    load_template_payload,
+    preview_to_dto,
+    require_preview,
+    save_mapping,
+    save_types,
+)
+from stock_ledger.parsers.mapping import MappingItem, MappingPlan
+from stock_ledger.repositories.import_mapping import ImportTemplateRepository
 from stock_ledger.repositories.imports import ImportBatchRepository, ImportPreviewRepository
 from stock_ledger.repositories.quarantine import QuarantineRepository
 from stock_ledger.repositories.trades import TradeRepository
@@ -42,15 +52,22 @@ from stock_api.schemas import (
     BatchCounts,
     BatchDetailOut,
     BatchFill,
+    BatchMappingInfo,
     BatchOut,
     BatchPage,
     ImportCommitIn,
+    ImportMappingIn,
+    ImportTemplatePage,
+    ImportTypesIn,
     JobAcceptedOut,
     JobLinks,
+    MappingRevoked,
     PreviewColumn,
     PreviewEstimated,
     PreviewFile,
+    PreviewMappingItem,
     PreviewOut,
+    PreviewTemplateOut,
     PreviewWarning,
     QuarantineItem,
     QuarantinePage,
@@ -101,14 +118,31 @@ def _parse_mapping(raw: str | None) -> dict[str, str] | None:
     return data
 
 
+def _if_match_version(raw: str | None) -> int | None:
+    """解析 `If-Match: "<mapping_version>"`；缺省返回 None（调用方回退 body/无锁）。"""
+    if raw is None or raw.strip() == "":
+        return None
+    try:
+        return int(raw.strip().strip('"'))
+    except ValueError as exc:
+        raise ApiError(
+            ErrorCode.VALIDATION_ERROR,
+            errors=[FieldError("If-Match", "invalid", "If-Match 必须是整数版本号")],
+        ) from exc
+
+
 def _preview_out(dto: ImportPreviewDTO) -> PreviewOut:
     """ledger 预览 DTO → API 边界 `PreviewOut`（金额在 sample 里已是定点字符串）。"""
     columns = [
         PreviewColumn(
             index=int(item["index"]),
+            key=item.get("key"),
             name=str(item["name"]),
             sample=([str(item["sample"])] if item.get("sample") else []),
+            samples=[str(value) for value in item.get("samples") or []],
             suggested_field=item.get("suggested_field"),
+            suggested_options=dict(item.get("suggested_options") or {}),
+            level=item.get("level"),
             confidence=float(item.get("confidence", 1.0)),
         )
         for item in dto.columns_detail
@@ -119,7 +153,10 @@ def _preview_out(dto: ImportPreviewDTO) -> PreviewOut:
         inserted=dto.estimated_inserted,
         skipped=dto.estimated_skipped,
         quarantined=dto.quarantined_count,
+        discarded=dto.discarded_count,
+        estimated_available=dto.estimated_available,
     )
+    template = PreviewTemplateOut(**dto.template) if dto.template else None
     return PreviewOut(
         preview_id=dto.preview_id,
         file=PreviewFile(name=dto.file_name, sha256=dto.file_sha256, bytes=dto.file_bytes),
@@ -128,10 +165,28 @@ def _preview_out(dto: ImportPreviewDTO) -> PreviewOut:
         warnings=warnings,
         estimated=estimated,
         cash_balance_available=dto.cash_balance_available,
-        can_commit=True,
+        can_commit=dto.stage in ("ready", "legacy") and not dto.blocking,
         assumptions=dto.assumptions,
         sample=dto.sample,
         expires_at=dto.expires_at,
+        stage=dto.stage,
+        broker=dto.broker,
+        broker_detection=dto.broker_detection,
+        signature=dto.signature,
+        mapping_version=dto.mapping_version,
+        mapping_fingerprint=dto.mapping_fingerprint,
+        template=template,
+        catalog=dto.catalog,
+        categories=dto.categories,
+        system_categories=dto.system_categories,
+        types=dto.type_resolutions,
+        verification=dto.verification,
+        blocking=dto.blocking,
+        unmapped_columns=dto.unresolved_columns,
+        mapping_items=[PreviewMappingItem(**item) for item in dto.mapping_items],
+        ignored_columns=list(dto.ignored_columns),
+        discarded_count=dto.discarded_count,
+        requires_reimport_ack=(WarningCode.MAPPING_CHANGED_REIMPORT.value in dto.warnings),
     )
 
 
@@ -147,6 +202,7 @@ def _batch_out(batch: Any, *, filled_count: int = 0) -> BatchOut:
             inserted=batch.inserted_count,
             skipped=batch.skipped_count,
             quarantined=batch.quarantined_count,
+            discarded=batch.discarded_count,
         ),
         filled_count=filled_count,
         warnings=list(batch.warnings),
@@ -163,6 +219,7 @@ def _batch_out(batch: Any, *, filled_count: int = 0) -> BatchOut:
                 ImportBatchStatus.SUCCEEDED.value,
             )
         ),
+        mapping_source=batch.mapping_source,
     )
 
 
@@ -178,6 +235,22 @@ def _raw_out(raw: dict[str, Any], columns: dict[str, Any]) -> QuarantineRaw:
     return QuarantineRaw(**values)
 
 
+def _template_out(template: Any) -> PreviewTemplateOut:
+    return PreviewTemplateOut(
+        template_id=template.id,
+        broker=template.broker,
+        signature=template.signature,
+        header_count=template.header_count,
+        date_format=template.date_format,
+        items=list(template.items or []),
+        ignored=list(template.ignored or []),
+        origin_batch_id=template.origin_batch_id,
+        last_batch_id=template.last_batch_id,
+        created_at=template.created_at,
+        updated_at=template.updated_at,
+    )
+
+
 @router.post("/imports/preview", response_model=PreviewOut, operation_id="previewImport")
 async def preview_import(
     request: Request,
@@ -185,8 +258,15 @@ async def preview_import(
     file: Annotated[UploadFile, File(description="账单文件 .xls/.xlsx/.csv")],
     mapping: Annotated[str | None, Form(description="表头→字段 的 JSON 字符串")] = None,
     date_format: Annotated[str | None, Form()] = None,
+    broker: Annotated[str, Form(description="auto|huatai|generic")] = "auto",
+    reuse_template: Annotated[bool, Form(description="复用同签名模板")] = True,
+    flow: Annotated[str | None, Header(alias="X-Import-Flow")] = None,
 ) -> PreviewOut:
-    """API-010：解析账单、列映射建议、质量预检；同步 200，不写 ledger.trade。"""
+    """API-010：解析账单、列映射建议、质量预检；同步 200，不写 ledger.trade。
+
+    默认走 legacy（严格 422、直接可提交），保持旧客户端/脚本行为；带
+    `X-Import-Flow: v2` 时进入「映射 → 类型 → 就绪」两段式，缺列不再 422。
+    """
     ctx.forbid_admin_trades()
     user_id = ctx.require_write()
     state = get_state(request)
@@ -194,6 +274,7 @@ async def preview_import(
     raw = await file.read()
     file_name = file.filename or "bill"
     parsed_mapping = _parse_mapping(mapping)
+    use_v2 = (flow or "").strip().lower() == "v2" and parsed_mapping is None
 
     async with state.db.session(user_id=user_id, begin=True) as session:
         dto = await create_preview(
@@ -203,9 +284,12 @@ async def preview_import(
             user_id=user_id,
             data=raw,
             file_name=file_name,
-            mapping=parsed_mapping,
+            # legacy 显式传 dict（空 dict 也代表 legacy，仍做严格校验）。
+            mapping=parsed_mapping if use_v2 else (parsed_mapping or {}),
             date_format=date_format,
             object_store=state.object_store,
+            broker=broker,
+            reuse_template=reuse_template,
         )
     return _preview_out(dto)
 
@@ -280,26 +364,75 @@ async def commit_import(
         preview = await ImportPreviewRepository(session).by_id(
             user_id, payload.preview_id, now=state.clock.now()
         )
+        legacy = preview.stage == "legacy"
+        if not legacy and preview.stage != "ready":
+            raise ApiError(
+                ErrorCode.IMPORT_STAGE_CONFLICT,
+                detail="预览尚未完成列对应与类型确认，不能提交",
+            )
+        if (
+            payload.mapping_version is not None
+            and payload.mapping_version != preview.mapping_version
+        ):
+            raise ApiError(
+                ErrorCode.VERSION_CONFLICT,
+                detail="映射已被修改，请刷新预览后重试",
+            )
+        requires_ack = WarningCode.MAPPING_CHANGED_REIMPORT.value in (preview.warnings or [])
+        if requires_ack and payload.mode != "replace_range" and not payload.acknowledge_reimport:
+            raise ApiError(
+                ErrorCode.IMPORT_REIMPORT_CONFLICT,
+                detail="该文件此前用不同映射导入过，请改用区间替换或显式确认重导",
+            )
+        if legacy and payload.mapping is not None:
+            preview.mapping = payload.mapping
+        mapping_source = "legacy" if legacy else ("template" if preview.template_id else "manual")
         batch_repo = ImportBatchRepository(session)
         batch = await batch_repo.create(
             user_id,
             preview_id=payload.preview_id,
             mode=payload.mode,
-            broker="huatai",
+            broker=preview.broker if not legacy else "huatai",
             file_name=preview.file_name,
             file_sha256=preview.file_sha256,
             file_bytes=preview.file_bytes,
-            columns={},
-            date_format=None,
+            columns=dict(preview.columns or {}),
+            date_format=preview.date_format,
             assumptions={},
             warnings=[],
             status=ImportBatchStatus.PENDING,
+            template_id=preview.template_id,
+            signature=preview.signature,
+            header_row_index=preview.header_row_index,
+            mapping_fingerprint=preview.mapping_fingerprint,
+            mapping_items=list(preview.mapping_items or []),
+            type_resolutions=list(preview.type_resolutions or []),
+            mapping_source=mapping_source,
         )
         params: dict[str, Any] = {
             "preview_id": payload.preview_id,
             "mode": payload.mode,
             "batch_id": batch.id,
+            "stage": preview.stage,
+            "date_format": preview.date_format,
+            "broker": batch.broker,
         }
+        if legacy:
+            params["mapping"] = dict(preview.mapping or {})
+        else:
+            params.update(
+                {
+                    "mapping_version": preview.mapping_version,
+                    "signature": preview.signature,
+                    "header_row_index": preview.header_row_index,
+                    "mapping_fingerprint": preview.mapping_fingerprint,
+                    "mapping_items": list(preview.mapping_items or []),
+                    "type_resolutions": list(preview.type_resolutions or []),
+                    "ignored_columns": list(preview.ignored_columns or []),
+                    "template_id": preview.template_id,
+                    "mapping_source": mapping_source,
+                }
+            )
         if payload.range is not None:
             # 区间替换必须用请求体声明的区间（不能拿账单 min/max 代替，否则会误删区间外数据）。
             params["range"] = payload.range.model_dump(by_alias=True, mode="json")
@@ -348,6 +481,150 @@ async def commit_import(
     return accepted
 
 
+@router.put(
+    "/imports/previews/{preview_id}/mapping",
+    response_model=PreviewOut,
+    operation_id="saveImportMapping",
+)
+async def save_import_mapping(
+    preview_id: str,
+    request: Request,
+    payload: ImportMappingIn,
+    ctx: Annotated[TenantContext, Depends(get_tenant)],
+    if_match: Annotated[str | None, Header(alias="If-Match")] = None,
+) -> PreviewOut:
+    """API-098：保存列映射并重跑类型分析；映射变更使旧类型确认失效。"""
+    ctx.forbid_admin_trades()
+    user_id = ctx.require_write()
+    state = get_state(request)
+    expected_version = _if_match_version(if_match)
+    if expected_version is None:
+        expected_version = payload.mapping_version
+    async with state.db.session(user_id=user_id, begin=True) as session:
+        preview = await require_preview(session, user_id, preview_id)
+        plan = MappingPlan(
+            header_row_index=preview.header_row_index or 0,
+            items=tuple(
+                MappingItem(
+                    column_key=item.column_key,
+                    field=item.target_field,
+                    options=dict(item.options),
+                )
+                for item in payload.items
+            ),
+            ignored=tuple(payload.ignored),
+        )
+        dto = await save_mapping(
+            session,
+            clock=state.clock,
+            user_id=user_id,
+            preview_id=preview_id,
+            plan=plan,
+            broker=payload.broker,
+            date_format=payload.date_format,
+            ack_unmapped=payload.acknowledge_unmapped,
+            expected_mapping_version=expected_version,
+            object_store=state.object_store,
+        )
+    return _preview_out(dto)
+
+
+@router.put(
+    "/imports/previews/{preview_id}/types",
+    response_model=PreviewOut,
+    operation_id="saveImportTypes",
+)
+async def save_import_types(
+    preview_id: str,
+    request: Request,
+    payload: ImportTypesIn,
+    ctx: Annotated[TenantContext, Depends(get_tenant)],
+    if_match: Annotated[str | None, Header(alias="If-Match")] = None,
+) -> PreviewOut:
+    """API-099：保存类型确认；全部确认后预览进入 `ready` 可提交。"""
+    ctx.forbid_admin_trades()
+    user_id = ctx.require_write()
+    state = get_state(request)
+    expected_version = _if_match_version(if_match)
+    if expected_version is None:
+        expected_version = payload.mapping_version
+    async with state.db.session(user_id=user_id, begin=True) as session:
+        dto = await save_types(
+            session,
+            clock=state.clock,
+            user_id=user_id,
+            preview_id=preview_id,
+            resolutions=[item.model_dump(exclude_none=True) for item in payload.resolutions],
+            expected_mapping_version=expected_version,
+            object_store=state.object_store,
+        )
+    return _preview_out(dto)
+
+
+@router.get(
+    "/imports/previews/{preview_id}",
+    response_model=PreviewOut,
+    operation_id="getImportPreview",
+)
+async def get_import_preview(
+    preview_id: str,
+    request: Request,
+    ctx: Annotated[TenantContext, Depends(get_tenant)],
+) -> PreviewOut:
+    """API-106：刷新预览（不重算映射/类型，直接读落库状态）。"""
+    ctx.forbid_admin_trades()
+    user_id = ctx.require_user()
+    state = get_state(request)
+    async with state.db.session(user_id=user_id, begin=True) as session:
+        preview = await ImportPreviewRepository(session).by_id(
+            user_id, preview_id, now=state.clock.now()
+        )
+        if preview is None:
+            raise NotFoundError(detail=f"预览 {preview_id} 不存在")
+        dto = preview_to_dto(preview)
+        dto.template = await load_template_payload(session, user_id, preview)
+    return _preview_out(dto)
+
+
+@router.get(
+    "/imports/templates", response_model=ImportTemplatePage, operation_id="listImportTemplates"
+)
+async def list_import_templates(
+    request: Request,
+    ctx: Annotated[TenantContext, Depends(get_tenant)],
+    limit: Annotated[int, Query(ge=1, le=200)] = 50,
+    cursor: Annotated[str | None, Query()] = None,
+) -> ImportTemplatePage:
+    """API-100：本人字段模板列表（按签名索引，游标分页）。"""
+    ctx.forbid_admin_trades()
+    user_id = ctx.require_user()
+    state = get_state(request)
+    async with state.db.session(user_id=user_id, begin=True) as session:
+        rows, next_cursor = await ImportTemplateRepository(session).list_with_cursor(
+            user_id, cursor=cursor, limit=limit
+        )
+    return ImportTemplatePage(items=[_template_out(row) for row in rows], next_cursor=next_cursor)
+
+
+@router.delete(
+    "/imports/templates/{template_id}", status_code=204, operation_id="deleteImportTemplate"
+)
+async def delete_import_template(
+    template_id: str,
+    request: Request,
+    ctx: Annotated[TenantContext, Depends(get_tenant)],
+) -> Response:
+    """API-101：删除本人模板；跨账号/不存在一律 404。"""
+    ctx.forbid_admin_trades()
+    user_id = ctx.require_write()
+    state = get_state(request)
+    async with state.db.session(user_id=user_id, begin=True) as session:
+        deleted = await ImportTemplateRepository(session).delete(user_id, template_id)
+    if not deleted:
+        raise ApiError(ErrorCode.IMPORT_TEMPLATE_NOT_FOUND, detail="模板不存在")
+    return Response(status_code=204)
+
+
 @router.get("/imports", response_model=BatchPage, operation_id="listImports")
 async def list_imports(
     request: Request,
@@ -387,8 +664,21 @@ async def get_import_batch(
         trade_repo = TradeRepository(session)
         fill_counts = await trade_repo.count_fills_by_batches(user_id, [batch_id])
         fill_rows = await trade_repo.list_by_batch(user_id, batch_id, side=Side.MISSING.value)
+        template = (
+            await ImportTemplateRepository(session).by_signature(user_id, batch.signature)
+            if batch.signature
+            else None
+        )
+        mapping = BatchMappingInfo(
+            source=batch.mapping_source,
+            template_id=batch.template_id,
+            signature=batch.signature,
+            remap_required=batch.remap_required,
+            is_origin=bool(template is not None and template.origin_batch_id == batch.id),
+        )
         out = BatchDetailOut(
             **_batch_out(batch, filled_count=fill_counts.get(batch_id, 0)).model_dump(),
+            mapping=mapping,
             fills=[
                 BatchFill(
                     trade_id=row.id,
@@ -499,11 +789,16 @@ async def revoke_import(
                 batch_id=batch_id,
                 code=exc.code.value,
             )
+    revoked = outcome.get("mapping_revoked") or {}
     return RevokeOut(
         batch_id=outcome["batch_id"],
         status="revoked",
         reverted={"inserted": int(outcome["removed_trades"]), "updated": 0},
         revoked_at=outcome["revoked_at"],
+        mapping_revoked=MappingRevoked(
+            mapping_deleted=bool(revoked.get("mapping_deleted")),
+            types_deleted=int(revoked.get("types_deleted") or 0),
+        ),
     )
 
 

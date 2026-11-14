@@ -358,6 +358,9 @@ def test_partial_oversell_marks_data_error_without_negative_position() -> None:
     assert error.kind == "oversell"
     assert error.trade_id == "s1"
     assert error.quantity_units == shares(50)
+    # 未配对 50/150 股分摊净卖款 = 1950.00 × 50/150 = 650.00（并入期初资产，不计收益）
+    assert error.proceeds_units == cents("650.00")
+    assert result.oversell_proceeds_units == cents("650.00")
     # data_error 回合不计入 closed / realized
     assert result.closed_rounds == ()
     assert result.realized_pnl_units == 0
@@ -378,6 +381,7 @@ def test_partial_oversell_proceeds_prorated_with_floor() -> None:
     assert round_.proceeds_units == 1_300
     assert round_.pnl_units == 1_300 - cents("1000.00")
     assert sum(fill.sell_proceeds_units for fill in round_.fills) == round_.proceeds_units
+    assert result.oversell_proceeds_units == 1_951 - 1_300
 
 
 def test_sell_without_any_holding_records_only_data_error() -> None:
@@ -387,6 +391,9 @@ def test_sell_without_any_holding_records_only_data_error() -> None:
     assert len(result.data_errors) == 1
     assert result.data_errors[0].kind == "oversell"
     assert result.data_errors[0].quantity_units == shares(100)
+    # 全部未配对：整笔净卖款 1200.00 均视为期初资产，不产生交易损益
+    assert result.data_errors[0].proceeds_units == cents("1200.00")
+    assert result.oversell_proceeds_units == cents("1200.00")
     # 后续买入可正常配对，不被此前的无主卖出影响
     result = build_rounds(
         [

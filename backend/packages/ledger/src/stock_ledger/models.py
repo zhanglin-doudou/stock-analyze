@@ -48,6 +48,9 @@ class ImportBatch(Base):
     __table_args__ = (
         Index("ix_import_batch_user_created", "user_id", "created_at"),
         Index("ix_import_batch_preview", "preview_id"),
+        # v2：同文件改映射重导检测 / 撤销时重算 last_batch_id（设计 §5.2）。
+        Index("ix_import_batch_user_file", "user_id", "file_sha256"),
+        Index("ix_import_batch_user_signature", "user_id", "signature", "created_at"),
         {"schema": SCHEMA},
     )
 
@@ -74,6 +77,17 @@ class ImportBatch(Base):
     error_code: Mapped[str | None] = mapped_column(String(48))
     replaced_batch_id: Mapped[str | None] = mapped_column(String(40))
     revoke_reason: Mapped[str | None] = mapped_column(String(32))
+    # ── 导入映射 v2 快照（2026-11-13 设计 §5.2）──────────────────
+    # worker 只用提交时的快照解析/分类，不再读 preview 最新状态（消除 TOCTOU）。
+    template_id: Mapped[str | None] = mapped_column(String(40))
+    signature: Mapped[str | None] = mapped_column(String(64))
+    header_row_index: Mapped[int | None] = mapped_column(Integer)
+    mapping_fingerprint: Mapped[str | None] = mapped_column(String(64))
+    mapping_items: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
+    type_resolutions: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
+    mapping_source: Mapped[str] = mapped_column(String(16), nullable=False, default="legacy")
+    discarded_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    remap_required: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -114,6 +128,22 @@ class ImportPreview(Base):
     unresolved_columns: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # ── 导入映射 v2 草稿（2026-11-13 设计 §5.2）──────────────────
+    # stage: mapping/types/ready/legacy；mapping_version 是 API-098/099 的乐观锁版本。
+    broker: Mapped[str] = mapped_column(String(16), nullable=False, default="generic")
+    signature: Mapped[str | None] = mapped_column(String(64))
+    header_row_index: Mapped[int | None] = mapped_column(Integer)
+    mapping_fingerprint: Mapped[str | None] = mapped_column(String(64))
+    stage: Mapped[str] = mapped_column(String(16), nullable=False, default="mapping")
+    mapping_items: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
+    ignored_columns: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
+    mapping_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    mapping_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    types_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    type_resolutions: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
+    template_id: Mapped[str | None] = mapped_column(String(40))
+    verification: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    discarded_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -315,7 +345,137 @@ class Reconciliation(Base):
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
 
 
-# 供迁移/RLS 脚本引用的表名清单（避免手写遗漏）
+class ImportTemplate(Base):
+    """用户级字段模板（按文件签名绑定，设计 §3.6 / D-04）。
+
+    与批次解耦：一个「券商 + 导出格式」只有一条模板，首次成功 commit 时落库，
+    后续同签名文件直接复用（增量零确认）；可单独删除（重新对应）并进审计。
+    `items` 存 MappingPlan.items，`ignored` 存用户显式忽略的列键；模板只存表头，
+    **绝不存行数据**（隐私）。
+    """
+
+    __tablename__ = "import_template"
+    __table_args__ = (
+        UniqueConstraint("user_id", "signature", name="uq_import_template_user_signature"),
+        Index("ix_import_template_user", "user_id", "updated_at"),
+        CheckConstraint("header_count >= 0", name="ck_import_template_header_count"),
+        {"schema": SCHEMA},
+    )
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey(USER_FK, ondelete="CASCADE"), nullable=False
+    )
+    broker: Mapped[str] = mapped_column(String(16), nullable=False)
+    signature: Mapped[str] = mapped_column(String(64), nullable=False)
+    header_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    date_format: Mapped[str | None] = mapped_column(String(32))
+    items: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
+    ignored: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
+    origin_batch_id: Mapped[str | None] = mapped_column(String(40))
+    last_batch_id: Mapped[str | None] = mapped_column(String(40))
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class ImportBillType(Base):
+    """用户级账单类型 → Category 映射（设计 §4 / D-10、D-11）。
+
+    首次出现时由用户确认（分类或废弃），之后同文本自动应用，不再逐项询问。
+    `origin_batch_id` 记录首次写入批次（审计），`last_write_batch_id` 记录最近一次
+    新增/修改批次——撤销按后者删除「本批次写入」的类型记忆，仅被复用的旧类型不删。
+    """
+
+    __tablename__ = "import_bill_type"
+    __table_args__ = (
+        UniqueConstraint("user_id", "type_key", name="uq_import_bill_type_user_key"),
+        Index("ix_import_bill_type_user", "user_id", "updated_at"),
+        Index("ix_import_bill_type_write", "user_id", "last_write_batch_id"),
+        CheckConstraint("length(type_key) BETWEEN 1 AND 64", name="ck_import_bill_type_key"),
+        CheckConstraint(
+            "(discarded AND category IS NULL) OR (NOT discarded AND category IS NOT NULL)",
+            name="ck_import_bill_type_resolution",
+        ),
+        {"schema": SCHEMA},
+    )
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey(USER_FK, ondelete="CASCADE"), nullable=False
+    )
+    type_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    type_label: Mapped[str] = mapped_column(String(120), nullable=False)
+    category: Mapped[str | None] = mapped_column(String(24))
+    discarded: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    broker: Mapped[str | None] = mapped_column(String(16))
+    origin_batch_id: Mapped[str | None] = mapped_column(String(40))
+    last_write_batch_id: Mapped[str | None] = mapped_column(String(40))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class ImportColumnRule(Base):
+    """系统/管理员维护的列名 → 字段规则（设计 §3.5）。
+
+    `user_id IS NULL` 为全局规则（管理员维护，所有租户可见）；预留用户级覆盖列但 MVP
+    不写。规则只产生**建议**，永不回写用户模板——管理员改规则不会悄悄改变历史导入口径。
+    唯一键用 `NULLS NOT DISTINCT`，让全局规则（user_id 为 NULL）之间也能互斥去重。
+    """
+
+    __tablename__ = "import_column_rule"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id",
+            "broker",
+            "header_norm",
+            "target_field",
+            name="uq_import_column_rule",
+            postgresql_nulls_not_distinct=True,
+        ),
+        Index("ix_import_column_rule_lookup", "broker", "enabled", "priority"),
+        CheckConstraint("length(broker) BETWEEN 1 AND 16", name="ck_import_column_rule_broker"),
+        CheckConstraint("weight BETWEEN 1 AND 10", name="ck_import_column_rule_weight"),
+        CheckConstraint(
+            "match_type IN ('exact','prefix','contains')",
+            name="ck_import_column_rule_match",
+        ),
+        CheckConstraint("priority BETWEEN 1 AND 999", name="ck_import_column_rule_priority"),
+        {"schema": SCHEMA},
+    )
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    user_id: Mapped[uuid.UUID | None] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey(USER_FK, ondelete="CASCADE")
+    )
+    broker: Mapped[str] = mapped_column(String(16), nullable=False)
+    header_norm: Mapped[str] = mapped_column(String(128), nullable=False)
+    match_type: Mapped[str] = mapped_column(String(8), nullable=False, default="exact")
+    target_field: Mapped[str] = mapped_column(String(24), nullable=False)
+    options: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    priority: Mapped[int] = mapped_column(Integer, nullable=False, default=100)
+    enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
+    is_system: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_fingerprint: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    weight: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    note: Mapped[str | None] = mapped_column(String(200))
+    version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
 LEDGER_TABLES: tuple[str, ...] = (
     ImportBatch.__tablename__,
     ImportPreview.__tablename__,
@@ -324,13 +484,19 @@ LEDGER_TABLES: tuple[str, ...] = (
     QuarantineRow.__tablename__,
     SummaryRule.__tablename__,
     Reconciliation.__tablename__,
+    ImportTemplate.__tablename__,
+    ImportBillType.__tablename__,
+    ImportColumnRule.__tablename__,
 )
 
 __all__ = [
     "LEDGER_TABLES",
     "SCHEMA",
     "ImportBatch",
+    "ImportBillType",
+    "ImportColumnRule",
     "ImportPreview",
+    "ImportTemplate",
     "QuarantineRow",
     "Reconciliation",
     "SummaryRule",

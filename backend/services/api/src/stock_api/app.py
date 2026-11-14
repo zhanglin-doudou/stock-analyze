@@ -32,6 +32,7 @@ from stock_api.errors import (
 from stock_api.middlewares import RequestContextMiddleware
 from stock_api.openapi_meta import apply_contract_metadata
 from stock_api.routers import (
+    admin_import_rules,
     assets,
     attribution,
     auth,
@@ -136,6 +137,7 @@ def create_app(settings: Settings | None = None, *, clock: Clock | None = None) 
         trades,
         reconciliation,
         imports,
+        admin_import_rules,
         rules,
         rounds,
         nav,

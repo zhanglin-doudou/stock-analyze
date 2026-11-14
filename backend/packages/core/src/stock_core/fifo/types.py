@@ -131,6 +131,9 @@ class DataError:
     kind: str
     quantity_units: int
     detail: str
+    #: 超卖未配对份额分摊到的净卖款（分，`amount_units` 已含费）。
+    #: 该部分不构成交易损益，按口径并入期初资产（见 review.bridge）。
+    proceeds_units: int = 0
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,6 +172,11 @@ class FifoResult:
             for round_ in self.rounds
             if round_.status in _DIVIDEND_COUNTED_STATUSES
         )
+
+    @property
+    def oversell_proceeds_units(self) -> int:
+        """超卖未配对份额分摊到的净卖款（分）；不构成交易损益。"""
+        return sum(error.proceeds_units for error in self.data_errors if error.kind == "oversell")
 
 
 _DIVIDEND_COUNTED_STATUSES: Final[frozenset[str]] = frozenset({"closed", "open"})

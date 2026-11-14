@@ -41,10 +41,15 @@ function makePreview(): Preview {
     ],
     date_format: "YYYY-MM-DD",
     warnings: [],
-    estimated: { parsed: 328, inserted: 326, skipped: 0, quarantined: 2 },
+    estimated: { parsed: 328, inserted: 326, skipped: 0, quarantined: 2, discarded: 0, estimated_available: true },
     cash_balance_available: true,
     can_commit: true,
     expires_at: "2026-10-21T01:00:00Z",
+    broker: "huatai",
+    stage: "ready",
+    discarded_count: 0,
+    mapping_version: 1,
+    requires_reimport_ack: false,
   };
 }
 
@@ -55,7 +60,7 @@ function makeBatch(overrides: Partial<ImportBatch> = {}): ImportBatch {
     mode: "full",
     broker: "huatai",
     file_name: "huatai_2024.xlsx",
-    counts: { parsed: 328, inserted: 326, skipped: 0, quarantined: 2 },
+    counts: { parsed: 328, inserted: 326, skipped: 0, quarantined: 2, discarded: 0 },
     filled_count: 0,
     warnings: [],
     assumptions: {},
@@ -63,6 +68,7 @@ function makeBatch(overrides: Partial<ImportBatch> = {}): ImportBatch {
     finished_at: "2026-10-21T00:00:05Z",
     revoked_at: null,
     can_revoke: true,
+    mapping_source: "legacy",
     ...overrides,
   };
 }
