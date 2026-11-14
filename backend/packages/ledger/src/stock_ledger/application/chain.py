@@ -2,8 +2,8 @@
 
 数据库账单不变量：库内账单恒连续（允许缺首尾）。本模块只做**只读**规划、不写库：
 
-- `walk_chain`：逐行核对 `上一行余额 + 本行带符号金额 == 本行余额`；对不上时先把该行
-  隔离，再继续向后尝试接上（中间可能是噪声账单），而不是整批失败。
+- `walk_chain`：逐行核对 `上一行余额 + 本行带符号金额 == 本行余额`；对不上时从该行起
+  连续隔离到链尾（锚点已不可信，继续接受会把缺口吞掉），首条断行留差额。
 - `walk_chain_with_head_retry`：首次导入（库为空）头部最多试 5 个候选锚点，取接受行数
   最多者，并列取最早。
 - `plan_chain`：按文件首末日期与库内首末账单选模式：
@@ -24,8 +24,8 @@
 
 边界口径：
 - 同一日期中排在锚点之前的文件行直接跳过（已在库中，不重复导入）；
-- 本行无资金余额 → 无法核对，接受但不推进锚点（与 reconcile 一致）；
-- 方向 `unknown` 的行不做链式核对，但其余额仍作为下一行锚点；
+- 本行无资金余额 → 无法核对，接受、金额计入待核对合计但不推进锚点（与 reconcile 一致）；
+- 方向 `unknown` 的行不做单独核对，金额计入待核对合计，余额不作下一行锚点；
 - 向前补历史接不上 → `IMPORT_CHAIN_DISCONTINUOUS`（整批回滚，报断行行号与差额）；
 - 覆盖区段与库内前后剩余账单的接缝不闭合 → 同上（覆盖本身不再是拒绝理由）。
 """
@@ -187,11 +187,33 @@ def group_rows_by_account(rows: list[ParsedRow]) -> list[tuple[str | None, list[
     return [(account, groups[account]) for account in order]
 
 
-def _break_candidate(row: ParsedRow) -> QuarantineCandidate:
-    """链式核对不通过的行 → 隔离候选（`suggested_rule_id` 恒为空）。"""
+def _break_candidate(
+    row: ParsedRow,
+    *,
+    delta_units: int | None = None,
+    expected_units: int | None = None,
+    actual_units: int | None = None,
+    counterpart: str | None = None,
+) -> QuarantineCandidate:
+    """链式核对不通过的行 → 隔离候选（`suggested_rule_id` 恒为空）。
+
+    首条断行的差额/期望/实际写进 `raw` 的 `_chain_*` 保留键，让导入记录页与排查
+    直接看到「断在哪、差多少」；后续连带隔离的行只保留原始内容。
+    """
+    raw = {**row.raw, "summary": row.summary or "", "line_no": str(row.line_no)}
+    if delta_units is not None:
+        raw.update(
+            {
+                "_chain_delta_units": str(delta_units),
+                "_chain_delta": str(Money(delta_units)),
+                "_chain_expected_units": str(expected_units),
+                "_chain_actual_units": str(actual_units),
+                "_chain_counterpart": counterpart or "",
+            }
+        )
     return QuarantineCandidate(
         line_no=row.line_no,
-        raw={**row.raw, "summary": row.summary or "", "line_no": str(row.line_no)},
+        raw=raw,
         reason_code=QuarantineReason.RECONCILIATION_BREAK.value,
         suggested_rule_id=None,
     )
@@ -214,41 +236,70 @@ def walk_chain(
     epsilon_units: int,
     skip_before: tuple[date, int | None] | None = None,
 ) -> ChainWalk:
-    """沿文件行序核对余额链；断行先隔离、继续向后尝试接上。
+    """沿文件行序核对余额链；断行起连续隔离到链尾。
 
     `start_balance_units is None` 表示还没有可信锚点：第一个带余额的行直接作为起点
     接受（它的余额不校验，因为没有上一行可比）。
+
+    锚点只由**通过核对**的行推进：无余额行与方向未知行的金额先并入 `pending_units`，
+    由下一条可核对行整体验证，绝不用它们自己的余额重设基准（否则缺口会被悄悄吸收）。
+    一旦核对失败，锚点已被证明不可信，后续任何「接受」都可能吞掉缺口，因此从断行起
+    **连续隔离到链尾**，保留已核对的前缀。
     """
     walk = ChainWalk(last_balance_units=start_balance_units)
-    for row in rows:
+    pending_units = 0
+    # 最近一条**通过核对**的行：差额是指「相对它」的偏差；方向未知/无余额行不能当锚点，
+    # 所以排查提示里的 counterpart 也不能指向它们。
+    anchor_row: ParsedRow | None = None
+    for index, row in enumerate(rows):
         if _skipped_before(row, skip_before):
             walk.skipped += 1
             continue
         balance = row.cash_balance_units
         if balance is None:
-            # 无余额无法核对：接受但不推进锚点。
+            # 无余额无法核对：接受、金额记入待核对合计，不推进锚点。
             walk.accepted.append(row)
             walk.last_row = row
+            pending_units += row.amount_units
             continue
         if walk.last_balance_units is None:
             walk.accepted.append(row)
             walk.last_balance_units = balance
             walk.last_row = row
+            anchor_row = row
+            pending_units = 0
             continue
         if row.side == Side.UNKNOWN.value:
-            # 方向未知的行不核对（金额带符号但方向语义无法独立复核），余额仍作下一行锚点。
+            # 方向未知的行不单独定锚：接受、金额并入待核对合计，余额不作下一行基准。
             walk.accepted.append(row)
-            walk.last_balance_units = balance
             walk.last_row = row
+            pending_units += row.amount_units
             continue
-        expected = walk.last_balance_units + row.amount_units
+        expected = walk.last_balance_units + pending_units + row.amount_units
         delta = balance - expected
         if abs(delta) <= epsilon_units:
             walk.accepted.append(row)
             walk.last_balance_units = balance
             walk.last_row = row
+            anchor_row = row
+            pending_units = 0
             continue
-        walk.quarantined.append(_break_candidate(row))
+        counterpart = f"第 {anchor_row.line_no} 行" if anchor_row else "起始锚点"
+        walk.quarantined.append(
+            _break_candidate(
+                row,
+                delta_units=delta,
+                expected_units=expected,
+                actual_units=balance,
+                counterpart=counterpart,
+            )
+        )
+        for rest in rows[index + 1 :]:
+            if _skipped_before(rest, skip_before):
+                walk.skipped += 1
+                continue
+            walk.quarantined.append(_break_candidate(rest))
+        break
     return walk
 
 

@@ -242,6 +242,8 @@ def test_transfer_rules_reuse_parser_vocabulary() -> None:
         "转存管转入",
         "转存管转出",
         "资管转让资金上账",
+        "银证转入",
+        "银证转出",
     }
 
 

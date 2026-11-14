@@ -246,6 +246,7 @@ NON_TRADE_SUMMARY_SIDE: tuple[tuple[str, str], ...] = (
     ("银行转存", Side.SELL.value),
     ("银行转取", Side.BUY.value),
     ("银证转入", Side.SELL.value),
+    ("银证转出", Side.BUY.value),
     ("跨行转入", Side.SELL.value),
     ("跨行转出", Side.BUY.value),
     ("带资金补登", Side.UNKNOWN.value),
@@ -278,6 +279,10 @@ TRANSFER_SUMMARY_KEYWORDS: tuple[str, ...] = (
     "转存管转入",
     "转存管转出",
     "资管转让资金上账",
+    # 银证转账的另一种摘要写法（华泰「银证转入/银证转出」）：与解析词表对称，避免
+    # 「解析器认识、分类器不认识」导致真实资金行在分类阶段被隔离。
+    "银证转入",
+    "银证转出",
 )
 
 

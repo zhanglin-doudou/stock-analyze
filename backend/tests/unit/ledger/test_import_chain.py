@@ -51,19 +51,24 @@ def _row(
     )
 
 
-def test_walk_chain_quarantines_noise_then_resumes() -> None:
+def test_walk_chain_quarantines_from_break_to_tail() -> None:
     rows = [
         _row(1, -100, 9_900),
         _row(2, -100, 9_700),  # 断行：期望 9_800
-        _row(3, -100, 9_800),  # 与上一接受行（9_900）接得上，应恢复
+        _row(3, -100, 9_800),  # 看似能接回，但锚点已不可信 → 一并隔离到链尾
     ]
     walk = walk_chain(rows, start_balance_units=10_000, epsilon_units=0)
 
-    assert [row.line_no for row in walk.accepted] == [1, 3]
-    assert [item.line_no for item in walk.quarantined] == [2]
+    assert [row.line_no for row in walk.accepted] == [1]
+    assert [item.line_no for item in walk.quarantined] == [2, 3]
     assert walk.quarantined[0].reason_code == QuarantineReason.RECONCILIATION_BREAK.value
     assert walk.quarantined[0].suggested_rule_id is None
-    assert walk.last_balance_units == 9_800
+    # 首条断行留痕：期望/实际/差额（分与定点字符串）
+    assert walk.quarantined[0].raw["_chain_expected_units"] == "9800"
+    assert walk.quarantined[0].raw["_chain_actual_units"] == "9700"
+    assert walk.quarantined[0].raw["_chain_delta"] == "-1.00"
+    assert "_chain_delta" not in walk.quarantined[1].raw
+    assert walk.last_balance_units == 9_900
 
 
 def test_walk_chain_skips_rows_before_same_day_anchor() -> None:
@@ -84,7 +89,7 @@ def test_walk_chain_skips_rows_before_same_day_anchor() -> None:
     assert walk.quarantined == []
 
 
-def test_walk_chain_unknown_side_does_not_break_chain() -> None:
+def test_walk_chain_unknown_side_is_verified_but_not_anchored() -> None:
     rows = [
         _row(1, -100, 9_900, side="unknown"),
         _row(2, -100, 9_800),
@@ -92,6 +97,35 @@ def test_walk_chain_unknown_side_does_not_break_chain() -> None:
     walk = walk_chain(rows, start_balance_units=10_000, epsilon_units=0)
 
     assert [row.line_no for row in walk.accepted] == [1, 2]
+    assert walk.quarantined == []
+
+
+def test_walk_chain_unknown_balance_cannot_absorb_gap() -> None:
+    # 方向未知行的余额「凭空少了 5,000」也不能当锚点：缺口留到下一条可核对行暴露。
+    rows = [
+        _row(1, -100, 9_900),
+        _row(2, -500, 4_900, side="unknown"),
+        _row(3, 0, 4_900),
+    ]
+    walk = walk_chain(rows, start_balance_units=10_000, epsilon_units=0)
+
+    assert [row.line_no for row in walk.accepted] == [1, 2]
+    assert [item.line_no for item in walk.quarantined] == [3]
+    # 期望 = 9,900 − 500 + 0 = 9,400；实际 4,900 → 差额 −45.00
+    assert walk.quarantined[0].raw["_chain_delta"] == "-45.00"
+    # 差额是相对「通过核对的行」算的，提示不能指向未定锚的 unknown 行（第 2 行）。
+    assert walk.quarantined[0].raw["_chain_counterpart"] == "第 1 行"
+
+
+def test_walk_chain_no_balance_rows_accumulate_amounts() -> None:
+    rows = [
+        _row(1, -100, 9_900),
+        _row(2, -100, None),  # 无余额：金额并入待核对合计
+        _row(3, -100, 9_700),
+    ]
+    walk = walk_chain(rows, start_balance_units=10_000, epsilon_units=0)
+
+    assert [row.line_no for row in walk.accepted] == [1, 2, 3]
     assert walk.quarantined == []
 
 

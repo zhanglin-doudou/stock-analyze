@@ -114,6 +114,8 @@ _TRANSFER_RULE_CODES: tuple[str, ...] = (
     "sys_custody_in",
     "sys_custody_out",
     "sys_asset_in",
+    "sys_syb_in",
+    "sys_syb_out",
 )
 _TRANSFER_RULE_NAMES: tuple[str, ...] = (
     "银行转证券→资金划转",
@@ -123,6 +125,8 @@ _TRANSFER_RULE_NAMES: tuple[str, ...] = (
     "转存管转入→资金划转",
     "转存管转出→资金划转",
     "资管转让上账→资金划转",
+    "银证转入→资金划转",
+    "银证转出→资金划转",
 )
 
 SYSTEM_RULES: tuple[tuple[str, str, str, str, str, str, int], ...] = (
