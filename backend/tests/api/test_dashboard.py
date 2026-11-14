@@ -16,6 +16,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 import uuid
 from datetime import UTC, date, datetime
@@ -317,6 +318,21 @@ async def _count(engine: AsyncEngine, sql: str) -> int:
         return int(await conn.scalar(text(sql)) or 0)
 
 
+async def _seed_quarantine_break(
+    engine: AsyncEngine, *, user_id: uuid.UUID, trade_date: date
+) -> None:
+    """插入一条未处理的断链隔离行（日期只在 raw 里，与真实隔离表同构）。"""
+    async with engine.begin() as conn:
+        await conn.execute(
+            text(
+                "insert into ledger.quarantine_row "
+                "(user_id, batch_id, line_no, raw, reason_code, resolved) "
+                "values (:uid, null, 1, cast(:raw as jsonb), 'RECONCILIATION_BREAK', false)"
+            ),
+            {"uid": user_id, "raw": json.dumps({"发生日期": trade_date.isoformat()})},
+        )
+
+
 def _find(missing: list[dict[str, str]], code: str) -> dict[str, str] | None:
     return next((item for item in missing if item["code"] == code), None)
 
@@ -593,6 +609,64 @@ async def test_api_084_insufficient_mdd(
     assert drawdown["from_date"] is None
     assert drawdown["n_obs"] < 60
     assert _find(body["missing"], "DASHBOARD_MDD_INSUFFICIENT") is not None
+
+
+async def test_api_084_total_profit_missing_carries_residual_and_break_date(
+    dashboard_client: Any,
+    account_factory: Any,
+    owner_engine: AsyncEngine,
+    settings: Any,
+    frozen_clock: FrozenClock,
+) -> None:
+    """桥接有残差时，缺失提示直接给「差多少 + 从哪天断」（不必再翻接口）。"""
+    acc = await account_factory()
+    # 06-20 期末余额少记 2000.00 → 桥接 residual = +2000.00（链不闭合）。
+    await _seed_trade(
+        owner_engine,
+        user_id=acc.user_id,
+        trade_date=date(2026, 5, 31),
+        side="buy",
+        quantity_units=1_000_000,
+        price_units=100_000_000,
+        amount_units=-1_000_000,
+        cash_balance_units=10_000_000,
+        category="buy",
+    )
+    await _seed_trade(
+        owner_engine,
+        user_id=acc.user_id,
+        trade_date=date(2026, 6, 10),
+        side="sell",
+        quantity_units=1_000_000,
+        price_units=120_000_000,
+        amount_units=1_200_000,
+        cash_balance_units=11_200_000,
+        category="sell",
+    )
+    await _seed_trade(
+        owner_engine,
+        user_id=acc.user_id,
+        trade_date=date(2026, 6, 20),
+        side="buy",
+        quantity_units=500_000,
+        price_units=100_000_000,
+        amount_units=-500_000,
+        cash_balance_units=10_500_000,
+        category="buy",
+    )
+    await _seed_quarantine_break(owner_engine, user_id=acc.user_id, trade_date=date(2026, 6, 20))
+    await _build_assets(dashboard_client, settings, acc.headers, frozen_clock, owner_engine)
+
+    resp = await dashboard_client.get("/api/v1/dashboard", headers=acc.headers)
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+
+    assert body["asset_overview"]["total_profit"] is None
+    item = _find(body["missing"], "DASHBOARD_TOTAL_PROFIT_UNAVAILABLE")
+    assert item is not None
+    assert "2000.00" in item["reason"]
+    assert "2026-06-20" in item["reason"]
+    assert "2026-06-20" in item["what_to_do"]
 
 
 async def test_api_084_leading_anchor_null_return_is_not_a_gap(
