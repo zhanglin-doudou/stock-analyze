@@ -10714,6 +10714,17 @@
             ],
             "title": "Category"
           },
+          "category_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category Label"
+          },
           "commission": {
             "title": "Commission",
             "type": "string"
@@ -25857,7 +25868,8 @@
                       "batch_id": "imp_01J9Z6ABCDEFGHJKMNPQRSTVWX",
                       "cash_balance": "50000.00",
                       "cash_balance_available": true,
-                      "category": "trade",
+                      "category": "buy",
+                      "category_label": "买入",
                       "commission": "12.34",
                       "created_at": "2026-09-30T09:30:00Z",
                       "dedupe_key": "ddk_01J9Z6ABCDEFGHJKMNPQRSTVWX",
@@ -26239,7 +26251,8 @@
                   "batch_id": "imp_01J9Z6ABCDEFGHJKMNPQRSTVWX",
                   "cash_balance": "50000.00",
                   "cash_balance_available": true,
-                  "category": "trade",
+                  "category": "buy",
+                  "category_label": "买入",
                   "commission": "12.34",
                   "created_at": "2026-09-30T09:30:00Z",
                   "dedupe_key": "ddk_01J9Z6ABCDEFGHJKMNPQRSTVWX",
@@ -26473,6 +26486,7 @@
                     "cash_balance": "1234.56",
                     "cash_balance_available": true,
                     "category": "trade",
+                    "category_label": "买入",
                     "commission": "1234.56",
                     "created_at": "2026-09-30T09:30:00Z",
                     "dedupe_key": "ddk_01J9Z6ABCDEFGHJKMNPQRSTVWX",
@@ -27343,6 +27357,7 @@
                     "cash_balance": "1234.56",
                     "cash_balance_available": true,
                     "category": "trade",
+                    "category_label": "买入",
                     "commission": "1234.56",
                     "created_at": "2026-09-30T09:30:00Z",
                     "dedupe_key": "ddk_01J9Z6ABCDEFGHJKMNPQRSTVWX",

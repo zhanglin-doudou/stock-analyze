@@ -55,6 +55,7 @@ async def _seed_trade(
     price_units: int = 1_000_000,
     amount_units: int = 1_000_000,
     cash_balance: int | None = None,
+    category: str | None = None,
     version: int = 1,
     batch_id: str | None = None,
     line_no: int | None = None,
@@ -79,6 +80,7 @@ async def _seed_trade(
                 other_fee_units=0,
                 cash_balance_units=cash_balance,
                 cash_balance_available=cash_balance is not None,
+                category=category,
                 occurrence_idx=0,
                 source="import",
                 version=version,
@@ -867,6 +869,16 @@ async def test_api_017_money_is_fixed_point_string(client, api_prefix, user, own
     assert item["quantity"] == "100"
     assert item["price"] == "1.000000"
     assert item["amount"] == "10000.00"
+
+
+async def test_api_017_category_label_is_backend_chinese_text(
+    client, api_prefix, user, owner_engine
+) -> None:
+    """明细类型中文文案由后端给出（前端零口径，只渲染该字符串）。"""
+    await _seed_trade(owner_engine, user_id=user.user_id, category="buy")
+    item = (await client.get(f"{api_prefix}/trades", headers=user.headers)).json()["items"][0]
+    assert item["category"] == "buy"
+    assert item["category_label"] == "买入"
 
 
 async def test_api_017_fractional_quantity_two_decimals(

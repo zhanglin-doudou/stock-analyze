@@ -483,6 +483,9 @@ class TradeOut(BaseModel):
     summary: str | None = None
     summary_code: str | None = None
     category: str | None = None
+    # 明细类型中文文案（contracts `BILL_CATEGORY_LABELS`，后端唯一口径）；
+    # 无 category 的历史/手工行为「未分类」，前端原样渲染、不做映射。
+    category_label: str | None = None
     dedupe_key: str
     version: int
     source: Literal["import", "manual", "system"] = "import"

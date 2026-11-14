@@ -5189,6 +5189,8 @@ export interface components {
             cash_balance_available: boolean;
             /** Category */
             category?: string | null;
+            /** Category Label */
+            category_label?: string | null;
             /** Commission */
             commission: string;
             /**

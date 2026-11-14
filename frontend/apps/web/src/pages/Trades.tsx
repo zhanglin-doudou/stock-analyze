@@ -119,7 +119,12 @@ export function Trades() {
       priority: 1,
       render: (row) => `${row.security_code} ${row.security_name ?? ""}`.trim(),
     },
-    { key: "side", header: "方向", priority: 1, render: (row) => row.side },
+    {
+      key: "category",
+      header: "明细类型",
+      priority: 1,
+      render: (row) => row.category_label,
+    },
     { key: "quantity", header: "数量", priority: 2, align: "right", render: (row) => row.quantity },
     { key: "price", header: "价格", priority: 2, align: "right", render: (row) => row.price },
     { key: "amount", header: "金额", priority: 2, align: "right", render: (row) => row.amount },

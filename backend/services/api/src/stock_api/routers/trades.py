@@ -13,6 +13,7 @@ from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Header, Query, Request, Response
 from fastapi.responses import JSONResponse
+from stock_contracts.enums import BILL_CATEGORY_LABELS
 from stock_contracts.errors import ApiError, ErrorCode
 from stock_core.values import Money, Price, Qty, format_quantity
 from stock_ledger.application.trades import (
@@ -55,6 +56,8 @@ _ALLOWED_SORTS: frozenset[str] = frozenset(
 # fields 裁剪白名单：TradeOut 字段名 + `id` 别名（§0.4）
 _ALLOWED_FIELDS: frozenset[str] = frozenset(TradeOut.model_fields)
 _ID_ALIASES = {"id": "trade_id"}
+# 无 category / 未登记枚举值的统一展示文案（前端零口径，只渲染该字符串）。
+_UNCATEGORIZED_LABEL = "未分类"
 
 
 def _reason_out(dto: ReasonDTO | None) -> TradeReasonOut | None:
@@ -104,6 +107,7 @@ def _trade_out(dto: TradeDTO, reason: ReasonDTO | None = None) -> TradeOut:
         summary=dto.summary,
         summary_code=dto.summary_code,
         category=dto.category,
+        category_label=BILL_CATEGORY_LABELS.get(dto.category or "", _UNCATEGORIZED_LABEL),
         dedupe_key=compute_dedupe_key(dto),
         version=dto.version,
         source=dto.source,

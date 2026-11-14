@@ -136,3 +136,53 @@ describe("Trades · 期间筛选（period 写入 URL）", () => {
     );
   });
 });
+
+describe("Trades · 明细类型列", () => {
+  it("列表用「明细类型」替代「方向」，直接渲染后端 category_label", async () => {
+    tradeApi.list.mockResolvedValue({
+      items: [
+        {
+          trade_id: "trd_1",
+          trade_date: "2021-07-15",
+          security_code: "600519",
+          security_name: "贵州茅台",
+          side: "buy",
+          category: "buy",
+          category_label: "买入",
+          quantity: "100.0000",
+          price: "1.000000",
+          amount: "-6048.00",
+          commission: "0.00",
+          stamp_tax: "0.00",
+          other_fee: "0.00",
+          cash_balance: null,
+          cash_balance_available: false,
+          money_fund_balance: null,
+          account_masked: null,
+          summary: null,
+          summary_code: null,
+          dedupe_key: "ddk_1",
+          version: 1,
+          source: "import",
+          batch_id: null,
+          note: null,
+          deleted_at: null,
+          created_at: "2021-07-15T00:00:00Z",
+          updated_at: "2021-07-15T00:00:00Z",
+          provenance: null,
+          reason: null,
+        },
+      ],
+      next_cursor: null,
+      has_more: false,
+      meta: { data_as_of: "2026-11-06" },
+      etag: null,
+    });
+
+    renderTrades("/trades");
+
+    expect(await screen.findByText("买入")).toBeTruthy();
+    expect(screen.getByRole("columnheader", { name: "明细类型" })).toBeTruthy();
+    expect(screen.queryByRole("columnheader", { name: "方向" })).toBeNull();
+  });
+});
