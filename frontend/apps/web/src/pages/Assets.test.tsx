@@ -386,6 +386,32 @@ describe("Assets 资产表页", () => {
     expect(buildAssets).toHaveBeenCalledTimes(1);
   });
 
+  it("FT-03g 自动触发收敛：noop 构建只刷新 last_built_at、状态仍 stale 时不重复 POST", async () => {
+    // 线上死循环复现：构建端与判定端口径版本不一致 → 每次构建都 noop，
+    // 状态永远 stale，只有 last_built_at 在前进（不得据此生成新的 stale 代次）。
+    listAssets
+      .mockResolvedValueOnce(
+        makePage({
+          build: makeBuild({ state: "stale", last_built_at: "2026-09-30T08:00:00Z" }),
+        }),
+      )
+      .mockResolvedValue(
+        makePage({
+          build: makeBuild({ state: "stale", last_built_at: "2026-09-30T08:00:01Z" }),
+        }),
+      );
+    getJob.mockResolvedValue(makeJob({ status: "succeeded" }));
+
+    renderPage();
+
+    await waitFor(() => expect(buildAssets).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(listAssets.mock.calls.length).toBeGreaterThanOrEqual(2));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(buildAssets).toHaveBeenCalledTimes(1);
+  });
+
   it("FT-03e 自动触发失败：展示后端文案 + 手动重试按钮，且不自动重复 POST", async () => {
     listAssets.mockResolvedValue(makePage({ build: makeBuild({ state: "stale" }) }));
     buildAssets.mockRejectedValueOnce(new ApiProblemError(buildProblem()));

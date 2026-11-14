@@ -44,11 +44,15 @@ export interface UseStaleAssetBuildOptions {
 const autoBuildSubmissions = new Map<string, Promise<string | null>>();
 
 /** 一次 stale 代次的指纹：只用后端只读字段，前端不做 staleness 计算。
- *  `last_built_at` 每次构建都会刷新 → 构建完成后即为新代次。 */
+ *
+ *  刻意**不含** `last_built_at`：no-op 构建（流水/行情/水位线都没变）也会刷新该时间，
+ *  若把它算进指纹，每次「stale → 自动 POST → noop → 仍 stale」都会生成新代次，
+ *  自动触发便永不收敛（实测 1 次/秒无限构建）。改用「数据身份」字段：只有真正完成
+ *  重建（`last_built_through` / `rows_count` / 口径版本变化）才是下一代。
+ */
 export function staleFingerprint(build: AssetBuildState): string {
   return [
     build.state,
-    build.last_built_at ?? "",
     build.last_built_through ?? "",
     build.rows_count,
     build.definition_version,
