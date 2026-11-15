@@ -125,6 +125,8 @@ async def test_sub_accounts_reconcile_independently_and_merge(
     assert coverage["mode"] == "empty"
     # 跨账户切换不再被当成断链：两段链各自连续，无隔离、无挡单。
     assert preview["blocking"] == []
+    # 隔离只统计解析期隔离行；类型待整步确认不算隔离（提交前必须确认，不会被隔离）。
+    assert preview["quarantine_rows"] == []
     assert preview["estimated"]["quarantined"] == 0
 
     batch_id = await _commit_and_drain(

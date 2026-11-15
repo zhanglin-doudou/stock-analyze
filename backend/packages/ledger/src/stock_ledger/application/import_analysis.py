@@ -277,7 +277,11 @@ def estimate_counts(
     *,
     existing_keys: set[str],
 ) -> dict[str, int]:
-    """只读估算：与 commit 同一顺序（dedupe → 废弃 → 未确认 → 插入）。"""
+    """只读估算：与 commit 同一顺序（dedupe → 废弃 → 待确认 → 插入）。
+
+    隔离只统计解析期隔离行：类型待整步确认的行既不算写入也不算隔离——提交前必须
+    确认全部类型，这些行不会落进隔离区。
+    """
     seen: set[str] = set()
     inserted = skipped = unknown = discarded = 0
     for row in bill.rows:
@@ -292,7 +296,7 @@ def estimate_counts(
         elif group.discard:
             discarded += 1
         elif group.needs_confirmation:
-            unknown += 1
+            continue
         else:
             inserted += 1
     return {
