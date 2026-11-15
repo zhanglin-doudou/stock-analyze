@@ -122,6 +122,20 @@ class Quote:
 
 
 @runtime_checkable
+class SyncableMarketSource(Protocol):
+    """可把日线缺口**显式补进** `market.daily_bar` 的行情源（仅 live + 本地缓存）。
+
+    读路径（API/worker 的 GET 端点）仍只读缓存；具备本能力的实现允许写路径（如资产表
+    构建）在缺行情时按标的集合 + 日期区间主动补拉一次（`sync_daily_bars`），与
+    `make sync-market` 同一条链路。
+    """
+
+    async def sync_daily_bars(
+        self, symbols: Sequence[str], start: date, end: date
+    ) -> tuple[int, tuple[str, ...]]: ...
+
+
+@runtime_checkable
 class MarketDataSource(Protocol):
     """行情端口：replay / live 适配器实现同一契约，P2-04 起消费。"""
 

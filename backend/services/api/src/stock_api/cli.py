@@ -943,7 +943,8 @@ async def _sync_market(
     """收盘后把持仓/基准日线的缺口同步进本地 ``market.daily_bar``。
 
     读路径（API/worker 的 metrics/assets）默认只读本地缓存，盘中不拉第三方；
-    本命令是唯一的第三方入口，且盘中不会拉当天。
+    本命令是**批量**同步入口，盘中不会拉当天。资产表构建在缺行情时会按缺失标的与缺失
+    区间补拉一次（资产表设计 §6.5），同样走 ``sync_daily_bars``、同样受盘中截断约束。
     """
     settings = get_settings()
     clock = SystemClock()

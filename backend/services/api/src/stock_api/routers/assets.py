@@ -240,7 +240,7 @@ async def get_assets_chart_endpoint(
     responses={
         200: {
             "model": AssetBuildFailed,
-            "description": "本次构建未执行（缺少行情数据）：无 job 产生，沿用失败构建状态 + missing[] 提示",
+            "description": "本次构建未执行（行情源无法补拉且缺少行情数据）：无 job 产生，沿用失败构建状态 + missing[] 提示",
         }
     },
 )
@@ -253,8 +253,10 @@ async def build_assets_endpoint(
 ) -> AssetBuildAccepted | JSONResponse:
     """API-082：入队构建/增量更新资产表（202）；单飞复用 / 异参 409。
 
-    缺行情（行情缓存完全没有覆盖资产表窗口）→ **200 + 失败构建状态 + 提示**，不入队
-    doomed job（自动触发路径据此静默跳过，等行情/条件变化后再试）。
+    缺行情（有本地缓存但**无法补拉**的行情源，且缓存完全没有覆盖资产表窗口）→
+    **200 + 失败构建状态 + 提示**，不入队 doomed job（自动触发路径据此静默跳过）。
+    live+本地缓存的行情源不再前置拦截：构建内会按缺失标的与缺失区间补拉一次，补拉后
+    仍缺则以 blocked 行 + 「缺少行情数据，请联系技术支持解决」表达。
     """
     ctx.forbid_admin_trades()
     user_id = ctx.require_write()

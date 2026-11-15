@@ -41,7 +41,7 @@ from stock_ledger.models import Trade
 from stock_platform.jobs import JobQueue
 from stock_platform.market_models import DailyBar
 from stock_platform.obs import get_logger
-from stock_platform.ports import MarketDataSource
+from stock_platform.ports import MarketDataSource, SyncableMarketSource
 from stock_platform.symbols import is_convertible_bond
 
 from stock_review.application.bond_alias import build_bond_alias, canonical_code
@@ -116,6 +116,9 @@ NO_ANCHOR_REASON = "无现金余额锚点（无 cash_balance 行）"
 FIFO_ERROR_REASON = "FIFO 数据异常（超卖等）"
 MARKET_UNCOVERED_REASON = "行情未覆盖，按最近收盘估值"
 MISSING_PRICE_PREFIX = "缺行情数据"
+# 缺行情补拉一次后仍未取到：给用户的最终提示（构建整体原因 + 行级原因后缀）。
+MISSING_QUOTE_FINAL_REASON = "缺少行情数据，请联系技术支持解决"
+MISSING_QUOTE_HINT = "，请联系技术支持解决"
 # blocked 行原因列上限（String(256)）
 _REASON_MAX = 256
 
@@ -186,11 +189,14 @@ class AssetBuildState:
 
 @dataclass(slots=True)
 class _DailyValuations:
-    """逐日推演结果：窗口内待写行 + 全局阻断信息。"""
+    """逐日推演结果：窗口内待写行 + 全局阻断信息 + 缺行情标的的受影响区间。"""
 
     rows: list[dict[str, object]]
     global_blocked: bool
     global_reason: str | None
+    # 缺行情（`blocked` 行）的标的 → (首个受影响日期, 最后一个受影响日期)。
+    # 只有当日持仓非零且「当日及之前无任何收盘价」的标的才计入；空表示没有 blocked 行。
+    missing_quotes: dict[str, tuple[date, date]]
 
 
 def _asset_id(user_id: uuid.UUID, trade_date: date) -> str:
@@ -251,6 +257,11 @@ def _row_status_reason(
     return "；".join(reasons) if reasons else None
 
 
+def _with_missing_quote_hint(reason: str) -> str:
+    """行级缺行情原因后追加最终提示（列宽 256 内；过长时截断标的清单而非提示本身）。"""
+    return reason[: _REASON_MAX - len(MISSING_QUOTE_HINT)] + MISSING_QUOTE_HINT
+
+
 # degraded 原因聚合标签（日志用）：去掉逐日变化的标的清单，避免键随组合爆炸。
 _BOND_FALLBACK_TAG = "债券按买入价估值（无行情）"
 _COST_FALLBACK_TAGS = frozenset({_BOND_FALLBACK_TAG})
@@ -283,6 +294,7 @@ def compute_daily_valuations(
     rebuilt_at: datetime,
     bond_alias: dict[str, str] | None = None,
     oversell_units: int = 0,
+    quotes_pull_attempted: bool = False,
 ) -> _DailyValuations:
     """内存重放 `[start, end]`，为 `[rebuild_from, end]` 生成资产日行（纯计算，无 I/O）。
 
@@ -292,13 +304,19 @@ def compute_daily_valuations(
     周末的外部现金流并入下一交易日；`prev_total` 取上一**已写工作日**的非 blocked 总资产，
     全量首行取期初现金锚点，增量首行用落库的 `prev_row`。
     持仓/成本/货基键按 `bond_alias` 归一为上市代码（发债代码不请求行情，设计 D3）。
+
+    `quotes_pull_attempted=True` 表示调用方已为缺行情标的补拉过行情（设计 §6.5）：仍
+    blocked 的行在原因后追加「请联系技术支持解决」；受影响标的与日期区间由
+    `missing_quotes` 返回，供调用方做**一次**定向补拉。
     """
     alias = bond_alias or {}
     # 新股待上市（认购缴款已入库、尚无行情）：按认购成本兜底估值，不阻断（设计 D11）。
     pending_codes = {canonical_code(alias, code) for code in new_stock_pending_codes(trades)}
     initial = _initial_cash(trades, start)
     if initial is None:
-        return _DailyValuations(rows=[], global_blocked=True, global_reason=NO_ANCHOR_REASON)
+        return _DailyValuations(
+            rows=[], global_blocked=True, global_reason=NO_ANCHOR_REASON, missing_quotes={}
+        )
     initial_cash, _assumption = initial
     initial_money_fund = initial_money_fund_balances(trades, start)
     bond_divisors = bond_face_divisors(trades)
@@ -315,6 +333,7 @@ def compute_daily_valuations(
     # None 表示首日之前或上一行 blocked。
     prior_total: int | None = None
     rows: list[dict[str, object]] = []
+    missing_quotes: dict[str, tuple[date, date]] = {}
     window_started = False
     # 周末不写行，但周末发生的资金划转仍需计入下一交易日的当日现金流。
     pending_cashflow = 0
@@ -386,6 +405,12 @@ def compute_daily_valuations(
             reason = blocked_price_reason(MISSING_PRICE_PREFIX, missing, market_causes)[
                 :_REASON_MAX
             ]
+            if quotes_pull_attempted:
+                # 已按标的集合补拉过一次仍缺：行级原因给出最终提示（构建级见 state reason）。
+                reason = _with_missing_quote_hint(reason)
+            for symbol in missing:
+                first, last = missing_quotes.get(symbol, (cursor_date, cursor_date))
+                missing_quotes[symbol] = (min(first, cursor_date), max(last, cursor_date))
             if cursor_date >= rebuild_from:
                 rows.append(
                     _blocked_row(
@@ -471,7 +496,12 @@ def compute_daily_valuations(
         pending_cashflow = 0
         cursor_date += timedelta(days=1)
 
-    return _DailyValuations(rows=rows, global_blocked=False, global_reason=None)
+    return _DailyValuations(
+        rows=rows,
+        global_blocked=False,
+        global_reason=None,
+        missing_quotes=missing_quotes,
+    )
 
 
 def prev_row_total(
@@ -697,10 +727,16 @@ async def precheck_market_data(
     与 `build_assets` 的 `_market_as_of` 同源判定（`market.daily_bar` 最大交易日）：
     - 仅对 live+本地缓存端口生效；replay / 纯透传端口没有本地缓存，缺个别标的属于
       既有 blocked/degraded 行语义（设计 §4.1 AT-08），不在前置拦截；
+    - 缓存全空/整段未覆盖时也不再拦：可补拉的行情源由 `build_assets` 在构建内补拉一次
+      （设计 §6.5），补拉后仍缺才以 blocked 行 + 最终提示表达；只有「有本地缓存却无法
+      补拉」的端口保留前置拦截；
     - 无有效流水（构建=清空 + reset）或构建窗口为空（时钟回拨）→ 不算缺行情；
     - 缓存最新交易日 ≥ 窗口起点 → 可建（个别日期/标的缺行情仍走既有降级语义）。
     """
     if getattr(market_data, "get_cached_bars", None) is None:
+        return None
+    if isinstance(market_data, SyncableMarketSource):
+        # 构建内会按缺失标的 + 缺失区间补拉一次，不再判成「doomed job」。
         return None
     repo = AssetRepository(session)
     trades_all = await repo.load_trades_including_deleted(user_id)
@@ -724,8 +760,46 @@ async def precheck_market_data(
             f"缺少行情数据：本地行情缓存{coverage}，未覆盖资产表窗口 "
             f"{start.isoformat()}~{end.isoformat()}，本次构建未执行。"
         ),
-        what_to_do="请先同步行情数据（make sync-market），覆盖资产表窗口后再重新触发资产构建。",
+        what_to_do=MISSING_QUOTE_FINAL_REASON,
     )
+
+
+async def _pull_missing_quotes(
+    market_data: SyncableMarketSource,
+    missing: dict[str, tuple[date, date]],
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """按「缺失标的 + 缺失日期区间」补拉一次日线，返回 (补拉的标的, 失败的标的)。
+
+    区间取「首个缺行情日期 − `PRICE_LOOKBACK`」到「最后一个缺行情日期」：估值只需要当日
+    或之前最近一个收盘价，向前多留回溯窗是为了在停牌/节假日/上市首日之前也能找到可用
+    的前收盘；不拉资产表窗口以外的更早区间。`sync_daily_bars` 内部只补真实缺口（已覆盖
+    区间与「上游确认无数据」的负缓存都不会重复请求），因此退市/停牌标的不会被反复拉取。
+    **每个标的至多调用一次，不重试**；单个标的失败不影响其他标的。
+    """
+    pulled: list[str] = []
+    failed: list[str] = []
+    for symbol, (first, last) in sorted(missing.items()):
+        start = first - PRICE_LOOKBACK
+        if start > last:
+            continue
+        pulled.append(symbol)
+        try:
+            _bars, symbol_failed = await market_data.sync_daily_bars([symbol], start, last)
+        except ApiError as exc:
+            # 单个标的的行情源异常（限流/不支持该代码等）不影响其余标的与本轮构建。
+            failed.append(symbol)
+            log.warning(
+                "assets.quotes_pull_failed",
+                symbol=symbol,
+                start=start.isoformat(),
+                end=last.isoformat(),
+                code=str(exc.code),
+                error=exc.detail,
+            )
+            continue
+        if symbol_failed:
+            failed.append(symbol)
+    return tuple(pulled), tuple(failed)
 
 
 async def build_assets(
@@ -925,26 +999,51 @@ async def build_assets(
 
     # 6) 行情：全量拉 [start-45, end]；增量只拉窗口 [rebuild_from-45, end]。
     price_from = (start if full else rebuild_from) - PRICE_LOOKBACK
-    ladder, market_causes = await load_prices(
-        market_data, _symbols(live, bond_alias), price_from, end
-    )
+    symbols = _symbols(live, bond_alias)
+    ladder, market_causes = await load_prices(market_data, symbols, price_from, end)
+    oversell_units = oversell_initial_units(fifo_result, period_start=start, period_end=end)
+    quotes_pull_attempted = False
+
+    def _valuate() -> _DailyValuations:
+        """用当前行情视图（`ladder` / `market_causes` / `market_as_of`）做一次纯内存推演。"""
+        return compute_daily_valuations(
+            live,
+            user_id=user_id,
+            start=start,
+            end=end,
+            rebuild_from=rebuild_from,
+            ladder=ladder,
+            market_causes=market_causes,
+            as_of=market_as_of,
+            prev_row=prev_row,
+            fifo_error_codes=fifo_error_codes,
+            rebuilt_at=clock.now(),
+            bond_alias=bond_alias,
+            oversell_units=oversell_units,
+            quotes_pull_attempted=quotes_pull_attempted,
+        )
 
     # 7) 内存逐日推演（无 I/O）；仅窗口行待写。
-    valuations = compute_daily_valuations(
-        live,
-        user_id=user_id,
-        start=start,
-        end=end,
-        rebuild_from=rebuild_from,
-        ladder=ladder,
-        market_causes=market_causes,
-        as_of=market_as_of,
-        prev_row=prev_row,
-        fifo_error_codes=fifo_error_codes,
-        rebuilt_at=clock.now(),
-        bond_alias=bond_alias,
-        oversell_units=oversell_initial_units(fifo_result, period_start=start, period_end=end),
-    )
+    valuations = _valuate()
+
+    # 7b) 缺行情自愈（设计 §6.5）：先按 blocked 行定位「缺的标的 + 缺失日期区间」，向
+    #     可补拉的行情源（live + 本地缓存）**补拉一次**，再用补拉后的行情重算一次。
+    #     只补拉一次、不循环不递归；补拉后仍缺则 blocked 行与 state 原因给出最终提示。
+    if valuations.missing_quotes and isinstance(market_data, SyncableMarketSource):
+        quotes_pull_attempted = True
+        pulled, pull_failed = await _pull_missing_quotes(market_data, valuations.missing_quotes)
+        log.info(
+            "assets.quotes_pull",
+            user_id=str(user_id),
+            symbols=pulled,
+            failed=pull_failed,
+        )
+        if pulled:
+            ladder, market_causes = await load_prices(market_data, symbols, price_from, end)
+            # 补拉可能推进行情覆盖日：重算 as_of，避免把刚补齐的日期仍按「未覆盖」降级。
+            market_as_of = await _market_as_of(session, market_data, clock)
+            valuations = _valuate()
+
     build_mode = BUILD_MODE_FULL if full else BUILD_MODE_INCREMENTAL
 
     # 8) 全局无锚点：不写日行，state 标 blocked。
@@ -989,10 +1088,17 @@ async def build_assets(
     rows_count = await repo.count(user_id)
     overall_status = await repo.overall_status(user_id)
     state_reason = _state_reason(overall_status, fifo_error=fifo_error_now)
+    blocked_rows = sum(1 for row in valuations.rows if row["status"] == ROW_STATUS_BLOCKED)
+    if blocked_rows and quotes_pull_attempted:
+        # 补拉一次后仍缺行情：state 原因给用户最终提示（前端直接渲染后端文案，不做判断）。
+        state_reason = (
+            f"{state_reason}；{MISSING_QUOTE_FINAL_REASON}"
+            if state_reason
+            else MISSING_QUOTE_FINAL_REASON
+        )
 
     # 监控点：每次构建都打 INFO 摘要；出现阻断/降级行再打 WARNING，附原因聚合与
     # 行情失败类别，无需复现即可从日志/告警直接定位（如退市标的缺口拉取失败）。
-    blocked_rows = sum(1 for row in valuations.rows if row["status"] == ROW_STATUS_BLOCKED)
     degraded_rows = sum(1 for row in valuations.rows if row["status"] == ROW_STATUS_DEGRADED)
     log.info(
         "assets.build",
@@ -1311,6 +1417,7 @@ __all__ = [
     "MARKET_CLOSE_HOUR",
     "MARKET_UNCOVERED_REASON",
     "MISSING_PRICE_PREFIX",
+    "MISSING_QUOTE_FINAL_REASON",
     "NO_ANCHOR_REASON",
     "SAFETY_DAYS",
     "WATERMARK_OVERLAP",

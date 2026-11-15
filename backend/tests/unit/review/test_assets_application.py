@@ -18,6 +18,7 @@ from stock_review.application.assets import (
     FIFO_ERROR_REASON,
     MARKET_UNCOVERED_REASON,
     MISSING_PRICE_PREFIX,
+    MISSING_QUOTE_HINT,
     _ratio_units,
     _session_notice,
     align_to_trading_day,
@@ -191,6 +192,7 @@ def _run(
     prev_row: AssetDaily | None = None,
     market_causes: dict[str, str] | None = None,
     bond_alias: dict[str, str] | None = None,
+    quotes_pull_attempted: bool = False,
 ):
     return compute_daily_valuations(
         trades,
@@ -205,6 +207,7 @@ def _run(
         fifo_error_codes=fifo_error_codes or set(),
         rebuilt_at=_REBUILT_AT,
         bond_alias=bond_alias,
+        quotes_pull_attempted=quotes_pull_attempted,
     )
 
 
@@ -682,6 +685,44 @@ def test_missing_price_blocks_day_with_zero_values_and_reason() -> None:
     assert blocked["status_reason"] is not None
     assert blocked["status_reason"].startswith(MISSING_PRICE_PREFIX)
     assert "999999" in blocked["status_reason"]
+    # 缺失区间供构建做一次定向补拉：只有真正 blocked 的工作日（周末不写行）。
+    assert result.missing_quotes == {"999999": (date(2026, 1, 2), date(2026, 1, 2))}
+    assert MISSING_QUOTE_HINT not in blocked["status_reason"]
+
+
+def test_missing_price_reason_carries_support_hint_after_pull_attempt() -> None:
+    """UT-27：补拉一次后仍缺行情 → 行级原因追加最终提示（文案由后端给，前端只渲染）。"""
+    trades = [
+        _trade(
+            trade_date=date(2026, 1, 1),
+            category="other",
+            amount_units=0,
+            cash_balance_units=cents("100000.00"),
+            line_no=1,
+        ),
+        _trade(
+            trade_date=date(2026, 1, 2),
+            category="buy",
+            amount_units=-cents("1000.00"),
+            quantity_units=shares("100"),
+            price_units=price("10.00"),
+            security_code="999999",
+            line_no=2,
+        ),
+    ]
+    result = _run(
+        trades,
+        date(2026, 1, 1),
+        date(2026, 1, 5),
+        ladder=_ladder(),
+        quotes_pull_attempted=True,
+    )
+    blocked = _row(result, date(2026, 1, 2))
+    assert blocked["status"] == "blocked"
+    assert blocked["status_reason"].startswith(MISSING_PRICE_PREFIX)
+    assert blocked["status_reason"].endswith(MISSING_QUOTE_HINT)
+    # 连续缺行情跨多个工作日：补拉区间覆盖首尾两端。
+    assert result.missing_quotes == {"999999": (date(2026, 1, 2), date(2026, 1, 5))}
 
 
 def test_blocked_next_day_has_null_pnl_then_recovers() -> None:

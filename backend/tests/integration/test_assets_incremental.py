@@ -6,6 +6,7 @@
 - IT-03 no-op；IT-04/IT-13 修正/改日期 → 全量；IT-05 撤销/软删/恢复；
 - IT-06/IT-17 行情 as_of 前进（含修复 degraded 段）；as_of 跨度 >45 天 → 全量；
 - IT-11 end 回退 → 全量；IT-14 指纹竞态兜底；FIFO 异常集合变化 → 全量；
+- IT-18 blocked 行在补齐行情后重算；IT-19 缺行情自愈（构建内单次补拉 + 最终提示）；
 - IT-08 失败原子性（事务回滚，旧行/旧 state 完好）；状态 CAS 冲突；
 - 回填（首个余额行前 → 全量；之后 → 增量）；
 - `GET /assets` 的 build.state 判定链（current/stale/missing/blocked）与游标分页；
@@ -33,8 +34,11 @@ from stock_platform.config import Settings
 from stock_platform.db import Database
 from stock_platform.ports import Bar
 from stock_review.application.assets import (
+    ASSET_DEFINITION_VERSION,
     FIFO_ERROR_REASON,
     MARKET_UNCOVERED_REASON,
+    MISSING_QUOTE_FINAL_REASON,
+    MISSING_QUOTE_HINT,
     AssetBuildSummary,
     build_assets,
     build_assets_job,
@@ -745,6 +749,193 @@ async def test_blocked_rows_rebuilt_after_prices_arrived_without_as_of_change(
     )  # type: ignore[arg-type]
 
 
+# ── IT-19：缺行情自愈（构建内按标的 + 缺失区间补拉一次）────────
+
+
+class _PullableMarket:
+    """可补拉的桩行情：读只读「本地缓存」，`sync_daily_bars` 模拟向上游补拉一次。
+
+    `upstream` 是上游能取到的日线；补拉命中后写进 `cache`，构建的第二次读数可见。
+    `pull_calls` 记录每次补拉的 (标的, 起点, 终点)，用于断言「只补拉一次、区间不越界」。
+    """
+
+    def __init__(self, *, as_of: date, upstream: list[Bar] | None = None) -> None:
+        self.as_of = as_of
+        self.upstream = list(upstream or [])
+        self.cache: list[Bar] = []
+        self.pull_calls: list[tuple[str, date, date]] = []
+
+    @property
+    def capabilities(self) -> Any:
+        return frozenset()
+
+    async def get_daily_bars(self, symbols: Any, start: date, end: date) -> list[Bar]:
+        return self._cached(symbols, start, end)
+
+    async def get_cached_bars(self, symbols: Any, start: date, end: date) -> list[Bar]:
+        return self._cached(symbols, start, end)
+
+    def _cached(self, symbols: Any, start: date, end: date) -> list[Bar]:
+        wanted = set(symbols)
+        return [
+            bar for bar in self.cache if bar.symbol in wanted and start <= bar.trade_date <= end
+        ]
+
+    async def sync_daily_bars(
+        self, symbols: Any, start: date, end: date
+    ) -> tuple[int, tuple[str, ...]]:
+        pulled = 0
+        effective_end = min(end, self.as_of)
+        for symbol in symbols:
+            self.pull_calls.append((symbol, start, end))
+            for bar in self.upstream:
+                matched = bar.symbol == symbol and start <= bar.trade_date <= effective_end
+                if matched and bar not in self.cache:
+                    self.cache.append(bar)
+                    pulled += 1
+        return pulled, ()
+
+
+async def _seed_two_missing_symbols(engine: AsyncEngine, user_id: uuid.UUID) -> None:
+    """06-24 余额锚点；06-25 买 600519、06-26 买 000001（两只都缺行情）。"""
+    await _seed_trade(
+        engine,
+        user_id,
+        trade_date=date(2026, 6, 24),
+        code="CASH",
+        category="other",
+        side="buy",
+        amount_units=0,
+        cash_balance_units=cents("100000.00"),
+        line_no=1,
+    )
+    await _seed_trade(
+        engine,
+        user_id,
+        trade_date=date(2026, 6, 25),
+        code="600519",
+        category="buy",
+        side="buy",
+        quantity_units=shares("100"),
+        price_units=price("1700.00"),
+        amount_units=-cents("170000.00"),
+        line_no=2,
+        updated_at=LATER_UPDATED_AT,
+    )
+    await _seed_trade(
+        engine,
+        user_id,
+        trade_date=date(2026, 6, 26),
+        code="000001",
+        category="buy",
+        side="buy",
+        quantity_units=shares("100"),
+        price_units=price("12.40"),
+        amount_units=-cents("1240.00"),
+        line_no=3,
+        updated_at=LATER_UPDATED_AT,
+    )
+
+
+async def test_build_pulls_missing_quotes_once_and_fills_blocked_rows(
+    owner_engine: AsyncEngine, app_db: Database
+) -> None:
+    """IT-19：缺行情 → 只对缺失标的的缺失区间补拉一次，补拉后重算即恢复 ok。"""
+    user_id = await _insert_user(owner_engine)
+    await _seed_two_missing_symbols(owner_engine, user_id)
+    market = _PullableMarket(
+        as_of=date(2026, 6, 30),
+        upstream=[
+            Bar(
+                symbol="600519",
+                trade_date=date(2026, 6, 24),
+                close_units=price("1700.00"),
+                return_units=0,
+            ),
+            Bar(
+                symbol="000001",
+                trade_date=date(2026, 6, 25),
+                close_units=price("12.40"),
+                return_units=0,
+            ),
+        ],
+    )
+
+    summary = await _build(app_db, user_id, market)
+    assert summary.mode == "full"
+    assert summary.status == "ok"
+
+    # 每只缺行情标的只补拉一次；区间 = 首个缺行情日 − 45 天回溯窗 ~ 最后缺行情日。
+    assert market.pull_calls == [
+        ("000001", date(2026, 5, 12), date(2026, 6, 30)),
+        ("600519", date(2026, 5, 11), date(2026, 6, 30)),
+    ]
+    rows = await _rows(app_db, user_id)
+    assert rows and not any(row.status == "blocked" for row in rows)
+    by_date = {row.trade_date: row for row in rows}
+    # 06-25：现金 100000-170000 + 600519 100 股 @1700 = 100000（补拉到的 06-24 收盘可用）。
+    assert by_date[date(2026, 6, 25)].total_assets_units == cents("100000.00")
+    # 06-26：再加 000001 100 股 @12.40（补拉到的 06-25 收盘可用）。
+    assert by_date[date(2026, 6, 26)].total_assets_units == cents("100000.00")
+    state = await _state(app_db, user_id)
+    assert state is not None
+    assert state.last_status == "ok"
+    assert state.status_reason is None
+
+
+async def test_build_shows_support_hint_when_pull_still_missing(
+    owner_engine: AsyncEngine, app_db: Database
+) -> None:
+    """IT-19：补拉一次后仍缺行情 → 不再重试；state 给最终提示，行级原因带同一提示后缀。"""
+    user_id = await _insert_user(owner_engine)
+    await _seed_two_missing_symbols(owner_engine, user_id)
+    market = _PullableMarket(as_of=date(2026, 6, 30), upstream=[])
+
+    await _build(app_db, user_id, market)
+
+    # 每只标的只补拉一次（不循环、不递归重建）。
+    assert market.pull_calls == [
+        ("000001", date(2026, 5, 12), date(2026, 6, 30)),
+        ("600519", date(2026, 5, 11), date(2026, 6, 30)),
+    ]
+    rows = await _rows(app_db, user_id)
+    blocked = [row for row in rows if row.status == "blocked"]
+    assert blocked
+    assert all(row.status_reason is not None for row in blocked)
+    assert all(str(row.status_reason).endswith(MISSING_QUOTE_HINT) for row in blocked)
+    state = await _state(app_db, user_id)
+    assert state is not None
+    assert state.last_status == "degraded"
+    assert state.status_reason == MISSING_QUOTE_FINAL_REASON
+
+
+async def test_no_pull_when_previous_close_covers_suspension(
+    owner_engine: AsyncEngine, app_db: Database
+) -> None:
+    """IT-19 边界：只有更早的收盘（停牌/无新行情）不算缺行情，不触发补拉。"""
+    user_id = await _insert_user(owner_engine)
+    await _seed_baseline(owner_engine, user_id)
+    # 只有 2026-02-27 的一根 bar：之后一直没有新行情（停牌/未更新），按「最近收盘」
+    # 估值即可，不算缺行情，不触发补拉。
+    market = _PullableMarket(
+        as_of=date(2026, 6, 30),
+        upstream=[],
+    )
+    market.cache.append(
+        Bar(
+            symbol="600519",
+            trade_date=date(2026, 2, 27),
+            close_units=price("1650.00"),
+            return_units=0,
+        )
+    )
+    await _build(app_db, user_id, market)
+
+    assert market.pull_calls == []
+    rows = await _rows(app_db, user_id)
+    assert rows and not any(row.status == "blocked" for row in rows)
+
+
 # ── IT-11：end 回退 → 全量 ────────────────────────────────
 
 
@@ -1013,7 +1204,7 @@ async def test_list_assets_state_chain_and_pagination(
         )
     assert build.state == "current"
     assert build.last_status == "ok"
-    assert build.definition_version == "1.7"
+    assert build.definition_version == ASSET_DEFINITION_VERSION
     assert build.data_as_of == replay_market.as_of
     assert build.rows_count > 0
     assert [point.trade_date for point in points] == sorted(
@@ -1256,7 +1447,7 @@ async def test_list_assets_missing_after_empty_build_hides_state_fields(
     assert build.status_reason is None
     assert build.data_as_of is None
     assert build.has_new_market_data is False
-    assert build.definition_version == "1.7"
+    assert build.definition_version == ASSET_DEFINITION_VERSION
 
 
 # ── worker handler：progress / result / 取消 ─────────────
