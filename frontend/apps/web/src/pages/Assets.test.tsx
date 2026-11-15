@@ -667,6 +667,21 @@ describe("Assets 资产表页", () => {
     expect(screen.getByText(/部分日期存在阻断\/降级/)).toBeTruthy();
   });
 
+  it("FT-08 degraded 提示：后端 status_reason 原样展示（缺行情最终文案由后端给）", async () => {
+    listAssets.mockResolvedValue(
+      makePage({
+        build: makeBuild({
+          last_status: "degraded",
+          status_reason: "缺少行情数据，请联系技术支持解决",
+        }),
+      }),
+    );
+
+    renderPage();
+
+    expect(await screen.findByText("缺少行情数据，请联系技术支持解决")).toBeTruthy();
+  });
+
   it("FT-10 可访问性：提交中按钮 disabled + aria-busy + 「构建中…」", async () => {
     listAssets.mockResolvedValue(missingPage());
     let resolveBuild: (value: AssetBuildAccepted) => void = () => undefined;

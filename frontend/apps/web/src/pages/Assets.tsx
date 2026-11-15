@@ -134,9 +134,10 @@ function BuildSummary({ page }: BuildSummaryProps): ReactElement {
         </p>
       ) : null}
       {build.last_status === "degraded" ? (
-        <p className="notice-warn" data-testid="assets-degraded">
-          部分日期存在阻断/降级，修复数据后点「更新资产表」即可重算。
-        </p>
+        <div className="notice-warn" data-testid="assets-degraded">
+          <p>部分日期存在阻断/降级，修复数据后点「更新资产表」即可重算。</p>
+          {build.status_reason ? <p className="muted">{build.status_reason}</p> : null}
+        </div>
       ) : null}
       {build.state === "blocked" ? (
         <div className="notice-warn" data-testid="assets-blocked-banner">
