@@ -47,6 +47,14 @@ def _bill(rows: int = 2, summary: str = "证券买入") -> bytes:
     return ("\ufeff" + _HEADER + "".join(_row(i + 1, summary) for i in range(rows))).encode("utf-8")
 
 
+def _quarantine_bill() -> bytes:
+    """1 条正常行 + 1 条完全重复行 + 1 条日期非法行（隔离行各有不同原因）。"""
+    invalid_date = (
+        "2026-04-32,600009,测试9,买入,100,10.00,1000.00,5.00,0.00,0.00,7000.00,证券买入\n"
+    )
+    return ("\ufeff" + _HEADER + _row(1) + _row(1) + invalid_date).encode("utf-8")
+
+
 def _two_fee_bill(*, fee_a: str = "1.00", second_balance: str = "10098.00") -> bytes:
     return (
         "成交日期,证券代码,证券名称,买卖标志,成交数量,成交价格,成交金额,"
@@ -189,7 +197,7 @@ async def test_api_010_v2_stage_mapping_or_types(client, api_prefix, user) -> No
     assert body["categories"]
     assert body["estimated"]["estimated_available"] is True
     assert all("key" in column for column in body["columns"])
-    # 摘要规则命中的已知类型无需人工确认 → 可直接 ready。
+    # E：类型必须整步确认后才 ready，规则命中不自动放行。
     assert body["can_commit"] is (body["stage"] == "ready")
 
 
@@ -220,9 +228,8 @@ async def test_api_010_v2_huatai_fixture_has_complete_suggestions(client, api_pr
         "摘要",
     }
     assert any(item["suggested_category"] for item in body["types"])
-    assert {item["type_key"] for item in body["types"] if item["needs_confirmation"]} == {
-        "未知业务xyz"
-    }
+    # E：即使命中摘要规则/历史记忆，也要用户在类型步骤整步确认，不自动跳过。
+    assert all(item["needs_confirmation"] for item in body["types"])
 
 
 async def test_api_010_v2_rejects_headerless_data_layout(client, api_prefix, user) -> None:
@@ -435,6 +442,116 @@ async def test_api_106_get_preview(client, api_prefix, user) -> None:
     assert resp.status_code == 200, resp.text
     assert resp.json()["preview_id"] == preview["preview_id"]
     assert resp.json()["stage"] == preview["stage"]
+
+
+async def test_api_010_preview_quarantine_rows_detail(client, api_prefix, user) -> None:
+    """A：隔离弹窗要逐行原因与定位字段；明细随预览落库，GET 预览也能取到全量。"""
+    preview = await _preview(client, api_prefix, user, data=_quarantine_bill())
+    rows = preview["quarantine_rows"]
+    assert len(rows) == 2
+    by_reason = {row["reason_code"]: row for row in rows}
+    assert set(by_reason) == {"DUPLICATE_IN_FILE", "INVALID_ROW"}
+
+    duplicate = by_reason["DUPLICATE_IN_FILE"]
+    assert duplicate["line_no"] == 3
+    assert duplicate["date"] == "2026-04-01"
+    assert duplicate["summary"] == "证券买入"
+    assert duplicate["security_code"] == "600001"
+    assert duplicate["amount"] == "1000.00"
+    assert duplicate["reason"]
+
+    invalid = by_reason["INVALID_ROW"]
+    assert invalid["line_no"] == 4
+    assert invalid["date"] == "2026-04-32"
+    assert invalid["summary"] == "证券买入"
+    assert invalid["reason"]
+
+    mapped = await client.put(
+        f"{api_prefix}/imports/previews/{preview['preview_id']}/mapping",
+        headers={**user.headers, "If-Match": str(preview["mapping_version"])},
+        json=_mapping_payload(preview),
+    )
+    assert mapped.status_code == 200, mapped.text
+    typed = await client.put(
+        f"{api_prefix}/imports/previews/{preview['preview_id']}/types",
+        headers={**user.headers, "If-Match": str(mapped.json()["mapping_version"])},
+        json=_types_payload(mapped.json()),
+    )
+    assert typed.status_code == 200, typed.text
+    body = typed.json()
+    # 类型确认后隔离计数只剩解析期隔离行，与明细逐行对齐。
+    assert body["estimated"]["quarantined"] == 2
+    assert len(body["quarantine_rows"]) == 2
+
+    fetched = await client.get(
+        f"{api_prefix}/imports/previews/{preview['preview_id']}", headers=user.headers
+    )
+    assert fetched.status_code == 200, fetched.text
+    assert fetched.json()["quarantine_rows"] == body["quarantine_rows"]
+
+
+async def test_api_011_rule_matched_types_still_need_step_confirmation(
+    client, api_prefix, user
+) -> None:
+    """E：命中摘要规则的已知类型也不自动跳过，类型不整步确认就不能提交。"""
+    preview = await _preview(client, api_prefix, user)
+    assert preview["types"]
+    assert all(item["suggested_category"] for item in preview["types"])
+
+    mapped = await client.put(
+        f"{api_prefix}/imports/previews/{preview['preview_id']}/mapping",
+        headers={**user.headers, "If-Match": str(preview["mapping_version"])},
+        json=_mapping_payload(preview),
+    )
+    assert mapped.status_code == 200, mapped.text
+    body = mapped.json()
+    assert body["stage"] == "types"
+    assert body["can_commit"] is False
+    assert all(item["needs_confirmation"] for item in body["types"])
+
+    resp = await client.post(
+        f"{api_prefix}/imports",
+        headers={**user.headers, "Idempotency-Key": "key-" + uuid.uuid4().hex},
+        json={"preview_id": preview["preview_id"], "mode": "full"},
+    )
+    assert resp.status_code == 409
+    assert resp.json()["code"] == ErrorCode.IMPORT_STAGE_CONFLICT.value
+
+
+async def test_api_098_remap_from_ready_keeps_user_type_choices(client, api_prefix, user) -> None:
+    """C：退回改映射后，用户此前手动选的分类不丢（但类型仍需重新整步确认）。"""
+    preview = await _preview(client, api_prefix, user)
+    mapped = await client.put(
+        f"{api_prefix}/imports/previews/{preview['preview_id']}/mapping",
+        headers={**user.headers, "If-Match": str(preview["mapping_version"])},
+        json=_mapping_payload(preview),
+    )
+    assert mapped.status_code == 200, mapped.text
+    body = mapped.json()
+    typed = await client.put(
+        f"{api_prefix}/imports/previews/{preview['preview_id']}/types",
+        headers={**user.headers, "If-Match": str(body["mapping_version"])},
+        json={
+            "resolutions": [
+                {"type_key": item["type_key"], "category": "other", "discard": False}
+                for item in body["types"]
+            ]
+        },
+    )
+    assert typed.status_code == 200, typed.text
+    assert typed.json()["stage"] == "ready"
+    assert {item["category"] for item in typed.json()["types"]} == {"other"}
+
+    remapped = await client.put(
+        f"{api_prefix}/imports/previews/{preview['preview_id']}/mapping",
+        headers={**user.headers, "If-Match": str(typed.json()["mapping_version"])},
+        json=_mapping_payload(typed.json()),
+    )
+    assert remapped.status_code == 200, remapped.text
+    again = remapped.json()
+    assert again["stage"] == "types"
+    assert {item["category"] for item in again["types"]} == {"other"}
+    assert all(item["needs_confirmation"] for item in again["types"])
 
 
 async def test_api_106_cross_account_404(client, api_prefix, user, account_factory) -> None:
@@ -788,6 +905,36 @@ async def test_api_098_011_two_fee_columns_merge_and_commit(
     ]
 
 
+async def test_api_098_remap_from_ready_updates_preview_in_place(
+    client: AsyncClient, api_prefix: str, user: Any
+) -> None:
+    """确认步「退回改映射」复用 API-098 原地更新：同一预览、版本自增、旧版本被拒。"""
+    ready = await _ready_preview(client, api_prefix, user)
+    assert ready["stage"] == "ready"
+    assert ready["can_commit"] is True
+
+    remapped = await client.put(
+        f"{api_prefix}/imports/previews/{ready['preview_id']}/mapping",
+        headers={**user.headers, "If-Match": str(ready["mapping_version"])},
+        json=_mapping_payload(ready),
+    )
+    assert remapped.status_code == 200, remapped.text
+    body = remapped.json()
+    # 原地更新：不新建预览、不需要重新上传文件。
+    assert body["preview_id"] == ready["preview_id"]
+    assert body["file"] == ready["file"]
+    assert body["mapping_version"] == ready["mapping_version"] + 1
+    # 映射变更会清空旧类型确认：要么回到类型步重新确认，要么仍满足提交条件。
+    assert body["stage"] in {"types", "ready"}
+
+    stale = await client.put(
+        f"{api_prefix}/imports/previews/{ready['preview_id']}/mapping",
+        headers={**user.headers, "If-Match": str(ready["mapping_version"])},
+        json=_mapping_payload(ready),
+    )
+    assert stale.status_code == 409
+
+
 @pytest.mark.parametrize(
     ("bill", "expected_code", "line_text"),
     [
@@ -821,8 +968,15 @@ async def test_api_098_balance_chain_break_is_quarantined_not_rejected(
     )
     assert mapped.status_code == 200, mapped.text
     body = mapped.json()
-    assert body["estimated"]["inserted"] == 1
-    assert body["estimated"]["quarantined"] == 1
+    # E：类型未整步确认前不进入可入库口径，但隔离明细应能定位断链行及原因。
+    assert body["estimated"]["inserted"] == 0
+    break_rows = [
+        row for row in body["quarantine_rows"] if row["reason_code"] == "RECONCILIATION_BREAK"
+    ]
+    assert len(break_rows) == 1
+    assert break_rows[0]["line_no"] is not None
+    assert break_rows[0]["reason"]
+    assert break_rows[0]["summary"]
 
     typed = await client.put(
         f"{api_prefix}/imports/previews/{preview['preview_id']}/types",
@@ -830,6 +984,8 @@ async def test_api_098_balance_chain_break_is_quarantined_not_rejected(
         json=_types_payload(body),
     )
     assert typed.status_code == 200, typed.text
+    assert typed.json()["estimated"]["inserted"] == 1
+    assert typed.json()["estimated"]["quarantined"] == 1
     accepted = await _commit(client, api_prefix, user, typed.json())
     await _drain_worker(settings)
 
@@ -1148,9 +1304,8 @@ async def test_api_011_015_incremental_type_and_revoke_preserve_template(
     second_preview = await _preview(client, api_prefix, user, data=second_data)
     assert second_preview["template"] is not None
     assert second_preview["stage"] == "types"
-    assert {item["type_key"] for item in second_preview["types"] if item["needs_confirmation"]} == {
-        "基金转换"
-    }
+    # E：命中历史记忆/规则的类型也必须整步确认，确认范围只限本文件涉及的类型。
+    assert all(item["needs_confirmation"] for item in second_preview["types"])
     second = await _ready_preview(client, api_prefix, user, data=second_data)
     second_accepted = await _commit(client, api_prefix, user, second)
     await _drain_worker(settings)
@@ -1211,7 +1366,7 @@ async def test_api_011_015_incremental_type_and_revoke_preserve_template(
     assert last_batch_id == first_accepted["batch_id"]
 
 
-async def test_api_010_011_huatai_newtype_fixture_only_confirms_new_type(
+async def test_api_010_011_huatai_newtype_fixture_requires_step_confirmation(
     client, api_prefix, user, settings
 ) -> None:
     first = await _ready_preview(
@@ -1235,9 +1390,8 @@ async def test_api_010_011_huatai_newtype_fixture_only_confirms_new_type(
     )
     assert second["template"] is not None
     assert second["stage"] == "types"
-    assert {item["type_key"] for item in second["types"] if item["needs_confirmation"]} == {
-        "基金转换"
-    }
+    # E：规则命中/记忆只预填分类，类型仍须整步确认。
+    assert all(item["needs_confirmation"] for item in second["types"])
 
     typed = await client.put(
         f"{api_prefix}/imports/previews/{second['preview_id']}/types",

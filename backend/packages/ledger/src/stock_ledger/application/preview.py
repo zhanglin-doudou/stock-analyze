@@ -20,7 +20,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from stock_contracts.clock import Clock
 from stock_contracts.constants import IMPORT_PREVIEW_TTL_HOURS
-from stock_contracts.enums import WarningCode
+from stock_contracts.enums import QUARANTINE_REASON_LABELS, WarningCode
 from stock_contracts.errors import ApiError, ErrorCode, FieldError, NotFoundError
 from stock_core.values import Money, Price, format_quantity
 from stock_platform.config import Settings, get_settings
@@ -44,7 +44,13 @@ from stock_ledger.application.import_analysis import (
     verify_fee_merge,
 )
 from stock_ledger.models import ImportPreview
-from stock_ledger.parsers.huatai import ParsedBill, ParsedRow, parse_bill, parse_bill_with_plan
+from stock_ledger.parsers.huatai import (
+    ParsedBill,
+    ParsedRow,
+    QuarantineCandidate,
+    parse_bill,
+    parse_bill_with_plan,
+)
 from stock_ledger.parsers.mapping import MappingPlan, validate_plan
 from stock_ledger.parsers.profiles import detect_broker
 from stock_ledger.parsers.table import inspect_table
@@ -132,6 +138,8 @@ class ImportPreviewDTO:
     mapping_version: int = 0
     template_id: str | None = None
     type_resolutions: list[dict[str, Any]] = field(default_factory=list)
+    #: 解析期隔离行明细（行号/原因/日期/摘要…）；提交前弹窗提醒用。
+    quarantine_rows: list[dict[str, Any]] = field(default_factory=list)
     blocking: list[dict[str, Any]] = field(default_factory=list)
     verification: dict[str, Any] = field(default_factory=dict)
     discarded_count: int = 0
@@ -173,6 +181,7 @@ class ImportPreviewDTO:
             "mapping_version": self.mapping_version,
             "template_id": self.template_id,
             "type_resolutions": self.type_resolutions,
+            "quarantine_rows": self.quarantine_rows,
             "blocking": self.blocking,
             "verification": self.verification,
             "discarded_count": self.discarded_count,
@@ -207,6 +216,45 @@ def row_to_sample(row: ParsedRow) -> dict[str, Any]:
     }
 
 
+#: 隔离明细展示的定位字段（canonical 字段名 → 输出键），值保持账单原文。
+_QUARANTINE_LOCATOR_FIELDS: tuple[tuple[str, str], ...] = (
+    ("trade_date", "date"),
+    ("security_code", "security_code"),
+    ("security_name", "security_name"),
+    ("summary", "summary"),
+    ("quantity", "quantity"),
+    ("price", "price"),
+    ("amount", "amount"),
+    ("cash_balance", "cash_balance"),
+)
+
+
+def quarantine_rows_detail(
+    quarantined: list[QuarantineCandidate],
+    column_fields: dict[str, str],
+) -> list[dict[str, Any]]:
+    """隔离行 → 明细（行号、原因、日期/摘要等定位字段）；只做展示，不参与提交校验。"""
+    rows: list[dict[str, Any]] = []
+    locator_fields = {field for field, _ in _QUARANTINE_LOCATOR_FIELDS}
+    for item in quarantined:
+        values: dict[str, str] = {}
+        for header, value in item.raw.items():
+            # raw 以「原始表头 → 原文」为主；链路类隔离会额外注入 canonical 键（如 summary）。
+            field = column_fields.get(header) or (header if header in locator_fields else None)
+            if field and field not in values and value:
+                values[field] = str(value)
+        row: dict[str, Any] = {
+            "line_no": item.line_no,
+            "reason_code": item.reason_code,
+            "reason": QUARANTINE_REASON_LABELS.get(item.reason_code, item.reason_code),
+            "suggested_rule_id": item.suggested_rule_id,
+        }
+        for field, key in _QUARANTINE_LOCATOR_FIELDS:
+            row[key] = values.get(field)
+        rows.append(row)
+    return rows
+
+
 @dataclass(slots=True)
 class _Analysis:
     bill: ParsedBill | None
@@ -216,6 +264,7 @@ class _Analysis:
     extra_warnings: list[str]
     estimates: dict[str, int]
     stage: str
+    quarantine_rows: list[dict[str, Any]] = field(default_factory=list)
 
 
 async def _analyze(
@@ -283,6 +332,7 @@ async def _analyze(
         fee_warnings,
         estimates,
         stage_for([], groups, parse_failed=False),
+        quarantine_rows=quarantine_rows_detail(bill.quarantined, _plan_columns(inspection, plan)),
     )
 
 
@@ -334,6 +384,7 @@ async def create_preview(
             if _legacy_unknown(row, rules):
                 continue
             inserted += 1
+        quarantine_rows = quarantine_rows_detail(bill.quarantined, bill.columns)
         preview = await ImportPreviewRepository(session).create(
             user_id,
             file_name=file_name,
@@ -355,6 +406,7 @@ async def create_preview(
             mapping_items=[],
             mapping_version=0,
             verification={},
+            quarantine_rows=quarantine_rows,
         )
         return _dto_from_preview(
             preview,
@@ -364,6 +416,7 @@ async def create_preview(
             estimated_skipped=skipped,
             warnings=warnings,
             assumptions=assumptions,
+            quarantine_rows=quarantine_rows,
         )
 
     column_rules = await _load_column_rules(session, user_id)
@@ -464,6 +517,7 @@ async def create_preview(
         verification=analysis.verification,
         discarded_count=analysis.estimates.get("discarded", 0),
         type_resolutions=resolutions_from_types(analysis.groups),
+        quarantine_rows=analysis.quarantine_rows,
     )
     dto = _dto_for_analysis(preview, analysis=analysis, inspection=inspection, detection=detection)
     dto.template = template_payload
@@ -559,6 +613,7 @@ async def save_mapping(
     preview.columns = _plan_columns(inspection, bill_plan)
     preview.mapping = {}
     preview.verification = analysis.verification
+    _keep_user_type_choices(preview, analysis)
     preview.type_resolutions = resolutions_from_types(analysis.groups)
     preview.types_confirmed_at = None
     preview.discarded_count = analysis.estimates.get("discarded", 0)
@@ -706,6 +761,7 @@ def preview_to_dto(preview: ImportPreview) -> ImportPreviewDTO:
         mapping_version=preview.mapping_version,
         template_id=preview.template_id,
         type_resolutions=list(preview.type_resolutions or []),
+        quarantine_rows=list(preview.quarantine_rows or []),
         blocking=blocking,
         verification=dict(preview.verification or {}),
         discarded_count=preview.discarded_count,
@@ -842,10 +898,31 @@ def _apply_analysis_counts(preview: ImportPreview, analysis: _Analysis) -> None:
         preview.sample = []
         preview.parsed_count = 0
         preview.quarantined_count = 0
+        preview.quarantine_rows = []
         return
     preview.sample = [row_to_sample(row) for row in analysis.bill.rows[:SAMPLE_LIMIT]]
     preview.parsed_count = len(analysis.bill.rows)
     preview.quarantined_count = analysis.estimates.get("quarantined", 0)
+    preview.quarantine_rows = list(analysis.quarantine_rows)
+
+
+def _keep_user_type_choices(preview: ImportPreview, analysis: _Analysis) -> None:
+    """退回改映射时保留用户此前手动选的分类/废弃（C），但类型仍需整步重新确认（E）。"""
+    previous = {
+        str(item.get("type_key")): item
+        for item in (preview.type_resolutions or [])
+        if item.get("source") == "user"
+    }
+    for key, group in analysis.groups.items():
+        item = previous.get(key)
+        if item is None:
+            continue
+        if bool(item.get("discard")):
+            group.discard = True
+            group.category = None
+        else:
+            group.discard = False
+            group.category = item.get("category")
 
 
 def _dto_for_analysis(
@@ -904,6 +981,7 @@ def _dto_for_analysis(
         mapping_version=preview.mapping_version,
         template_id=preview.template_id,
         type_resolutions=list(preview.type_resolutions or []),
+        quarantine_rows=list(analysis.quarantine_rows),
         blocking=analysis.blocking,
         verification=dict(preview.verification or {}),
         discarded_count=preview.discarded_count,
@@ -928,6 +1006,7 @@ def _dto_from_preview(
     estimated_skipped: int,
     warnings: list[str],
     assumptions: dict[str, Any],
+    quarantine_rows: list[dict[str, Any]],
 ) -> ImportPreviewDTO:
     return ImportPreviewDTO(
         preview_id=preview.id,
@@ -952,6 +1031,7 @@ def _dto_from_preview(
         cash_balance_available=any(row.cash_balance_available for row in bill.rows),
         stage="legacy",
         broker="huatai",
+        quarantine_rows=list(quarantine_rows),
     )
 
 

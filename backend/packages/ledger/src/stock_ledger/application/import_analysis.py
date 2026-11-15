@@ -163,13 +163,13 @@ def aggregate_types(
     known_types: dict[str, ImportBillType],
     rules: list[SummaryRule],
 ) -> dict[str, TypeGroup]:
-    """把明细按「原样摘要 / 派生键」聚合；已确认记忆优先于摘要规则建议。"""
+    """把明细按「原样摘要 / 派生键」聚合；记忆/摘要规则只预填，类型一律待用户整步确认。"""
     groups: dict[str, TypeGroup] = {}
     for row in bill.rows:
         key, label = row_type_key(row)
         group = groups.get(key)
         if group is None:
-            group = TypeGroup(type_key=key, type_label=label[:120])
+            group = TypeGroup(type_key=key, type_label=label[:120], needs_confirmation=True)
             groups[key] = group
         group.row_count += 1
         group.amount_units += row.amount_units
@@ -182,19 +182,20 @@ def aggregate_types(
         known = known_types.get(key)
         if known is not None:
             group.source = "import_type"
-            group.needs_confirmation = False
             group.discard = known.discarded
             group.category = known.category
             group.suggested_category = known.category
+            # E：即使命中历史记忆也不自动通过，仍需用户在类型步骤整步确认。
+            group.needs_confirmation = True
             continue
         matched = _match_summary_rule(rules, group)
         if matched is not None:
             group.source = "summary_rule"
             group.suggested_category = matched.category
             group.suggested_rule_id = matched.id
-            # 摘要规则是用户已有的默认分类，视为已确认；只有未命中才需要人工补分类。
-            group.needs_confirmation = False
             group.category = matched.category
+            # E：摘要规则只决定预填分类，不自动确认；确认范围限当前文件涉及的类型。
+            group.needs_confirmation = True
     return groups
 
 

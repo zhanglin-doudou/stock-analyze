@@ -3939,6 +3939,8 @@ export interface components {
             mapping_version: number;
             /** Preview Id */
             preview_id: string;
+            /** Quarantine Rows */
+            quarantine_rows?: components["schemas"]["PreviewQuarantineRow"][];
             /**
              * Requires Reimport Ack
              * @default false
@@ -3971,6 +3973,36 @@ export interface components {
             };
             /** Warnings */
             warnings?: components["schemas"]["PreviewWarning"][];
+        };
+        /**
+         * PreviewQuarantineRow
+         * @description 隔离行明细：提交前弹窗逐行展示，不参与提交校验（不阻断）。
+         */
+        PreviewQuarantineRow: {
+            /** Amount */
+            amount?: string | null;
+            /** Cash Balance */
+            cash_balance?: string | null;
+            /** Date */
+            date?: string | null;
+            /** Line No */
+            line_no?: number | null;
+            /** Price */
+            price?: string | null;
+            /** Quantity */
+            quantity?: string | null;
+            /** Reason */
+            reason: string;
+            /** Reason Code */
+            reason_code: string;
+            /** Security Code */
+            security_code?: string | null;
+            /** Security Name */
+            security_name?: string | null;
+            /** Suggested Rule Id */
+            suggested_rule_id?: string | null;
+            /** Summary */
+            summary?: string | null;
         };
         /** PreviewTemplateOut */
         PreviewTemplateOut: {

@@ -7066,6 +7066,13 @@
             "title": "Preview Id",
             "type": "string"
           },
+          "quarantine_rows": {
+            "items": {
+              "$ref": "#/components/schemas/PreviewQuarantineRow"
+            },
+            "title": "Quarantine Rows",
+            "type": "array"
+          },
           "requires_reimport_ack": {
             "default": false,
             "title": "Requires Reimport Ack",
@@ -7156,6 +7163,135 @@
           "expires_at"
         ],
         "title": "PreviewOut",
+        "type": "object"
+      },
+      "PreviewQuarantineRow": {
+        "description": "隔离行明细：提交前弹窗逐行展示，不参与提交校验（不阻断）。",
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount"
+          },
+          "cash_balance": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cash Balance"
+          },
+          "date": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date"
+          },
+          "line_no": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Line No"
+          },
+          "price": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Price"
+          },
+          "quantity": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Quantity"
+          },
+          "reason": {
+            "title": "Reason",
+            "type": "string"
+          },
+          "reason_code": {
+            "title": "Reason Code",
+            "type": "string"
+          },
+          "security_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Security Code"
+          },
+          "security_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Security Name"
+          },
+          "suggested_rule_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Suggested Rule Id"
+          },
+          "summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Summary"
+          }
+        },
+        "required": [
+          "reason_code",
+          "reason"
+        ],
+        "title": "PreviewQuarantineRow",
         "type": "object"
       },
       "PreviewTemplateOut": {
@@ -15427,6 +15563,22 @@
                   ],
                   "mapping_version": 0,
                   "preview_id": "prv_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "quarantine_rows": [
+                    {
+                      "amount": "1234.56",
+                      "cash_balance": "1234.56",
+                      "date": "2026-09-30",
+                      "line_no": 7,
+                      "price": "12.340000",
+                      "quantity": "100",
+                      "reason": "示例原因",
+                      "reason_code": "UNKNOWN_SUMMARY",
+                      "security_code": "600519",
+                      "security_name": "贵州茅台",
+                      "suggested_rule_id": "obj_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                      "summary": "证券买入"
+                    }
+                  ],
                   "requires_reimport_ack": false,
                   "sample": [
                     {
@@ -15760,6 +15912,22 @@
                   ],
                   "mapping_version": 0,
                   "preview_id": "prv_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "quarantine_rows": [
+                    {
+                      "amount": "1234.56",
+                      "cash_balance": "1234.56",
+                      "date": "2026-09-30",
+                      "line_no": 7,
+                      "price": "12.340000",
+                      "quantity": "100",
+                      "reason": "示例原因",
+                      "reason_code": "UNKNOWN_SUMMARY",
+                      "security_code": "600519",
+                      "security_name": "贵州茅台",
+                      "suggested_rule_id": "obj_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                      "summary": "证券买入"
+                    }
+                  ],
                   "requires_reimport_ack": false,
                   "sample": [
                     {
@@ -16075,6 +16243,22 @@
                   ],
                   "mapping_version": 0,
                   "preview_id": "prv_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "quarantine_rows": [
+                    {
+                      "amount": "1234.56",
+                      "cash_balance": "1234.56",
+                      "date": "2026-09-30",
+                      "line_no": 7,
+                      "price": "12.340000",
+                      "quantity": "100",
+                      "reason": "示例原因",
+                      "reason_code": "UNKNOWN_SUMMARY",
+                      "security_code": "600519",
+                      "security_name": "贵州茅台",
+                      "suggested_rule_id": "obj_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                      "summary": "证券买入"
+                    }
+                  ],
                   "requires_reimport_ack": false,
                   "sample": [
                     {
@@ -16417,6 +16601,22 @@
                   ],
                   "mapping_version": 0,
                   "preview_id": "prv_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "quarantine_rows": [
+                    {
+                      "amount": "1234.56",
+                      "cash_balance": "1234.56",
+                      "date": "2026-09-30",
+                      "line_no": 7,
+                      "price": "12.340000",
+                      "quantity": "100",
+                      "reason": "示例原因",
+                      "reason_code": "UNKNOWN_SUMMARY",
+                      "security_code": "600519",
+                      "security_name": "贵州茅台",
+                      "suggested_rule_id": "obj_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                      "summary": "证券买入"
+                    }
+                  ],
                   "requires_reimport_ack": false,
                   "sample": [
                     {

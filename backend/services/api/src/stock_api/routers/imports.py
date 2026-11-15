@@ -67,6 +67,7 @@ from stock_api.schemas import (
     PreviewFile,
     PreviewMappingItem,
     PreviewOut,
+    PreviewQuarantineRow,
     PreviewTemplateOut,
     PreviewWarning,
     QuarantineItem,
@@ -186,6 +187,7 @@ def _preview_out(dto: ImportPreviewDTO) -> PreviewOut:
         mapping_items=[PreviewMappingItem(**item) for item in dto.mapping_items],
         ignored_columns=list(dto.ignored_columns),
         discarded_count=dto.discarded_count,
+        quarantine_rows=[PreviewQuarantineRow(**item) for item in dto.quarantine_rows],
         requires_reimport_ack=(WarningCode.MAPPING_CHANGED_REIMPORT.value in dto.warnings),
     )
 

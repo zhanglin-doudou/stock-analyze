@@ -121,6 +121,19 @@ class QuarantineReason(StrEnum):
     RECONCILIATION_BREAK = "RECONCILIATION_BREAK"
 
 
+#: 隔离原因的中文说明（预览隔离弹窗直接展示，前端不再维护第二份文案）。
+QUARANTINE_REASON_LABELS: dict[str, str] = {
+    QuarantineReason.UNKNOWN_SUMMARY.value: "摘要无法识别，缺少业务分类",
+    QuarantineReason.UNMAPPED_COLUMN.value: "依赖的列未映射",
+    QuarantineReason.INVALID_ROW.value: "字段无法解析（日期/数量/价格等）",
+    QuarantineReason.DUPLICATE_IN_FILE.value: "文件内重复行",
+    QuarantineReason.INVALID_AMOUNT.value: "金额字段无效或全为 0",
+    QuarantineReason.ZERO_AMOUNT_INFO.value: "零金额通知行，无资金意义",
+    QuarantineReason.BILL_TYPE_DISCARDED.value: "账单类型被标记为废弃",
+    QuarantineReason.RECONCILIATION_BREAK.value: "资金余额链断裂，与上一行接不上",
+}
+
+
 class BillCategory(StrEnum):
     """账单业务分类（11 值，设计 D-15）。DB 仍以 text 存储，新增值免迁移。"""
 

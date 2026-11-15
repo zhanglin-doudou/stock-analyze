@@ -67,7 +67,21 @@ interface TypeRow {
   needsConfirmation: boolean;
   category: string;
   discard: boolean;
-  confirmed: boolean;
+}
+
+interface TypeChoice {
+  category: string;
+  discard: boolean;
+}
+
+interface QuarantineRow {
+  line_no: number | null;
+  reason_code: string;
+  reason: string;
+  date: string | null;
+  security_code: string | null;
+  summary: string | null;
+  amount: string | null;
 }
 
 interface CatalogField {
@@ -105,6 +119,7 @@ function rowsFromPreview(preview: Preview): MappingRow[] {
   const ignored = new Set(preview.ignored_columns ?? []);
   return preview.columns.map((column, index) => {
     const key = column.key ?? `__col_${index}`;
+    const isIgnored = ignored.has(key);
     return {
       key,
       name: column.name,
@@ -113,31 +128,36 @@ function rowsFromPreview(preview: Preview): MappingRow[] {
       suggested: column.suggested_field ?? null,
       suggestedOptions: (column.suggested_options ?? {}) as Record<string, unknown>,
       target: existing.get(key) ?? column.suggested_field ?? "",
-      accepted: false,
-      ignored: ignored.has(key),
+      // 已保存过映射（含退回改映射）时保持「采用」勾选，不把用户填好的选择清空。
+      accepted: existing.has(key) && !isIgnored,
+      ignored: isIgnored,
     };
   });
 }
 
-function typesFromPreview(preview: Preview): TypeRow[] {
+function typesFromPreview(preview: Preview, saved?: Map<string, TypeChoice>): TypeRow[] {
   return readTypes(preview).map((item) => {
+    const typeKey = String(item.type_key);
     const suggested = (item.suggested_category as string | null) ?? null;
-    const category = (item.category as string | null) ?? suggested ?? "";
-    const discard = Boolean(item.discard);
-    const needs = Boolean(item.needs_confirmation);
+    const remembered = saved?.get(typeKey);
+    const category = remembered ? remembered.category : ((item.category as string | null) ?? suggested ?? "");
+    const discard = remembered ? remembered.discard : Boolean(item.discard);
     return {
-      typeKey: String(item.type_key),
+      typeKey,
       label: String(item.type_label ?? item.type_key),
       rowCount: typeof item.row_count === "number" ? item.row_count : 0,
       amountSum: String(item.amount_sum ?? "0.00"),
       samples: (item.samples as string[] | undefined) ?? [],
       suggestedCategory: suggested,
-      needsConfirmation: needs,
+      needsConfirmation: Boolean(item.needs_confirmation),
       category,
       discard,
-      confirmed: !needs && (category !== "" || discard),
     };
   });
+}
+
+function quarantineRows(preview: Preview): QuarantineRow[] {
+  return (preview.quarantine_rows ?? []) as unknown as QuarantineRow[];
 }
 
 /** 客户端镜像后端的完整性闸门（只决定按钮可用性，最终以后端 422 为准）。 */
@@ -178,7 +198,13 @@ export function Import() {
   const [busy, setBusy] = useState(false);
   const [done, setDone] = useState("");
   const [portal, setPortal] = useState<HTMLElement | null>(null);
+  const [quarantineNotice, setQuarantineNotice] = useState<QuarantineRow[] | null>(null);
   const idempotency = useRef<string>("");
+  // 退回改映射时用来回填用户此前选好的类型分类（C）；按预览 id 隔离，换文件不串。
+  const typeChoices = useRef<{ previewId: string; choices: Map<string, TypeChoice> }>({
+    previewId: "",
+    choices: new Map(),
+  });
 
   // Portal 容器必须带 data-import-ui，弹层才吃到 scoped reset。
   useEffect(() => {
@@ -193,17 +219,47 @@ export function Import() {
     };
   }, []);
 
-  const applyPreview = useCallback((dto: Preview) => {
-    setPreview(dto);
-    setDateFormat(dto.date_format ?? "");
-    setRows(rowsFromPreview(dto));
-    setTypes(typesFromPreview(dto));
-    idempotency.current = newIdempotencyKey();
-    if (dto.stage === "ready") setStep("confirm");
-    else if (dto.stage === "types") setStep("types");
-    else if (dto.stage === "mapping") setStep("mapping");
-    else setStep("upload");
-  }, []);
+  useEffect(() => {
+    if (!preview) return;
+    typeChoices.current = {
+      previewId: preview.preview_id,
+      choices: new Map(
+        types.map((row) => [row.typeKey, { category: row.category, discard: row.discard }]),
+      ),
+    };
+  }, [types, preview]);
+
+  const applyPreview = useCallback(
+    (dto: Preview, options?: { restore?: boolean }) => {
+      const remembered =
+        typeChoices.current.previewId === dto.preview_id
+          ? typeChoices.current.choices
+          : undefined;
+      setPreview(dto);
+      setDateFormat(dto.date_format ?? "");
+      setRows(rowsFromPreview(dto));
+      setTypes(typesFromPreview(dto, remembered));
+      idempotency.current = newIdempotencyKey();
+      // A/B：进入可提交阶段时，隔离行非 0 才弹「不会导入的行」提醒；无隔离行不出现这一步。
+      const quarantined = quarantineRows(dto);
+      if (dto.stage === "ready") {
+        setStep("confirm");
+        setQuarantineNotice(
+          !options?.restore && quarantined.length > 0 ? quarantined : null,
+        );
+      } else if (dto.stage === "types") {
+        setStep("types");
+        setQuarantineNotice(null);
+      } else if (dto.stage === "mapping") {
+        setStep("mapping");
+        setQuarantineNotice(null);
+      } else {
+        setStep("upload");
+        setQuarantineNotice(null);
+      }
+    },
+    [],
+  );
 
   async function onFile(file: File): Promise<void> {
     setBusy(true);
@@ -234,7 +290,7 @@ export function Import() {
     [rows],
   );
   const unresolvedTypes = useMemo(
-    () => types.filter((row) => !row.confirmed || (!row.discard && !row.category)),
+    () => types.filter((row) => !row.discard && !row.category),
     [types],
   );
 
@@ -264,7 +320,6 @@ export function Import() {
         String(preview.mapping_version),
       );
       applyPreview(dto);
-      if (dto.stage === "ready") setStep("confirm");
     } catch (err) {
       setError(err);
       if (preview) void refreshPreview(preview.preview_id);
@@ -275,7 +330,7 @@ export function Import() {
 
   async function refreshPreview(previewId: string): Promise<void> {
     try {
-      applyPreview(await api.imports.getPreview(previewId));
+      applyPreview(await api.imports.getPreview(previewId), { restore: true });
     } catch {
       // 刷新失败保留当前草稿，错误由主流程展示。
     }
@@ -380,9 +435,7 @@ export function Import() {
   }
 
   function patchType(key: string, patch: Partial<TypeRow>): void {
-    setTypes((current) =>
-      current.map((row) => (row.typeKey === key ? { ...row, confirmed: false, ...patch } : row)),
-    );
+    setTypes((current) => current.map((row) => (row.typeKey === key ? { ...row, ...patch } : row)));
   }
 
   return (
@@ -605,7 +658,7 @@ export function Import() {
             <CardHeader>
               <CardTitle>3 · 账单类型</CardTitle>
               <CardDescription>
-                每个类型必须匹配 Category 或标记废弃；确认后才写流水。
+                系统建议只做预填，不会自动通过；核对后点击下方按钮整步确认（只涉及本文件的类型）。
               </CardDescription>
             </CardHeader>
             <CardContent className="tw-flex tw-flex-col tw-gap-3">
@@ -618,7 +671,6 @@ export function Import() {
                     <TableHead>样例</TableHead>
                     <TableHead>Category</TableHead>
                     <TableHead>废弃</TableHead>
-                    <TableHead>确认</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -626,9 +678,9 @@ export function Import() {
                     <TableRow key={row.typeKey}>
                       <TableCell>
                         {row.label}
-                        {!row.needsConfirmation ? (
+                        {row.suggestedCategory && row.category === row.suggestedCategory ? (
                           <Badge variant="outline" className="tw-ml-2">
-                            已自动匹配
+                            系统建议
                           </Badge>
                         ) : null}
                       </TableCell>
@@ -667,14 +719,6 @@ export function Import() {
                           }
                         />
                       </TableCell>
-                      <TableCell>
-                        <Switch
-                          aria-label={`确认 ${row.label}`}
-                          checked={row.confirmed}
-                          disabled={!row.discard && !row.category}
-                          onCheckedChange={(checked) => setTypes((current) => current.map((item) => (item.typeKey === row.typeKey ? { ...item, confirmed: checked } : item)))}
-                        />
-                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -689,7 +733,7 @@ export function Import() {
                   修改对应关系
                 </Button>
                 <Button type="button" disabled={busy || unresolvedTypes.length > 0} onClick={() => void saveTypes()}>
-                  继续
+                  确认这些类型并继续
                 </Button>
               </div>
             </CardContent>
@@ -741,9 +785,16 @@ export function Import() {
                 </div>
               ) : null}
               <div className="tw-flex tw-justify-between tw-gap-2">
-                <Button type="button" variant="secondary" onClick={() => setStep("mapping")}>
-                  修改对应关系
-                </Button>
+                <div className="tw-flex tw-gap-2">
+                  <Button type="button" variant="secondary" onClick={() => setStep("mapping")}>
+                    修改对应关系
+                  </Button>
+                  {types.length > 0 ? (
+                    <Button type="button" variant="secondary" onClick={() => setStep("types")}>
+                      修改账单类型
+                    </Button>
+                  ) : null}
+                </div>
                 <Button
                   type="button"
                   disabled={busy || !preview.can_commit || (preview.requires_reimport_ack && !ackReimport)}
@@ -844,6 +895,60 @@ export function Import() {
                 }}
               >
                 确认继续
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+        <AlertDialog
+          open={quarantineNotice !== null}
+          onOpenChange={(open) => {
+            if (!open) setQuarantineNotice(null);
+          }}
+        >
+          <AlertDialogContent className="tw-max-w-3xl">
+            <AlertDialogHeader>
+              <AlertDialogTitle>有 {quarantineNotice?.length ?? 0} 行不会导入</AlertDialogTitle>
+              <AlertDialogDescription>
+                下列行无法解析或属于重复行，会进入隔离区；不影响其余行提交，仅供提交前核对。
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <div className="tw-max-h-72 tw-overflow-auto">
+              <Table aria-label="隔离行明细">
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>行号</TableHead>
+                    <TableHead>日期</TableHead>
+                    <TableHead>代码</TableHead>
+                    <TableHead>摘要</TableHead>
+                    <TableHead className="tw-text-right">金额</TableHead>
+                    <TableHead>隔离原因</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(quarantineNotice ?? []).map((row, index) => (
+                    <TableRow key={`${row.line_no ?? "?"}-${index}`}>
+                      <TableCell className="tw-whitespace-nowrap">{row.line_no ?? "—"}</TableCell>
+                      <TableCell className="tw-whitespace-nowrap">{row.date ?? "—"}</TableCell>
+                      <TableCell className="tw-whitespace-nowrap">{row.security_code ?? "—"}</TableCell>
+                      <TableCell>{row.summary ?? "—"}</TableCell>
+                      <TableCell className="tw-text-right tw-font-mono">{row.amount ?? "—"}</TableCell>
+                      <TableCell>{row.reason}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+            <AlertDialogFooter>
+              <AlertDialogCancel
+                onClick={() => {
+                  setQuarantineNotice(null);
+                  setStep(types.length > 0 ? "types" : "mapping");
+                }}
+              >
+                返回修改
+              </AlertDialogCancel>
+              <AlertDialogAction onClick={() => setQuarantineNotice(null)}>
+                知悉，继续导入
               </AlertDialogAction>
             </AlertDialogFooter>
           </AlertDialogContent>

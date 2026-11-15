@@ -264,6 +264,7 @@ class ImportPreviewRepository:
         verification: dict[str, Any] | None = None,
         discarded_count: int = 0,
         type_resolutions: Sequence[Any] = (),
+        quarantine_rows: Sequence[Any] = (),
     ) -> ImportPreview:
         preview = ImportPreview(
             id=new_preview_id(),
@@ -294,6 +295,7 @@ class ImportPreviewRepository:
             verification=verification or {},
             discarded_count=discarded_count,
             type_resolutions=list(type_resolutions),
+            quarantine_rows=list(quarantine_rows),
         )
         self._session.add(preview)
         await self._session.flush()

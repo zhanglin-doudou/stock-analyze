@@ -164,6 +164,23 @@ class PreviewMappingItem(BaseModel):
     options: dict[str, Any] = Field(default_factory=dict)
 
 
+class PreviewQuarantineRow(BaseModel):
+    """隔离行明细：提交前弹窗逐行展示，不参与提交校验（不阻断）。"""
+
+    line_no: int | None = None
+    reason_code: str
+    reason: str
+    suggested_rule_id: str | None = None
+    date: str | None = None
+    security_code: str | None = None
+    security_name: str | None = None
+    summary: str | None = None
+    quantity: str | None = None
+    price: str | None = None
+    amount: str | None = None
+    cash_balance: str | None = None
+
+
 class PreviewOut(BaseModel):
     preview_id: str
     file: PreviewFile
@@ -194,6 +211,7 @@ class PreviewOut(BaseModel):
     mapping_items: list[PreviewMappingItem] = Field(default_factory=list)
     ignored_columns: list[str] = Field(default_factory=list)
     discarded_count: int = 0
+    quarantine_rows: list[PreviewQuarantineRow] = Field(default_factory=list)
     requires_reimport_ack: bool = False
 
 

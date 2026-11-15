@@ -141,6 +141,8 @@ class ImportPreview(Base):
     mapping_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     types_confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     type_resolutions: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
+    # 解析期隔离行明细（行号/原因/日期/摘要…）：提交前弹窗提醒用，不参与提交校验。
+    quarantine_rows: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
     template_id: Mapped[str | None] = mapped_column(String(40))
     verification: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
     discarded_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

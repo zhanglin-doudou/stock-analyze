@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import type { ImportBatch, JobAccepted, JobEvent, Preview } from "@sa/api-client";
 import { Import } from "./Import";
@@ -147,8 +147,15 @@ function mappingPreview(withUnmapped = false): Preview {
 }
 
 function typesPreview(overrides: Partial<Preview> = {}): Preview {
+  const columns = mappingPreview().columns;
   return basePreview({
     stage: "types",
+    columns,
+    mapping_items: columns.map((column) => ({
+      column_key: column.key ?? "",
+      field: column.suggested_field ?? "",
+      options: {},
+    })),
     types: [
       {
         type_key: "证券买入",
@@ -158,7 +165,7 @@ function typesPreview(overrides: Partial<Preview> = {}): Preview {
         samples: ["证券买入"],
         suggested_category: "buy",
         category: null,
-        needs_confirmation: false,
+        needs_confirmation: true,
         discard: false,
       },
     ],
@@ -286,7 +293,9 @@ describe("Import 向导（v2 两阶段确认）", () => {
     fireEvent.click(screen.getByRole("button", { name: "继续" }));
     await screen.findByText("3 · 账单类型");
 
-    fireEvent.click(screen.getByRole("button", { name: "继续" }));
+    // E：系统建议（buy）不自动跳过，也不提供逐项确认，必须整步点确认。
+    expect(screen.queryByRole("switch", { name: "确认 证券买入" })).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "确认这些类型并继续" }));
     await waitFor(() => expect(saveTypes).toHaveBeenCalledTimes(1));
     expect(saveTypes.mock.calls[0][1].resolutions).toEqual([
       { type_key: "证券买入", category: "buy", discard: false },
@@ -305,5 +314,120 @@ describe("Import 向导（v2 两阶段确认）", () => {
       ),
     );
     expect(await screen.findByText(/插入 3 行/)).toBeTruthy();
+  });
+
+  it("确认步可退回账单类型重新调整：复用同一预览，不重传也不提交", async () => {
+    saveTypes.mockResolvedValue(readyPreview({ types: typesPreview().types }));
+    renderPage();
+    await upload();
+    await screen.findByText("2 · 列对应");
+    fireEvent.click(screen.getByRole("button", { name: "全部接受系统建议" }));
+    fireEvent.click(screen.getByRole("button", { name: "继续" }));
+    await screen.findByText("3 · 账单类型");
+    fireEvent.click(screen.getByRole("button", { name: "确认这些类型并继续" }));
+    await screen.findByText("4 · 确认导入");
+
+    fireEvent.click(screen.getByRole("button", { name: "修改账单类型" }));
+
+    expect(await screen.findByText("3 · 账单类型")).toBeTruthy();
+    expect(preview).toHaveBeenCalledTimes(1);
+    expect(commit).not.toHaveBeenCalled();
+  });
+
+  it("有隔离行时先弹窗列出全部行与原因，确认后仍可提交", async () => {
+    saveTypes.mockResolvedValue(
+      readyPreview({
+        estimated: {
+          parsed: 1,
+          inserted: 1,
+          skipped: 0,
+          quarantined: 2,
+          discarded: 0,
+          estimated_available: true,
+        },
+        quarantine_rows: [
+          {
+            line_no: 3,
+            reason_code: "DUPLICATE_IN_FILE",
+            reason: "文件内重复行",
+            date: "2026-04-01",
+            security_code: "600001",
+            summary: "证券买入",
+            amount: "1000.00",
+          },
+          {
+            line_no: 4,
+            reason_code: "INVALID_ROW",
+            reason: "字段无法解析（日期/数量/价格等）",
+            date: "2026-04-32",
+            security_code: "600009",
+            summary: "证券买入",
+            amount: "1000.00",
+          },
+        ],
+      }),
+    );
+    renderPage();
+    await upload();
+    await screen.findByText("2 · 列对应");
+    fireEvent.click(screen.getByRole("button", { name: "全部接受系统建议" }));
+    fireEvent.click(screen.getByRole("button", { name: "继续" }));
+    await screen.findByText("3 · 账单类型");
+    fireEvent.click(screen.getByRole("button", { name: "确认这些类型并继续" }));
+
+    const dialog = await screen.findByRole("alertdialog");
+    expect(within(dialog).getByText("有 2 行不会导入")).toBeTruthy();
+    expect(within(dialog).getByText("3")).toBeTruthy();
+    expect(within(dialog).getByText("4")).toBeTruthy();
+    expect(within(dialog).getByText("2026-04-01")).toBeTruthy();
+    expect(within(dialog).getByText("2026-04-32")).toBeTruthy();
+    expect(within(dialog).getByText("文件内重复行")).toBeTruthy();
+    expect(within(dialog).getByText("字段无法解析（日期/数量/价格等）")).toBeTruthy();
+    expect(commit).not.toHaveBeenCalled();
+
+    fireEvent.click(within(dialog).getByRole("button", { name: "知悉，继续导入" }));
+    await waitFor(() => expect(screen.queryByRole("alertdialog")).toBeNull());
+    expect(screen.getByText("4 · 确认导入")).toBeTruthy();
+    const submit = screen.getByRole("button", { name: "确认导入" }) as HTMLButtonElement;
+    expect(submit.disabled).toBe(false);
+    fireEvent.click(submit);
+    await waitFor(() => expect(commit).toHaveBeenCalledTimes(1));
+  });
+
+  it("没有隔离行时不出现隔离确认这一步", async () => {
+    renderPage();
+    await upload();
+    await screen.findByText("2 · 列对应");
+    fireEvent.click(screen.getByRole("button", { name: "全部接受系统建议" }));
+    fireEvent.click(screen.getByRole("button", { name: "继续" }));
+    await screen.findByText("3 · 账单类型");
+    fireEvent.click(screen.getByRole("button", { name: "确认这些类型并继续" }));
+
+    expect(await screen.findByText("4 · 确认导入")).toBeTruthy();
+    expect(screen.queryByRole("alertdialog")).toBeNull();
+  });
+
+  it("退回改映射时保留用户已选的类型，不重置为系统建议", async () => {
+    renderPage();
+    await upload();
+    await screen.findByText("2 · 列对应");
+    fireEvent.click(screen.getByRole("button", { name: "全部接受系统建议" }));
+    fireEvent.click(screen.getByRole("button", { name: "继续" }));
+    await screen.findByText("3 · 账单类型");
+
+    fireEvent.click(screen.getByRole("switch", { name: "废弃 证券买入" }));
+    fireEvent.click(screen.getByRole("button", { name: "修改对应关系" }));
+    await screen.findByText("2 · 列对应");
+    fireEvent.click(screen.getByRole("button", { name: "继续" }));
+    await waitFor(() => expect(saveMapping).toHaveBeenCalledTimes(2));
+    await screen.findByText("3 · 账单类型");
+
+    const discard = screen.getByRole("switch", { name: "废弃 证券买入" });
+    expect(discard.getAttribute("aria-checked")).toBe("true");
+    fireEvent.click(screen.getByRole("button", { name: "确认这些类型并继续" }));
+    await waitFor(() => expect(saveTypes).toHaveBeenCalledTimes(1));
+    expect(saveTypes.mock.calls[0][1].resolutions).toEqual([
+      { type_key: "证券买入", category: null, discard: true },
+    ]);
   });
 });
