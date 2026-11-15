@@ -57,60 +57,6 @@ def test_buy_and_sell_map_to_fifo_kinds() -> None:
     assert events[1].trade_id == sell.id
 
 
-def test_money_fund_rows_flag_allow_oversell() -> None:
-    """货基行（money_fund_balance_units 非空）打 allow_oversell；普通行不打。"""
-    mf_buy = _trade(
-        security_code="940018",
-        security_name="华泰紫金天天发货币",
-        category="buy",
-        side="buy",
-        money_fund_balance_units=10000_00,
-    )
-    mf_sell = _trade(
-        security_code="940018",
-        security_name="华泰紫金天天发货币",
-        category="sell",
-        side="sell",
-        amount_units=5000_00,
-        money_fund_balance_units=5000_00,
-    )
-    plain = _trade()
-    events = trades_to_events([mf_buy, mf_sell, plain])
-    assert [event.allow_oversell for event in events] == [True, True, False]
-
-
-def test_money_fund_subscription_oversell_closes_round_with_interest() -> None:
-    """货基申购 106708.53 + 赎回 106720.80（含隔离红利的 12.27 利息）→ 正常 closed、无超卖错误。"""
-    buy = _trade(
-        security_code="940018",
-        security_name="华泰紫金天天发货币",
-        category="buy",
-        side="buy",
-        quantity_units=10_6708_5300,  # 106708.5300 份
-        price_units=1_000_000,
-        amount_units=-10_6708_53,  # -106708.53 元
-        money_fund_balance_units=10_6708_53,
-    )
-    sell = _trade(
-        security_code="940018",
-        security_name="华泰紫金天天发货币",
-        category="sell",
-        side="sell",
-        quantity_units=10_6720_8000,  # 106720.8000 份
-        price_units=1_000_000,
-        amount_units=10_6720_80,  # +106720.80 元
-        money_fund_balance_units=0,
-    )
-    result = build_rounds(trades_to_events([buy, sell]))
-    assert result.data_errors == ()
-    assert len(result.rounds) == 1
-    round_ = result.rounds[0]
-    assert round_.status == "closed"
-    assert round_.cost_units == 10_6708_53
-    assert round_.proceeds_units == 10_6720_80
-    assert round_.pnl_units == 12_27  # 106720.80 - 106708.53 = 12.27（利息）
-
-
 def test_dividend_is_net_and_tax_row_stays_fee() -> None:
     dividend = _trade(
         category="dividend",
@@ -246,7 +192,6 @@ def _cbond_sell() -> object:
 
 def test_cbond_subscription_merged_into_listed_round() -> None:
     """申购缴款（754019 曙26发债）与上市卖出（113050 曙26转债）配成同一回合。"""
-    from stock_core.fifo import build_rounds
 
     events = trades_to_events([_cbond_buy(), _cbond_sell()])  # type: ignore[list-item]
     assert {event.security_code for event in events} == {"113050"}

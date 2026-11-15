@@ -367,7 +367,7 @@ CATALOG: dict[ErrorCode, Problem] = dict(
             ErrorCode.IMPORT_PROFILE_REQUIRED,
             422,
             "这张账单需要对应券商的能力才能正确处理。",
-            "选择正确的券商 profile，或映射缺失的货基余额列。",
+            "选择正确的券商 profile。",
             False,
         ),
         _p(

@@ -69,7 +69,7 @@ _JOBS_PREFIX = "/api/v1/jobs"
 _ENDPOINT_REBUILD = "POST /jobs/rebuild-rounds"
 _ENDPOINT_INSIGHTS_REFRESH = "POST /rounds/insights/refresh"
 _PERIOD_RE = re.compile(r"^(\d{4})-(\d{2})$")
-_VALID_STATUSES = frozenset({"open", "closed", "data_error"})
+_VALID_STATUSES = frozenset({"open", "closed", "oversell", "data_error"})
 
 
 def _parse_period(period: str) -> tuple[date, date]:

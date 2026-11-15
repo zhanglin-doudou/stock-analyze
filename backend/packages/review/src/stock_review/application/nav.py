@@ -1,7 +1,8 @@
 """净值与收益应用层（Period2-03 / API-032）：ledger 明细 → 每日 NAV → 落库。
 
 口径（INTERFACE §3.7 / PRD FR-R2.3）：
-- 每日总资产 = 现金余额 + Σ(持仓数量 × 当日收盘价)；
+- 每日总资产 = 现金余额 + Σ(持仓数量 × 当日收盘价)；债券/伪代码无行情，按含费成本计入
+  （与资产表/指标/归因同口径，`needs_quote` 之外不请求行情、不阻断）；
 - 外部现金流 = `category=transfer` 的 amount 之和（入金正、出金负）；
 - 份额法 TWR：shares_0=1，NAV_t = (V_t - CF_t) / shares_{t-1}，Δshares = CF_t / NAV_t；
 - 期初资产用 bridge 的 `_initial_cash`（区间前最后余额 statement / 区间首条余额行反推 back_solved）+ 期初持仓市值；
@@ -28,10 +29,10 @@ from stock_core.nav import CashflowPoint, NavSeries, build_nav_series, compute_x
 from stock_ledger.models import Trade
 from stock_ledger.repositories.trades import TradeRepository
 from stock_platform.ports import MarketDataSource
-from stock_platform.symbols import is_bond, is_convertible_bond
+from stock_platform.symbols import needs_quote
 
 from stock_review.application.bond_alias import build_bond_alias, canonical_code
-from stock_review.application.bridge import _initial_cash, oversell_initial_units
+from stock_review.application.bridge import _initial_cash
 from stock_review.application.rebuild import trades_to_events
 from stock_review.application.valuation import (
     CASHFLOW_CATEGORIES as _CASHFLOW_CATEGORIES,
@@ -43,16 +44,7 @@ from stock_review.application.valuation import (
     PRICE_LOOKBACK as _PRICE_LOOKBACK,
 )
 from stock_review.application.valuation import (
-    QTY_PRICE_SCALE as _QTY_PRICE_SCALE,
-)
-from stock_review.application.valuation import (
     blocked_price_reason as _blocked_reason,
-)
-from stock_review.application.valuation import (
-    bond_face_divisors as _bond_face_divisors,
-)
-from stock_review.application.valuation import (
-    bond_value_units as _bond_value_units,
 )
 from stock_review.application.valuation import (
     category as _category,
@@ -64,25 +56,19 @@ from stock_review.application.valuation import (
     holding_delta as _holding_delta,
 )
 from stock_review.application.valuation import (
-    initial_money_fund_balances as _initial_money_fund_balances,
-)
-from stock_review.application.valuation import (
     is_cash_balance as _is_cash_balance,
 )
 from stock_review.application.valuation import (
-    is_money_fund_row as _is_money_fund_row,
-)
-from stock_review.application.valuation import (
     load_prices as _load_prices,
-)
-from stock_review.application.valuation import (
-    money_fund_balance as _money_fund_balance,
 )
 from stock_review.application.valuation import (
     new_stock_pending_codes as _new_stock_pending_codes,
 )
 from stock_review.application.valuation import (
     total_market_value as _total_market_value,
+)
+from stock_review.application.valuation import (
+    valued_position_units as _valued_position_units,
 )
 from stock_review.models import NavDaily
 
@@ -124,7 +110,6 @@ class _DailyState:
     cash_units: int
     holdings: dict[str, int]  # security_code → quantity_units (scale=4)
     cost_basis: dict[str, int]  # security_code → 累计成本 (scale=2)
-    money_fund: dict[str, int]  # security_code → 货币基金余额 (scale=2)
     cashflow_units: int  # 当日外部现金流（scale=2）
 
 
@@ -136,7 +121,7 @@ class _HoldingSnapshot:
     security_name: str
     quantity_units: int  # scale=4
     cost_units: int  # 累计成本 (scale=2)，=0 且 qty>0 表示纯送转
-    close_units: int  # 当日或之前最近收盘价 (scale=6)
+    close_units: int  # 当日或之前最近收盘价 (scale=6)；按成本估值的标的为 0
     market_value_units: int  # 市值 (scale=2)
 
 
@@ -188,18 +173,20 @@ async def compute_nav_points(
     dict[date, list[_HoldingSnapshot]],  # holdings_by_date (非 blocked 日)
     str | None,  # assumption：期初现金锚点来源（statement | back_solved）
     int | None,  # prev_day_value_units：上一交易日收盘资产（首日「昨日资产」）
+    dict[date, int],  # oversell_by_date：只在 TWR 口径剔除、不展示的金额
 ]:
     """计算区间内每日 NAV 输入 + 持仓快照。
 
     返回 (points, blocked_points, blocked_reasons, degraded, holdings_by_date, assumption,
-    prev_day_value_units)。holdings_by_date 为 API 响应组装所需，不落库；
-    assumption / prev_day_value_units 仅响应透出，不进入 TWR 序列或落库字段。
+    prev_day_value_units, oversell_by_date)。holdings_by_date 为 API 响应组装所需，不落库；
+    assumption / prev_day_value_units 仅响应透出，不进入 TWR 序列或落库字段；
+    oversell_by_date 为超卖净卖款（已含在总资产里），仅用于 TWR 剔除，不进 `cashflow_units`。
     """
     # 1. 期初现金锚点：区间前余额行直取（statement）或区间首条余额行反推（back_solved）；
     #    全历史无余额行 → 全局阻断。
     initial = _initial_cash(trades, period_start)
     if initial is None:
-        return [], [], ["无现金余额锚点（无 cash_balance 行）"], False, {}, None, None
+        return [], [], ["无现金余额锚点（无 cash_balance 行）"], False, {}, None, None, {}
     initial_cash, assumption = initial
 
     # 可转债发债→上市代码别名（设计 D3）：从全量明细派生，期初持仓/区间交易/行情统一
@@ -209,20 +196,17 @@ async def compute_nav_points(
     # 2. FIFO 结果用于检测 data_error（降级）
     fifo_all = build_rounds(trades_to_events(trades, bond_alias=bond_alias))
     degraded = any(r.status == "data_error" for r in fifo_all.rounds)
-    # 超卖未配对卖款并入期初净值（不计收益）；逐日现金状态仍用未补记的锚点，避免双算。
-    oversell_units = oversell_initial_units(
-        fifo_all, period_start=period_start, period_end=period_end
-    )
-    initial_capital = initial_cash + oversell_units
+    # 超卖净卖款已随卖出流水进入现金；从当日外部现金流中剔除，不计收益。
+    oversell_proceeds = {
+        e.trade_id: e.proceeds_units for e in fifo_all.data_errors if e.kind == "oversell"
+    }
+    initial_capital = initial_cash
 
-    # 3. 期初持仓（区间前 open lots）+ 成本；货基行不进持仓（按余额计）
-    money_fund_codes = {t.security_code for t in trades if _is_money_fund_row(t)}
-    initial_money_fund = _initial_money_fund_balances(trades, period_start)
+    # 3. 期初持仓（区间前 open lots）+ 成本
     # 新股待上市（认购缴款已入库、尚无行情）：按认购成本兜底估值，不阻断（设计 D11）。
     pending_new_stock_codes = {
         canonical_code(bond_alias, code) for code in _new_stock_pending_codes(trades)
     }
-    bond_divisors = _bond_face_divisors(trades)
     fifo_before = build_rounds(
         trades_to_events([t for t in trades if t.trade_date < period_start], bond_alias=bond_alias)
     )
@@ -230,8 +214,6 @@ async def compute_nav_points(
     initial_cost: dict[str, int] = defaultdict(int)
     code_names: dict[str, str] = {}
     for lot in fifo_before.open_lots:
-        if lot.security_code in money_fund_codes:
-            continue  # 货基份额不进持仓，余额由 initial_money_fund 承担
         initial_holdings[lot.security_code] += lot.quantity_units
         initial_cost[lot.security_code] += lot.cost_units
     # 从所有 trades 构建 code → name 映射（覆盖期初持仓 + 区间内新买入）；
@@ -251,48 +233,45 @@ async def compute_nav_points(
     if trade_dates[-1] < period_end:
         trade_dates.append(period_end)
 
-    # 6. 需要行情的标的：**只取可能形成持仓的标的**（现金余额行/货基行不算）；
-    #    发债代码归并为上市代码（申购代码无行情，只发 canonical 请求）。
+    # 6. 需要行情的标的：只取可能形成持仓、且**需要读取行情**的标的（A 股/场内基金；
+    #    现金余额行、债券与伪代码不算）；发债代码归并为上市代码（申购代码无行情）。
     holding_symbols = {
         canonical_code(bond_alias, t.security_code)
         for t in all_trades_in_range
         if t.security_code
-        and not _is_money_fund_row(t)
         and _holding_delta(_category(t), t.quantity_units, amount_units=t.amount_units) != 0
     }
-    all_symbols = sorted(holding_symbols | set(initial_holdings.keys()))
+    all_symbols = sorted(
+        code for code in holding_symbols | set(initial_holdings.keys()) if needs_quote(code)
+    )
     # 回看窗口：期初基准需要「期初当日或之前」的收盘价，否则第一天就判缺行情。
     ladder, market_causes = await _load_prices(
         market_data, all_symbols, period_start - _PRICE_LOOKBACK, trade_dates[-1]
     )
-    initial_money_fund_units = sum(initial_money_fund.values())
-    bond_fallback_any = False
-
-    # 6a. 月度首日「昨日资产」：期初现金 + 货基余额 + 期初持仓按上一交易日收盘价估值。
+    # 6a. 月度首日「昨日资产」：期初现金 + 期初持仓按上一交易日收盘价估值。
     #     仅用于展示首日的昨日资产/日收益额（不进入 TWR 序列）。
     (
         prev_day_value,
         prev_day_missing,
-        prev_day_fallback,
+        _prev_day_cost_fallback,
         _prev_day_new_stock_fallback,
     ) = _total_market_value(
         dict(initial_holdings),
         ladder,
         period_start - timedelta(days=1),
         cost_basis=dict(initial_cost),
-        bond_divisors=bond_divisors,
         new_stock_codes=pending_new_stock_codes,
     )
-    if any(not is_convertible_bond(s) for s in prev_day_fallback):
-        bond_fallback_any = True
     prev_day_value_units: int | None = (
-        None if prev_day_missing else initial_capital + initial_money_fund_units + prev_day_value
+        None if prev_day_missing else initial_capital + prev_day_value
     )
 
     points: list[tuple[date, int, int]] = []
     holdings_by_date: dict[date, list[_HoldingSnapshot]] = {}
+    # 超卖净卖款按日汇总：只从 TWR/日收益口径剔除，不进 `cashflow_units` 展示。
+    oversell_by_date: dict[date, int] = {}
 
-    # 6b. 期初基准点：区间首日之前的总资产（现金 + 货基 + 期初持仓按市价）。
+    # 6b. 期初基准点：区间首日之前的总资产（现金 + 期初持仓按市价）。
     #     没有它，TWR 只能从首个交易日算起，整段收益会漏掉首日涨跌。
     #     首日锚点恒取 period_start-1（值 = 上一交易日收盘估值，6a 已算好），只参与 TWR，
     #     不落库、不进响应——否则首日（无论当天有无成交）的涨跌会被吞掉：
@@ -307,18 +286,15 @@ async def compute_nav_points(
         (
             baseline_value,
             baseline_missing,
-            baseline_fallback,
+            _baseline_cost_fallback,
             _baseline_new_stock_fallback,
         ) = _total_market_value(
             dict(initial_holdings),
             ladder,
             baseline_date,
             cost_basis=dict(initial_cost),
-            bond_divisors=bond_divisors,
             new_stock_codes=pending_new_stock_codes,
         )
-        if any(not is_convertible_bond(s) for s in baseline_fallback):
-            bond_fallback_any = True
         if baseline_missing:
             return (
                 [],
@@ -333,17 +309,15 @@ async def compute_nav_points(
                 {},
                 assumption,
                 prev_day_value_units,
+                {},
             )
-        points.append(
-            (baseline_date, initial_capital + initial_money_fund_units + baseline_value, 0)
-        )
+        points.append((baseline_date, initial_capital + baseline_value, 0))
         holdings_by_date[baseline_date] = _build_holding_snapshots(
             dict(initial_holdings),
             dict(initial_cost),
             ladder,
             baseline_date,
             code_names,
-            bond_divisors=bond_divisors,
         )
     elif prev_day_value_units is None:
         # 首日即交易日，但上一交易日估值缺行情 → 无法锚定首日涨跌，整段阻断。
@@ -360,6 +334,7 @@ async def compute_nav_points(
             {},
             assumption,
             prev_day_value_units,
+            {},
         )
 
     # 7. 逐日推演
@@ -367,7 +342,6 @@ async def compute_nav_points(
         cash_units=initial_cash,
         holdings=dict(initial_holdings),
         cost_basis=dict(initial_cost),
-        money_fund=dict(initial_money_fund),
         cashflow_units=0,
     )
     blocked_points: list[tuple[date, str]] = []
@@ -375,30 +349,30 @@ async def compute_nav_points(
     for d in trade_dates:
         day_trades = by_date.get(d, [])
         cashflow = 0
+        oversell_today = 0
         day_cash_delta = 0
         balance_override: int | None = None
 
         for trade in day_trades:
             category = _category(trade)
             code = trade.security_code
-            if _is_money_fund_row(trade):
-                # 货基：不进持仓/成本，只覆盖余额（同日以稳定序最后一行为准；负余额按 0 兜底）。
-                state.money_fund[code] = _money_fund_balance(trade)
-            elif code:
+            if code:
                 code = canonical_code(bond_alias, code)  # 发债代码归并上市代码（设计 D3）
                 # 持仓数量变化
                 delta = _holding_delta(
                     category, trade.quantity_units, amount_units=trade.amount_units
                 )
                 if delta:
-                    state.holdings[code] = state.holdings.get(code, 0) + delta
+                    # 超卖部分视同资金划转：持仓按 0 截断，不产生负持仓/负市值。
+                    old_qty = state.holdings.get(code, 0)
+                    new_qty = max(0, old_qty + delta)
+                    delta = new_qty - old_qty
+                    state.holdings[code] = new_qty
                 # 成本变化：buy/rights/new_stock 增加成本，sell 按比例结转
                 if category in _COST_ADD_CATEGORIES and trade.amount_units != 0:
                     state.cost_basis[code] = state.cost_basis.get(code, 0) + (-trade.amount_units)
                 elif category == "sell":
-                    old_qty = state.holdings.get(code, 0) - _holding_delta(
-                        category, trade.quantity_units, amount_units=trade.amount_units
-                    )
+                    old_qty = state.holdings.get(code, 0) - delta
                     if old_qty > 0 and delta < 0:
                         old_cost = state.cost_basis.get(code, 0)
                         state.cost_basis[code] = max(0, old_cost + (old_cost * delta) // old_qty)
@@ -410,6 +384,8 @@ async def compute_nav_points(
             # 外部现金流
             if category in _CASHFLOW_CATEGORIES:
                 cashflow += trade.amount_units
+            # 超卖净卖款：卖款已在现金/总资产里，不计收益，也不标成外部现金流。
+            oversell_today += oversell_proceeds.get(trade.id, 0)
             # 余额行覆盖
             if _is_cash_balance(trade):
                 balance_override = int(trade.cash_balance_units or 0)
@@ -420,42 +396,40 @@ async def compute_nav_points(
         else:
             state.cash_units += day_cash_delta
 
-        # 当日市值（债券缺行情按买入价兜底，不阻断）
-        market_value, missing, bond_fallback, _new_stock_fallback = _total_market_value(
+        # 当日市值（债券/伪代码按含费成本估值，不请求行情、不阻断）
+        market_value, missing, _cost_fallback, _new_stock_fallback = _total_market_value(
             state.holdings,
             ladder,
             d,
             cost_basis=state.cost_basis,
-            bond_divisors=bond_divisors,
             new_stock_codes=pending_new_stock_codes,
         )
-        if any(not is_convertible_bond(s) for s in bond_fallback):
-            bond_fallback_any = True
         if missing:
             # 缺行情 → 当日阻断（继续推演后续日，不中断整段）
             blocked_points.append((d, _blocked_reason("缺行情数据", missing, market_causes)))
             continue
 
-        money_fund_units = sum(state.money_fund.values())
-        total_value = state.cash_units + money_fund_units + market_value
+        total_value = state.cash_units + market_value
         points.append((d, total_value, cashflow))
+        if oversell_today:
+            oversell_by_date[d] = oversell_today
         holdings_by_date[d] = _build_holding_snapshots(
             dict(state.holdings),
             dict(state.cost_basis),
             ladder,
             d,
             code_names,
-            bond_divisors=bond_divisors,
         )
 
     return (
         points,
         blocked_points,
         [],
-        degraded or bond_fallback_any,
+        degraded,
         holdings_by_date,
         assumption,
         prev_day_value_units,
+        oversell_by_date,
     )
 
 
@@ -465,37 +439,29 @@ def _build_holding_snapshots(
     ladder: dict[str, list[tuple[date, int]]],
     trade_date: date,
     code_names: dict[str, str],
-    *,
-    bond_divisors: dict[str, int] | None = None,
 ) -> list[_HoldingSnapshot]:
     """根据某日推演结束后的 holdings/cost_basis + 价格阶梯，构建持仓快照列表。
 
-    过滤 qty=0 的标的；按 security_code 排序，保证确定性。债券价格按换算系数折算
-    （akshare 净价是元/百元面值）；缺行情的债券在总资产里已按买入价兜底，快照跳过
-    （避免展示 0 现价）。
+    过滤 qty=0 的标的；按 security_code 排序，保证确定性。估值口径与资产表/净值同源
+    （`valued_position_units`）：债券与伪代码不读行情、按含费成本计入，`close_units=0`；
+    仍缺行情的行情品种跳过（该日已被判 blocked）。
     """
-    divisors = bond_divisors or {}
     snapshots: list[_HoldingSnapshot] = []
     for code in sorted(holdings):
         qty = holdings[code]
         if qty == 0:
             continue
-        close = _close_on_or_before(ladder, code, trade_date)
-        if close is None:
-            continue  # 缺行情的日期会被判 blocked / 债券已按买入价兜底，这里只是兜底过滤
-        cost = cost_basis.get(code, 0)
-        market_value = (
-            _bond_value_units(code, qty, close, divisors)
-            if is_bond(code)
-            else qty * close // _QTY_PRICE_SCALE
-        )
+        close = _close_on_or_before(ladder, code, trade_date) if needs_quote(code) else None
+        market_value, _source = _valued_position_units(code, qty, close, cost_basis.get(code, 0))
+        if market_value is None:
+            continue  # 缺行情的行情品种当日被判 blocked，这里只是兜底过滤
         snapshots.append(
             _HoldingSnapshot(
                 security_code=code,
                 security_name=code_names.get(code, code),
                 quantity_units=qty,
-                cost_units=cost,
-                close_units=close,
+                cost_units=cost_basis.get(code, 0),
+                close_units=close or 0,
                 market_value_units=market_value,
             )
         )
@@ -526,6 +492,7 @@ async def compute_and_store_nav(
         holdings_by_date,
         assumption,
         prev_day_value_units,
+        oversell_by_date,
     ) = await compute_nav_points(trades, period_start, period_end, market_data)
 
     rebuilt_at = clock.now()
@@ -554,7 +521,7 @@ async def compute_and_store_nav(
         series: NavSeries | None = None
         mwr_units = 0
     else:
-        series = build_nav_series(points) if points else None
+        series = build_nav_series(points, excluded_cashflows=oversell_by_date) if points else None
         cashflow_points = investor_cashflows(series) if series is not None else []
         mwr_units = compute_xirr(cashflow_points) if cashflow_points else 0
         point_status = "degraded" if degraded else "ok"

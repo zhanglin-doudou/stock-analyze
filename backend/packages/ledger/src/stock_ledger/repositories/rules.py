@@ -41,7 +41,7 @@ _BASE_SYSTEM_RULES: tuple[tuple[str, str, str, str, str, str, int], ...] = (
     ("sys_sell_plain", "卖出→卖出", "sell", "both", "exact", "卖出", 20),
     # 省心投申购确认（华泰基金投顾）：主账户资金转出到省心投投顾账户，转出动作不在
     # 账单留记录——该行视同银行转出，归资金划转（解析器已转成 CASH 资金行，设计 D14）。
-    # 必须 exact 且 priority 高于货基「申购确认→买入」(15)，否则会被误分类成货基申购。
+    # 必须 exact 且 priority 高于基金「申购确认→买入」(15)，否则会被误分类成基金申购。
     (
         "sys_sxt_out",
         "[省心投]申购确认→资金划转",
@@ -53,7 +53,7 @@ _BASE_SYSTEM_RULES: tuple[tuple[str, str, str, str, str, str, int], ...] = (
     ),
     # 券商行为（broker_action）：券商侧的份额锁定/登记动作，不扣款、不影响持仓、不计成本。
     # 优先级 11 必须早于「新股」(14) 与「申购」(16)，否则「申购中签」「申购还款」
-    # 「新股入账」会被抢去 new_stock 并虚增持仓/成本；也早于货基「申购确认」(15)。
+    # 「新股入账」会被抢去 new_stock 并虚增持仓/成本；也早于基金「申购确认」(15)。
     ("sys_brk_win", "申购中签→券商行为", "broker_action", "both", "contains", "申购中签", 11),
     ("sys_brk_repay", "申购还款→券商行为", "broker_action", "both", "contains", "申购还款", 11),
     ("sys_brk_arrive", "新股入账→券商行为", "broker_action", "both", "contains", "新股入账", 11),
@@ -66,8 +66,8 @@ _BASE_SYSTEM_RULES: tuple[tuple[str, str, str, str, str, str, int], ...] = (
     ("sys_brk_hold_in", "托管转入→券商行为", "broker_action", "both", "contains", "托管转入", 11),
     # 新股/可转债申购（新口径）：只认真正扣款的行——摘要含「新股」「认购」「申购」。
     # 「中签」「缴款」不再单独归入（登记类见上方 broker_action）；上市后卖出统一走 sell。
-    # 「新股」「认购」放 14：早于货基「申购确认」(15)，保证「新股申购确认缴款」不被当成
-    # 货基买入；单字「申购」放 16：晚于货基，避免把「申购确认」抢成打新。
+    # 「新股」「认购」放 14：早于基金「申购确认」(15)，保证「新股申购确认缴款」不被当成
+    # 基金买入；单字「申购」放 16：晚于基金，避免把「申购确认」抢成打新。
     ("sys_new_stock", "新股→新股申购", "new_stock", "both", "contains", "新股", 14),
     ("sys_new_sub", "认购→新股申购", "new_stock", "both", "contains", "认购", 14),
     # 上市后卖出统一走 sell：新股口径收窄后含「新股」的规则只认建仓，这里给「新股卖出」
@@ -93,7 +93,7 @@ _BASE_SYSTEM_RULES: tuple[tuple[str, str, str, str, str, str, int], ...] = (
         "市值认购资金扣收",
         12,
     ),
-    # 货币基金申赎确认（货基账单通常没有「买卖标志」列，摘要只写「申购/赎回确认」）：
+    # 基金申赎确认（基金账单通常没有「买卖标志」列，摘要只写「申购/赎回确认」）：
     # 关键词与解析器 `FUND_SUMMARY_SIDE` 保持一致（漂移由单测锁定）。priority 15 必须
     # 晚于券商行为(11)与「新股/认购」(14)，早于单字「申购」(16)。
     ("sys_fund_buy", "申购确认→买入", "buy", "both", "contains", "申购确认", 15),
@@ -102,7 +102,7 @@ _BASE_SYSTEM_RULES: tuple[tuple[str, str, str, str, str, str, int], ...] = (
     ("sys_div_tax", "股息红利税→费用", "fee", "both", "contains", "红利税", 25),
     ("sys_dividend", "红利入账→分红", "dividend", "both", "exact", "红利入账", 30),
     ("sys_div_bonus", "股息→分红", "dividend", "both", "contains", "股息", 40),
-    # 货基分红发放（红利再投/现金分红）：与「红利入账」同口径，不能被宽泛「费」规则吞掉。
+    # 基金分红发放（红利再投/现金分红）：与「红利入账」同口径，不能被宽泛「费」规则吞掉。
     ("sys_div_paid", "红利发放→分红", "dividend", "both", "contains", "红利发放", 30),
     ("sys_interest", "利息归本→利息", "interest", "both", "contains", "利息", 50),
     # 配股（含「配股缴款」）：既有股票变更也有扣费，属 rights；优先级 13 早于

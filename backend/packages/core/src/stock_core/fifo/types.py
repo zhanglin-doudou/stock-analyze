@@ -53,9 +53,6 @@ class FifoEvent:
     ratio_units: int = 0
     line_no: int = 0
     summary: str = ""
-    # 货基标记：允许超卖且超卖不计 data_error。货基红利发放行按口径隔离、不进流水，
-    # 赎回时份额会略多于已入账申购——超出部分即累计利息（零成本），卖款全额计收益。
-    allow_oversell: bool = False
 
     @property
     def stable_key(self) -> tuple[date, int, str, int, int, str]:
@@ -89,7 +86,7 @@ class Fill:
 
 @dataclass(frozen=True, slots=True)
 class Round:
-    """FIFO 回合：closed（正常配对）/ open（期末未平仓）/ data_error（超卖等）。"""
+    """FIFO 回合：closed（正常配对）/ open（期末未平仓）/ oversell（超卖，视同资金划转）。"""
 
     key: str
     security_code: str
@@ -140,7 +137,7 @@ class DataError:
 
 @dataclass(frozen=True, slots=True)
 class FifoResult:
-    """FIFO 引擎输出。rounds = closed（含 data_error）+ open，按稳定序排列。"""
+    """FIFO 引擎输出。rounds = closed（含 oversell）+ open，按稳定序排列。"""
 
     rounds: tuple[Round, ...]
     fills: tuple[Fill, ...]
@@ -149,7 +146,7 @@ class FifoResult:
 
     @property
     def closed_rounds(self) -> tuple[Round, ...]:
-        """正常平仓回合（status == "closed"；data_error 不计入）。"""
+        """正常平仓回合（status == "closed"；oversell 不计入）。"""
         return tuple(round_ for round_ in self.rounds if round_.status == "closed")
 
     @property

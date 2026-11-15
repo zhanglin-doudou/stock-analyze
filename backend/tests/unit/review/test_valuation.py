@@ -20,21 +20,17 @@ from stock_review.application.valuation import (
     PRICE_LOOKBACK,
     QTY_PRICE_SCALE,
     blocked_price_reason,
-    bond_face_divisors,
-    bond_value_units,
     category,
     close_on_or_before,
     closing_price_ladder,
     holding_delta,
-    initial_money_fund_balances,
     is_cash_balance,
-    is_money_fund_row,
     load_prices,
     market_failure_cause,
-    money_fund_share_delta,
     new_stock_codes_in_window,
     new_stock_pending_codes,
     total_market_value,
+    valued_position_units,
 )
 
 _USER = uuid.uuid4()
@@ -63,7 +59,6 @@ def _trade(
     security_name: str = "贵州茅台",
     side: str = "buy",
     price_units: int = 0,
-    money_fund_balance_units: int | None = None,
 ) -> Trade:
     return Trade(
         id=f"trd_{uuid.uuid4().hex[:12]}",
@@ -81,7 +76,6 @@ def _trade(
         other_fee_units=0,
         cash_balance_units=cash_balance_units,
         cash_balance_available=cash_balance_units is not None,
-        money_fund_balance_units=money_fund_balance_units,
         category=category_,
         occurrence_idx=0,
         line_no=0,
@@ -196,128 +190,84 @@ def test_total_market_value_floors_each_symbol() -> None:
         "300750": [],
     }
     holdings = {"600519": 3, "000001": 3, "300750": 0}
-    total, missing, bond_fallback, stock_fallback = total_market_value(
+    total, missing, cost_fallback, stock_fallback = total_market_value(
         holdings, ladder, date(2026, 2, 1)
     )
     # 逐标的 floor：3*1_000_001//1e8=0，3*999_999//1e8=0；qty=0 不请求行情、不报缺失。
     assert total == 0
     assert missing == []
-    assert bond_fallback == []
+    assert cost_fallback == []
     assert stock_fallback == []
     holdings = {"600519": 10**8, "000001": 10**8}
-    total, missing, bond_fallback, stock_fallback = total_market_value(
+    total, missing, cost_fallback, stock_fallback = total_market_value(
         holdings, ladder, date(2026, 2, 1)
     )
     assert total == 1_000_001 + 999_999
     assert missing == []
-    assert bond_fallback == []
+    assert cost_fallback == []
     assert stock_fallback == []
     # 持有但无任何收盘 → 缺失（由调用方判 blocked）
-    total, missing, _bond_fallback, _stock_fallback = total_market_value(
+    total, missing, _cost_fallback, _stock_fallback = total_market_value(
         {"300750": 10**8}, ladder, date(2026, 2, 1)
     )
     assert total == 0
     assert missing == ["300750"]
 
 
-# ── 货币基金 / 债券（设计 2026-10-29）─────────────────────────
+# ── 债券 / 伪代码：不读行情，按含费成本估值 ────────────────────
 
 
-_MF_NAME = "华泰紫金天\n天发货币"
-
-
-def test_money_fund_primitives_and_opening_balances() -> None:
-    buy = _trade(
-        trade_date=date(2026, 1, 5),
-        category_="buy",
-        security_code="940018",
-        security_name=_MF_NAME,
-        quantity_units=shares("10000"),
-        amount_units=-cents("10000"),
-        price_units=price("1.0000"),
-        money_fund_balance_units=cents("10000"),
+def test_valued_position_units_sources() -> None:
+    """共用估值原语：行情品种按市价、非行情品种按成本、待上市新股按认购成本。"""
+    assert valued_position_units("600519", shares("100"), price("1700"), cents("170045")) == (
+        cents("170000"),
+        "market",
     )
-    sell = _trade(
-        trade_date=date(2026, 1, 6),
-        category_="sell",
-        security_code="940018",
-        security_name=_MF_NAME,
-        side="sell",
-        quantity_units=shares("2000"),
-        amount_units=cents("2000"),
-        price_units=price("1.0000"),
-        money_fund_balance_units=cents("8000"),
+    assert valued_position_units("019547", shares("1000"), None, cents("980")) == (
+        cents("980"),
+        "cost",
     )
-    assert is_money_fund_row(buy) and is_money_fund_row(sell)
-    # 余额列为 NULL 的普通行不是货基行（哪怕名称含「货币」）。
-    assert not is_money_fund_row(_trade(trade_date=date(2026, 1, 5), category_="buy"))
-    # 份额 × 1.0000 → 金额；卖出取负。
-    assert money_fund_share_delta(buy) == cents("10000")
-    assert money_fund_share_delta(sell) == -cents("2000")
-    # 区间前有余额行 → 直取最后一条。
-    assert initial_money_fund_balances([buy, sell], date(2026, 2, 1)) == {"940018": cents("8000")}
-    # 区间内首条余额行 → 反推期初（8000 − (−2000) = 10000）。
-    assert initial_money_fund_balances([sell], date(2026, 1, 6)) == {"940018": cents("10000")}
-    # 无货基行 → 空。
-    assert initial_money_fund_balances([], date(2026, 2, 1)) == {}
+    assert valued_position_units(
+        "001237", shares("500"), None, cents("26630"), new_stock_codes={"001237"}
+    ) == (cents("26630"), "new_stock_cost")
+    # 行情品种缺价且不是待上市新股 → 不可估值（调用方按缺行情处理）。
+    assert valued_position_units("600519", shares("100"), None, cents("5000")) == (None, "")
 
 
-def test_bond_face_divisor_consistent_with_valuation() -> None:
-    """成交金额反推系数必须与 `qty × close ÷ 1e8 ÷ divisor` 自洽。"""
-    # 数量按「张」：10 张 × 净价 100 = 1000 元 → 系数 1。
-    zhang = _trade(
-        trade_date=date(2026, 1, 5),
-        category_="buy",
-        security_code="019547",
-        security_name="国债",
-        quantity_units=shares("10"),
-        price_units=price("100.00"),
-        amount_units=-cents("1000"),
-    )
-    # 数量按「面值」：1000 面值 × 净价 100 ÷ 100 = 1000 元 → 系数 100（公司债，
-    # 可转债不走反推，见下方 cbond 专项用例）。
-    face = _trade(
-        trade_date=date(2026, 1, 5),
-        category_="buy",
-        security_code="122009",
-        security_name="公司债",
-        quantity_units=shares("1000"),
-        price_units=price("100.00"),
-        amount_units=-cents("1000"),
-    )
-    assert bond_face_divisors([zhang]) == {"019547": 1}
-    assert bond_face_divisors([face]) == {"122009": 100}
-
-    ladder = {"019547": [(date(2026, 1, 5), price("100.00"))]}
-    total, missing, fallback, stock_fallback = total_market_value(
-        {"019547": shares("10")},
+def test_non_quote_symbols_use_cost_basis_not_quote() -> None:
+    """债券/伪代码不读行情：即使缓存里有 bar，市值也取含费成本（买入价）。"""
+    ladder = {"113050": [(date(2026, 8, 3), price("130"))]}
+    total, missing, cost_fallback, stock_fallback = total_market_value(
+        {"113050": shares("1")},
         ladder,
-        date(2026, 1, 5),
-        bond_divisors=bond_face_divisors([zhang]),
+        date(2026, 8, 3),
+        cost_basis={"113050": cents("1000")},
     )
-    assert (total, missing, fallback, stock_fallback) == (cents("1000"), [], [], [])
+    assert (total, missing, cost_fallback, stock_fallback) == (
+        cents("1000"),
+        [],
+        ["113050"],
+        [],
+    )
 
 
-def test_bond_missing_quote_falls_back_to_cost_basis() -> None:
+def test_bond_and_pseudo_missing_quote_never_blocks() -> None:
+    """无行情时：债券/伪代码按成本、不进 missing；行情品种仍算缺失。"""
     ladder = {"019547": [], "600519": []}
-    holdings = {"019547": shares("1000"), "600519": shares("100")}
-    cost = {"019547": cents("980"), "600519": cents("5000")}
-    # 债券缺行情 → 按买入成本兜底（fallback），非债券缺行情 → missing（调用方 blocked）。
-    total, missing, fallback, stock_fallback = total_market_value(
-        holdings, ladder, date(2026, 1, 5), cost_basis=cost, bond_divisors={"019547": 1}
+    holdings = {"019547": shares("1000"), "970172": shares("10"), "600519": shares("100")}
+    cost = {"019547": cents("980"), "970172": cents("1000"), "600519": cents("5000")}
+    total, missing, cost_fallback, stock_fallback = total_market_value(
+        holdings, ladder, date(2026, 1, 5), cost_basis=cost
     )
-    assert total == cents("980")
-    assert fallback == ["019547"]
+    assert total == cents("1980")
+    assert cost_fallback == ["019547", "970172"]
     assert stock_fallback == []
     assert missing == ["600519"]
-    # 不启用兜底（cost_basis=None）时债券也进 missing。
-    total, missing, fallback, stock_fallback = total_market_value(
-        holdings, ladder, date(2026, 1, 5)
+    # 无成本（cost_basis=None）→ 非行情标的也无法估值，进 missing 由调用方决定文案。
+    total, missing, cost_fallback, _stock_fallback = total_market_value(
+        {"019547": shares("1000")}, ladder, date(2026, 1, 5)
     )
-    assert total == 0
-    assert fallback == []
-    assert stock_fallback == []
-    assert missing == ["019547", "600519"]
+    assert (total, missing, cost_fallback) == (0, ["019547"], [])
 
 
 # ── 行情失败分类 ────────────────────────────────────────────
@@ -399,76 +349,8 @@ async def test_load_prices_degrades_to_per_symbol_on_batch_failure() -> None:
     assert causes == {"999999": "not_supported"}
 
 
-# ── 可转债市值：固定 1 手 = 10 张（设计 2026-10-29 D2）──────────────────────
-
-
-def test_cbond_value_fixed_lot_10() -> None:
-    """1 手 @ 收盘 130 元/张 → 10 张 × 130 = 1300 元（不走成交金额反推）。"""
-    assert bond_value_units("113050", shares("1"), price("130"), None) == cents("1300")
-    # 其它债券仍按反推系数折算（张口径：10 张 × 101.5 = 1015 元）。
-    assert bond_value_units("019547", shares("10"), price("101.5"), {"019547": 1}) == cents("1015")
-    # 面值口径公司债：1000 面值 × 100 ÷ 100 = 1000 元。
-    assert bond_value_units("122009", shares("1000"), price("100"), {"122009": 100}) == cents(
-        "1000"
-    )
-
-
-def test_bond_face_divisors_skips_convertible() -> None:
-    """可转债不反推（申购代码无成交行可推，口径固定 1 手 = 10 张）。"""
-    cbond = _trade(
-        trade_date=date(2026, 7, 20),
-        category_="buy",
-        security_code="113050",
-        security_name="曙26转债",
-        quantity_units=shares("1"),
-        price_units=price("100.00"),
-        amount_units=-cents("1000"),
-    )
-    gov = _trade(
-        trade_date=date(2026, 1, 5),
-        category_="buy",
-        security_code="019547",
-        security_name="国债",
-        quantity_units=shares("10"),
-        price_units=price("100.00"),
-        amount_units=-cents("1000"),
-    )
-    divisors = bond_face_divisors([cbond, gov])
-    assert "113050" not in divisors
-    assert divisors["019547"] == 1
-
-
-def test_cbond_market_value_in_total() -> None:
-    ladder = {"113050": [(date(2026, 8, 3), price("130"))]}
-    total, missing, fallback, stock_fallback = total_market_value(
-        {"113050": shares("1")},
-        ladder,
-        date(2026, 8, 3),
-        cost_basis={"113050": cents("1000")},
-        bond_divisors={},
-    )
-    assert (total, missing, fallback, stock_fallback) == (cents("1300"), [], [], [])
-
-
-def test_cbond_missing_quote_falls_back_to_cost_basis() -> None:
-    """上市前窗口（无行情）：按买入成本兜底，进 fallback 不进 missing。"""
-    total, missing, fallback, stock_fallback = total_market_value(
-        {"113050": shares("1")},
-        {"113050": []},
-        date(2026, 7, 21),
-        cost_basis={"113050": cents("1000")},
-        bond_divisors={},
-    )
-    assert (total, missing, fallback, stock_fallback) == (
-        cents("1000"),
-        [],
-        ["113050"],
-        [],
-    )
-
-
 def test_new_stock_pending_codes_only_paid_rows() -> None:
-    """只有「认购缴款」（金额非 0）的行算待上市新股；中签/入帐通知行与货基行不算。"""
+    """只有「认购缴款」（金额非 0）的行算待上市新股；中签/入帐通知行不算。"""
     paid = _trade(
         trade_date=date(2026, 5, 18),
         category_="new_stock",
@@ -532,25 +414,25 @@ def test_new_stock_codes_in_window_is_period_scoped() -> None:
 
 def test_new_stock_pending_quote_falls_back_to_subscription_cost() -> None:
     """待上市新股（001237）无行情：按认购缴款成本兜底进 stock_fallback，不阻断。"""
-    total, missing, bond_fallback, stock_fallback = total_market_value(
+    total, missing, cost_fallback, stock_fallback = total_market_value(
         {"001237": shares("500"), "600519": shares("100")},
         {"001237": [], "600519": []},
         date(2026, 5, 20),
         cost_basis={"001237": cents("26630"), "600519": cents("5000")},
         new_stock_codes={"001237"},
     )
-    assert (total, missing, bond_fallback, stock_fallback) == (
+    assert (total, missing, cost_fallback, stock_fallback) == (
         cents("26630"),
         ["600519"],
         [],
         ["001237"],
     )
     # 不在 new_stock_codes 里的普通标的缺行情仍进 missing（真缺行情不能被掩盖）。
-    total, missing, bond_fallback, stock_fallback = total_market_value(
+    total, missing, cost_fallback, stock_fallback = total_market_value(
         {"001237": shares("500")},
         {"001237": []},
         date(2026, 5, 20),
         cost_basis={"001237": cents("26630")},
         new_stock_codes=set(),
     )
-    assert (total, missing, bond_fallback, stock_fallback) == (0, ["001237"], [], [])
+    assert (total, missing, cost_fallback, stock_fallback) == (0, ["001237"], [], [])

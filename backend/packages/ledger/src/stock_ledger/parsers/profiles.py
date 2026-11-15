@@ -1,7 +1,7 @@
 """券商画像与自动识别（设计 §3.4 / D-09）。
 
 识别只用「指纹规则 + 静态精确表头」，**绝不凭文件名/扩展名猜测**；置信度不足一律回落
-`generic`，由用户显式选择画像。画像只影响解析策略（如省心投、货基余额），不改变列映射。
+`generic`，由用户显式选择画像。画像只影响解析策略（如省心投），不改变列映射。
 """
 
 from __future__ import annotations
@@ -45,8 +45,6 @@ class BrokerProfile:
     code: str
     label: str
     apply_sxt: bool
-    #: 货基行缺少「货基余额」映射时是否 fail-closed。
-    require_money_fund_balance: bool
 
 
 PROFILES: Final[dict[str, BrokerProfile]] = {
@@ -54,13 +52,11 @@ PROFILES: Final[dict[str, BrokerProfile]] = {
         code="huatai",
         label=broker_label("huatai"),
         apply_sxt=True,
-        require_money_fund_balance=False,
     ),
     "generic": BrokerProfile(
         code="generic",
         label=broker_label("generic"),
         apply_sxt=False,
-        require_money_fund_balance=True,
     ),
 }
 

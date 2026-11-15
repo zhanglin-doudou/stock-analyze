@@ -1562,7 +1562,7 @@ async def test_legacy_and_v2_real_fixture_have_zero_downstream_diff(
         "trades": """
             SELECT trade_date, security_code, security_name, side, quantity_units, price_units,
                    amount_units, commission_units, stamp_tax_units, other_fee_units,
-                   cash_balance_units, cash_balance_available, money_fund_balance_units,
+                   cash_balance_units, cash_balance_available,
                    occurrence_idx, category, summary, line_no, dedupe_key
             FROM ledger.trade
             WHERE user_id=:user_id AND deleted_at IS NULL

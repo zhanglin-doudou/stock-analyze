@@ -43,7 +43,6 @@ def _trade(
     side: str = "buy",
     price_units: int = 0,
     cash_balance_units: int | None = None,
-    money_fund_balance_units: int | None = None,
 ) -> Trade:
     return Trade(
         id=f"trd_{uuid.uuid4().hex[:12]}",
@@ -61,7 +60,6 @@ def _trade(
         other_fee_units=0,
         cash_balance_units=cash_balance_units,
         cash_balance_available=cash_balance_units is not None,
-        money_fund_balance_units=money_fund_balance_units,
         category=category,
         occurrence_idx=0,
         line_no=0,
@@ -123,9 +121,14 @@ def _bar(symbol: str, trade_date: date, close: str) -> Bar:
 _AS_OF = date(2026, 10, 19)
 
 
-async def test_holdings_exclude_money_fund_and_skip_price_request() -> None:
-    """货基行是余额口径资产：不进持仓、不请求行情，也不产生缺行情告警。"""
-    market = StubMarketData({"600519": [_bar("600519", date(2026, 10, 19), "1700.00")]})
+async def test_holdings_treat_fund_as_ordinary_holding() -> None:
+    """货基按普通持仓处理：与普通标的同口径请求行情并计入持仓。"""
+    market = StubMarketData(
+        {
+            "600519": [_bar("600519", date(2026, 10, 19), "1700.00")],
+            "511880": [_bar("511880", date(2026, 10, 19), "100.00")],
+        }
+    )
     trades = [
         _anchor(),
         _trade(
@@ -140,12 +143,11 @@ async def test_holdings_exclude_money_fund_and_skip_price_request() -> None:
         _trade(
             trade_date=date(2026, 9, 30),
             category="buy",
-            security_code="940018",
-            security_name="华泰紫金天天发货币",
-            quantity_units=shares("51847.59"),
-            price_units=price("1.0000"),
-            amount_units=cents("-51847.59"),
-            money_fund_balance_units=cents("51847.59"),
+            security_code="511880",
+            security_name="银华日利货币ETF",
+            quantity_units=shares("100"),
+            price_units=price("100.00"),
+            amount_units=cents("-10000.00"),
         ),
     ]
 
@@ -153,15 +155,16 @@ async def test_holdings_exclude_money_fund_and_skip_price_request() -> None:
         trades, as_of=_AS_OF, market_data=market
     )
 
-    assert [item.security_code for item in holdings] == ["600519"]
+    # 按市值降序：600519 17 万 > 511880 1 万。
+    assert [item.security_code for item in holdings] == ["600519", "511880"]
     assert missing == []
     assert fallback == []
     assert truncated is False
-    assert market.requested == ["600519"]
+    assert market.requested == ["511880", "600519"]
 
 
 async def test_holdings_merge_cbond_issue_code_into_listed_code() -> None:
-    """发债代码（754019 曙26发债）归并到上市代码；可转债 1 手 = 10 张。"""
+    """发债代码（754019 曙26发债）归并到上市代码；债券按含费成本估值、不读行情。"""
     market = StubMarketData({"113708": [_bar("113708", date(2026, 10, 19), "110.00")]})
     trades = [
         _anchor(),
@@ -187,7 +190,8 @@ async def test_holdings_merge_cbond_issue_code_into_listed_code() -> None:
             security_name="曙26发债",
             quantity_units=shares("1"),
             price_units=price("100.00"),
-            amount_units=cents("-1000.00"),
+            # 上市入账行金额为 0：成本只来自 7-1 的申购缴款 1000，避免重复计成本。
+            amount_units=cents("0.00"),
         ),
     ]
 
@@ -198,15 +202,15 @@ async def test_holdings_merge_cbond_issue_code_into_listed_code() -> None:
     assert [item.security_code for item in holdings] == ["113708"]
     # 名称取最后一条成交行（发债行），代码已归并到上市代码。
     assert holdings[0].security_name in {"曙26发债", "曙26转债"}
-    # 1 手 × 110.00 元/张 × 10 = 1100.00 元
-    assert holdings[0].market_value_units == cents("1100.00")
+    # 债券不读行情：即使缓存有 110.00 的 bar，也按含费成本 1000.00 估值。
+    assert holdings[0].market_value_units == cents("1000.00")
     assert missing == []
-    assert fallback == []
-    assert market.requested == ["113708"]
+    assert fallback == ["113708"]
+    assert market.requested == []
 
 
 async def test_holdings_bond_and_pending_new_stock_fall_back_to_cost() -> None:
-    """债券 / 待上市新股缺行情 → 按买入成本兜底，不算「缺行情」。"""
+    """债券 / 待上市新股缺行情 → 按买入成本估值，不算「缺行情」。"""
     market = StubMarketData()
     trades = [
         _anchor(),
@@ -238,7 +242,10 @@ async def test_holdings_bond_and_pending_new_stock_fall_back_to_cost() -> None:
     assert by_code["019547"].market_value_units == cents("100000.00")
     assert by_code["001237"].market_value_units == cents("67500.00")
     assert missing == []
+    # 按成本估值清单（仅监控日志用）：待上市新股 + 按成本常态估值的债券。
     assert fallback == ["001237", "019547"]
+    # 债券不发起行情请求（待上市新股仍请求行情，只是当前无 bar）。
+    assert market.requested == ["001237"]
 
 
 async def test_holdings_report_missing_price_for_ordinary_stock() -> None:
@@ -271,7 +278,6 @@ def _asset_row(trade_date: date, *, status: str, daily_return_units: int | None)
         user_id=_USER,
         trade_date=trade_date,
         cash_units=0,
-        money_fund_units=0,
         market_value_units=0,
         total_assets_units=0,
         holding_cost_units=0,

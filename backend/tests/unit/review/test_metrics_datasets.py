@@ -31,11 +31,10 @@ from stock_review.metrics.gate import decide
 from support.metrics_factories import make_asset_day, make_context
 
 
-def _trade(code: str, name: str = "", mf: int | None = None) -> SimpleNamespace:
+def _trade(code: str, name: str = "") -> SimpleNamespace:
     return SimpleNamespace(
         security_code=code,
         security_name=name,
-        money_fund_balance_units=mf,
     )
 
 
@@ -46,17 +45,18 @@ def _round(code: str) -> SimpleNamespace:
 # ── 标的过滤 / 归并 ──────────────────────────────────────────
 
 
-def test_metric_symbols_filters_pseudo_money_fund_unsupported_and_applies_bond_alias() -> None:
+def test_metric_symbols_keeps_only_quote_symbols_and_applies_bond_alias() -> None:
     trades = [
         _trade("CASH"),
-        _trade("940018", "华泰紫金天天发货币", mf=10_000),
+        _trade("940018", "华泰紫金天天发货币"),
         _trade("830799", "北交所股票"),
         _trade("754019", "曙26发债"),
         _trade("113050", "曙26转债"),
         _trade("600519", "贵州茅台"),
     ]
     rounds = [_round("600519"), _round("CASH")]
-    assert metric_symbols(rounds, trades) == ("113050", "600519")
+    # 只有 A 股/场内基金请求行情：债券（含发债归并后的 113050）与伪代码一律剔除。
+    assert metric_symbols(rounds, trades) == ("600519",)
 
 
 def test_metric_symbols_keeps_unsupported_when_no_classification() -> None:

@@ -24,25 +24,20 @@ SOLD_EARLY_PROFIT = "profit"
 
 # 日内调仓的对手方候选：只有真实二级市场证券成交才算「买入/卖出其它证券」。
 # `CASH` 是资金伪代码（资金划转/费用/利息/红利税补缴），公司行动（分红/送转/配股）、
-# 新股申购与货基申赎都不是换股；把它们算进来会把「卖出后补缴红利税」「卖出后申购
-# 货基」误判成日内调仓。category 词表复用 FIFO 事件类型（唯一真相来源）。
+# 新股申购都不是换股；把它们算进来会把「卖出后补缴红利税」误判成日内调仓。
+# category 词表复用 FIFO 事件类型（唯一真相来源）。
 CASH_SECURITY_CODE = "CASH"
 REBALANCE_CATEGORIES: frozenset[str] = frozenset({EventKind.BUY.value, EventKind.SELL.value})
 
 
-def is_rebalance_counterparty(*, security_code: str, category: str, is_money_fund: bool) -> bool:
+def is_rebalance_counterparty(*, security_code: str, category: str) -> bool:
     """该笔流水能否作为日内调仓的对手方（真实二级市场证券成交）。
 
     - `security_code == CASH`：资金流水，不是证券；
     - `category` 只接受 `buy` / `sell`：分红/送转/配股/新股申购/费用/转账/利息均非
-      二级市场成交；
-    - 货基申赎（`category` 为 buy/sell 但带货基标记）是现金管理，不是调仓。
+      二级市场成交。
     """
-    return (
-        security_code != CASH_SECURITY_CODE
-        and category.strip().lower() in REBALANCE_CATEGORIES
-        and not is_money_fund
-    )
+    return security_code != CASH_SECURITY_CODE and category.strip().lower() in REBALANCE_CATEGORIES
 
 
 # 持有期分桶上界（交易日，闭区间；约 21 TD/月、5 TD/周）：

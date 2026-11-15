@@ -256,6 +256,13 @@ def walk_chain(
             walk.skipped += 1
             continue
         balance = row.cash_balance_units
+        if row.amount_units == 0 and balance is not None and pending_units == 0:
+            # 零资金流的份额行（红利发放/非交易过户确认等）：不参与余额链核对。
+            # 它们不改变现金，券商在这类行常把「资金余额」填 0.00，不能据此断链，
+            # 也不推进锚点（`last_row` 留给最后一条真实资金行做接缝核对）。
+            # 若前面还有待核对金额（pending_units != 0），仍需在此行验证缺口。
+            walk.accepted.append(row)
+            continue
         if balance is None:
             # 无余额无法核对：接受、金额记入待核对合计，不推进锚点。
             walk.accepted.append(row)
@@ -310,9 +317,12 @@ def walk_chain_with_head_retry(
     max_candidates: int = HEAD_RETRY_CANDIDATES,
 ) -> ChainWalk:
     """首次导入：头部最多试 `max_candidates` 个锚点，取接受行数最多者，并列取最早。"""
-    candidates = [index for index, row in enumerate(rows) if row.cash_balance_units is not None][
-        :max_candidates
-    ]
+    # 零资金流行的「资金余额」列不可信（常填 0.00），不能作为锚点候选。
+    candidates = [
+        index
+        for index, row in enumerate(rows)
+        if row.cash_balance_units is not None and row.amount_units != 0
+    ][:max_candidates]
     if not candidates:
         return walk_chain(rows, start_balance_units=None, epsilon_units=epsilon_units)
 
@@ -324,9 +334,20 @@ def walk_chain_with_head_retry(
             start_balance_units=anchor_row.cash_balance_units,
             epsilon_units=epsilon_units,
         )
+        # 锚点之前的零资金流行（零金额份额行等）不参与核对，直接接受，不当作断链。
+        prefix_accepted = [
+            row
+            for row in rows[:index]
+            if row.amount_units == 0 and row.cash_balance_units is not None
+        ]
+        prefix_quarantined = [
+            _break_candidate(row)
+            for row in rows[:index]
+            if not (row.amount_units == 0 and row.cash_balance_units is not None)
+        ]
         candidate = ChainWalk(
-            accepted=[anchor_row, *rest.accepted],
-            quarantined=[_break_candidate(row) for row in rows[:index]] + rest.quarantined,
+            accepted=[*prefix_accepted, anchor_row, *rest.accepted],
+            quarantined=prefix_quarantined + rest.quarantined,
             last_balance_units=rest.last_balance_units,
             last_row=rest.last_row or anchor_row,
             skipped=rest.skipped,

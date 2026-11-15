@@ -26,7 +26,6 @@ def _trade(
     category: str,
     line_no: int,
     summary_code: str = "",
-    money_fund_balance_units: int | None = None,
 ) -> Any:
     """`_trade_day_index` 只读这几个字段的轻量替身。"""
     return SimpleNamespace(
@@ -37,7 +36,6 @@ def _trade(
         security_code=security_code,
         category=category,
         summary_code=summary_code,
-        money_fund_balance_units=money_fund_balance_units,
     )
 
 
@@ -100,40 +98,21 @@ def test_rebalance_out_ignores_cash_dividend_tax() -> None:
     )
 
 
-def test_rebalance_out_ignores_money_fund_subscribe() -> None:
-    """卖出后紧跟货基申购 → 不命中：货基余额标记与摘要码两种识别都要生效。"""
+def test_rebalance_out_counts_fund_subscribe_as_counterparty() -> None:
+    """卖出后申购普通基金（货基已按普通持仓处理）→ 视为换股，命中 rebalance_out。"""
     buy = _trade("t1", side="buy", security_code="301031", category="buy", line_no=1907)
     sell = _trade("t2", side="sell", security_code="301031", category="sell", line_no=1908)
-    marked = _trade(
+    fund_buy = _trade(
         "t3",
         side="buy",
         security_code="940018",
         category="buy",
         line_no=1909,
         summary_code="sys_fund_buy",
-        money_fund_balance_units=11_629_538,
     )
     assert _rebalance(
-        [buy, sell, marked], security="301031", round_sells=[sell], round_buys=[buy]
-    ) == (
-        False,
-        False,
-    )
-    # 旧批次可能没有货基余额标记：只用摘要码 `sys_fund_buy` 兜底。
-    unmarked = _trade(
-        "t4",
-        side="buy",
-        security_code="940018",
-        category="buy",
-        line_no=1910,
-        summary_code="sys_fund_buy",
-    )
-    assert _rebalance(
-        [buy, sell, unmarked], security="301031", round_sells=[sell], round_buys=[buy]
-    ) == (
-        False,
-        False,
-    )
+        [buy, sell, fund_buy], security="301031", round_sells=[sell], round_buys=[buy]
+    ) == (True, False)
 
 
 def test_rebalance_out_ignores_new_stock_subscription() -> None:

@@ -219,18 +219,6 @@ def test_generic_profile_fails_closed_on_sxt_bill() -> None:
     assert exc.value.code == ErrorCode.IMPORT_PROFILE_REQUIRED
 
 
-def test_generic_profile_fails_closed_on_money_fund_without_balance() -> None:
-    path = _API_DIR / "华泰账单_货基_mock.xlsx"
-    data = path.read_bytes()
-    inspection = inspect_table(data, path.name)
-    plan = plan_from_legacy_mapping(inspection.headers, inspection.header_row_index, None)
-    with pytest.raises(ApiError) as exc:
-        parse_bill_with_plan(
-            data, path.name, plan=plan, date_format=None, clock=CLOCK, broker="generic"
-        )
-    assert exc.value.code == ErrorCode.IMPORT_PROFILE_REQUIRED
-
-
 def test_other_fee_multi_column_is_summed_in_plan() -> None:
     workbook = Workbook()
     sheet = workbook.active

@@ -144,7 +144,6 @@ def _trade(
     cash_balance_units: int | None = None,
     side: str = "buy",
     line_no: int = 1,
-    money_fund_balance_units: int | None = None,
 ) -> Trade:
     return Trade(
         id=f"trd_{uuid.uuid4().hex[:12]}",
@@ -162,7 +161,6 @@ def _trade(
         other_fee_units=0,
         cash_balance_units=cash_balance_units,
         cash_balance_available=cash_balance_units is not None,
-        money_fund_balance_units=money_fund_balance_units,
         category=category,
         occurrence_idx=0,
         line_no=line_no,
@@ -192,6 +190,7 @@ def _run(
     prev_row: AssetDaily | None = None,
     market_causes: dict[str, str] | None = None,
     bond_alias: dict[str, str] | None = None,
+    oversell_proceeds: dict[str, int] | None = None,
     quotes_pull_attempted: bool = False,
 ):
     return compute_daily_valuations(
@@ -207,6 +206,7 @@ def _run(
         fifo_error_codes=fifo_error_codes or set(),
         rebuilt_at=_REBUILT_AT,
         bond_alias=bond_alias,
+        oversell_proceeds=oversell_proceeds,
         quotes_pull_attempted=quotes_pull_attempted,
     )
 
@@ -445,168 +445,11 @@ def test_balance_line_overrides_daily_cash() -> None:
     assert _row(result, date(2026, 1, 2))["cash_units"] == cents("111.00")
 
 
-# ── 货币基金 / 债券（设计 2026-10-29）─────────────────────────
+# ── 债券：不读行情，按含费成本估值 ──────────────────────────
 
 
-def test_money_fund_balance_counts_into_assets_without_market_request() -> None:
-    """货基行不进持仓/不请求行情：总资产 = 现金 + 货基 + 市值。"""
-    trades = [
-        _trade(
-            trade_date=date(2026, 1, 1),
-            category="other",
-            amount_units=0,
-            cash_balance_units=cents("1000.00"),
-            line_no=1,
-        ),
-        _trade(
-            trade_date=date(2026, 1, 2),
-            category="buy",
-            security_code="940018",
-            amount_units=-cents("500.00"),
-            quantity_units=shares("500"),
-            price_units=price("1.0000"),
-            money_fund_balance_units=cents("500.00"),
-            line_no=2,
-        ),
-    ]
-    # ladder 为空：若货基被当普通持仓会因缺行情 blocked；这里应保持 ok。
-    result = _run(trades, date(2026, 1, 1), date(2026, 1, 3))
-    day2 = _row(result, date(2026, 1, 2))
-    assert day2["status"] == "ok"
-    assert day2["cash_units"] == cents("500.00")
-    assert day2["money_fund_units"] == cents("500.00")
-    assert day2["market_value_units"] == 0
-    assert day2["holding_count"] == 0
-    assert day2["total_assets_units"] == cents("1000.00")
-    assert day2["status_reason"] is None
-
-
-def test_money_fund_oversell_interest_lands_in_daily_pnl_not_initial_assets() -> None:
-    """货基部分超卖：超出份额 = 累计利息，必须在赎回当日计收益（设计 D15）。
-
-    真实账单 940018 场景：9-23 申购 1000.00（余额 1000.00）、9-30 赎回 1012.27（余额 0）。
-    多出的 12.27 是万份收益。期初货基余额必须按 0（不能被锚点反推成 12.27），否则利息
-    被算进初始资产、赎回当日 daily_pnl 变成 0。
-    """
-    trades = [
-        _trade(
-            trade_date=date(2026, 9, 1),
-            category="other",
-            amount_units=0,
-            cash_balance_units=cents("1000.00"),
-            line_no=1,
-        ),
-        _trade(
-            trade_date=date(2026, 9, 23),
-            category="buy",
-            security_code="940018",
-            amount_units=-cents("1000.00"),
-            quantity_units=shares("1000"),
-            price_units=price("1.0000"),
-            money_fund_balance_units=cents("1000.00"),
-            line_no=2,
-        ),
-        _trade(
-            trade_date=date(2026, 9, 30),
-            category="sell",
-            side="sell",
-            security_code="940018",
-            amount_units=cents("1012.27"),
-            quantity_units=shares("1012.27"),
-            price_units=price("1.0000"),
-            money_fund_balance_units=cents("0.00"),
-            line_no=3,
-        ),
-    ]
-    result = _run(trades, date(2026, 9, 1), date(2026, 9, 30))
-
-    day1 = _row(result, date(2026, 9, 1))
-    assert day1["money_fund_units"] == 0  # 期初不得凭空多出利息
-    assert day1["total_assets_units"] == cents("1000.00")
-    assert day1["prev_total_assets_units"] == cents("1000.00")
-
-    day2 = _row(result, date(2026, 9, 23))
-    assert day2["money_fund_units"] == cents("1000.00")  # 申购是资产转换，不影响总资产
-    assert day2["total_assets_units"] == cents("1000.00")
-    assert day2["daily_pnl_units"] == 0
-
-    day3 = _row(result, date(2026, 9, 30))
-    assert day3["money_fund_units"] == 0
-    assert day3["cash_units"] == cents("1012.27")
-    assert day3["total_assets_units"] == cents("1012.27")
-    # 超卖利息 12.27 在这里实现（而不是被塞进期初资产）。
-    assert day3["daily_pnl_units"] == cents("12.27")
-
-
-def test_money_fund_negative_balance_is_clamped_not_degraded() -> None:
-    """历史入库的负货基余额（账单缺赎回流水）→ 按 0 兜底，不产生降级行。"""
-    trades = [
-        _trade(
-            trade_date=date(2026, 1, 1),
-            category="other",
-            amount_units=0,
-            cash_balance_units=cents("20000.00"),
-            line_no=1,
-        ),
-        _trade(
-            trade_date=date(2026, 1, 2),
-            category="buy",
-            security_code="004369",
-            amount_units=-cents("10000.00"),
-            quantity_units=shares("10000"),
-            price_units=price("1.0000"),
-            money_fund_balance_units=-cents("9971.96"),
-            line_no=2,
-        ),
-    ]
-    result = _run(trades, date(2026, 1, 1), date(2026, 1, 3))
-
-    day2 = _row(result, date(2026, 1, 2))
-    assert day2["status"] == "ok"
-    assert day2["status_reason"] is None
-    assert day2["money_fund_units"] == 0
-    assert day2["total_assets_units"] == cents("10000.00")
-
-
-def test_money_fund_balance_override_takes_last_row_of_day() -> None:
-    """同日两行货基 → 余额按稳定序最后一行覆盖（不是累加）。"""
-    trades = [
-        _trade(
-            trade_date=date(2026, 1, 1),
-            category="other",
-            amount_units=0,
-            cash_balance_units=cents("1000.00"),
-            line_no=1,
-        ),
-        _trade(
-            trade_date=date(2026, 1, 2),
-            category="buy",
-            security_code="940018",
-            amount_units=-cents("300.00"),
-            quantity_units=shares("300"),
-            price_units=price("1.0000"),
-            money_fund_balance_units=cents("300.00"),
-            line_no=3,
-        ),
-        _trade(
-            trade_date=date(2026, 1, 2),
-            category="buy",
-            security_code="940018",
-            amount_units=-cents("200.00"),
-            quantity_units=shares("200"),
-            price_units=price("1.0000"),
-            money_fund_balance_units=cents("500.00"),
-            line_no=4,
-        ),
-    ]
-    day2 = _row(_run(trades, date(2026, 1, 1), date(2026, 1, 2)), date(2026, 1, 2))
-    assert day2["money_fund_units"] == cents("500.00")
-    assert day2["cash_units"] == cents("500.00")
-    assert day2["total_assets_units"] == cents("1000.00")
-
-
-def test_bond_missing_quote_is_degraded_not_blocked() -> None:
-    """债券缺行情 → 按买入价（cost_basis）估值 + degraded；非债券缺行情仍 blocked。"""
+def test_bond_missing_quote_is_ok_with_cost_remark() -> None:
+    """债券按含费成本估值：不读行情、不 blocked、不 degraded，只在 remark 留痕。"""
     trades = [
         _trade(
             trade_date=date(2026, 1, 1),
@@ -633,20 +476,21 @@ def test_bond_missing_quote_is_degraded_not_blocked() -> None:
         market_causes={"019547": "not_supported"},
     )
     day2 = _row(result, date(2026, 1, 2))
-    assert day2["status"] == "degraded"
+    assert day2["status"] == "ok"
+    assert day2["status_reason"] is None
+    assert day2["remark"] == "按买入价估值：019547"
     assert day2["market_value_units"] == cents("1000.00")
     assert day2["cash_units"] == cents("9000.00")
     assert day2["total_assets_units"] == cents("10000.00")
-    assert day2["status_reason"] is not None
-    assert "债券按买入价估值" in day2["status_reason"]
-    assert "019547" in day2["status_reason"]
+    # 非行情标的不会触发补拉（没有 missing 区间）。
+    assert result.missing_quotes == {}
 
 
 # ── blocked / degraded ─────────────────────────────────────
 
 
 def test_missing_price_blocks_day_with_zero_values_and_reason() -> None:
-    """UT-09：持有无行情标的 → 受影响日 blocked；数值 0、prev/pnl/return NULL、原因含代码。"""
+    """UT-09：持有行情品种但无 bar → 受影响日 blocked；数值 0、prev/pnl/return NULL、原因含代码。"""
     trades = [
         _trade(
             trade_date=date(2026, 1, 1),
@@ -661,7 +505,7 @@ def test_missing_price_blocks_day_with_zero_values_and_reason() -> None:
             amount_units=-cents("1000.00"),
             quantity_units=shares("100"),
             price_units=price("10.00"),
-            security_code="999999",
+            security_code="600519",
             line_no=2,
         ),
     ]
@@ -684,9 +528,9 @@ def test_missing_price_blocks_day_with_zero_values_and_reason() -> None:
     assert blocked["daily_return_units"] is None
     assert blocked["status_reason"] is not None
     assert blocked["status_reason"].startswith(MISSING_PRICE_PREFIX)
-    assert "999999" in blocked["status_reason"]
+    assert "600519" in blocked["status_reason"]
     # 缺失区间供构建做一次定向补拉：只有真正 blocked 的工作日（周末不写行）。
-    assert result.missing_quotes == {"999999": (date(2026, 1, 2), date(2026, 1, 2))}
+    assert result.missing_quotes == {"600519": (date(2026, 1, 2), date(2026, 1, 2))}
     assert MISSING_QUOTE_HINT not in blocked["status_reason"]
 
 
@@ -706,7 +550,7 @@ def test_missing_price_reason_carries_support_hint_after_pull_attempt() -> None:
             amount_units=-cents("1000.00"),
             quantity_units=shares("100"),
             price_units=price("10.00"),
-            security_code="999999",
+            security_code="600519",
             line_no=2,
         ),
     ]
@@ -722,7 +566,7 @@ def test_missing_price_reason_carries_support_hint_after_pull_attempt() -> None:
     assert blocked["status_reason"].startswith(MISSING_PRICE_PREFIX)
     assert blocked["status_reason"].endswith(MISSING_QUOTE_HINT)
     # 连续缺行情跨多个工作日：补拉区间覆盖首尾两端。
-    assert result.missing_quotes == {"999999": (date(2026, 1, 2), date(2026, 1, 5))}
+    assert result.missing_quotes == {"600519": (date(2026, 1, 2), date(2026, 1, 5))}
 
 
 def test_blocked_next_day_has_null_pnl_then_recovers() -> None:
@@ -828,8 +672,8 @@ def test_fifo_error_only_degrades_days_with_problem_holdings() -> None:
     assert r2["status_reason"] == FIFO_ERROR_REASON
 
 
-def test_oversell_allows_negative_market_value_and_degrades() -> None:
-    """D8/UT-12：超卖 → 负持仓/负市值，status=degraded（不建非负 CHECK）。"""
+def test_oversell_clamped_to_zero_and_not_degraded() -> None:
+    """超卖：持仓按 0 截断（不产生负市值），卖款进总资产但不算收益、不标资金划转。"""
     trades = [
         _trade(
             trade_date=date(2026, 1, 1),
@@ -850,12 +694,20 @@ def test_oversell_allows_negative_market_value_and_degrades() -> None:
     ]
     ladder = _ladder(_bar("000001", date(2026, 1, 2), "10.00"), symbols=["000001"])
     result = _run(
-        trades, date(2026, 1, 1), date(2026, 1, 2), ladder=ladder, fifo_error_codes={"000001"}
+        trades,
+        date(2026, 1, 1),
+        date(2026, 1, 2),
+        ladder=ladder,
+        oversell_proceeds={trades[1].id: cents("2000.00")},
     )
     row = _row(result, date(2026, 1, 2))
-    assert row["market_value_units"] == -cents("1000.00")
-    assert row["status"] == "degraded"
-    assert row["status_reason"] == FIFO_ERROR_REASON
+    assert row["market_value_units"] == 0
+    assert row["total_assets_units"] == cents("12000.00")
+    assert row["status"] == "ok"
+    assert row["status_reason"] is None
+    # 卖款已进现金余额，但既不算收益也不标成资金划转：cashflow 仍为 0，日收益为 0。
+    assert row["cashflow_units"] == 0
+    assert row["daily_pnl_units"] == 0
 
 
 def test_global_blocked_when_no_cash_balance() -> None:
@@ -1145,10 +997,9 @@ def test_new_stock_prelisting_degraded_not_blocked_and_holding_counted_once() ->
     assert after["total_assets_units"] == cents("140870")
 
 
-def test_cbond_alias_prelisting_degraded_postlisting_ok() -> None:
+def test_cbond_alias_valued_at_cost_throughout() -> None:
     """754019 曙26发债（07-20 中签缴款 1 手@-1000）归并到 113050 曙26转债：
-    上市前（08-03 前）按买入价兜底，视为正常（ok），remark 标注含可转债；
-    上市后按行情估值 ok，全程不 blocked。"""
+    债券不读行情，上市前后都按含费成本 1000 估值（ok + remark），全程不 blocked。"""
     alias = {"754019": "113050"}
     trades = [
         _trade(
@@ -1177,16 +1028,18 @@ def test_cbond_alias_prelisting_degraded_postlisting_ok() -> None:
     assert result.global_blocked is False
 
     pre = _row(result, date(2026, 7, 20))
-    # 上市前无行情 → 可转债按买入价兜底，视为正常（ok），remark 标注；现金 99000 + 成本 1000 = 100000。
+    # 上市前：按买入价估值，视为正常（ok），remark 留痕；现金 99000 + 成本 1000 = 100000。
     assert pre["status"] == "ok"
     assert pre["status_reason"] is None
-    assert pre["remark"] == "当日资产含可转债"
+    assert pre["remark"] == "按买入价估值：113050"
     assert pre["total_assets_units"] == cents("100000")
     assert pre["market_value_units"] == cents("1000")
 
     listed = _row(result, date(2026, 8, 3))
-    # 上市后按行情：1 手 × 10 张 × 130 元/张 = 1300 元。
+    # 上市后也不读行情：仍按含费成本 1000 估值（与资产表/净值/归因同口径）。
     assert listed["status"] == "ok"
-    assert listed["market_value_units"] == cents("1300")
-    assert listed["total_assets_units"] == cents("100300")
+    assert listed["status_reason"] is None
+    assert listed["remark"] == "按买入价估值：113050"
+    assert listed["market_value_units"] == cents("1000")
+    assert listed["total_assets_units"] == cents("100000")
     assert listed["holding_count"] == 1

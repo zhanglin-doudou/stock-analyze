@@ -42,7 +42,6 @@ from stock_review.application.portfolio import HOLDINGS_MAX, Holding, holdings_a
 from stock_review.application.valuation import (
     CASHFLOW_CATEGORIES,
     category,
-    is_money_fund_row,
 )
 from stock_review.metrics.defs._common import fee_breakdown
 from stock_review.metrics.views import TradeView
@@ -155,7 +154,6 @@ class DashboardAssetOverview:
     holdings: list[DashboardHolding]
     market_value_units: int | None
     cash_units: int | None
-    money_fund_units: int | None
     total_assets_units: int | None
     position_ratio_units: int | None
     total_profit_units: int | None
@@ -627,7 +625,6 @@ async def build_dashboard(
         holdings: list[DashboardHolding] = []
         market_value_units = None
         cash_units = None
-        money_fund_units = None
         total_assets_units = None
         position_ratio_units = None
     else:
@@ -636,7 +633,6 @@ async def build_dashboard(
         )
         market_value_units = latest.market_value_units
         cash_units = latest.cash_units
-        money_fund_units = latest.money_fund_units
         total_assets_units = latest.total_assets_units
         position_ratio_units = ratio_units(market_value_units, total_assets_units)
         if truncated:
@@ -658,7 +654,7 @@ async def build_dashboard(
                 )
             )
         # 监控点：看板持仓降级时输出原因（缺行情 / 成本兜底 + 资产行自身原因），
-        # 便于不回库直接定位（如货基误进持仓、发债代码未归并、待上市新股）。
+        # 便于不回库直接定位（如发债代码未归并、待上市新股）。
         if missing_prices or cost_fallback:
             log.warning(
                 "dashboard.holdings_degraded",
@@ -876,7 +872,7 @@ async def build_dashboard(
 
     # 交易次数 Top3：按证券代码（可转债归并上市代码）统计流水 buy/sell 行数
     # （买入/卖出分别计一次交易）；同时聚合个股累计收益（全部回合 pnl）与个股总费用。
-    # 现金类/货基不计。
+    # 现金类不计。
     bond_alias, _unresolved = build_bond_alias(
         (trade.security_code, trade.security_name) for trade in trades
     )
@@ -886,7 +882,7 @@ async def build_dashboard(
     trade_names: dict[str, str] = {}
     for trade in trades:
         code = canonical_code(bond_alias, trade.security_code)
-        if not code or is_money_fund_row(trade) or category(trade) in CASHFLOW_CATEGORIES:
+        if not code or category(trade) in CASHFLOW_CATEGORIES:
             continue
         if code not in trade_names and trade.security_name:
             trade_names[code] = trade.security_name
@@ -969,7 +965,6 @@ async def build_dashboard(
             holdings=holdings,
             market_value_units=market_value_units,
             cash_units=cash_units,
-            money_fund_units=money_fund_units,
             total_assets_units=total_assets_units,
             position_ratio_units=position_ratio_units,
             total_profit_units=total_profit_units,

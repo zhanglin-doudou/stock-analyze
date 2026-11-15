@@ -192,16 +192,16 @@ async def test_real_bill_all_rows_classified_and_zero_unknown(
     assert body["filled_count"] == 0
 
 
-async def test_money_fund_bill_imports_with_zero_amount_quarantine(
+async def test_fund_bill_imports_with_zero_amount_dividend(
     client, api_prefix, user, settings
 ) -> None:
-    """货币基金账单：申赎确认命中规则；零金额红利只调货基余额、不隔离。"""
+    """货币基金账单：申赎确认命中规则；零金额「红利发放」按账单分类正常入账。"""
     preview = await _preview(
         client, api_prefix, user, _FUND_BILL.read_bytes(), _FUND_BILL.name, _XLSX_CONTENT_TYPE
     )
     assert preview["estimated"] == {
-        "parsed": 6,
-        "inserted": 6,
+        "parsed": 7,
+        "inserted": 7,
         "skipped": 0,
         "quarantined": 0,
         "discarded": 0,
@@ -214,8 +214,8 @@ async def test_money_fund_bill_imports_with_zero_amount_quarantine(
 
     batch = await _batch(client, api_prefix, user, accepted["batch_id"])
     assert batch["counts"] == {
-        "parsed": 6,
-        "inserted": 6,
+        "parsed": 7,
+        "inserted": 7,
         "skipped": 0,
         "quarantined": 0,
         "discarded": 0,
@@ -226,7 +226,7 @@ async def test_money_fund_bill_imports_with_zero_amount_quarantine(
     assert items == []
 
     trades = await _trades(client, api_prefix, user)
-    assert len(trades) == 6
+    assert len(trades) == 7
     assert all(item["category"] for item in trades)
     by_summary = {(item["summary"], item["side"]): item for item in trades}
 
@@ -234,23 +234,22 @@ async def test_money_fund_bill_imports_with_zero_amount_quarantine(
     assert redeem["category"] == "sell"
     assert redeem["summary_code"] == "sys_redeem"
     assert redeem["amount"] == "116295.38"
-    # 货基行带余额（份额 × 1.0000）；红利发放（零金额份额行）参与余额推演后，
-    # 期初按 -min(累计净额) 反推为 116295.38：赎回后 = 0.00，申购后 = 106708.53。
-    assert redeem["money_fund_balance"] == "0.00"
 
     subscribe = by_summary[("申购确认", "buy")]
     assert subscribe["category"] == "buy"
     assert subscribe["summary_code"] == "sys_fund_buy"
     assert subscribe["amount"] == "-106708.53"
-    assert subscribe["money_fund_balance"] == "106708.53"
 
-    assert {item["category"] for item in trades} == {"buy", "sell", "transfer"}
+    dividend = next(item for item in trades if item["summary"] == "红利发放")
+    assert dividend["category"] == "dividend"
+    assert dividend["amount"] == "0.00"
+    assert {item["category"] for item in trades} == {"buy", "sell", "transfer", "dividend"}
 
 
 async def test_real_statement_excerpt_quarantine_only_zero_amount(
     client, api_prefix, user, settings
 ) -> None:
-    """真实对账单节选：折行摘要全部命中、持仓区不入隔离，全零金额行隔离 INVALID_AMOUNT。"""
+    """真实对账单节选：折行摘要全部命中；零金额「红利发放」入账，其余全零行仍隔离。"""
     preview = await _preview(
         client,
         api_prefix,
@@ -260,10 +259,10 @@ async def test_real_statement_excerpt_quarantine_only_zero_amount(
         _XLSX_CONTENT_TYPE,
     )
     assert preview["estimated"] == {
-        "parsed": 5,
-        "inserted": 5,
+        "parsed": 6,
+        "inserted": 6,
         "skipped": 0,
-        "quarantined": 5,
+        "quarantined": 4,
         "discarded": 0,
         "estimated_available": True,
     }
@@ -274,10 +273,10 @@ async def test_real_statement_excerpt_quarantine_only_zero_amount(
 
     batch = await _batch(client, api_prefix, user, accepted["batch_id"])
     assert batch["counts"] == {
-        "parsed": 5,
-        "inserted": 5,
+        "parsed": 6,
+        "inserted": 6,
         "skipped": 0,
-        "quarantined": 5,
+        "quarantined": 4,
         "discarded": 0,
     }
     assert "UNKNOWN_SUMMARY" not in set(batch["warnings"])
@@ -286,16 +285,19 @@ async def test_real_statement_excerpt_quarantine_only_zero_amount(
     assert batch["fills"] == []
 
     items = await _quarantine(client, api_prefix, user, accepted["batch_id"])
-    assert len(items) == 5
-    # 3 条 [省心投]红利发放 → ZERO_AMOUNT_INFO（设计 D14）；转托管确认 + 证券清理全零
-    # → INVALID_AMOUNT。
-    assert {item["reason_code"] for item in items} == {"INVALID_AMOUNT", "ZERO_AMOUNT_INFO"}
-    assert {item["line_no"] for item in items} == {17, 18, 19, 20, 25}
+    assert len(items) == 4
+    # 3 条零金额「红利发放」内容完全一致：1 条按账单分类入账，2 条文件内重复；
+    # 转托管确认与证券清理（全零）仍隔离 INVALID_AMOUNT。
+    assert {item["reason_code"] for item in items} == {
+        "INVALID_AMOUNT",
+        "DUPLICATE_IN_FILE",
+    }
+    assert {item["line_no"] for item in items} == {18, 19, 20, 25}
     # 持仓/声明区块（夹具第 27 行起）不应出现在隔离区。
     assert all(item["line_no"] < 27 for item in items)
 
     trades = await _trades(client, api_prefix, user)
-    assert len(trades) == 5
+    assert len(trades) == 6
     assert all(item["category"] for item in trades)
     by_summary = {item["summary"]: item for item in trades}
     # [省心投]申购确认视同银行转出（设计 D14）：category=transfer，CASH 占位、方向 buy。
@@ -306,16 +308,15 @@ async def test_real_statement_excerpt_quarantine_only_zero_amount(
     # 券商登记动作（托管转出/新股入帐/证券清理…）归 broker_action：不影响持仓与成本（资产口径 1.9）。
     assert by_summary["托管转出"]["category"] == "broker_action"
     assert by_summary["新股入帐"]["category"] == "broker_action"
+    assert by_summary["[省心投]红\n利发放"]["category"] == "dividend"
+    assert by_summary["[省心投]红\n利发放"]["amount"] == "0.00"
     assert {item["category"] for item in trades} == {
         "sell",
         "transfer",
         "new_stock",
         "broker_action",
+        "dividend",
     }
-    # 基金持仓区块是期末锚点：940018 赎回后余额 = 参考市值 51859.86；省心投申购行已转
-    # CASH 资金行，不再产生货基余额。
-    balances = {item["money_fund_balance"] for item in trades if item["money_fund_balance"]}
-    assert balances == {"51859.86"}
 
 
 async def test_unknown_summary_preview_equals_commit_quarantine(

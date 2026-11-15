@@ -42,7 +42,6 @@ _MUTABLE_FIELDS: frozenset[str] = frozenset(
         "other_fee_units",
         "cash_balance_units",
         "cash_balance_available",
-        "money_fund_balance_units",
         "category",
         "account_masked",
         "note",
@@ -89,7 +88,6 @@ class TradeRow:
     other_fee_units: int = 0
     cash_balance_units: int | None = None
     cash_balance_available: bool = False
-    money_fund_balance_units: int | None = None
     category: str | None = None
     occurrence_idx: int = 0
     account_masked: str | None = None
@@ -143,7 +141,6 @@ class TradeRepository:
             other_fee_units=row.other_fee_units,
             cash_balance_units=row.cash_balance_units,
             cash_balance_available=row.cash_balance_available,
-            money_fund_balance_units=row.money_fund_balance_units,
             category=row.category,
             dedupe_key=row.dedupe_key,
             occurrence_idx=row.occurrence_idx,

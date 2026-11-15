@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from stock_contracts.clock import Clock
 from stock_contracts.errors import ApiError, ErrorCode
 from stock_platform.ports import MarketDataSource
-from stock_platform.symbols import classify_symbol
+from stock_platform.symbols import needs_quote
 
 from stock_review.application.assets import (
     ASSET_DEFINITION_VERSION,
@@ -53,7 +53,7 @@ _ASSET_LOOKBACK_DAYS = 120
 # 期初买入的样本永远凑不齐前向窗口（n=0）。向前多取 120 自然日（≈80 个交易日），
 # 上限今天；回放模式按夹具自然截断。
 BAR_FORWARD_DAYS = 120
-# 伪代码/非证券行：不参与行情请求（CASH 是现金余额占位，货基由 money_fund 列标记）。
+# 伪代码/非证券行：不参与行情请求（CASH 是现金余额占位）。
 _PSEUDO_CODES = frozenset({"CASH"})
 
 logger = logging.getLogger(__name__)
@@ -155,7 +155,6 @@ def _trade_view(row: Any) -> TradeView:
         deleted_at=row.deleted_at,
         version=row.version,
         security_name=row.security_name or "",
-        money_fund_balance_units=row.money_fund_balance_units,
     )
 
 
@@ -282,7 +281,11 @@ def benchmark_fetch_symbol(benchmark: str, market_data: MarketDataSource) -> str
 
 
 def metric_symbols(rounds_raw: list[Round], trades_raw: list[Any]) -> tuple[str, ...]:
-    """需要请求行情的标的：过滤伪代码/货基，按 bond alias 归并，并剔除不支持品种。"""
+    """需要请求行情的标的：过滤伪代码与非行情品种，按 bond alias 归并。
+
+    只有 A 股/场内基金读行情（`needs_quote`）；债券与伪代码在资产表/净值/归因里按
+    含费成本估值，指标侧同样不请求行情、不算缺失。
+    """
     bond_alias, _unresolved = build_bond_alias(
         (row.security_code, row.security_name) for row in trades_raw
     )
@@ -292,10 +295,10 @@ def metric_symbols(rounds_raw: list[Round], trades_raw: list[Any]) -> tuple[str,
             wanted.add(row.security_code)
     for row in trades_raw:
         code = row.security_code
-        if not code or code in _PSEUDO_CODES or row.money_fund_balance_units is not None:
+        if not code or code in _PSEUDO_CODES:
             continue
         wanted.add(canonical_code(bond_alias, code))
-    return tuple(sorted(code for code in wanted if classify_symbol(code) is not None))
+    return tuple(sorted(code for code in wanted if needs_quote(code)))
 
 
 async def load_viewset(

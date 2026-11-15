@@ -74,14 +74,6 @@ IMPORT_FIELD_CATALOG: Final[tuple[ImportField, ...]] = (
         False,
         "money",
     ),
-    ImportField(
-        "money_fund_balance",
-        "ledger.trade.money_fund_balance_units",
-        "货基余额",
-        LEVEL_OPTIONAL,
-        False,
-        "money",
-    ),
     ImportField("summary", "ledger.trade.summary", "账单类型/摘要", LEVEL_CLASSIFY, False, "text"),
     ImportField("note", "ledger.trade.note", "备注", LEVEL_OPTIONAL, False, "text"),
     ImportField(
@@ -120,7 +112,6 @@ FIELD_ALIASES: Final[dict[str, tuple[str, ...]]] = {
     "stamp_tax": ("印花税", "交易印花税"),
     "other_fee": ("其他费", "过户费", "其他费用"),
     "cash_balance": ("资金余额", "余额"),
-    "money_fund_balance": ("货基余额", "货币基金余额", "基金余额"),
     "summary": ("摘要", "业务名称", "业务类型"),
     "note": ("备注",),
     # account 只认资金账号类列（含「帐」异体字）。股东代码/股东账号是「沪/深市场股东号」，

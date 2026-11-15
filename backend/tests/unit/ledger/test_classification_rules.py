@@ -76,26 +76,26 @@ def test_real_bill_summaries_all_match(summary: str, side: str, category: str, c
 @pytest.mark.parametrize(
     ("summary", "side", "category", "code"),
     [
-        # 货币基金账单（`test-bill.xlsx`）出现过的摘要：赎回确认此前无规则命中 → 被误隔离。
+        # 基金账单（`test-bill.xlsx`）出现过的摘要：赎回确认此前无规则命中 → 被误隔离。
         ("赎回确认", "sell", "sell", "sys_redeem"),
         ("申购确认", "buy", "buy", "sys_fund_buy"),
         ("红利发放", "unknown", "dividend", "sys_div_paid"),
     ],
 )
-def test_money_fund_summaries_all_match(summary: str, side: str, category: str, code: str) -> None:
+def test_fund_summaries_all_match(summary: str, side: str, category: str, code: str) -> None:
     rule = match_rule(_rules(), summary, side)
     assert rule is not None, summary
     assert rule.category == category
     assert rule.code == code
 
 
-def test_money_fund_rules_beat_generic_rules_without_swallowing_others() -> None:
+def test_fund_rules_beat_generic_rules_without_swallowing_others() -> None:
     rules = _rules()
-    # 「申购确认」必须命中货基买入：单字「申购」→new_stock 的规则(16)晚于货基(15)，
-    # 避免把货基申购确认抢成打新。
+    # 「申购确认」必须命中基金买入：单字「申购」→new_stock 的规则(16)晚于基金(15)，
+    # 避免把基金申购确认抢成打新。
     buy_confirm = match_rule(rules, "申购确认", "buy")
     assert buy_confirm is not None and buy_confirm.code == "sys_fund_buy"
-    # 新股申购（无「确认」）仍归打新建仓，不被货基规则抢走。
+    # 新股申购（无「确认」）仍归打新建仓，不被基金规则抢走。
     new_apply = match_rule(rules, "新股申购", "buy")
     assert new_apply is not None and new_apply.code == "sys_new_stock"
     # 只认「赎回确认」形态：赎回费属于费用，不能被赎回规则误吞。
@@ -265,8 +265,8 @@ def test_synthetic_fixture_rows_classified_except_intentional_unknown() -> None:
     assert all(row.summary == "未知业务XYZ" for row in unknown)
 
 
-def test_money_fund_fixture_parse_and_classify_zero_quarantine() -> None:
-    """货基账单全链路（解析→分类）：6 行命中、零金额红利只调余额不隔离。"""
+def test_fund_fixture_parse_and_classify_zero_quarantine() -> None:
+    """货基账单全链路（解析→分类）：7 行入账（含零金额红利发放），零隔离。"""
     fixture = Path(__file__).parents[2] / "api" / "华泰账单_货基_mock.xlsx"
     bill = parse_bill(
         fixture.read_bytes(),
@@ -275,9 +275,8 @@ def test_money_fund_fixture_parse_and_classify_zero_quarantine() -> None:
         date_format=None,
         clock=FrozenClock(datetime(2026, 7, 1, 9, 0, tzinfo=UTC)),
     )
-    assert len(bill.rows) == 6
+    assert len(bill.rows) == 7
     assert bill.quarantined == []
-    assert bill.assumptions["money_fund_balance_only_rows"] == [19]
 
     rules = _rules()
     categories: dict[str, set[str]] = {}
@@ -290,11 +289,12 @@ def test_money_fund_fixture_parse_and_classify_zero_quarantine() -> None:
         "申购确认": {"buy"},
         "证券买入": {"buy"},
         "银行转存": {"transfer"},
+        "红利发放": {"dividend"},
     }
 
 
 def test_real_statement_excerpt_parse_and_classify() -> None:
-    """真实对账单节选：折行摘要全部命中，持仓/声明区块被忽略，省心投红利/全零行隔离。"""
+    """真实对账单节选：折行摘要全部命中，持仓/声明区块被忽略；红利发放正常入账。"""
     fixture = Path(__file__).parents[2] / "api" / "华泰账单_真实节选_mock.xlsx"
     bill = parse_bill(
         fixture.read_bytes(),
@@ -303,9 +303,12 @@ def test_real_statement_excerpt_parse_and_classify() -> None:
         date_format=None,
         clock=FrozenClock(datetime(2026, 7, 1, 9, 0, tzinfo=UTC)),
     )
-    assert len(bill.rows) == 5
-    assert [item.line_no for item in bill.quarantined] == [17, 18, 19, 20, 25]
-    assert {item.reason_code for item in bill.quarantined} == {"INVALID_AMOUNT", "ZERO_AMOUNT_INFO"}
+    assert len(bill.rows) == 6
+    assert sorted(item.line_no for item in bill.quarantined) == [18, 19, 20, 25]
+    assert {item.reason_code for item in bill.quarantined} == {
+        "DUPLICATE_IN_FILE",
+        "INVALID_AMOUNT",
+    }
 
     rules = _rules()
     categories: dict[str, set[str]] = {}
@@ -316,6 +319,8 @@ def test_real_statement_excerpt_parse_and_classify() -> None:
     assert categories == {
         # [省心投]申购确认视同银行转出（设计 D14）→ 资金划转。
         "[省心投]申\n购确认": {"transfer"},
+        # 零金额份额行按账单分类正常入账。
+        "[省心投]红\n利发放": {"dividend"},
         "托管转出": {"broker_action"},
         "新股申购确\n认缴款": {"new_stock"},
         "新股入帐": {"broker_action"},

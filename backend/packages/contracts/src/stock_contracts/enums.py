@@ -110,8 +110,7 @@ class QuarantineReason(StrEnum):
     DUPLICATE_IN_FILE = "DUPLICATE_IN_FILE"
     # 金额字段全为 0（佣金/印花税/其他费/发生金额/资金余额）：无资金流的噪音行。
     INVALID_AMOUNT = "INVALID_AMOUNT"
-    # 申购中签/新股入账/托管转出、[省心投]红利发放（省心投账户内部份额通知，与主账户
-    # 资金无关）等纯通知行：无资金意义，不进明细（可审计可恢复）。
+    # 申购中签/新股入账/托管转出等纯通知行：无资金意义，不进明细（可审计可恢复）。
     ZERO_AMOUNT_INFO = "ZERO_AMOUNT_INFO"
     # 用户把该账单类型标记为「废弃」（噪音）：整类行落隔离区，单独计 `discarded_count`，
     # 不并入 `quarantined`（设计 D-12 / §4.3）。
@@ -160,7 +159,7 @@ BILL_CATEGORY_LABELS: dict[str, str] = {
     BillCategory.BONUS.value: "送转",  # 只有股权变更，不扣费
     BillCategory.DIVIDEND.value: "分红",
     BillCategory.RIGHTS.value: "配股",  # 股票变更和扣费
-    BillCategory.INTEREST.value: "利息",  # 货币基金利息
+    BillCategory.INTEREST.value: "利息",
     BillCategory.FEE.value: "费用",
     BillCategory.TRANSFER.value: "资金划转",
     BillCategory.NEW_STOCK.value: "新股/可转债中签",

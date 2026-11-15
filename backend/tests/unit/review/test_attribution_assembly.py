@@ -202,7 +202,6 @@ def _asset_row(
         user_id=USER_ID,
         trade_date=trade_date,
         cash_units=cash,
-        money_fund_units=0,
         market_value_units=market_value,
         total_assets_units=total,
         holding_cost_units=0,
@@ -275,9 +274,7 @@ def test_mirror_view_uses_asset_basis_and_window_snapshots() -> None:
         end_date=T1,
         ladder=LADDER,
         canonical=lambda code: code,
-        bond_divisors={},
         new_stocks=set(),
-        begin_balances={},
     )
     assert mirror.holdings["600000"] == (6_000_000, 2_000_000)
     # 两笔卖出净额 6713.40 / 2597.40，比例结转成本 6483.24 / 2161.08 → 230.16 / 436.32。
@@ -390,7 +387,6 @@ def test_golden_residual_buckets_and_coverage() -> None:
         begin_date=P0_DATE,
         end_date=T1,
         bucket_mv={"600000": (570_000, 280_000)},
-        money_fund_balances={},
         holdings_at={"600000": (6_000_000, 2_000_000)},
         corporate={},
         canonical=lambda c: c,
@@ -484,7 +480,6 @@ def test_split_routes_new_stock_to_ipo_bucket() -> None:
         end_date=T1,
         # 001237：期初 9,000.00 → 期末 0，卖出 +4,000.00 ⇒ −5,000.00（破发）
         bucket_mv={"001237": (900_000, 0), "110059": (0, 0)},
-        money_fund_balances={},
         holdings_at={"001237": (100_000, 0), "110059": (100_000, 0)},
         corporate={},
         canonical=lambda c: c,
@@ -524,7 +519,6 @@ def test_split_ipo_bucket_is_zero_without_new_stock() -> None:
         begin_date=P0_DATE,
         end_date=T1,
         bucket_mv={"110059": (0, 0)},
-        money_fund_balances={},
         holdings_at={"110059": (100_000, 0)},
         corporate={},
         canonical=lambda c: c,
@@ -1085,7 +1079,6 @@ def test_judgement_basis_excludes_interest_bucket() -> None:
         begin_date=P0_DATE,
         end_date=T1,
         bucket_mv={},
-        money_fund_balances={},
         holdings_at={},
         corporate={},
         canonical=lambda c: c,
@@ -1128,7 +1121,6 @@ def test_judgement_basis_excludes_ipo_bucket() -> None:
         begin_date=P0_DATE,
         end_date=T1,
         bucket_mv={"001237": (900_000, 0)},  # 期初 9,000.00 → 期末 0 ⇒ −5,000.00
-        money_fund_balances={},
         holdings_at={"001237": (100_000, 0)},
         corporate={},
         canonical=lambda c: c,
@@ -1205,7 +1197,6 @@ def test_judgement_basis_ignores_valuation_gap() -> None:
         begin_date=P0_DATE,
         end_date=T1,
         bucket_mv={},
-        money_fund_balances={},
         holdings_at={},
         corporate={},
         canonical=lambda c: c,

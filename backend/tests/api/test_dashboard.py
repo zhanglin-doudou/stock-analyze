@@ -376,8 +376,6 @@ async def test_api_084_happy_path_two_sections(
     assert asset["status"] == "ok"
     assert asset["market_value"] == "170643.00"
     assert asset["cash"] == "-70000.00"
-    assert asset["money_fund"] == "0.00"
-    assert asset["balance"] == "-70000.00"
     assert asset["total_assets"] == "100643.00"
     assert asset["position_pct"] == "169.55%"
     assert asset["total_profit"] == "643.00"
@@ -400,8 +398,6 @@ async def test_api_084_happy_path_two_sections(
     # 2026-10-28（Phase 3）：后端补展示串（千分位）；raw 定点串保留兼容。
     assert asset["market_value_display"] == "170,643.00"
     assert asset["cash_display"] == "-70,000.00"
-    assert asset["money_fund_display"] == "0.00"
-    assert asset["balance_display"] == "-70,000.00"
     assert asset["total_assets_display"] == "100,643.00"
     assert asset["total_profit_display"] == "643.00"
     assert asset["max_invested_cost_display"] == "100,000.00"
@@ -409,8 +405,6 @@ async def test_api_084_happy_path_two_sections(
     for field in (
         "market_value",
         "cash",
-        "money_fund",
-        "balance",
         "total_assets",
         "total_profit",
         "max_invested_cost",
@@ -521,8 +515,6 @@ async def test_api_084_not_built_is_missing(dashboard_client: Any, account_facto
     for field in (
         "market_value",
         "cash",
-        "money_fund",
-        "balance",
         "total_assets",
         "position_pct",
         "total_profit",
@@ -569,8 +561,6 @@ async def test_api_084_blocked_has_no_numbers(
     for field in (
         "market_value",
         "cash",
-        "money_fund",
-        "balance",
         "total_assets",
         "position_pct",
         "total_profit",

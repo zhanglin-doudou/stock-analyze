@@ -216,8 +216,8 @@ def classify_side(raw: str) -> str | None:
 _SUMMARY_BUY_TOKEN = "证券买入"
 _SUMMARY_SELL_TOKEN = "证券卖出"
 
-# 货币基金申赎确认摘要 → 资金方向。
-# 货基对账单通常没有「买卖标志」列，摘要只写「申购确认/赎回确认」；不识别就会落
+# 基金申赎确认摘要 → 资金方向。
+# 基金对账单通常没有「买卖标志」列，摘要只写「申购确认/赎回确认」；不识别就会落
 # unknown，分类规则按方向匹配时命中不了。只认「确认」形态，避免把「赎回费」等
 # 费用类摘要误判成交易方向（费用仍走 unknown + 费用规则）。
 FUND_SUMMARY_SIDE: tuple[tuple[str, str], ...] = (

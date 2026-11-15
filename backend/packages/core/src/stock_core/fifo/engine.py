@@ -191,7 +191,6 @@ def _process_security(
                     _snapshot_closed(
                         current,
                         oversell_units=current.oversell_units,
-                        data_error=current.oversell_units > 0,
                     )
                 )
                 current = None
@@ -222,8 +221,8 @@ def _apply_sell(
 
     上层已保证 quantity_units > 0，此函数只处理 lot 消耗逻辑。
     """
-    # FIFO 取可用 lot；超出部分只记 data_error，绝不产生负持仓。
-    # 货基（allow_oversell）：红利发放行被隔离未入账，赎回份额略多于申购是常态，不记错。
+    # FIFO 取可用 lot；超出部分视同资金划转（只记 data_error 供桥接并入期初，
+    # 绝不产生负持仓），不计交易损益。
     remaining = event.quantity_units
     chunks: list[tuple[_Lot, int]] = []
     for lot in lots:
@@ -234,9 +233,6 @@ def _apply_sell(
         remaining -= take
     oversell_units = remaining
     if not chunks:
-        if event.allow_oversell:
-            # 货基全额超卖：账单期前本金赎回，无成本信息——静默跳过，不记错、不计损益。
-            return None, 0
         errors.append(
             DataError(
                 trade_id=event.trade_id,
@@ -288,38 +284,18 @@ def _apply_sell(
         )
 
     if oversell_units:
-        if event.allow_oversell:
-            # 货基部分超卖：超出份额 = 被隔离的红利再投利息，零成本——卖款全额计为收益。
-            interest_proceeds = event.amount_units - proceeds_total
-            fills.append(
-                Fill(
-                    buy_trade_id="",
-                    sell_trade_id=event.trade_id,
-                    sequence=len(fills) + 1,
-                    quantity_units=oversell_units,
-                    buy_cost_units=0,
-                    sell_proceeds_units=interest_proceeds,
-                    dividend_units=0,
-                    pnl_units=interest_proceeds,
-                    open_date=event.trade_date,
-                    close_date=event.trade_date,
-                    holding_days=0,
-                )
+        errors.append(
+            DataError(
+                trade_id=event.trade_id,
+                security_code=security_code,
+                trade_date=event.trade_date,
+                kind="oversell",
+                quantity_units=oversell_units,
+                detail="卖出数量超过可用持仓，超出部分未配对",
+                # 未配对份额按数量比例分摊到的净卖款（含费，不再二次扣费）。
+                proceeds_units=event.amount_units - proceeds_total,
             )
-            oversell_units = 0
-        else:
-            errors.append(
-                DataError(
-                    trade_id=event.trade_id,
-                    security_code=security_code,
-                    trade_date=event.trade_date,
-                    kind="oversell",
-                    quantity_units=oversell_units,
-                    detail="卖出数量超过可用持仓，超出部分未配对",
-                    # 未配对份额按数量比例分摊到的净卖款（含费，不再二次扣费）。
-                    proceeds_units=event.amount_units - proceeds_total,
-                )
-            )
+        )
     lots[:] = [lot for lot in lots if lot.quantity_units > 0]
     return fills, oversell_units
 
@@ -331,8 +307,8 @@ def _round_display_name(state: _RoundState) -> str:
     return state.security_name
 
 
-def _snapshot_closed(state: _RoundState, *, oversell_units: int, data_error: bool) -> Round:
-    """把一个刚归零的周期状态 snapshot 为 closed Round。"""
+def _snapshot_closed(state: _RoundState, *, oversell_units: int) -> Round:
+    """把一个刚归零的周期状态 snapshot 为 closed / oversell Round。"""
     weighted_days = sum(f.holding_days * f.quantity_units for f in state.fills)
     holding_days = (
         max((weighted_days + state.matched_units // 2) // state.matched_units, 1)
@@ -347,7 +323,7 @@ def _snapshot_closed(state: _RoundState, *, oversell_units: int, data_error: boo
         key=key,
         security_code=state.security_code,
         security_name=_round_display_name(state),
-        status="data_error" if data_error else "closed",
+        status="oversell" if oversell_units else "closed",
         open_trade_id=state.open_trade_id,
         close_trade_id=close_trade_id,
         open_date=state.open_date,
@@ -359,7 +335,7 @@ def _snapshot_closed(state: _RoundState, *, oversell_units: int, data_error: boo
         pnl_units=pnl_units,
         return_rate_units=_return_rate_units(pnl_units, state.cost_units),
         holding_days=holding_days,
-        data_error=data_error,
+        data_error=False,
         oversell_units=oversell_units,
         fills=tuple(state.fills),
     )

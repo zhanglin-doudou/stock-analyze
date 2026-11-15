@@ -98,11 +98,6 @@ def _trade_out(dto: TradeDTO, reason: ReasonDTO | None = None) -> TradeOut:
             str(Money(dto.cash_balance_units)) if dto.cash_balance_units is not None else None
         ),
         cash_balance_available=dto.cash_balance_available,
-        money_fund_balance=(
-            str(Money(dto.money_fund_balance_units))
-            if dto.money_fund_balance_units is not None
-            else None
-        ),
         account_masked=dto.account_masked,
         summary=dto.summary,
         summary_code=dto.summary_code,
@@ -166,10 +161,6 @@ def _patch_changes(payload: TradePatchIn) -> dict[str, Any]:
             changes[f"{name}_units"] = _parse_units(value, Money, name)
         elif name == "cash_balance":
             changes["cash_balance_units"] = (
-                None if value is None else _parse_units(value, Money, name)
-            )
-        elif name == "money_fund_balance":
-            changes["money_fund_balance_units"] = (
                 None if value is None else _parse_units(value, Money, name)
             )
     return changes

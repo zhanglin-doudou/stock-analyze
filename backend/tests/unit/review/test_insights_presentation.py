@@ -43,14 +43,15 @@ def _trade(
 
 
 def test_security_type_classification() -> None:
-    """代码区段是单一真相；货基靠流水标记/名称兜底，其它债券归入 other。"""
-    assert _security_type("600519", "贵州茅台", set()) == "stock"
-    assert _security_type("159892", "恒生生物", set()) == "fund"
-    assert _security_type("113708", "曙26转债", set()) == "convertible_bond"
-    assert _security_type("019547", "16国债19", set()) == "other"
-    assert _security_type("940018", "华泰紫金天天发货币", set()) == "fund"
-    assert _security_type("940018", "天天发", {"940018"}) == "fund"
-    assert _security_type("754019", "曙26发债", set()) == "other"
+    """代码区段是单一真相；名称含「货币」的理财归入 fund，其它债券归入 other。"""
+    assert _security_type("600519", "贵州茅台") == "stock"
+    assert _security_type("159892", "恒生生物") == "fund"
+    assert _security_type("113708", "曙26转债") == "convertible_bond"
+    assert _security_type("019547", "16国债19") == "other"
+    assert _security_type("940018", "华泰紫金天天发货币") == "fund"
+    # 货基特例代码表已移除：名称无「货币」时无法识别为基金。
+    assert _security_type("940018", "天天发") == "other"
+    assert _security_type("754019", "曙26发债") == "other"
 
 
 def test_security_type_covers_every_symbol() -> None:
@@ -69,7 +70,7 @@ def test_security_type_covers_every_symbol() -> None:
         "CASH",  # 资金流水行
     )
     for code in codes:
-        assert _security_type(code, code, set()) in SECURITY_TYPES
+        assert _security_type(code, code) in SECURITY_TYPES
 
 
 def test_position_states_same_day_sells_before_buy_marks_no_addon() -> None:
