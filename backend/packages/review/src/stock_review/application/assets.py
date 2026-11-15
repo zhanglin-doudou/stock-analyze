@@ -79,7 +79,7 @@ log = get_logger("stock_review.assets")
 #      资产表同口径（货基不进持仓、可转债代码归并、债券/待上市新股按成本兜底）。
 # 1.6：新股按认购成本兜底 / 可转债按买入价兜底 → 不再 degraded（视为正常估值），
 #      新增 remark 列标注「当日资产含可转债」；仅非可转债按成本兜底仍 degraded。
-# 1.7：周六/周日不写资产行（A 股无交易，去除周末噪声行）；周末银证转账并入下一交易日
+# 1.7：周六/周日不写资产行（A 股无交易，去除周末噪声行）；周末资金划转并入下一交易日
 #      现金流，prev_total 取上一已写工作日。
 # 1.8：`new_stock` 语义收窄为「新股/可转债中签」——只有中签缴款（金额非 0）建仓，申购冻结/
 #      解冻/还款/退款归资金划转（不建仓、不进打新收益）；上市后卖出归 `sell`。分类口径变化
@@ -316,7 +316,7 @@ def compute_daily_valuations(
     prior_total: int | None = None
     rows: list[dict[str, object]] = []
     window_started = False
-    # 周末不写行，但周末发生的银证转账仍需计入下一交易日的当日现金流。
+    # 周末不写行，但周末发生的资金划转仍需计入下一交易日的当日现金流。
     pending_cashflow = 0
 
     cursor_date = start

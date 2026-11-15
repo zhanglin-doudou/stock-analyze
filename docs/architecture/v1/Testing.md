@@ -151,7 +151,7 @@ fixtures/
 | 10 | `26_suspended_valuation` | 个股连续停牌 10 个交易日 | 停牌日取前收 + 标 `stale`；当日收益不计；连续停牌 >50% 剔除卖飞率并计 `pending_window` | FR-R2.2, NFR-2, A16 |
 | 11 | `27_delisted_holding` | 期末仍持股且标的退市 | 退市股不从样本消失；期末浮盈亏用最后收盘价；计入全样本胜率分母 | NFR-2, A10 |
 | 12 | `30_ipo_three_flows` | 申购中签 + 缴款 + 新股卖出（无代码段） | 不参与回合配对；占用计入资金利用率；净值不断链 | FR-L5.2 |
-| 13 | `31_interest_vs_transfer` | 同月利息归本 + 银证转入 + 转出 | 利息=内部收益（不折份额）；转账=外部现金流（折份额）；TWR 只受行情影响 | FR-R3.2, A2/A3 |
+| 13 | `31_interest_vs_transfer` | 同月利息归本 + 银证转入 + 转出 | 利息=内部收益（不折份额）；资金划转=外部现金流（折份额）；TWR 只受行情影响 | FR-R3.2, A2/A3 |
 | 14 | `32_large_deposit_uptrend` | 月中入金 30% 且当月上涨 | `MWR > TWR`（资金在盈利期投入），差值方向断言 + CI；页面文案含解释 | FR-R3.3 |
 | 15 | `40_unknown_summary_quarantine` | 摘要「可转债转股」不在规则表 | 100% 进隔离区、响应含**行号**、不静默丢弃；指标不出该行 | FR-L5.1/5.3 |
 | 16 | `41_first_row_not_buy` | 首行是「利息归本」 | `period_initial_cash = 首行余额 − 首行发生金额`；`assumption=back_solved`；首行入库不丢弃 | FR-R2.1, A1 |

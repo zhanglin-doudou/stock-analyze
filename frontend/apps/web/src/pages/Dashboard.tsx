@@ -400,7 +400,7 @@ export function Dashboard(): ReactElement {
             </span>
           </div>
           <Kpi
-            label="银证转账峰值转入成本"
+            label="资金划转峰值转入成本"
             value={shown(asset.max_invested_cost_display, asset.max_invested_cost)}
             testId="kpi-max-invested-cost"
           />

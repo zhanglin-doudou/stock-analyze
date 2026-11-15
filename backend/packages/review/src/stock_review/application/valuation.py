@@ -32,7 +32,7 @@ from stock_platform.symbols import is_bond, is_convertible_bond
 # 持仓影响类：这些 category 会改变持仓数量（buy/bonus/rights/new_stock 加，sell 减）。
 # broker_action（申购中签/新股入账/证券清理等登记动作）不在其中：数量与市值都不受影响。
 HOLDING_CATEGORIES: frozenset[str] = frozenset({"buy", "sell", "bonus", "rights", "new_stock"})
-# 外部现金流：transfer（银证转账）与 broker_action（券商行为）。
+# 外部现金流：transfer（资金划转）与 broker_action（券商行为）。
 # broker_action 按**金额**判定资金属性：登记行金额为 0 → 对现金零影响；若账单确实带了非 0
 # 金额（如「申购还款」回款），按外部现金流从收益中剔除，避免虚增。
 CASHFLOW_CATEGORIES: frozenset[str] = frozenset({"transfer", "broker_action"})

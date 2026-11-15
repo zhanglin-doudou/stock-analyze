@@ -31,8 +31,8 @@ const SERIES: TrendSeriesPoint[] = [
   },
 ];
 
-describe("TrendChart 银证净转入/转出标记", () => {
-  it("只为有转账的日期渲染圆环，并保留可展开数据表", () => {
+describe("TrendChart 资金划转净转入/转出标记", () => {
+  it("只为有划转的日期渲染圆环，并保留可展开数据表", () => {
     const { container } = render(<TrendChart series={SERIES} title="总资产曲线" />);
 
     expect(screen.getByRole("img", { name: /总资产曲线/ })).toBeTruthy();
@@ -40,7 +40,7 @@ describe("TrendChart 银证净转入/转出标记", () => {
     expect(container.querySelectorAll(".dash-trend-marker-ring.is-in")).toHaveLength(1);
     expect(container.querySelectorAll(".dash-trend-marker-ring.is-out")).toHaveLength(1);
     expect(screen.getByText(/查看数据表/)).toBeTruthy();
-    expect(screen.getByText("2 天有转账")).toBeTruthy();
+    expect(screen.getByText("2 天有划转")).toBeTruthy();
   });
 
   it("hover 圆环显示当日资产与净转入/净转出金额", () => {
@@ -67,7 +67,7 @@ describe("TrendChart 银证净转入/转出标记", () => {
     expect(screen.queryByRole("tooltip")).toBeNull();
   });
 
-  it("数据表给出每日资产与净转账（含无转账日）", () => {
+  it("数据表给出每日资产与净划转（含无划转日）", () => {
     render(<TrendChart series={SERIES} title="总资产曲线" />);
     fireEvent.click(screen.getByText(/查看数据表/));
     const table = screen.getByRole("table");

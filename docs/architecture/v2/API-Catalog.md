@@ -137,7 +137,7 @@
 | API-082 | POST | `/assets/build` | 构建/增量更新资产表 | D1 | write | 必需 | 异步 | P0 | 202/200 |
 | API-083 | POST | `/jobs/rebuild-period` | 按月一键编排（rounds→assets→nav→metrics） | R2/D1 | write | 必需 | 异步 | P0 | 202 |
 | API-084 | GET | `/dashboard` | Dashboard 两板块聚合（资产概览 + 历史概览） | D1 | read | — | 同步 | P0 | 200 |
-| API-085 | GET | `/assets/chart` | 资产日线 chart-ready 视图（归一化序列+展示标签+每日银证净转账方向） | D1 | read | — | 同步 | P0 | 200 |
+| API-085 | GET | `/assets/chart` | 资产日线 chart-ready 视图（归一化序列+展示标签+每日资金划转净额方向） | D1 | read | — | 同步 | P0 | 200 |
 | API-086 | GET | `/metrics/catalog` | 18 个指标口径说明书（定义/方向/窗口/经验区间/版本） | D3/R8 | read | — | 同步 | P0 | 200 |
 | API-087 | GET | `/sectors/overview` | 板块概览（行业三级/概念暴露+集中度+偏好；概念可按偏好过滤） | D1 | read | — | 同步 | P0 | 200 |
 | API-088 | GET | `/sectors` | 板块目录树（行业多级/概念列表，供筛选与钻取） | D1 | read | — | 同步 | P1 | 200 |
@@ -299,7 +299,7 @@
              + dividends + interest - fees + other - ending_value
   ending_value = 期末现金 + open_cost（期末未平仓成本；P2-03 换为市值后同一恒等式仍成立）
   ```
-  `cashflows` 为净外部资金流（银证转账等 transfer 净额）；`fees` 为未分摊费用（fee 类行，正=费用）；`other` 为无法归类的现金流（打新/补差/未知），非零时 `status=degraded` 并自然体现在 `residual`。期初/期末现金取账单 `cash_balance` 锚点，锚点缺失时按现金流推导并降级；完全无 `cash_balance` 时 `status=blocked`。
+  `cashflows` 为净外部资金流（资金划转等 transfer 净额）；`fees` 为未分摊费用（fee 类行，正=费用）；`other` 为无法归类的现金流（打新/补差/未知），非零时 `status=degraded` 并自然体现在 `residual`。期初/期末现金取账单 `cash_balance` 锚点，锚点缺失时按现金流推导并降级；完全无 `cash_balance` 时 `status=blocked`。
 - 错误码：INVALID_PERIOD(422)、VALIDATION_ERROR(422)、ADMIN_CANNOT_READ_TRADES(403)。
 - 验收断言：① balanced==true；② |identity.residual|≤0.01；③ 断链 fixture（cash_balance 不连续）→ balanced==false 且 residual≠0；④ 相同输入重复调用 balanced/residual/inputs_hash 完全相同。
 #### API-028 POST /jobs/rebuild-rounds
@@ -572,7 +572,7 @@
   - **短期事后旗标判据**：`short_term_underwater` = 买入后连续 5 个行情日（不含当日）**每个**交易日收盘价都低于含费净买价（任一日收盘价不低于净买价即不命中，持平不算负收益）；`short_term_sold_early` = 含费净卖价低于卖出后第 5 个行情日收盘价的 5% 以上（严格大于 5%，恰低 5% 不命中）；两者均使用未来行情，窗口未走完时状态为 `pending`。
   - **残余口径**：两侧叠放合计理论上严格等于该侧笔数，唯一已知残余是「已有持仓但成本不可得」的买入（`addon_*=no_cost_basis`，既非首次建仓也非加仓三态）与「无持仓卖出」（`reduce_*=not_applicable/no_position`）；接口如实按原状态计数，禁止并入任一状态类别。
   - `has_data` = 区间内有任何买卖笔数；`has_flag_data` = 任一月任一趋势旗标 count > 0；`has_state_data` = 任一月任一互斥状态 count > 0；图表按各自数据判空，不得画空白坐标轴。
-  - **单月收益（additive，2026-11-10）**：`items[].monthly_return = {month,value_bp,pct,display,sign,available,days,partial,note,amount,amount_display}`。口径 = 当前资产口径版本（`asset_build_state.definition_version`）的 `asset_daily.daily_return_units` 在自然月内复利（TWR，已剔除出入金）；`value_bp` 为基点整数（2.35% → 235，供图表柱高）；`pct`/`display` 为后端定点串（`2.35%`/`+2.35%`）；`sign ∈ pos|neg|flat|none`。**无可用日收益的月份显式 `value_bp=0`（图上 0 高度）且 `available=false`、`pct/display=null`、`sign=none`、`amount/amount_display=null`，禁止用 0 冒充 0% 收益或 0 金额**；`partial=true` 表示资产表未覆盖整月（按已覆盖区间复利），`note` 为后端说明文案。**金额（additive，2026-11-10）**：`amount` = 当月每日 `asset_daily.daily_pnl_units` 的累加（**已剔除出入金**：daily_pnl 只剔除银证转账，分红/打新等投资损益仍计入），两位小数定点串；`amount_display` 为千分位展示串；与收益率同源同日行，blocked 行与非当前口径版本行不参与累加。顶层 `has_return_data`、`return_basis`（口径说明，前端展示在图表上方：两者均已剔除出入金）、`return_labels`（`pos/neg/none` 图例文案）、`return_metric_labels`（tooltip 指标名：`return`=收益率、`amount`=金额）均由后端给出。
+  - **单月收益（additive，2026-11-10）**：`items[].monthly_return = {month,value_bp,pct,display,sign,available,days,partial,note,amount,amount_display}`。口径 = 当前资产口径版本（`asset_build_state.definition_version`）的 `asset_daily.daily_return_units` 在自然月内复利（TWR，已剔除出入金）；`value_bp` 为基点整数（2.35% → 235，供图表柱高）；`pct`/`display` 为后端定点串（`2.35%`/`+2.35%`）；`sign ∈ pos|neg|flat|none`。**无可用日收益的月份显式 `value_bp=0`（图上 0 高度）且 `available=false`、`pct/display=null`、`sign=none`、`amount/amount_display=null`，禁止用 0 冒充 0% 收益或 0 金额**；`partial=true` 表示资产表未覆盖整月（按已覆盖区间复利），`note` 为后端说明文案。**金额（additive，2026-11-10）**：`amount` = 当月每日 `asset_daily.daily_pnl_units` 的累加（**已剔除出入金**：daily_pnl 只剔除资金划转，分红/打新等投资损益仍计入），两位小数定点串；`amount_display` 为千分位展示串；与收益率同源同日行，blocked 行与非当前口径版本行不参与累加。顶层 `has_return_data`、`return_basis`（口径说明，前端展示在图表上方：两者均已剔除出入金）、`return_labels`（`pos/neg/none` 图例文案）、`return_metric_labels`（tooltip 指标名：`return`=收益率、`amount`=金额）均由后端给出。
   - **为什么不复用 `/nav` 月度 TWR**：`nav_daily` 是 `GET /nav` 的派生缓存——只覆盖被请求过的日期（按月稀疏），每次请求都会按本次区间重建点集、并在同事务内清理区间内不属于本次点集的陈旧行，点集随请求区间变化，因此不能作为稳定的月度收益序列数据源（该理由取决于派生缓存的写入方式，不依赖 `/nav` 的收益口径是否正确，口径修复后仍成立）；指标目录（18 项）不含月度收益率指标。资产日表逐日收益是看板回撤族已使用的 TWR 数据源，按月复利结果唯一。
 - 错误码：VALIDATION_ERROR(422，`months` 非 6/12/24)、ADMIN_CANNOT_READ_TRADES(403)。
 - 验收：`months=6/12/24` 月边界正确（跨年）；只返回本人数据；未构建月份显式 0 且列入 `months_without_data`；旧指纹月份旗标计数为 0 且列入 `stale_months`、笔数不受影响；`flag_config` 回显生效阈值与 `flags_hash`；`states[]` 每侧状态互斥（买侧首次建仓与加仓互斥、卖侧清仓与减仓互斥）；只读（调用前后表行数不变）；单月收益按日收益复利且符号/展示串由后端给出，无资产行月份 `available=false`+`value_bp=0`+`amount=null`，blocked/旧口径版本行不参与复利与金额累加，覆盖不足标 `partial`；金额为 `daily_pnl` 当月累加（已剔出入金，含分红/打新损益）。

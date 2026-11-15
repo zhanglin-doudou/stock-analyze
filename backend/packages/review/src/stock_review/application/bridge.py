@@ -269,7 +269,7 @@ async def bridge_for_period(
             # fee 行 amount 为负（资金流出），桥接公式里 fees 是正数费用。
             fees += -trade.amount_units
         elif category in _CASHFLOW_CATEGORIES:
-            # transfer（银证转账）与 broker_action（券商行为，金额非 0 时即真实回款）
+            # transfer（资金划转）与 broker_action（券商行为，金额非 0 时即真实回款）
             # 都是外部现金流，不计入投资收益。
             cashflows += trade.amount_units
         else:

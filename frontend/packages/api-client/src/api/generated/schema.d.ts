@@ -1512,7 +1512,7 @@ export interface components {
          * AssetChartPointOut
          * @description API-085：图表点（v 为后端归一化无量纲字符串，前端只做几何投影）。
          *
-         *     cashflow 为当日银证转账净额（定点字符串，正数=净转入、负数=净转出）；
+         *     cashflow 为当日资金划转净额（定点字符串，正数=净转入、负数=净转出）；
          *     cashflow_direction 是后端判定的展示方向，前端不解析符号、不做金额运算。
          */
         AssetChartPointOut: {
@@ -2176,7 +2176,7 @@ export interface components {
          * DashboardAssetOverviewOut
          * @description 资产概览：当前快照（最新资产日）+ 峰值转入成本/总收益/费用。
          *
-         *     `max_invested_cost` 语义为**银证转账峰值转入成本**（累计净转入的峰值），
+         *     `max_invested_cost` 语义为**资金划转峰值转入成本**（累计净转入的峰值），
          *     `max_cost_return_pct` = 总收益 / 峰值转入成本（字段名保留以兼容旧客户端）。
          */
         DashboardAssetOverviewOut: {

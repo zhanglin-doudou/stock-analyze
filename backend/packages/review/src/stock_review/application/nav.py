@@ -158,7 +158,7 @@ def investor_cashflows(series: NavSeries) -> list[CashflowPoint]:
     """NAV 序列 → 投资人视角现金流（XIRR 口径，PRD 附录 A6）。
 
     `Σ CF_i / (1+x)^((d_i−d_0)/365) = 0`，其中 CF **含期初投入（负）与期末市值（正）**；
-    区间内银证转账按投资人方向取负号（转入 = 投资人出钱 = 流出）。
+    区间内资金划转按投资人方向取负号（转入 = 投资人出钱 = 流出）。
     少于 2 个点（无持有区间）时无法定义收益率，返回空。
     """
     points = series.points

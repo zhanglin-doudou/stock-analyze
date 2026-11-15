@@ -137,7 +137,7 @@ async def _seed_trade(
 async def _seed_happy_chain(engine: AsyncEngine, *, user_id: uuid.UUID) -> None:
     """04-01 银证转入 100000.00 + 06-30 买入 100@1700（余额 -70000）。
 
-    锚点用 `transfer`：看板「峰值转入成本」= 银证转账累计净额峰值（100000.00），
+    锚点用 `transfer`：看板「峰值转入成本」= 资金划转累计净额峰值（100000.00），
     作为 `max_cost_return_pct` / `max_profit_cost_pct` 的分母。
     """
     await _seed_trade(
@@ -381,7 +381,7 @@ async def test_api_084_happy_path_two_sections(
     assert asset["total_assets"] == "100643.00"
     assert asset["position_pct"] == "169.55%"
     assert asset["total_profit"] == "643.00"
-    # 峰值转入成本 = 银证转账累计净额峰值（04-01 转入 100000.00）。
+    # 峰值转入成本 = 资金划转累计净额峰值（04-01 转入 100000.00）。
     assert asset["max_invested_cost"] == "100000.00"
     # 峰值成本收益率 = 当前收益额 / 峰值转入成本 = 643 / 100000。
     assert asset["max_cost_return_pct"] == "0.64%"

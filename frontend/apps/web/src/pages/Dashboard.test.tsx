@@ -856,7 +856,7 @@ describe("Dashboard 看板", () => {
     expect(screen.getByTestId("history-overview")).toBeTruthy();
     // Phase 1c：总资产日线来自 /assets（真实数据，几何由 charts/geometry 完成）
     expect(await screen.findByRole("img", { name: /总资产曲线/ })).toBeTruthy();
-    // 银证净转入/转出圆环由 /assets/chart 的 cashflow_direction 驱动
+    // 资金划转净转入/转出圆环由 /assets/chart 的 cashflow_direction 驱动
     expect(screen.getByRole("button", { name: /2026-06-29.*净转入/ })).toBeTruthy();
     expect(screen.getByRole("button", { name: /2026-06-30.*净转出/ })).toBeTruthy();
     // 图表提供可展开数据表替代

@@ -186,7 +186,7 @@ GRANT SELECT ON ... TO stock_backup;
   - `data_as_of` 血缘留痕；
   - 日期 > `as_of` 且持仓数 > 0 → 该行 `degraded`（原因"行情未覆盖，按最近收盘估值"）；纯现金行不降级。
   - 不再用 `end = min(today, as_of)`，避免 live 多进程 as_of 回退导致水位线振荡/`delete_after` 反复删补。
-- 行粒度：`[start, end]` **每个工作日一行**（周一至周五；周六/周日跳过，价格 carry-forward，现金不变）。周末发生的银证转账并入下一交易日现金流（`cashflow_units` 与 `daily_pnl` 同口径）。
+- 行粒度：`[start, end]` **每个工作日一行**（周一至周五；周六/周日跳过，价格 carry-forward，现金不变）。周末发生的资金划转并入下一交易日现金流（`cashflow_units` 与 `daily_pnl` 同口径）。
 - 价格阶梯：`[rebuild_from - 45 天, end]`（全量时 `[start - 45, end]`）的 bars，取"当日或之前最近收盘价"（复用 `_PRICE_LOOKBACK=45` 行为）。
 
 ### 5.2 期初锚点与初始持仓
@@ -531,7 +531,7 @@ await repo.update_state_cas(                       # WHERE version=:expected
 | UT-02 | 买入 + 月末估值 | 05-29 余额 100000；06-30 买 100@1700（-170000，余额 -70000）；600519 06-30 收盘 1706.20 | cash=-70000.00、market=170620.00、total=100620.00、cost=170000、unrealized=620、pnl=620、return=0.0062（620000 units） |
 | UT-03 | 卖出结转成本 | 买 200@10（-2000），卖 100@12（+1200） | 剩余 qty=100、cost=1000 |
 | UT-04 | 分红/利息/费用 | dividend/interest/fee | 现金按 amount 变化；不改持仓/成本；非 transfer 不计 cashflow |
-| UT-05 | 银证转账 | transfer +50000 | cashflow=50000；pnl 不含该 50000 |
+| UT-05 | 资金划转 | transfer +50000 | cashflow=50000；pnl 不含该 50000 |
 | UT-06 | 送转/配股 | bonus 零金额正数量；rights 负金额 | bonus 加数量不改成本；rights 加数量且成本 += -amount |
 | UT-07 | 余额覆盖优先 + 已知限制 | 同日多笔含余额行；余额行之后仍有 amount | 现金取当日最后一笔余额；**记录**"其后 amount 被覆盖"的既有简化（v1 不修，用例固定行为） |
 | UT-08 | 周末不写行 + 现金流并入 | 周末（周六/周日）发生 transfer，跨周末持仓 | 周末**无行**；周末 transfer 并入下一工作日 `cashflow`；工作日行用最近收盘；相邻工作日连续（跳过周末） |

@@ -216,7 +216,7 @@ class DashboardResult:
 
 
 def _peak_transfer_cost(trades: list[Trade]) -> int | None:
-    """银证转账峰值转入成本：累计净转入（转入 + / 转出 -）的历史峰值。
+    """资金划转峰值转入成本：累计净转入（转入 + / 转出 -）的历史峰值。
 
     峰值 <= 0（从未净转入）→ None，不伪造 0；收益率分母统一用它。
     """
@@ -610,7 +610,7 @@ async def build_dashboard(
             )
         )
 
-    # 峰值转入成本 = 银证转账累计净转入的历史峰值（原「历史峰值持仓成本」口径已弃用）；
+    # 峰值转入成本 = 资金划转累计净转入的历史峰值（原「历史峰值持仓成本」口径已弃用）；
     # 峰值成本收益率 = 当前收益额 / 峰值转入成本。
     max_invested = _peak_transfer_cost(trades)
     if max_invested is None:
@@ -618,8 +618,8 @@ async def build_dashboard(
             DashboardMissing(
                 field="asset_overview.max_invested_cost",
                 code=MISSING_MAX_INVESTED,
-                reason="没有银证转账转入记录，无法计算峰值转入成本。",
-                what_to_do="导入含银证转账流水的账单后重新构建资产表。",
+                reason="没有资金划转转入记录，无法计算峰值转入成本。",
+                what_to_do="导入含资金划转流水的账单后重新构建资产表。",
             )
         )
 
@@ -782,7 +782,7 @@ async def build_dashboard(
                 field="asset_overview.initial_capital",
                 code=MISSING_INITIAL_CAPITAL,
                 reason="没有可用的期初现金/持仓锚点，无法确定期初资金。",
-                what_to_do="导入含期初余额或银证转账的账单后重新构建资产表。",
+                what_to_do="导入含期初余额或资金划转的账单后重新构建资产表。",
             )
         )
 

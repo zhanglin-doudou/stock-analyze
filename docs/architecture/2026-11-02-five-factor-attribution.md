@@ -149,14 +149,14 @@ M1 采用"**逐持仓段的价格路径剖分**"：`买点执行差 → 板块�
 V_begin   = asset_daily 中「严格早于 T0」最后一行（status != blocked）的 total_assets；
             若不存在：取区间内首行的 prev_total_assets（必须非 NULL，否则 blocked）
 V_end     = asset_daily 中「≤ T1」最后一行的 total_assets
-CF_period = Σ asset_daily[trade_date ∈ [T0, T1]].cashflow_units        # 外部现金流（银证转账）
+CF_period = Σ asset_daily[trade_date ∈ [T0, T1]].cashflow_units        # 外部现金流（资金划转）
 total_pnl = V_end − V_begin − CF_period
 ```
 
 - **行状态硬约束**（评审补）：`V_begin` 行 `status=="blocked"`（数值全 0，与真实空账户不可区分）→ **blocked**；区间内首行 `prev_total_assets IS NULL` → **blocked**（断链）；`V_end` 行 blocked → blocked；区间内任一行 blocked → blocked。**允许真实空账户的 `total_assets==0` 起点**（账户存在但期初无资产），但不允许用 0 兜底 blocked 行。
 - **交易日对齐**（评审补）：T0/T1 是自然日（月末可能是周六/周日）。`V_end` 的期望日期 = `latest_workday(min(valuation_end, T1))`（现有 `assets.py`/`metrics/datasets.py` 同口径），`V_end.trade_date < 该期望日期` 才判 `ASSET_SERIES_STALE`；`T1 > asset_build_state.data_as_of` 才判 stale。**禁止**直接用 `trade_date < T1` 判 stale（2026-02-28/05-31/10-31 都是周末，会全员误判 blocked）。
 - **含浮盈亏**：期末持仓按期末收盘估值（停牌用最近收盘、货基按余额、债券按换算系数——与资产表同一原语），"没卖出的亏损"也在 `total_pnl` 里。
-- **外部现金流**只来自 `asset_daily.cashflow_units`（`valuation.CASHFLOW_CATEGORIES={transfer}`，银证转账；场内基金申赎/配股缴款按内部现金流处理，见 `bridge.py` 的 rights 注释），**不**从流水二次推断。
+- **外部现金流**只来自 `asset_daily.cashflow_units`（`valuation.CASHFLOW_CATEGORIES={transfer}`，资金划转；场内基金申赎/配股缴款按内部现金流处理，见 `bridge.py` 的 rights 注释），**不**从流水二次推断。
 - **窗口与周末**：资产行工作日全覆盖，周末流水由资产构建滚入下一交易日行的 `cashflow_units`；ledger 侧股息/利息/费用按 `trade_date ∈ [T0,T1]` 汇总。**T0/T1 恰为周末时，周末发生、滚入区间外交易日的现金流可能落进 `valuation_gap`**（边界披露，§3.6）。
 - **与 Dashboard 的差异（写进 assumptions）**：Dashboard 全历史 `total_profit = V_end − (期初现金+期初持仓成本) − cashflows − other`（`dashboard.py`），期初用**成本**；本归因是任意区间，期初必须用**市值**。两处字段名不同，月报引用以本设计为准并在脚注说明。
 
