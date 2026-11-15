@@ -2,6 +2,10 @@
 
 > 状态：**v1.0 — 已人工批准并实现**（门禁全绿；实现记录见 [Implementation-Log](../reviews/2026-10-29-bill-parsing-and-valuation-caliber-Implementation-Log.md)）
 > 日期：2026-10-29 ｜ 作者：AI（Team Lead）
+>
+> ⚠️ **2026-11-15 口径变更（资产口径 2.0）**：**第一篇「货币基金余额口径」已整体下线**——`ledger.trade.money_fund_balance_units`、`review.asset_daily.money_fund_units`、解析期货基识别/余额推演/锚点反推/超卖利息、`balance` 资产余额字段全部删除；货币基金改为**普通持仓**（计成本与市值、正常请求行情），资产口径为 `total_assets = cash + market_value`。货基超卖不再走「利息」特例，而是独立 `oversell` 回合（卖款进现金/总资产但不计收益，留待回合页人工修订）。第一篇的 D1–D6、D10、D12、D14、D15、D16 及 §6.1–§6.4 仅作历史存档，**不再代表现行实现**；现行口径见 [API-Catalog](v2/API-Catalog.md) 与 [DATABASE](../DATABASE.md) 的 `0017_remove_money_fund` 条目。
+> 第二篇（零金额信息行 / 可转债口径）除「[省心投]红利发放一律隔离」外仍有效：红利发放与非交易过户确认等零金额份额行已改为按账单分类正常入账。
+>
 > 说明：本文由两篇同日设计合并而成，解决同一主线问题——**真实账单导入后的噪音行与估值断链**：
 > - **第一篇**：货币基金余额口径 + 债券行情/买入价兜底（原 `2026-10-29-money-fund-and-bond-market-data.md`）
 > - **第二篇**：零金额信息行隔离 + 可转债数量口径与跨代码回合匹配（原 `2026-10-29-subscription-isolation-and-cbond-rounds.md`）
