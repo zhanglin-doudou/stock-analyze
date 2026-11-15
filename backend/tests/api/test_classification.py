@@ -303,10 +303,14 @@ async def test_real_statement_excerpt_quarantine_only_zero_amount(
     assert by_summary["[省心投]申\n购确认"]["security_code"] == "CASH"
     assert by_summary["新股申购确\n认缴款"]["category"] == "new_stock"
     assert by_summary["[省心投]申\n购确认"]["side"] == "buy"
+    # 券商登记动作（托管转出/新股入帐/证券清理…）归 broker_action：不影响持仓与成本（资产口径 1.9）。
+    assert by_summary["托管转出"]["category"] == "broker_action"
+    assert by_summary["新股入帐"]["category"] == "broker_action"
     assert {item["category"] for item in trades} == {
         "sell",
         "transfer",
         "new_stock",
+        "broker_action",
     }
     # 基金持仓区块是期末锚点：940018 赎回后余额 = 参考市值 51859.86；省心投申购行已转
     # CASH 资金行，不再产生货基余额。
