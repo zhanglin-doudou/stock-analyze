@@ -157,7 +157,6 @@ describe("Trades · 明细类型列", () => {
           other_fee: "0.00",
           cash_balance: null,
           cash_balance_available: false,
-          money_fund_balance: null,
           account_masked: null,
           summary: null,
           summary_code: null,

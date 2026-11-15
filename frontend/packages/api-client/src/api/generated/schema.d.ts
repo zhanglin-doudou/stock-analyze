@@ -105,8 +105,10 @@ export interface paths {
          * Build Assets Endpoint
          * @description API-082：入队构建/增量更新资产表（202）；单飞复用 / 异参 409。
          *
-         *     缺行情（行情缓存完全没有覆盖资产表窗口）→ **200 + 失败构建状态 + 提示**，不入队
-         *     doomed job（自动触发路径据此静默跳过，等行情/条件变化后再试）。
+         *     缺行情（有本地缓存但**无法补拉**的行情源，且缓存完全没有覆盖资产表窗口）→
+         *     **200 + 失败构建状态 + 提示**，不入队 doomed job（自动触发路径据此静默跳过）。
+         *     live+本地缓存的行情源不再前置拦截：构建内会按缺失标的与缺失区间补拉一次，补拉后
+         *     仍缺则以 blocked 行 + 「缺少行情数据，请联系技术支持解决」表达。
          */
         post: operations["buildAssets"];
         delete?: never;
@@ -1560,8 +1562,6 @@ export interface components {
          * @description 每日资产快照行（金额 2 位定点字符串；blocked 行数值字段**显式 null**）。
          */
         AssetPointOut: {
-            /** Balance */
-            balance?: string | null;
             /** Cash */
             cash?: string | null;
             /** Cashflow */
@@ -1586,8 +1586,6 @@ export interface components {
             holding_count: number;
             /** Market Value */
             market_value?: string | null;
-            /** Money Fund */
-            money_fund?: string | null;
             /** Prev Total Assets */
             prev_total_assets?: string | null;
             /** Remark */
@@ -2184,10 +2182,6 @@ export interface components {
             annualized_return?: string | null;
             /** Annualized Return Pct */
             annualized_return_pct?: string | null;
-            /** Balance */
-            balance?: string | null;
-            /** Balance Display */
-            balance_display?: string | null;
             /** Bill End Date */
             bill_end_date?: string | null;
             /** Bill Start Date */
@@ -2212,10 +2206,6 @@ export interface components {
             max_invested_cost?: string | null;
             /** Max Invested Cost Display */
             max_invested_cost_display?: string | null;
-            /** Money Fund */
-            money_fund?: string | null;
-            /** Money Fund Display */
-            money_fund_display?: string | null;
             /** Position Pct */
             position_pct?: string | null;
             /**
@@ -4544,7 +4534,7 @@ export interface components {
              * Status
              * @enum {string}
              */
-            status: "open" | "closed" | "data_error";
+            status: "open" | "closed" | "oversell" | "data_error";
         };
         /** RoundPage */
         RoundPage: {
@@ -5234,8 +5224,6 @@ export interface components {
             dedupe_key: string;
             /** Deleted At */
             deleted_at?: string | null;
-            /** Money Fund Balance */
-            money_fund_balance?: string | null;
             /** Note */
             note?: string | null;
             /** Other Fee */
@@ -5305,8 +5293,6 @@ export interface components {
             cash_balance?: string | null;
             /** Commission */
             commission?: string | null;
-            /** Money Fund Balance */
-            money_fund_balance?: string | null;
             /** Note */
             note?: string | null;
             /** Other Fee */
@@ -5871,7 +5857,7 @@ export interface operations {
             };
         };
         responses: {
-            /** @description 本次构建未执行（缺少行情数据）：无 job 产生，沿用失败构建状态 + missing[] 提示 */
+            /** @description 本次构建未执行（行情源无法补拉且缺少行情数据）：无 job 产生，沿用失败构建状态 + missing[] 提示 */
             200: {
                 headers: {
                     [name: string]: unknown;

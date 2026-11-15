@@ -60,8 +60,6 @@ function makePoint(overrides: Partial<AssetPoint> = {}): AssetPoint {
   return {
     date: "2026-06-30",
     cash: "-70000.00",
-    money_fund: "20000.00",
-    balance: "-50000.00",
     market_value: "170620.00",
     total_assets: "100620.00",
     holding_cost: "170000.00",
@@ -498,8 +496,6 @@ describe("Assets 资产表页", () => {
           makePoint({
             date: "2026-06-28",
             cash: null,
-            money_fund: null,
-            balance: null,
             market_value: null,
             total_assets: null,
             holding_cost: null,

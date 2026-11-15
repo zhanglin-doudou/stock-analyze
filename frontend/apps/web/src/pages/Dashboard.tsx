@@ -391,7 +391,7 @@ export function Dashboard(): ReactElement {
             value={shown(asset.market_value_display, asset.market_value)}
             testId="kpi-market-value"
           />
-          <Kpi label="资产余额" value={shown(asset.balance_display, asset.balance)} testId="kpi-balance" />
+          <Kpi label="现金余额" value={shown(asset.cash_display, asset.cash)} testId="kpi-cash" />
           <div className="dash-kpi" data-testid="kpi-position">
             <span className="dash-kpi-label">仓位</span>
             <strong className="num">{displayValue(asset.position_pct)}</strong>

@@ -89,7 +89,10 @@ function renderPage(): ReturnType<typeof render> {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  listRounds.mockResolvedValue(makePage([makeRound()]));
+  // 页面会额外拉一次「超卖回合」：默认无超卖，避免与主列表内容重复。
+  listRounds.mockImplementation(async (params) =>
+    params?.status === "oversell" ? makePage([]) : makePage([makeRound()]),
+  );
   listJobs.mockResolvedValue(emptyJobs());
   rebuild.mockResolvedValue({
     job_id: "job_rebuild",
@@ -118,6 +121,27 @@ describe("Rounds 回合列表页", () => {
     expect(detail.getAttribute("href")).toBe("/rounds/rnd_1");
   });
 
+  it("超卖回合单独成区块展示在回合列表之上，并预留人工修订说明", async () => {
+    const oversell = makeRound({
+      round_id: "rnd_os",
+      security_code: "300496",
+      security_name: "中科创达",
+      status: "oversell",
+      pnl: "0.00",
+    });
+    listRounds.mockImplementation(async (params) =>
+      params?.status === "oversell" ? makePage([oversell]) : makePage([makeRound()]),
+    );
+    renderPage();
+
+    const section = await screen.findByRole("region", { name: "超卖回合" });
+    expect(section.textContent).toContain("300496 中科创达");
+    expect(section.textContent).toContain("人工修订功能暂未开放");
+    // 主列表仍只展示正常回合。
+    expect(screen.getByText("600519 贵州茅台")).toBeTruthy();
+    expect(listRounds).toHaveBeenCalledWith(expect.objectContaining({ status: "oversell" }));
+  });
+
   it("无回合时提示「导入账单后自动建立」并给出导入入口", async () => {
     listRounds.mockResolvedValue(makePage([]));
     renderPage();
@@ -136,7 +160,7 @@ describe("Rounds 回合列表页", () => {
     fireEvent.click(screen.getByRole("button", { name: "查询" }));
 
     await waitFor(() =>
-      expect(listRounds).toHaveBeenLastCalledWith(expect.objectContaining({ security_code: "000001" })),
+      expect(listRounds).toHaveBeenCalledWith(expect.objectContaining({ security_code: "000001" })),
     );
   });
 

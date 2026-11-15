@@ -405,7 +405,6 @@ export type AssertTradeFields = Assert<
     | "other_fee"
     | "cash_balance"
     | "cash_balance_available"
-    | "money_fund_balance"
     | "dedupe_key"
     | "version"
     | "deleted_at"
@@ -483,8 +482,6 @@ export type AssertAssetPointFields = Assert<
     AssetPoint,
     | "date"
     | "cash"
-    | "money_fund"
-    | "balance"
     | "market_value"
     | "total_assets"
     | "holding_cost"
