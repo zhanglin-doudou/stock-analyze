@@ -164,6 +164,9 @@ def test_new_stock_rule_beats_fund_buy_rule_for_ipo_payment() -> None:
         ("申购解冻", "both", "transfer", "sys_sub_unfreeze"),
         ("申购退款", "both", "transfer", "sys_sub_refund"),
         ("中签退款", "both", "transfer", "sys_win_refund"),
+        # 市值认购资金扣收：无证券代码的缴款腿，归资金划转；不能被「认购」抢成 new_stock。
+        ("市值认购资金扣收", "buy", "transfer", "sys_mkt_sub_out"),
+        ("市值认购资金扣收", "unknown", "transfer", "sys_mkt_sub_out"),
         # 配股（含配股缴款）既有股票变更也有扣费：归 rights，不被新股/申购规则抢走。
         ("配股缴款", "buy", "rights", "sys_rights"),
         # 真实扣款的打新/可转债认购仍是特殊买入，按缴款金额（含费）建仓。

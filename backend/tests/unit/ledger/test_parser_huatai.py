@@ -407,6 +407,28 @@ def test_non_trade_dividend_tax_with_newline() -> None:
     assert r.amount_units == -60_00
 
 
+def test_non_trade_market_value_subscription_is_cash_row() -> None:
+    """市值认购资金扣收：无证券代码、资金流出 → CASH 占位，不按字段缺失隔离。"""
+    row = _buy_row(
+        证券代码="",
+        证券名称="",
+        买卖标志="",
+        摘要="市值认购资金扣收",
+        成交数量="0",
+        成交价格="0.00",
+        成交金额="-1000.00",
+        佣金="0.00",
+        资金余额="458.92",
+    )
+    bill = _parse(_xlsx(_HEADERS, [row]))
+    assert bill.quarantined == []
+    r = bill.rows[0]
+    assert r.security_code == "CASH"
+    assert r.security_name == "市值认购资金扣收"
+    assert r.side == "buy"
+    assert r.amount_units == -1000_00
+
+
 def test_zero_amount_rows_quarantined_as_invalid_amount() -> None:
     """佣金/印花税/其他费/发生金额/资金余额全为 0 → 隔离为 INVALID_AMOUNT，不入明细。"""
     for summary in ("转存管转入", "转存管转出"):

@@ -80,6 +80,19 @@ _BASE_SYSTEM_RULES: tuple[tuple[str, str, str, str, str, str, int], ...] = (
     ("sys_sub_unfreeze", "申购解冻→资金划转", "transfer", "both", "contains", "申购解冻", 12),
     ("sys_sub_refund", "申购退款→资金划转", "transfer", "both", "contains", "申购退款", 12),
     ("sys_win_refund", "中签退款→资金划转", "transfer", "both", "contains", "中签退款", 12),
+    # 市值认购资金扣收：按市值认购可转债/新股的缴款腿（解析器已转成 CASH 资金行），
+    # 只有资金流出、没有证券代码，属于广义资金划转而不是打新建仓。exact + priority 12
+    # 必须早于「认购」(14)，否则会被 sys_new_sub 抢成 new_stock 并给 CASH 伪代码记成本。
+    # 与其它规则一致：只预填建议分类，仍需用户在类型步骤整步确认。
+    (
+        "sys_mkt_sub_out",
+        "市值认购资金扣收→资金划转",
+        "transfer",
+        "both",
+        "exact",
+        "市值认购资金扣收",
+        12,
+    ),
     # 货币基金申赎确认（货基账单通常没有「买卖标志」列，摘要只写「申购/赎回确认」）：
     # 关键词与解析器 `FUND_SUMMARY_SIDE` 保持一致（漂移由单测锁定）。priority 15 必须
     # 晚于券商行为(11)与「新股/认购」(14)，早于单字「申购」(16)。

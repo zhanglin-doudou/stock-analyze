@@ -32,6 +32,31 @@ _TWO_FEE_FIXTURE = _MARKET_FIXTURES / "bill_generic_2fee.csv"
 _NO_SUMMARY_FIXTURE = _MARKET_FIXTURES / "bill_generic_nosummary.csv"
 _LEGACY_GOLDEN_FIXTURE = Path(__file__).with_name("华泰账单_mock.xlsx")
 _XLSX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+# 真实华泰对账单（GB18030 + TAB 文本型 .xls，账号/股东代码已替换）：302 行、18 个业务摘要，
+# 其中 5 行「市值认购资金扣收」无证券代码、带资金流出，是最容易断链的形态。
+_CBOND_FIXTURE = _MARKET_FIXTURES / "bill_huatai_cbond_subscription.xls"
+_XLS_CONTENT_TYPE = "application/vnd.ms-excel"
+# 可入库的类型行数；「新股登记」「国债新股上市和配股到账」是零金额登记行，按设计隔离
+# （INVALID_AMOUNT），不进明细也不进类型表。
+_CBOND_TYPE_ROW_COUNTS = {
+    "证券买入清算": 93,
+    "证券卖出清算": 80,
+    "基金申购": 19,
+    "基金赎回": 19,
+    "银证转出": 17,
+    "上海市场股息红利个人所得税扣款": 15,
+    "银证转入": 13,
+    "红股派息": 7,
+    "市值认购资金扣收": 5,
+    "现金产品快速取现客户方": 5,
+    "利息归本": 4,
+    "跨行转出": 4,
+    "跨行转入": 4,
+    "深圳市场股息红利个人所得税扣款": 3,
+    "红利发放": 2,
+    "强行赎回": 2,
+}
+_CBOND_ZERO_AMOUNT_SUMMARIES = {"新股登记", "国债新股上市和配股到账"}
 
 
 def _row(index: int, summary: str = "证券买入") -> str:
@@ -230,6 +255,36 @@ async def test_api_010_v2_huatai_fixture_has_complete_suggestions(client, api_pr
     assert any(item["suggested_category"] for item in body["types"])
     # E：即使命中摘要规则/历史记忆，也要用户在类型步骤整步确认，不自动跳过。
     assert all(item["needs_confirmation"] for item in body["types"])
+
+
+async def test_api_010_huatai_cbond_bill_type_table_is_complete(client, api_prefix, user) -> None:
+    """真实华泰对账单：无代码「市值认购资金扣收」不得断链，类型表要覆盖全部可入库摘要。
+
+    回归背景：该摘要此前不在非交易资金词表里，5 行被判 INVALID_ROW 并从行集剔除，
+    余额链在断点处起连续隔离到链尾（274 行 RECONCILIATION_BREAK），类型表只剩断点前的
+    5 个类型。修复后 302 行里只应剩 10 条零金额登记行的隔离。
+    """
+    body = await _preview(
+        client,
+        api_prefix,
+        user,
+        data=_CBOND_FIXTURE.read_bytes(),
+        filename=_CBOND_FIXTURE.name,
+        content_type=_XLS_CONTENT_TYPE,
+    )
+    assert body["broker"] == "huatai"
+    assert body["estimated"]["parsed"] == sum(_CBOND_TYPE_ROW_COUNTS.values())
+    assert {item["type_key"]: item["row_count"] for item in body["types"]} == _CBOND_TYPE_ROW_COUNTS
+    assert all(item["needs_confirmation"] for item in body["types"])
+    # 该类型必须出现在确认表里，且只预填 transfer（资金划转），不自动确认。
+    market_sub = {item["type_key"]: item for item in body["types"]}["市值认购资金扣收"]
+    assert market_sub["suggested_category"] == "transfer"
+    assert market_sub["suggested_rule_id"]
+    assert market_sub["needs_confirmation"] is True
+    # 隔离只剩零金额登记行：没有解析失败（INVALID_ROW）、也没有链断裂级联。
+    assert len(body["quarantine_rows"]) == 10
+    assert {item["reason_code"] for item in body["quarantine_rows"]} == {"INVALID_AMOUNT"}
+    assert {item["summary"] for item in body["quarantine_rows"]} == _CBOND_ZERO_AMOUNT_SUMMARIES
 
 
 async def test_api_010_v2_rejects_headerless_data_layout(client, api_prefix, user) -> None:
