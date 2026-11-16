@@ -16,6 +16,7 @@ import {
   type JobPage,
   type MetricBatch,
   type MetricCatalog,
+  type Round,
   type SectorsOverview,
 } from "@sa/api-client";
 import { Assets } from "./Assets";
@@ -33,6 +34,7 @@ vi.mock("../client", () => ({
     metrics: { batch: vi.fn(), catalog: vi.fn() },
     assets: { chart: vi.fn(), list: vi.fn(), build: vi.fn() },
     jobs: { list: vi.fn(), get: vi.fn(), events: vi.fn() },
+    rounds: { list: vi.fn() },
     sectors: { overview: vi.fn() },
   },
 }));
@@ -52,6 +54,32 @@ const buildAssets = vi.mocked(api.assets.build);
 const listJobs = vi.mocked(api.jobs.list);
 const getJob = vi.mocked(api.jobs.get);
 const jobEvents = vi.mocked(api.jobs.events);
+const listRounds = vi.mocked(api.rounds.list);
+
+function makeOversellRound(overrides: Partial<Round> = {}): Round {
+  return {
+    round_id: "rnd_oversell_1",
+    security_code: "600487",
+    security_name: "亨通光电",
+    status: "oversell",
+    open_date: "2026-06-19",
+    close_date: "2026-06-19",
+    quantity: "150",
+    cost: "0.00",
+    proceeds: "2250.00",
+    dividend: "0.00",
+    pnl: "0.00",
+    return_rate: "0.00000000",
+    holding_days: 0,
+    open_trade_id: "trd_1",
+    close_trade_id: "trd_1",
+    data_error: false,
+    oversell_quantity: "150",
+    fills_count: 0,
+    rebuilt_at: "2026-06-19T08:00:00Z",
+    ...overrides,
+  };
+}
 
 function makeRound(overrides: Partial<DashboardRoundOut> = {}): DashboardRoundOut {
   return {
@@ -838,6 +866,7 @@ beforeEach(() => {
   getJob.mockResolvedValue(makeJob());
   buildAssets.mockResolvedValue(accepted());
   jobEvents.mockImplementation(() => noEvents());
+  listRounds.mockResolvedValue({ items: [], next_cursor: null, has_more: false });
 });
 
 afterEach(cleanup);
@@ -1056,6 +1085,44 @@ describe("Dashboard 看板", () => {
     // 两页共用同一个 job：看板出状态行，资产页出进度条。
     expect(screen.getByTestId("dashboard-auto-build")).toBeTruthy();
     expect(screen.getByTestId("assets-job-progress")).toBeTruthy();
+  });
+
+  it("FT-14 超卖降级：展示降级原因并自动拉取超卖回合列表", async () => {
+    listRounds.mockResolvedValue({
+      items: [makeOversellRound(), makeOversellRound({ round_id: "rnd_2", security_code: "000001", security_name: "平安银行", oversell_quantity: "50" })],
+      next_cursor: null,
+      has_more: false,
+    });
+    getDashboard.mockResolvedValue(
+      makeDashboard({
+        status: "degraded",
+        build: makeBuild({ last_status: "degraded", status_reason: "存在超卖回合，需补录成本" }),
+      }),
+    );
+
+    renderPage();
+
+    expect(await screen.findByTestId("dashboard-degraded")).toBeTruthy();
+    expect(screen.getByTestId("dashboard-degraded-reason").textContent).toContain(
+      "存在超卖回合，需补录成本",
+    );
+    // 降级态自动按超卖状态拉回合列表（与资产页同源 API）。
+    await waitFor(() =>
+      expect(listRounds).toHaveBeenCalledWith({ limit: 100, status: "oversell" }),
+    );
+    const items = await screen.findAllByTestId("dashboard-oversell-item");
+    expect(items).toHaveLength(2);
+    expect(items[0].textContent).toContain("600487");
+    expect(items[0].textContent).toContain("亨通光电");
+    expect(items[0].textContent).toContain("卖出 150");
+  });
+
+  it("FT-15 非降级：不拉取超卖回合、不展示降级提示", async () => {
+    renderPage();
+
+    expect(await screen.findByTestId("asset-overview")).toBeTruthy();
+    expect(screen.queryByTestId("dashboard-degraded")).toBeNull();
+    expect(listRounds).not.toHaveBeenCalled();
   });
 
   it("FT-03 年度指标自动加载：用 metrics_period 请求并原样展示 value", async () => {
