@@ -1191,6 +1191,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/trades/{trade_id}/oversell-revision": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Oversell Revision
+         * @description API-107：查询该卖出的超卖数量与人工修订状态（只读）。
+         */
+        get: operations["getOversellRevision"];
+        /**
+         * Put Oversell Revision
+         * @description API-108：补录/覆盖修订成本，幂等；同一卖出至多一条资金腿 + 一条买入腿。
+         */
+        put: operations["upsertOversellRevision"];
+        post?: never;
+        /**
+         * Delete Oversell Revision
+         * @description API-109：撤回人工修订（软删注入行，幂等）并派发重算。
+         */
+        delete: operations["deleteOversellRevision"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/trades/{trade_id}/reason": {
         parameters: {
             query?: never;
@@ -3719,6 +3747,59 @@ export interface components {
             twr: string;
         };
         /**
+         * OversellRevisionIn
+         * @description PUT 入参：该卖出未配对部分的总成本（正数，定点字符串）。
+         */
+        OversellRevisionIn: {
+            /** Cost */
+            cost: string;
+        };
+        /** OversellRevisionMutationOut */
+        OversellRevisionMutationOut: {
+            /** Assets Job Id */
+            assets_job_id?: string | null;
+            /** Rebuild Job Id */
+            rebuild_job_id?: string | null;
+            revision: components["schemas"]["OversellRevisionOut"];
+        };
+        /** OversellRevisionOut */
+        OversellRevisionOut: {
+            buy_trade?: components["schemas"]["TradeOut"] | null;
+            cash_trade?: components["schemas"]["TradeOut"] | null;
+            /** Cost */
+            cost?: string | null;
+            /** Round Id */
+            round_id?: string | null;
+            sell: components["schemas"]["OversellRevisionSellOut"];
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "none" | "revised" | "superseded" | "not_oversell";
+        };
+        /** OversellRevisionSellOut */
+        OversellRevisionSellOut: {
+            /** Amount */
+            amount: string;
+            /** Note */
+            note?: string | null;
+            /** Oversell Quantity */
+            oversell_quantity: string;
+            /** Quantity */
+            quantity: string;
+            /** Security Code */
+            security_code: string;
+            /** Security Name */
+            security_name: string;
+            /**
+             * Trade Date
+             * Format: date
+             */
+            trade_date: string;
+            /** Trade Id */
+            trade_id: string;
+        };
+        /**
          * PatCreateResponse
          * @description 明文 `token` 仅在此响应中出现一次（API-007 断言①）。
          */
@@ -5237,6 +5318,8 @@ export interface components {
             /** Quantity */
             quantity: string;
             reason?: components["schemas"]["TradeReasonOut"] | null;
+            /** Revision Of */
+            revision_of?: string | null;
             /** Security Code */
             security_code: string;
             /** Security Name */
@@ -9740,6 +9823,232 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getOversellRevision: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path: {
+                trade_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OversellRevisionOut"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    upsertOversellRevision: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path: {
+                trade_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OversellRevisionIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OversellRevisionMutationOut"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 资源状态冲突 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 请求过于频繁 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    deleteOversellRevision: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path: {
+                trade_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OversellRevisionMutationOut"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 资源状态冲突 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 请求过于频繁 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
                     "application/problem+json": components["schemas"]["Error"];
                 };
             };

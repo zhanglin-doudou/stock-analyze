@@ -70,6 +70,11 @@ export type TradeHistoryItem = ApiSchemas["TradeHistoryItem"];
 export type TradeHistoryOut = ApiSchemas["TradeHistoryOut"];
 export type TradePatchIn = ApiSchemas["TradePatchIn"];
 export type AffectedMetric = ApiSchemas["AffectedMetric"];
+// 2026-11-15：超卖卖出人工修订（API-107~109）
+export type OversellRevisionOut = ApiSchemas["OversellRevisionOut"];
+export type OversellRevisionIn = ApiSchemas["OversellRevisionIn"];
+export type OversellRevisionMutationOut = ApiSchemas["OversellRevisionMutationOut"];
+export type OversellRevisionSellOut = ApiSchemas["OversellRevisionSellOut"];
 
 export type PreviewOut = ApiSchemas["PreviewOut"];
 export type PreviewColumnOut = ApiSchemas["PreviewColumn"];

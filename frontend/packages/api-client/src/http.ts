@@ -34,6 +34,9 @@ import type {
   MetricDrilldown,
   MetricExplain,
   Nav,
+  OversellRevisionIn,
+  OversellRevisionMutationOut,
+  OversellRevisionOut,
   PatCreateResponse,
   Preview,
   PreviewOptions,
@@ -771,6 +774,29 @@ export function createClient(options: ClientOptions) {
         method: "DELETE",
         ifMatch: version === undefined ? undefined : `"${version}"`,
       }).then(() => undefined);
+    },
+    /** API-107：该卖出的超卖与人工修订状态（只读）。 */
+    oversellRevision(tradeId: string) {
+      return send<OversellRevisionOut>({
+        path: `/trades/${tradeId}/oversell-revision`,
+      }).then((r) => r.data);
+    },
+    /** API-108：补录/覆盖修订成本（幂等；返回注入行与重算任务 id）。 */
+    putOversellRevision(tradeId: string, body: OversellRevisionIn, idempotencyKey?: string) {
+      return send<OversellRevisionMutationOut>({
+        path: `/trades/${tradeId}/oversell-revision`,
+        method: "PUT",
+        body,
+        idempotencyKey,
+      }).then((r) => r.data);
+    },
+    /** API-109：撤回人工修订（软删注入行，幂等）。 */
+    deleteOversellRevision(tradeId: string, idempotencyKey?: string) {
+      return send<OversellRevisionMutationOut>({
+        path: `/trades/${tradeId}/oversell-revision`,
+        method: "DELETE",
+        idempotencyKey,
+      }).then((r) => r.data);
     },
   };
 
