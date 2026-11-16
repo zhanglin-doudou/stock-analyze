@@ -269,14 +269,15 @@ async def test_full_rebuild_matches_hand_computed_round(
     async with app_db.tenant_tx(user_id) as session:
         open_round = await session.get(Round, build_round_id(user_id, "600519", f"{buy_id}:open"))
     assert open_round is not None
-    # open round 聚合已消耗 lot 部分：sell 400 股分摊成本 4000.00，现金 4800.00 → pnl 800.00。
+    # open round 展示当前剩余持仓：buy 1000 股 / sell 400 股 → 剩余 600 股、剩余成本 6000.00；
+    # proceeds/pnl 为已实现部分（卖出 4800.00 − 配对成本 4000.00 = 800.00）。
     assert open_round.status == "open"
     assert open_round.close_trade_id is None
-    assert open_round.quantity_units == 4_000_000  # 已 FIFO 配对的股数
-    assert open_round.cost_units == 400_000  # 已消耗 lot 成本
+    assert open_round.quantity_units == 6_000_000  # 剩余持仓 600 股
+    assert open_round.cost_units == 600_000  # 剩余 lot 成本 6000.00
     assert open_round.proceeds_units == 480_000
     assert open_round.dividend_units == 0
-    assert open_round.pnl_units == 80_000  # proceeds - cost
+    assert open_round.pnl_units == 80_000  # 已实现盈亏
     assert open_round.return_rate_units == 20_000_000
     assert open_round.fills_count == 1
     assert open_round.data_error is False

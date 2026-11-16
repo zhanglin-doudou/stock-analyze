@@ -375,11 +375,14 @@ def _snapshot_bare_oversell(event: FifoEvent, security_code: str) -> Round:
 def _snapshot_open(state: _RoundState, lots: list[_Lot]) -> Round:
     """把期末仍在进行的周期 snapshot 为 open Round（含累计 fills）。
 
-    恒等式不变量：pnl = proceeds - cost + dividend（open / closed 通用）。
-    - quantity_units 取 matched_units（已 FIFO 配对的股数）；
-    - cost_units = 已消耗 lot 成本（剩余 lot 成本在 open_lots 独立展示，避免重复）；
-    - dividend_units = 已消耗 lot 股息（剩余 lot 股息也在 open_lots 独立展示）。
+    open 回合展示**当前剩余持仓**：
+    - quantity_units = 剩余 lot 数量合计（不是已配对卖出数量）；
+    - cost_units = 剩余 lot 成本合计；
+    - proceeds_units / dividend_units = 已卖出金额 / 已消耗 lot 股息；
+    - pnl_units = proceeds - 已消耗成本 + 已消耗股息（已实现盈亏，不含浮动盈亏）。
     """
+    remaining_quantity = sum(lot.quantity_units for lot in lots)
+    remaining_cost = sum(lot.cost_units for lot in lots)
     pnl_units = state.proceeds_units - state.cost_units + state.dividend_units
     key = f"{state.open_trade_id}:open"
     return Round(
@@ -391,8 +394,8 @@ def _snapshot_open(state: _RoundState, lots: list[_Lot]) -> Round:
         close_trade_id=None,
         open_date=state.open_date,
         close_date=None,
-        quantity_units=state.matched_units,
-        cost_units=state.cost_units,
+        quantity_units=remaining_quantity,
+        cost_units=remaining_cost,
         proceeds_units=state.proceeds_units,
         dividend_units=state.dividend_units,
         pnl_units=pnl_units,

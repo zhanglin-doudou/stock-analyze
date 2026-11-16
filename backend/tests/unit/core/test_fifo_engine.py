@@ -223,11 +223,11 @@ def test_add_position_two_lots_fifo_pairing() -> None:
     assert round_.key == "b1:open"
     assert round_.status == "open"
     assert round_.open_trade_id == "b1"
-    assert round_.quantity_units == shares(150)
-    assert round_.cost_units == cents("1550.00")  # 已消耗 1000+550，剩余 550 在 open_lots
+    assert round_.quantity_units == shares(50)  # 剩余持仓 50 股（b2 剩余）
+    assert round_.cost_units == cents("550.00")  # 剩余持仓成本（b2 剩余 50 @11）
     assert round_.proceeds_units == cents("1800.00")
     assert round_.dividend_units == 0
-    assert round_.pnl_units == cents("250.00")
+    assert round_.pnl_units == cents("250.00")  # 1800 - 已消耗 1550
     # FIFO 配对填充
     assert [fill.buy_trade_id for fill in round_.fills] == ["b1", "b2"]
     assert [fill.sequence for fill in round_.fills] == [1, 2]
@@ -656,11 +656,11 @@ def test_dividend_does_not_change_cost_and_open_lot_keeps_undistributed_share() 
     round_ = result.rounds[0]
     assert round_.key == "b1:open"
     assert round_.status == "open"
-    assert round_.quantity_units == shares(100)  # 已匹配
-    assert round_.cost_units == cents("1000.00")  # 已消耗 b1 的 1000 元，剩余 2000 在 open_lots
+    assert round_.quantity_units == shares(200)  # 剩余持仓（b2 的 200 股）
+    assert round_.cost_units == cents("2000.00")  # 剩余持仓成本（b2）
     assert round_.proceeds_units == cents("1000.00")
     assert round_.dividend_units == 33  # 已消耗 lot 分到的股息（尾差 68 在 open_lots）
-    assert round_.pnl_units == 33  # 100000 - 100000 + 33
+    assert round_.pnl_units == 33  # 100000 - 已消耗 100000 + 33
 
     assert len(round_.fills) == 1
     fill = round_.fills[0]
@@ -887,8 +887,8 @@ def test_open_rounds_per_lot_sorted_by_open_date_then_key() -> None:
     assert round_.fills == ()
     assert round_.holding_days == 0
     assert round_.proceeds_units == 0
-    assert round_.quantity_units == 0  # 还没卖过
-    assert round_.cost_units == 0  # 没有 SELL，已消耗 cost = 0
+    assert round_.quantity_units == shares(300)  # 剩余持仓 300 股（无卖出）
+    assert round_.cost_units == cents("3000.00")  # 剩余持仓成本（900+1100+1000）
     assert round_.dividend_units == 0
     assert round_.pnl_units == 0
     assert round_.return_rate_units == 0
@@ -979,15 +979,15 @@ def test_open_round_return_rate_uses_dividend_over_cost() -> None:
     result = build_rounds(events)
     open_round = result.rounds[0]
     assert open_round.status == "open"
-    assert open_round.quantity_units == 0  # 还没卖过
+    assert open_round.quantity_units == shares(100)  # 剩余持仓 100 股
     assert open_round.fills == ()
     assert open_round.proceeds_units == 0
-    # 没有 SELL → 已消耗 cost=0，股息还在 open_lots 里（未消耗）
-    assert open_round.cost_units == 0
+    # 剩余持仓成本 = 1000；股息还在 open_lots 里（未消耗）
+    assert open_round.cost_units == cents("1000.00")
     assert open_round.dividend_units == 0
-    # pnl = proceeds - cost + dividend = 0 - 0 + 0
+    # pnl = proceeds - 已消耗成本 + 已消耗股息 = 0 - 0 + 0
     assert open_round.pnl_units == 0
-    # return_rate = pnl / cost，但 cost=0 时为 0（约定）
+    # return_rate = pnl / 已消耗成本，但已消耗 cost=0 时为 0（约定）
     assert open_round.return_rate_units == 0
 
 
@@ -1029,15 +1029,15 @@ def test_conservation_invariants_for_mixed_events() -> None:
     round_ = result.rounds[0]
     assert round_.key == "b1:open"
     assert round_.status == "open"
-    assert round_.quantity_units == shares(350)
-    assert round_.cost_units == 289_999  # 已消耗 lot cost（不是全周期 350000）
+    assert round_.quantity_units == shares(70)  # 剩余持仓 70 股
+    assert round_.cost_units == 60_001  # 剩余持仓成本（b2 剩余 70 股）
     assert round_.proceeds_units == cents("4200.00")  # 350×12
     assert round_.dividend_units == 416  # 已消耗 lot 分到的股息
-    assert round_.pnl_units == 130_417  # 420000 - 289999 + 416
+    assert round_.pnl_units == 130_417  # 420000 - 已消耗 289999 + 416
 
-    # 3 fills 合计 350 股
+    # 3 fills 合计 350 股（已配对卖出数，≠ 剩余持仓 70）
     assert len(round_.fills) == 3
-    assert sum(fill.quantity_units for fill in round_.fills) == round_.quantity_units
+    assert sum(fill.quantity_units for fill in round_.fills) == shares(350)
     # fills 的 pnl 合计
     assert sum(fill.pnl_units for fill in round_.fills) == 58_166 + 37_846 + 34_405  # 130417
 
@@ -1051,24 +1051,26 @@ def test_conservation_invariants_for_mixed_events() -> None:
 
     # === 守恒不变量 ===
 
-    # pnl 恒等式：pnl = proceeds - cost + dividend（open / closed 都适用）
-    for r in result.rounds:
-        assert r.pnl_units == r.proceeds_units - r.cost_units + r.dividend_units
+    # open 回合 pnl = proceeds - 已消耗成本 + 已消耗股息（用 fills 反推已消耗成本）
+    matched_cost = sum(fill.buy_cost_units for fill in round_.fills)
+    assert round_.pnl_units == round_.proceeds_units - matched_cost + round_.dividend_units
 
-    # cost 守恒：已消耗 cost + 剩余 lot cost = 总投入
-    assert round_.cost_units + sum(lot.cost_units for lot in result.open_lots) == cents(
-        "1000.00"
-    ) + cents("2200.00") + cents("300.00")  # 350000 分
+    # 剩余成本守恒：round.cost_units == open_lots 成本合计
+    remaining_cost = sum(lot.cost_units for lot in result.open_lots)
+    assert round_.cost_units == remaining_cost
+    # 已消耗 cost + 剩余 cost = 总投入
+    assert matched_cost + remaining_cost == cents("1000.00") + cents("2200.00") + cents("300.00")
 
     # 股息守恒：已消耗 dividend + 剩余 lot dividend = 净股息总额
     assert (
         round_.dividend_units + sum(lot.dividend_units for lot in result.open_lots) == 500
     )  # 600-100 tax
 
-    # 数量守恒：matched + open = 总 420 股
-    assert round_.quantity_units + sum(lot.quantity_units for lot in result.open_lots) == shares(
-        420
-    )
+    # 数量守恒：round.quantity == open_lots 数量合计（剩余持仓）
+    remaining_qty = sum(lot.quantity_units for lot in result.open_lots)
+    assert round_.quantity_units == remaining_qty
+    # 已配对 + 剩余 = 总 420 股
+    assert sum(fill.quantity_units for fill in round_.fills) + remaining_qty == shares(420)
 
 
 def test_build_rounds_is_deterministic() -> None:

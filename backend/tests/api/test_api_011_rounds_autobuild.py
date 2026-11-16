@@ -84,9 +84,10 @@ async def test_import_auto_builds_rounds_and_web_can_query(
     assert opened[0]["status"] == "open"
     round_ = opened[0]
     assert round_["security_code"] == "600519"
-    # open round 聚合已消耗 lot 部分：sell 150 股 FIFO 消耗 buy1 全量 + buy2 50 股
-    assert round_["quantity"] == "150"  # 已 FIFO 配对的股数（整数份额不带尾零）
-    assert round_["cost"] == "1600.00"  # 已消耗 lot 成本（1000 + 600）
+    # open round 展示剩余持仓：buy100+buy100−sell150 = 剩余 50 股、剩余成本 600.00；
+    # proceeds/pnl 为已实现部分（卖出 2250.00 − 配对成本 1600.00 = 650.00）。
+    assert round_["quantity"] == "50"  # 剩余持仓 50 股
+    assert round_["cost"] == "600.00"  # 剩余 lot 成本
     assert round_["proceeds"] == "2250.00"
     assert round_["pnl"] == "650.00"
     assert round_["fills_count"] == 2

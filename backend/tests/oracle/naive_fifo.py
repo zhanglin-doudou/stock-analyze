@@ -68,6 +68,7 @@ class OracleRound:
     """一个回合的期望值（自然单位）。
 
     回合 = 0→非0→0 的仓位周期；中途做T的 SELL 也配对进同一回合。
+    open 回合的 quantity/cost 取**剩余持仓**（剩余 lot 合计），与生产引擎一致。
     """
 
     key: str
@@ -75,8 +76,8 @@ class OracleRound:
     sell_trade_id: str | None  # 最后一次 SELL；open 周期为 None
     open_date: date
     close_date: date | None
-    quantity: Decimal  # 整个周期已 FIFO 配对的股数之和
-    cost: Decimal
+    quantity: Decimal  # open=剩余持仓；closed=已配对股数
+    cost: Decimal  # open=剩余持仓成本；closed=已消耗成本
     proceeds: Decimal
     dividend: Decimal
     pnl: Decimal
@@ -135,9 +136,11 @@ def build_rounds(events: Iterable[OracleEvent]) -> OracleResult:
             elif event.kind == "rights":
                 _rights(event, state)
             # 其它事件不参与回合配对
-        # 期末仍有 lot → open round
+        # 期末仍有 lot → open round（quantity/cost 取剩余持仓，pnl 用已消耗成本算）
         if state.current is not None and state.lots:
             cur = state.current
+            remaining_qty = sum((lot.quantity for lot in state.lots), Decimal(0))
+            remaining_cost = sum((lot.cost for lot in state.lots), Decimal(0))
             pnl = cur.proceeds - cur.cost + cur.dividend
             key = f"{cur.buy_trade_id}:open"
             round_ = OracleRound(
@@ -146,10 +149,10 @@ def build_rounds(events: Iterable[OracleEvent]) -> OracleResult:
                 sell_trade_id=None,
                 open_date=cur.open_date,
                 close_date=None,
-                quantity=cur.matched,
-                cost=cur.cost,  # 已消耗 lot 成本，剩余 lot 在 open_lots 独立展示
+                quantity=remaining_qty,
+                cost=remaining_cost,
                 proceeds=cur.proceeds,
-                dividend=cur.dividend,  # 已消耗 lot 股息，剩余 lot 在 open_lots
+                dividend=cur.dividend,
                 pnl=pnl,
                 oversell=cur.oversell,
                 is_open=True,
