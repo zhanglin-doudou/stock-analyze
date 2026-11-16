@@ -36,12 +36,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from stock_contracts.clock import SHANGHAI, Clock
 from stock_contracts.enums import JobStatus
 from stock_contracts.errors import ApiError, ErrorCode
+from stock_contracts.preferences import DEFAULT_MARKET_SESSIONS
 from stock_core.fifo import build_rounds
 from stock_ledger.models import Trade
 from stock_platform.jobs import JobQueue
 from stock_platform.market_models import DailyBar
 from stock_platform.obs import get_logger
 from stock_platform.ports import MarketDataSource, SyncableMarketSource
+from stock_platform.repositories.users import UserSettingRepository
 from stock_platform.symbols import needs_quote
 
 from stock_review.application.bond_alias import build_bond_alias, canonical_code
@@ -660,37 +662,95 @@ def latest_workday(day: date) -> date:
     return day
 
 
-# A 股收盘时刻（Asia/Shanghai）。未做日内实时行情：收盘前当日没有收盘行情，
-# 资产表不含当日行；收盘后当日纳入（行情未同步时该日行以 blocked 体现）。
-MARKET_CLOSE_HOUR = 15
+# A 股默认关闭时刻（Asia/Shanghai）和盘后数据就绪时刻。
+# 生产值可被用户偏好 `market_session_prefs` 覆盖——调用方从 user model 读出后注入。
+DEFAULT_DATA_READY_AFTER = DEFAULT_MARKET_SESSIONS["data_ready_after"]  # "16:30"
 
 
-def valuation_end(clock: Clock) -> date:
-    """资产表可估值的最近收盘日：未收盘的当日不算。
+def _parse_hour_min(clock_str: str) -> tuple[int, int]:
+    """`"16:30"` → (16, 30)；非法回退默认 (16, 30)。"""
+    try:
+        h, m = clock_str.split(":")
+        hh, mm = int(h), int(m)
+        if 0 <= hh <= 23 and 0 <= mm <= 59:
+            return hh, mm
+    except (AttributeError, ValueError):
+        pass
+    return 16, 30
 
-    构建终点与 stale 判定（本模块与 metrics 门禁）共用本口径：
+
+DEFAULT_CLOSE_HOUR, _ = _parse_hour_min(DEFAULT_MARKET_SESSIONS["sessions"][-1]["close"])
+
+
+async def _load_market_prefs(session: AsyncSession, user_id: uuid.UUID) -> tuple[int, str, bool]:
+    """加载用户行情偏好并规整为 (close_hour, data_ready_after, session_notice_enabled)。
+
+    优先读 user_setting.market_session_prefs；缺省回退 `DEFAULT_MARKET_SESSIONS`。
+    被 `list_assets` / `get_asset_build_state` / 构建入口共用，避免每个调用方各自散查。
+    """
+    effective = await UserSettingRepository(session).get_effective(user_id)
+    ms = effective.market_sessions
+    # 从 sessions 末段 close 解析关闭时刻
+    sessions = ms.get("sessions") if isinstance(ms, dict) else None
+    close_hour = DEFAULT_CLOSE_HOUR
+    if isinstance(sessions, list) and sessions:
+        last = sessions[-1]
+        if isinstance(last, dict):
+            close, _ = _parse_hour_min(str(last.get("close", "15:00")))
+            close_hour = close
+    data_ready_after = (
+        str(ms.get("data_ready_after", DEFAULT_DATA_READY_AFTER))
+        if isinstance(ms, dict)
+        else DEFAULT_DATA_READY_AFTER
+    )
+    enabled = ms.get("session_notice_enabled", True) if isinstance(ms, dict) else True
+    return close_hour, data_ready_after, bool(enabled)
+
+
+def valuation_end(
+    clock: Clock,
+    *,
+    data_ready_after: str = DEFAULT_DATA_READY_AFTER,
+) -> date:
+    """资产表可估值的最近盘后就绪日。
+
     - 周末/节假日沿用「最近工作日」；
-    - 工作日 15:00（Asia/Shanghai）前 → 前一工作日（当日尚无收盘行情）；
-    - 15:00 后 → 当日。
+    - 工作日当前时间 < `data_ready_after`（默认 16:30）→ 前一工作日（当日盘后数据未就绪）；
+    - ≥ `data_ready_after` → 当日。
+
+    构建终点与 stale 判定（本模块与 metrics 门禁）共用本口径。
     """
     today = clock.today()
     end = latest_workday(today)
-    if end == today and clock.now().astimezone(SHANGHAI).hour < MARKET_CLOSE_HOUR:
+    close_h, close_m = _parse_hour_min(data_ready_after)
+    now_sh = clock.now().astimezone(SHANGHAI)
+    if end == today and (now_sh.hour, now_sh.minute) < (close_h, close_m):
         end = latest_workday(end - timedelta(days=1))
     return end
 
 
-def _session_notice(clock: Clock, market_as_of: date | None) -> str | None:
-    """当日交易时段提示（只读展示，不参与判定）：
+def _session_notice(
+    clock: Clock,
+    market_as_of: date | None,
+    *,
+    close_hour: int = DEFAULT_CLOSE_HOUR,
+    data_ready_after: str = DEFAULT_DATA_READY_AFTER,
+) -> str | None:
+    """当日交易时段/数据就绪提示（只读展示，不参与判定）：
 
     - `market_open`：当日为工作日且未收盘——资产表不含当日数据；
-    - `sync_pending`：当日为工作日且已收盘，但行情未同步到当日——提示 `make sync-market`。
+    - `sync_pending`：当日为工作日、已收盘，但盘后数据未就绪（< data_ready_after）
+      或行情未同步到当日——提示盘后稍等。
     """
     today = clock.today()
     if latest_workday(today) != today:
         return None
-    if clock.now().astimezone(SHANGHAI).hour < MARKET_CLOSE_HOUR:
+    now_sh = clock.now().astimezone(SHANGHAI)
+    if now_sh.hour < close_hour:
         return "market_open"
+    ready_h, ready_m = _parse_hour_min(data_ready_after)
+    if (now_sh.hour, now_sh.minute) < (ready_h, ready_m):
+        return "sync_pending"
     if market_as_of is None or market_as_of < today:
         return "sync_pending"
     return None
@@ -749,6 +809,7 @@ async def precheck_market_data(
     user_id: uuid.UUID,
     clock: Clock,
     market_data: MarketDataSource,
+    data_ready_after: str | None = None,
 ) -> MarketDataMissing | None:
     """构建前置检查：行情缓存没有任何覆盖资产表窗口的交易日 → 返回缺行情提示。
 
@@ -760,6 +821,8 @@ async def precheck_market_data(
       补拉」的端口保留前置拦截；
     - 无有效流水（构建=清空 + reset）或构建窗口为空（时钟回拨）→ 不算缺行情；
     - 缓存最新交易日 ≥ 窗口起点 → 可建（个别日期/标的缺行情仍走既有降级语义）。
+
+    `data_ready_after` 从用户偏好读取后注入；缺省用 `DEFAULT_DATA_READY_AFTER`。
     """
     if getattr(market_data, "get_cached_bars", None) is None:
         return None
@@ -772,7 +835,9 @@ async def precheck_market_data(
     if not live:
         return None
     start = min(trade.trade_date for trade in live)
-    end = valuation_end(clock)
+    if data_ready_after is None:
+        _, data_ready_after, _ = await _load_market_prefs(session, user_id)
+    end = valuation_end(clock, data_ready_after=data_ready_after)
     if end < start:
         return None
     latest = await session.scalar(
@@ -846,6 +911,9 @@ async def build_assets(
         raise ApiError(ErrorCode.VALIDATION_ERROR, detail=f"未知构建模式: {mode}")
     repo = AssetRepository(session)
     state = await repo.get_state(user_id)
+    # 偏好只查一次：data_ready_after 控制 valuation_end 口径，close_hour / notice_enabled
+    # 构建内不直接用（那是展示层），但加载成本极低也一并取，便于后续扩展。
+    _, data_ready_after, _ = await _load_market_prefs(session, user_id)
     trades_all = await repo.load_trades_including_deleted(user_id)
     live = [trade for trade in trades_all if trade.deleted_at is None]
     count_all, version_sum, max_updated = _fingerprint(trades_all)
@@ -878,7 +946,7 @@ async def build_assets(
     start = min(trade.trade_date for trade in live)
     # 资产表只在已收盘的工作日写行（设计 §5.3 + 收盘口径）：末行日期对齐到最近
     # 已收盘工作日——周末/未收盘当日不写行，避免水位线停在没有收盘行情的日期。
-    end = valuation_end(clock)
+    end = valuation_end(clock, data_ready_after=data_ready_after)
 
     # 可转债发债→上市代码别名（设计 D3）：回合/持仓/行情请求统一用 canonical 代码。
     bond_alias, bond_alias_unresolved = build_bond_alias(
@@ -1265,11 +1333,27 @@ async def _build_state_view(
     clock: Clock,
     market_data: MarketDataSource,
     state: AssetBuildStateRow | None,
+    close_hour: int = DEFAULT_CLOSE_HOUR,
+    data_ready_after: str = DEFAULT_DATA_READY_AFTER,
+    session_notice_enabled: bool = True,
 ) -> AssetBuildState:
-    """`build.state` 判定链（设计 §7.1，按序 P1 修正版）。"""
+    """`build.state` 判定链（设计 §7.1，按序 P1 修正版）。
+
+    `close_hour` / `data_ready_after` 从用户偏好 `market_session_prefs` 解析后注入；
+    未注入时用默认值（15:00 / 16:30），与 `effective_market_sessions` 一致。
+    """
     # 当日时段提示（未收盘 / 已收盘但行情未同步）：所有分支都透出，与 state 判定正交。
     market_as_of = await _market_as_of(session, market_data, clock)
-    notice = _session_notice(clock, market_as_of)
+    notice = (
+        _session_notice(
+            clock,
+            market_as_of,
+            close_hour=close_hour,
+            data_ready_after=data_ready_after,
+        )
+        if session_notice_enabled
+        else None
+    )
     if state is None:
         return _missing_state(ASSET_DEFINITION_VERSION, notice)
     base = AssetBuildState(
@@ -1314,14 +1398,17 @@ async def _build_state_view(
     ):
         base.state = STATE_STALE
         return base
-    # 6) 行情前进 → stale（并标记 has_new_market_data）。
-    #    行情覆盖日与构建同口径（live+缓存读 market.daily_bar，避免进程内近似值误判）。
-    if state.data_as_of is None or market_as_of > state.data_as_of:
+    # 6) 行情前进 + 盘后数据已就绪 → stale（并标记 has_new_market_data）。
+    #    data_ready_after 前即使 market_as_of 前进也不判 stale（行情 bar 可能仍会更新）。
+    now_sh = clock.now().astimezone(SHANGHAI)
+    ready_h, ready_m = _parse_hour_min(data_ready_after)
+    data_ready = (now_sh.hour, now_sh.minute) >= (ready_h, ready_m)
+    if data_ready and (state.data_as_of is None or market_as_of > state.data_as_of):
         base.state = STATE_STALE
         base.has_new_market_data = True
         return base
-    # 7) 有新的已收盘工作日；周末/未收盘当日不判 stale（资产表这些日期不写行）。
-    if valuation_end(clock) > state.last_built_through:
+    # 7) 有新的已收盘工作日（按 data_ready_after 口径）；周末/未就绪当日不判 stale。
+    if valuation_end(clock, data_ready_after=data_ready_after) > state.last_built_through:
         base.state = STATE_STALE
     return base
 
@@ -1353,8 +1440,17 @@ async def list_assets(
         status=status,
         sort=sort,
     )
+    close_hour, data_ready_after, notice_enabled = await _load_market_prefs(session, user_id)
     build = await _build_state_view(
-        repo, session, user_id=user_id, clock=clock, market_data=market_data, state=state
+        repo,
+        session,
+        user_id=user_id,
+        clock=clock,
+        market_data=market_data,
+        state=state,
+        close_hour=close_hour,
+        data_ready_after=data_ready_after,
+        session_notice_enabled=notice_enabled,
     )
     return [_to_point(row) for row in rows], next_cursor, build
 
@@ -1370,8 +1466,17 @@ async def get_asset_build_state(
     repo = AssetRepository(session)
     state = await repo.get_state(user_id)
     definition_version = state.definition_version if state is not None else ASSET_DEFINITION_VERSION
+    close_hour, data_ready_after, notice_enabled = await _load_market_prefs(session, user_id)
     build = await _build_state_view(
-        repo, session, user_id=user_id, clock=clock, market_data=market_data, state=state
+        repo,
+        session,
+        user_id=user_id,
+        clock=clock,
+        market_data=market_data,
+        state=state,
+        close_hour=close_hour,
+        data_ready_after=data_ready_after,
+        session_notice_enabled=notice_enabled,
     )
     return build, definition_version
 
@@ -1424,8 +1529,9 @@ async def build_assets_job(
 
 __all__ = [
     "ASSET_DEFINITION_VERSION",
+    "DEFAULT_CLOSE_HOUR",
+    "DEFAULT_DATA_READY_AFTER",
     "FIFO_ERROR_REASON",
-    "MARKET_CLOSE_HOUR",
     "MARKET_UNCOVERED_REASON",
     "MISSING_PRICE_PREFIX",
     "MISSING_QUOTE_FINAL_REASON",
