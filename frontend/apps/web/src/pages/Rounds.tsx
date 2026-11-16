@@ -244,6 +244,26 @@ export function Rounds() {
 
   return (
     <div>
+      {oversellRows.length > 0 ? (
+        <section className="oversell-section" aria-label="超卖回合">
+          <h1 className="danger-text">超卖回合（重要！需手工订正）</h1>
+          <p className="muted">
+            账单记录的卖出数量超过买入记录（多为历史持仓未导入）。超卖部分的卖款已计入现金与总资产，
+            但不算收益；这些回合不计入正常回合列表，也不会影响已平仓统计。
+          </p>
+          <p className="muted">
+            需要补录缺失的买入成本时，点「详情」进入回合页使用「超卖成本补录」。
+          </p>
+          <DataTable
+            caption="超卖回合列表"
+            columns={oversellColumns}
+            rows={oversellRows}
+            rowKey={(row) => row.round_id}
+            emptyText="暂无超卖回合"
+            loading={loading && page == null}
+          />
+        </section>
+      ) : null}
       <h1>回合</h1>
       <p className="muted">
         导入账单成功后，后台会自动按 FIFO 配对建立回合（可分批减仓、计入股息/送转/配股）。
@@ -310,27 +330,6 @@ export function Rounds() {
 
       {notice ? <p className="notice">{notice}</p> : null}
       <ProblemView error={error} onRetry={() => void load()} />
-
-      {oversellRows.length > 0 ? (
-        <section className="oversell-section" aria-label="超卖回合">
-          <h2>超卖回合</h2>
-          <p className="muted">
-            账单记录的卖出数量超过买入记录（多为历史持仓未导入）。超卖部分的卖款已计入现金与总资产，
-            但不算收益；这些回合不计入正常回合列表，也不会影响已平仓统计。
-          </p>
-          <p className="muted">
-            需要补录缺失的买入成本时，点「详情」进入回合页使用「超卖成本补录」。
-          </p>
-          <DataTable
-            caption="超卖回合列表"
-            columns={oversellColumns}
-            rows={oversellRows}
-            rowKey={(row) => row.round_id}
-            emptyText="暂无超卖回合"
-            loading={loading && page == null}
-          />
-        </section>
-      ) : null}
 
       <DataTable
         caption="回合列表"

@@ -518,7 +518,7 @@ export function RoundDetail() {
 
           {round.status === "oversell" && sellTradeId ? (
             <div className="detail-card">
-              <h2>超卖成本补录</h2>
+              <h2 className="danger-text">超卖成本补录（重要！）</h2>
               <p className="muted">
                 补录不会改动原账单：系统会在该卖出当日、排在卖出之前插入「资金划转 + 无费用买入」两条流水
                 （备注「人工修订，非真实成交账单」），再按 FIFO 重算配对与资产。

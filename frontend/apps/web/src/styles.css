@@ -458,3 +458,7 @@ input[type="date"] {
 .kpi-hint {
   font-size: 12px;
 }
+
+.danger-text {
+  color: var(--danger)
+}
