@@ -1,7 +1,8 @@
 """板块概览聚合（API-087，2026-10-31 sector-data 设计 §5.2/§6）。
 
 * 只读：不写表、不建 job、不联网（板块数据源由调用方注入，默认缓存/replay）；
-* 持仓市值复用 ``portfolio.holdings_at``，与 Dashboard / 资产表同一估值口径；
+* 持仓市值复用 ``portfolio.holdings_from_rounds``（从 FIFO open 回合聚合），与
+  Dashboard / 回合页面同一持仓口径；
 * 行业是互斥分区（分母 `E_map`，Σw=1）；概念是可重叠标签（分母 `E`，不可加总）；
 * 全部标度整数，格式化只在 API 边界做；不可用一律 ``None`` + ``missing`` 码。
 """
@@ -55,8 +56,10 @@ from stock_review.application.assets import (
     STATE_STALE,
     get_asset_build_state,
 )
-from stock_review.application.portfolio import holdings_at
+from stock_review.application.bond_alias import build_bond_alias
+from stock_review.application.portfolio import holdings_from_rounds
 from stock_review.repositories.assets import AssetRepository
+from stock_review.repositories.rounds import RoundRepository
 
 TAXONOMY_INDUSTRY = "industry"
 TAXONOMY_CONCEPT = "concept"
@@ -742,8 +745,17 @@ async def build_sector_overview(
     assert latest is not None
     snapshot = latest.trade_date
     trades = list(await TradeRepository(session).balances_ordered(user_id, period_end=snapshot))
-    holdings, missing_prices, _cost_fallback, truncated = await holdings_at(
-        trades, as_of=snapshot, market_data=market_data
+    bond_alias, _unresolved = build_bond_alias(
+        (trade.security_code, trade.security_name) for trade in trades
+    )
+    all_rounds = await RoundRepository(session).all_rounds(user_id)
+    open_rounds = [round_ for round_ in all_rounds if round_.status == "open"]
+    holdings, missing_prices, _cost_fallback, truncated = await holdings_from_rounds(
+        open_rounds,
+        trades=trades,
+        bond_alias=bond_alias,
+        as_of=snapshot,
+        market_data=market_data,
     )
     if truncated:
         missing.append(
