@@ -557,7 +557,12 @@ def _revision_out(revision: OversellRevision) -> OversellRevisionOut:
 async def _enqueue_revision_rebuilds(
     state: Any, session: Any, user_id: Any
 ) -> tuple[str | None, str | None]:
-    """修订落库后派发全量回合重建 + 资产重建；入队失败只记日志（不回滚修订）。"""
+    """修订落库后只派发全量回合重建，不自动构建资产表。
+
+    回合需立即重建（超卖状态/配对关系变化），资产表交给用户在全部补录完成后
+    手动点「更新资产表」触发——避免每补一笔就跑一次全量资产构建。
+    入队失败只记日志（不回滚修订）。
+    """
     rebuild_job_id: str | None = None
     assets_job_id: str | None = None
     try:
@@ -570,16 +575,6 @@ async def _enqueue_revision_rebuilds(
         )
     except ApiError as exc:
         log.warning("revision.rebuild_enqueue_skipped", code=exc.code.value)
-    try:
-        assets_job_id, _reused = await state.queue.enqueue(
-            session,
-            kind="build_assets",
-            user_id=user_id,
-            scope_key=f"{user_id}:assets",
-            params={"mode": "full"},
-        )
-    except ApiError as exc:
-        log.warning("revision.assets_enqueue_skipped", code=exc.code.value)
     return rebuild_job_id, assets_job_id
 
 

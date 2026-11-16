@@ -548,7 +548,9 @@ export function Assets() {
         onClose={() => setRevisionTradeId(null)}
         onSettled={() => {
           setRevisionTradeId(null);
-          void load();
+          // 只刷新超卖回合列表（已补录的回合会从列表消失）；不刷新资产表，
+          // 避免 build.state 变 stale 触发 useStaleAssetBuild 自动构建——
+          // 资产表等用户全部补录完成后手动点「更新资产表」统一重算。
           void loadOversellRounds();
         }}
       />

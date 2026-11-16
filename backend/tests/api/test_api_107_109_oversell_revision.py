@@ -110,9 +110,9 @@ async def test_put_oversell_revision_injects_two_legs_and_closes_round(
     assert revision["buy_trade"]["amount"] == "-1000.00"
     assert revision["cash_trade"]["revision_of"] == sell_id
     assert revision["buy_trade"]["revision_of"] == sell_id
-    # 端点在同一事务内派发回合/资产重建任务
+    # 端点在同一事务内只派发回合重建；资产表等用户全部补录后手动触发。
     assert body["rebuild_job_id"]
-    assert body["assets_job_id"]
+    assert body["assets_job_id"] is None
 
     rows = await _revision_rows(owner_engine, user.user_id, sell_id)
     assert len(rows) == 2
