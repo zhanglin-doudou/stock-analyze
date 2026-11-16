@@ -4,8 +4,9 @@
 - 所有方法显式收 `user_id`（多租户第一道防线；RLS 是第二道）。
 - **事务由调用方持有**：本类不 commit / rollback（job handler 的租户事务负责原子性）。
 - 稳定序与 `TradeRepository.balances_ordered` 完全一致：
-  `trade_date, line_no NULLS FIRST, side=missing 优先, id`（资产表逐日推演必须与其同序，
-  否则同日余额取值/期初反推不可复现）。
+  `trade_date, line_no NULLS FIRST, side=missing 优先, 买类优先于卖, id`（资产表逐日
+  推演必须与其同序，否则同日余额取值/期初反推不可复现；买先于卖避免 T+0 同日买卖
+  的超卖截断产生 phantom 持仓）。
 - 读流水**含软删**：软删/恢复/修正都走 ORM UPDATE（刷新 `updated_at`），指纹能捕获；
   计算只用 `deleted_at IS NULL`。
 - 游标复用 `stock_platform.cursor`（载荷 `{"d": "YYYY-MM-DD", "i": id}`），
@@ -35,11 +36,22 @@ ASSET_SORTS: frozenset[str] = frozenset({"trade_date", "-trade_date"})
 
 
 def _stable_order() -> tuple[ColumnElement[Any], ...]:
-    """流水稳定序（与 `TradeRepository.balances_ordered` 同序）。"""
+    """流水稳定序（与 `TradeRepository.balances_ordered` 同序）。
+
+    同日同行号内「买先于卖」：保证资产逐日推演时，先建仓再卖出，避免卖出先于
+    买入被 `max(0, …)` 超卖截断后、买入又加满，产生 phantom 持仓（可转债等
+    T+0 品种同日买卖易触发）。其余类别（股息/利息/费用/划转等）不影响持仓，
+    排在买卖之后；对账补差行（side=missing）仍最优先。
+    """
     return (
         Trade.trade_date.asc(),
         Trade.line_no.asc().nulls_first(),
         case((Trade.side == Side.MISSING.value, 0), else_=1).asc(),
+        case(
+            (Trade.category.in_(["buy", "bonus", "rights", "new_stock"]), 0),
+            (Trade.category == "sell", 1),
+            else_=2,
+        ).asc(),
         Trade.id.asc(),
     )
 

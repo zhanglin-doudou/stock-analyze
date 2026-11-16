@@ -435,6 +435,11 @@ class TradeRepository:
             Trade.trade_date.asc(),
             Trade.line_no.asc().nulls_first(),
             case((Trade.side == Side.MISSING.value, 0), else_=1).asc(),
+            case(
+                (Trade.category.in_(["buy", "bonus", "rights", "new_stock"]), 0),
+                (Trade.category == "sell", 1),
+                else_=2,
+            ).asc(),
             Trade.id.asc(),
         )
         return list(await self._session.scalars(stmt))
@@ -448,6 +453,11 @@ class TradeRepository:
             Trade.trade_date.asc(),
             Trade.line_no.asc().nulls_first(),
             case((Trade.side == Side.MISSING.value, 0), else_=1).asc(),
+            case(
+                (Trade.category.in_(["buy", "bonus", "rights", "new_stock"]), 0),
+                (Trade.category == "sell", 1),
+                else_=2,
+            ).asc(),
             Trade.id.asc(),
         ).limit(1)
         return await self._session.scalar(stmt)
@@ -461,6 +471,11 @@ class TradeRepository:
             Trade.trade_date.desc(),
             Trade.line_no.desc().nulls_last(),
             case((Trade.side == Side.MISSING.value, 0), else_=1).desc(),
+            case(
+                (Trade.category.in_(["buy", "bonus", "rights", "new_stock"]), 0),
+                (Trade.category == "sell", 1),
+                else_=2,
+            ).desc(),
             Trade.id.desc(),
         ).limit(1)
         return await self._session.scalar(stmt)
@@ -479,6 +494,11 @@ class TradeRepository:
         stmt = stmt.order_by(
             Trade.line_no.asc().nulls_first(),
             case((Trade.side == Side.MISSING.value, 0), else_=1).asc(),
+            case(
+                (Trade.category.in_(["buy", "bonus", "rights", "new_stock"]), 0),
+                (Trade.category == "sell", 1),
+                else_=2,
+            ).asc(),
             Trade.id.asc(),
         ).limit(1)
         return await self._session.scalar(stmt)
@@ -498,6 +518,11 @@ class TradeRepository:
             Trade.trade_date.desc(),
             Trade.line_no.desc().nulls_last(),
             case((Trade.side == Side.MISSING.value, 0), else_=1).desc(),
+            case(
+                (Trade.category.in_(["buy", "bonus", "rights", "new_stock"]), 0),
+                (Trade.category == "sell", 1),
+                else_=2,
+            ).desc(),
             Trade.id.desc(),
         ).limit(1)
         return await self._session.scalar(stmt)
@@ -517,6 +542,11 @@ class TradeRepository:
             Trade.trade_date.asc(),
             Trade.line_no.asc().nulls_first(),
             case((Trade.side == Side.MISSING.value, 0), else_=1).asc(),
+            case(
+                (Trade.category.in_(["buy", "bonus", "rights", "new_stock"]), 0),
+                (Trade.category == "sell", 1),
+                else_=2,
+            ).asc(),
             Trade.id.asc(),
         ).limit(1)
         return await self._session.scalar(stmt)
