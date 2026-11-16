@@ -35,13 +35,28 @@ def _sell(day: date, *, qty_units: int, amount_units: int) -> FifoEvent:
     )
 
 
-def test_full_oversell_records_proceeds_without_round() -> None:
-    """无任何持仓的卖出：无可配对买入，不产生回合，卖款留痕供资产表按资金划转剔除。"""
+def test_full_oversell_records_round_without_fills() -> None:
+    """无任何持仓的卖出：落库成 oversell 回合（无 fill），卖款留痕供人工修订与资产口径使用。"""
     result = build_rounds([_sell(date(2026, 1, 2), qty_units=100 * 10_000, amount_units=100_000)])
 
-    assert result.rounds == ()
+    assert len(result.rounds) == 1
+    round_ = result.rounds[0]
+    assert round_.key == "trd_sell:oversell"
+    assert round_.status == "oversell"
+    assert round_.data_error is False
+    assert round_.quantity_units == 100 * 10_000
+    assert round_.oversell_units == 100 * 10_000
+    assert round_.proceeds_units == 100_000
+    # 纯超卖不构成交易损益：成本/盈亏/收益率恒 0
+    assert round_.cost_units == 0
+    assert round_.pnl_units == 0
+    assert round_.return_rate_units == 0
+    assert round_.fills == ()
     assert result.oversell_proceeds_units == 100_000
     assert [(e.kind, e.proceeds_units) for e in result.data_errors] == [("oversell", 100_000)]
+    # 不进 closed / realized
+    assert result.closed_rounds == ()
+    assert result.realized_pnl_units == 0
 
 
 def test_partial_oversell_round_status_is_oversell() -> None:

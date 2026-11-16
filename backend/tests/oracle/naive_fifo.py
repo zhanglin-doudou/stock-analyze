@@ -190,7 +190,24 @@ def _sell(event: OracleEvent, state: _State) -> None:
         chunks.append((lot, take))
         remaining -= take
     if not chunks:
-        # 全超卖 → 无可用 lot，不开启周期
+        # 全超卖 → 无可用 lot：生产会落一条 `oversell` 回合（数量=卖出数量、卖款留痕、
+        # pnl 恒 0，不构成交易损益），这里对齐同一口径。
+        state.rounds.append(
+            OracleRound(
+                key=f"{event.trade_id}:oversell",
+                buy_trade_id=event.trade_id,
+                sell_trade_id=event.trade_id,
+                open_date=event.trade_date,
+                close_date=event.trade_date,
+                quantity=event.quantity,
+                cost=Decimal(0),
+                proceeds=event.amount,
+                dividend=Decimal(0),
+                pnl=Decimal(0),
+                oversell=remaining,
+                is_open=False,
+            )
+        )
         return
     matched = sum((take for _, take in chunks), Decimal(0))
     oversell = remaining

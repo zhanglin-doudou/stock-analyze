@@ -114,6 +114,7 @@ def trades_to_events(
       DIVIDEND 的 `amount_units` 已是税后净额，不重复扣税；
     - 送转：`quantity_units` = 新增股数、`ratio_units` = 0（引擎按数量直接加股，成本不变）；
     - `line_no` 空值按 0 处理（稳定序需要 int）；
+    - 人工修订注入行（`revision_of` 非空）`sort_rank=0`，保证同日先于被修订的卖出配对；
     - 可转债发债代码按 `bond_alias` 归一到上市代码（未传时从本批 trades 派生），
       申购缴款与上市卖出进入同一 FIFO 组（设计 D3）。
     """
@@ -141,6 +142,8 @@ def trades_to_events(
                 ratio_units=0,
                 line_no=trade.line_no or 0,
                 summary=trade.summary or "",
+                # 人工修订注入行必须排在原账单行之前（同交易日、同行号时先建 lot）。
+                sort_rank=0 if trade.revision_of else 1,
             )
         )
     return events

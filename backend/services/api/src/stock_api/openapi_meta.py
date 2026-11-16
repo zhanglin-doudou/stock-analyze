@@ -1362,6 +1362,56 @@ OPERATION_META: dict[str, dict[str, Any]] = {
             "ADMIN_CANNOT_READ_TRADES",
         ],
     },
+    # 2026-11-15（API-107~109，超卖卖出人工修订）
+    "getOversellRevision": {
+        "api_id": "API-107",
+        "scope": "read",
+        "idempotent": True,
+        "async": False,
+        "error_codes": [
+            "NOT_FOUND",
+            "VALIDATION_ERROR",
+            "TOKEN_EXPIRED",
+            "TOKEN_REVOKED",
+            "MULTIPLE_CREDENTIALS",
+            "INSUFFICIENT_SCOPE",
+            "ADMIN_CANNOT_READ_TRADES",
+        ],
+    },
+    "upsertOversellRevision": {
+        "api_id": "API-108",
+        "scope": "write",
+        "idempotent": True,
+        "async": False,
+        "error_codes": [
+            "NOT_FOUND",
+            "VALIDATION_ERROR",
+            "JOB_ALREADY_RUNNING",
+            "QUOTA_EXCEEDED",
+            "TOKEN_EXPIRED",
+            "TOKEN_REVOKED",
+            "MULTIPLE_CREDENTIALS",
+            "INSUFFICIENT_SCOPE",
+            "ADMIN_CANNOT_READ_TRADES",
+        ],
+    },
+    "deleteOversellRevision": {
+        "api_id": "API-109",
+        "scope": "write",
+        "idempotent": True,
+        "async": False,
+        "error_codes": [
+            "NOT_FOUND",
+            "VALIDATION_ERROR",
+            "JOB_ALREADY_RUNNING",
+            "QUOTA_EXCEEDED",
+            "TOKEN_EXPIRED",
+            "TOKEN_REVOKED",
+            "MULTIPLE_CREDENTIALS",
+            "INSUFFICIENT_SCOPE",
+            "ADMIN_CANNOT_READ_TRADES",
+        ],
+    },
     "listRoundInsights": {
         "api_id": "API-092",
         "scope": "read",
@@ -2107,6 +2157,72 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
             "annotated_at": _DATETIME,
             "late_annotated": False,
             "version": 1,
+        }
+    },
+    # 2026-11-15（API-107~109）：超卖卖出人工修订；注入行由接口产出，示例先给未修订态。
+    "getOversellRevision": {
+        "200": {
+            "sell": {
+                "trade_id": "trd_" + _ID_SUFFIX,
+                "trade_date": _DATE,
+                "security_code": "127061",
+                "security_name": "N英特转债",
+                "quantity": "10",
+                "amount": "1123.92",
+                "oversell_quantity": "10",
+                "note": None,
+            },
+            "status": "none",
+            "cost": None,
+            "cash_trade": None,
+            "buy_trade": None,
+            "round_id": None,
+        }
+    },
+    "upsertOversellRevision": {
+        "200": {
+            "revision": {
+                "sell": {
+                    "trade_id": "trd_" + _ID_SUFFIX,
+                    "trade_date": _DATE,
+                    "security_code": "127061",
+                    "security_name": "N英特转债",
+                    "quantity": "10",
+                    "amount": "1123.92",
+                    "oversell_quantity": "0",
+                    "note": None,
+                },
+                "status": "revised",
+                "cost": "1000.00",
+                "cash_trade": None,
+                "buy_trade": None,
+                "round_id": "rnd_" + _ID_SUFFIX,
+            },
+            "rebuild_job_id": "job_" + _ID_SUFFIX,
+            "assets_job_id": "job_" + _ID_SUFFIX,
+        }
+    },
+    "deleteOversellRevision": {
+        "200": {
+            "revision": {
+                "sell": {
+                    "trade_id": "trd_" + _ID_SUFFIX,
+                    "trade_date": _DATE,
+                    "security_code": "127061",
+                    "security_name": "N英特转债",
+                    "quantity": "10",
+                    "amount": "1123.92",
+                    "oversell_quantity": "10",
+                    "note": None,
+                },
+                "status": "none",
+                "cost": None,
+                "cash_trade": None,
+                "buy_trade": None,
+                "round_id": None,
+            },
+            "rebuild_job_id": "job_" + _ID_SUFFIX,
+            "assets_job_id": "job_" + _ID_SUFFIX,
         }
     },
     # 2026-11-05（API-092）：回合洞察列表（含汇总结论；缺失为 null 不补 0）。

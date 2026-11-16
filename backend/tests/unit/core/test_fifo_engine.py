@@ -384,16 +384,36 @@ def test_partial_oversell_proceeds_prorated_with_floor() -> None:
     assert result.oversell_proceeds_units == 1_951 - 1_300
 
 
-def test_sell_without_any_holding_records_only_data_error() -> None:
+def test_sell_without_any_holding_records_oversell_round_and_data_error() -> None:
+    """纯超卖：无 lot 可配对也要落库成 oversell 回合（回合页可见），便于人工补录成本。"""
     result = build_rounds([sell("s1", date(2024, 1, 10), 100, "12.00")])
-    assert result.rounds == ()
     assert result.open_lots == ()
+    assert len(result.rounds) == 1
+    round_ = result.rounds[0]
+    assert round_.key == "s1:oversell"
+    assert round_.status == "oversell"
+    assert round_.data_error is False
+    assert round_.open_trade_id == "s1"
+    assert round_.close_trade_id == "s1"
+    assert round_.open_date == date(2024, 1, 10)
+    assert round_.close_date == date(2024, 1, 10)
+    assert round_.quantity_units == shares(100)
+    assert round_.oversell_units == shares(100)
+    assert round_.cost_units == 0
+    assert round_.proceeds_units == cents("1200.00")
+    assert round_.pnl_units == 0
+    assert round_.return_rate_units == 0
+    assert round_.holding_days == 0
+    assert round_.fills == ()
     assert len(result.data_errors) == 1
     assert result.data_errors[0].kind == "oversell"
     assert result.data_errors[0].quantity_units == shares(100)
     # 全部未配对：整笔净卖款 1200.00 均视为期初资产，不产生交易损益
     assert result.data_errors[0].proceeds_units == cents("1200.00")
     assert result.oversell_proceeds_units == cents("1200.00")
+    # oversell 回合不计入 closed / realized
+    assert result.closed_rounds == ()
+    assert result.realized_pnl_units == 0
     # 后续买入可正常配对，不被此前的无主卖出影响
     result = build_rounds(
         [
@@ -402,8 +422,8 @@ def test_sell_without_any_holding_records_only_data_error() -> None:
             sell("s2", date(2024, 1, 15), 100, "12.00"),
         ]
     )
-    assert len(result.rounds) == 1
-    assert result.rounds[0].key == "b1:s2"
+    assert [round_.key for round_ in result.rounds] == ["s1:oversell", "b1:s2"]
+    assert result.rounds[1].status == "closed"
 
 
 # ── 新股认购：NEW_STOCK 缴款行建仓，上市卖出可配对成回合（设计 D11）──
@@ -528,8 +548,42 @@ def test_invalid_buy_does_not_create_lot_and_sell_afterwards_oversells() -> None
         sell("s1", date(2024, 1, 10), 100, "12.00"),
     ]
     result = build_rounds(events)
-    assert result.rounds == ()
+    # 无效买入不建 lot；随后的卖出变成纯超卖，落库成 oversell 回合（无 fill）。
+    assert [round_.key for round_ in result.rounds] == ["s1:oversell"]
+    assert result.rounds[0].fills == ()
     assert [error.kind for error in result.data_errors] == ["invalid_event", "oversell"]
+
+
+def test_revision_row_sorts_before_sell_on_same_day() -> None:
+    """人工修订注入行 `sort_rank=0`：同交易日/同行号时先建 lot，再被卖出配对。"""
+    revision_buy = FifoEvent(
+        trade_id="rev_buy",
+        trade_date=date(2024, 1, 10),
+        kind=EventKind.BUY,
+        security_code="600000",
+        security_name="浦发银行",
+        quantity_units=shares(100),
+        price_units=price_of("10.00"),
+        amount_units=-cents("1000.00"),
+        line_no=259,
+        sort_rank=0,
+    )
+    sale = sell("s1", date(2024, 1, 10), 100, "12.00", line_no=259)
+    # 故意把卖出放在前面：验证按稳定序（sort_rank）而不是输入顺序
+    result = build_rounds([sale, revision_buy])
+
+    assert result.data_errors == ()
+    assert result.open_lots == ()
+    assert len(result.rounds) == 1
+    round_ = result.rounds[0]
+    assert round_.key == "rev_buy:s1"
+    assert round_.status == "closed"
+    assert round_.quantity_units == shares(100)
+    assert round_.oversell_units == 0
+    assert round_.cost_units == cents("1000.00")
+    assert round_.proceeds_units == cents("1200.00")
+    assert round_.pnl_units == cents("200.00")
+    assert len(round_.fills) == 1
 
 
 # ── 股息 ─────────────────────────────────────────────────

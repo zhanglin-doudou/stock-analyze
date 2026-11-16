@@ -82,11 +82,11 @@ def test_validate_contract_returns_no_violations(spec: dict[str, Any]) -> None:
 
 
 def test_covers_all_registered_operations(spec: dict[str, Any]) -> None:
-    """74 个 operation（P2-12 API-084 + 2026-10-28 API-085/086 + 2026-10-31 API-087/088 + 2026-11-02 API-036 + 2026-11-05 API-090~094 + 2026-11-09 API-095 + 2026-11-13 API-055/096/097 + 2026-11-13 导入映射 v2 API-098~106）全部登记且与 OPERATION_META 一致。"""
+    """77 个 operation（P2-12 API-084 + 2026-10-28 API-085/086 + 2026-10-31 API-087/088 + 2026-11-02 API-036 + 2026-11-05 API-090~094 + 2026-11-09 API-095 + 2026-11-13 API-055/096/097 + 2026-11-13 导入映射 v2 API-098~106 + 2026-11-15 API-107~109）全部登记且与 OPERATION_META 一致。"""
     operations = _operations(spec)
     operation_ids = [operation["operationId"] for _, _, operation in operations]
-    assert len(operations) == 74
-    assert len(set(operation_ids)) == 74
+    assert len(operations) == 77
+    assert len(set(operation_ids)) == 77
     assert set(operation_ids) == set(OPERATION_META), "OPERATION_META 与实现端点漂移"
     paths = {path for _, path, _ in operations}
     # 探针/元数据端点（/api/v1/openapi.json 由 FastAPI 自引用，不在 paths 中）。
@@ -126,12 +126,13 @@ def test_every_2xx_has_example(spec: dict[str, Any]) -> None:
                     json_count += 1
                 else:
                     text_count += 1
-    # 74 个 operation：2 个文本响应（SSE / Prometheus），204 无 body 若干；
-    # 其余 66 个 2xx JSON 响应必须各带确定性示例（新增端点漏示例即失败）。
-    # 66 = 55 + POST /assets/build 的 200（缺行情时返回失败状态与 missing[]）
+    # 77 个 operation：2 个文本响应（SSE / Prometheus），204 无 body 若干；
+    # 其余 69 个 2xx JSON 响应必须各带确定性示例（新增端点漏示例即失败）。
+    # 69 = 55 + POST /assets/build 的 200（缺行情时返回失败状态与 missing[]）
     #       + GET/PATCH /settings（API-055/096）+ POST /settings/trade-flags/rebuild（API-097）
-    #       + 导入映射 v2（API-098/099/100/102/103/104/106）。
-    assert json_count == 66
+    #       + 导入映射 v2（API-098/099/100/102/103/104/106）
+    #       + 超卖人工修订（API-107/108/109）。
+    assert json_count == 69
     assert text_count == 2  # SSE（API-063）+ Prometheus 文本（API-074）
     stream = _find_operation(spec, "streamJobEvents")["responses"]["200"]["content"]
     assert "text/event-stream" in stream
@@ -188,6 +189,10 @@ def test_example_money_and_ratio_formats(spec: dict[str, Any]) -> None:
     ratio_checked = 0
     for _, example in _json_examples(spec):
         for field, value in _walk_example_fields(example):
+            if value is None:
+                # 可空字段（如尚未注入修订成本的 `cost`）示例值为 null，
+                # 表示无值，不参与标量格式断言。
+                continue
             if field in MONEY_FIELDS:
                 assert isinstance(value, str) and _MONEY_RE.match(value), (field, value)
                 money_checked += 1

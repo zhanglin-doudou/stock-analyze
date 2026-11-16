@@ -165,6 +165,14 @@ class Trade(Base):
         # 资产表增量脏查询（updated_at 水位线）专用：index-only 覆盖
         # `WHERE user_id = ? AND updated_at >= ? ORDER BY updated_at`。
         Index("ix_trade_user_updated_at", "user_id", "updated_at", "trade_date"),
+        # 人工修订注入行（`revision_of` 指向被修订的卖出流水）：只索引注入行，便于按卖出
+        # 反查/覆盖/撤回；真实账单该列为 NULL，不占索引空间。
+        Index(
+            "ix_trade_user_revision",
+            "user_id",
+            "revision_of",
+            postgresql_where=text("revision_of IS NOT NULL"),
+        ),
         Index(
             "uq_trade_user_dedupe",
             "user_id",
@@ -209,6 +217,8 @@ class Trade(Base):
     account_masked: Mapped[str | None] = mapped_column(String(32))
     note: Mapped[str | None] = mapped_column(String(200))
     source: Mapped[str] = mapped_column(String(16), nullable=False, default="import")
+    # 人工修订标记：非空表示本行是为该卖出流水注入的成本补录行（非真实账单）。
+    revision_of: Mapped[str | None] = mapped_column(String(40))
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     line_no: Mapped[int | None] = mapped_column(Integer)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

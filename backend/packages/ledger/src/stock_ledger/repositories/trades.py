@@ -94,6 +94,8 @@ class TradeRow:
     note: str | None = None
     source: str = "import"
     line_no: int | None = None
+    # 人工修订注入行标记：非空表示本行是该卖出流水的人工修订补录（非真实账单）。
+    revision_of: str | None = None
 
 
 def _trade_to_row(trade: Trade) -> TradeRow:
@@ -149,6 +151,7 @@ class TradeRepository:
             source=row.source,
             version=1,
             line_no=row.line_no,
+            revision_of=row.revision_of,
         )
 
     async def insert_many(self, user_id: uuid.UUID, rows: Sequence[TradeRow]) -> int:
@@ -314,12 +317,16 @@ class TradeRepository:
         """replace_range：软删区间内旧行，避免新账单与旧数据重复计入。
 
         `account` 非空时只删该资金子账户的旧行（多子账户账单各自覆盖自己的区段）。
+
+        人工修订注入行（`revision_of IS NOT NULL`）不参与区间覆盖：它们不对应账单原文，
+        只由修订接口自身覆盖/撤回；否则重新导入同一区段会静默删掉用户的成本补录。
         """
         stmt = select(Trade).where(
             Trade.user_id == user_id,
             Trade.trade_date >= date_from,
             Trade.trade_date <= date_to,
             Trade.deleted_at.is_(None),
+            Trade.revision_of.is_(None),
         )
         if account is not None:
             stmt = stmt.where(Trade.account_masked == account)

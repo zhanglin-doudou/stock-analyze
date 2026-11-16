@@ -53,13 +53,17 @@ class FifoEvent:
     ratio_units: int = 0
     line_no: int = 0
     summary: str = ""
+    # 同 `(trade_date, line_no)` 内的先后次序：人工修订注入行（0）必须排在原账单行（1）之前，
+    # 使同日补录的买入 lot 先于卖出被消耗。真实账单行一律为默认 1。
+    sort_rank: int = 1
 
     @property
-    def stable_key(self) -> tuple[date, int, str, int, int, str]:
-        """稳定序：`(交易日, 文件行号, 摘要, 数量, 均价, trade_id)`（PRD 附录 A7）。"""
+    def stable_key(self) -> tuple[date, int, int, str, int, int, str]:
+        """稳定序：`(交易日, 文件行号, 次序, 摘要, 数量, 均价, trade_id)`（PRD 附录 A7）。"""
         return (
             self.trade_date,
             self.line_no,
+            self.sort_rank,
             self.summary,
             self.quantity_units,
             self.price_units,

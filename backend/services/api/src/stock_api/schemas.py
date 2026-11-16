@@ -507,6 +507,8 @@ class TradeOut(BaseModel):
     source: Literal["import", "manual", "system"] = "import"
     batch_id: str | None = None
     note: str | None = None
+    # 非空 = 人工修订注入行（为 revision_of 指向的卖出流水补录成本，非真实账单）。
+    revision_of: str | None = None
     deleted_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
@@ -558,6 +560,43 @@ class TradeHistoryItem(BaseModel):
 class TradeHistoryOut(BaseModel):
     trade_id: str
     items: list[TradeHistoryItem]
+
+
+# ── 超卖卖出人工修订（API-107~109）──────────────────────────
+class OversellRevisionIn(StrictModel):
+    """PUT 入参：该卖出未配对部分的总成本（正数，定点字符串）。"""
+
+    cost: str
+
+
+class OversellRevisionSellOut(BaseModel):
+    trade_id: str
+    trade_date: date
+    security_code: str
+    security_name: str
+    quantity: str
+    amount: str
+    # 当前仍未配对的数量（修订生效后为 0）。
+    oversell_quantity: str
+    note: str | None = None
+
+
+class OversellRevisionOut(BaseModel):
+    sell: OversellRevisionSellOut
+    # none=可修订 / revised=已修订 / superseded=真实账单已覆盖（待确认）/ not_oversell=无需修订
+    status: Literal["none", "revised", "superseded", "not_oversell"]
+    cost: str | None = None
+    # 注入的两条流水（未修订为 null），页面据此展示「非真实成交账单」标记。
+    cash_trade: TradeOut | None = None
+    buy_trade: TradeOut | None = None
+    # 重算后该卖出对应的回合（未重算为 null），前端可跳转展示配对结果。
+    round_id: str | None = None
+
+
+class OversellRevisionMutationOut(BaseModel):
+    revision: OversellRevisionOut
+    rebuild_job_id: str | None = None
+    assets_job_id: str | None = None
 
 
 # ── 摘要规则与对账（API-022~026）────────────────────────────

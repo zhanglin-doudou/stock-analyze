@@ -160,11 +160,14 @@ def _assert_no_negative_positions(events: list[FifoEvent]) -> None:
         assert round_.dividend_units >= 0
         assert round_.oversell_units >= 0
         # 周期语义不变量（open / closed 通用）：
-        # - pnl 恒等式：pnl = proceeds - cost + dividend
+        # - pnl 恒等式：pnl = proceeds - cost + dividend（纯超卖回合例外：卖款留痕但 pnl 恒 0）
         # - 有 fills 时 Σ fill.quantity == round.quantity_units（matched）
-        assert round_.pnl_units == (
-            round_.proceeds_units - round_.cost_units + round_.dividend_units
-        )
+        if round_.status == "oversell" and not round_.fills:
+            assert round_.pnl_units == 0
+        else:
+            assert round_.pnl_units == (
+                round_.proceeds_units - round_.cost_units + round_.dividend_units
+            )
         if round_.fills:
             assert sum(fill.quantity_units for fill in round_.fills) == round_.quantity_units
             assert sum(fill.pnl_units for fill in round_.fills) == round_.pnl_units
@@ -193,8 +196,11 @@ def test_buy_sell_quantity_and_cost_conservation(events: list[FifoEvent]) -> Non
     )
 
     matched_quantity = sum(
+        # 纯超卖回合（无 fills）的 quantity 取卖出数量而非配对量，必须排除；
+        # 部分超卖/正常回合的 quantity 已是 matched（oversell 只是标记）。
         round_.quantity_units
-        for round_ in result.rounds  # 含 open / closed，都是已 FIFO 配对量
+        for round_ in result.rounds  # 含 open / closed
+        if round_.fills or round_.status != "oversell"
     )
     open_quantity = sum(lot.quantity_units for lot in result.open_lots)
     oversell_quantity = sum(

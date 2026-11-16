@@ -149,8 +149,11 @@ def _process_security(
                 errors.append(_invalid_event(event, security_code, detail="卖出数量必须为正"))
                 continue
             fills, oversell_units = _apply_sell(event, security_code, lots, errors)
-            # 无可配对 lot（持 0 股卖出等）：跳过 fill 追加，lot 状态不变
+            # 无可配对 lot（持 0 股卖出等）：不产生 Fill，但超卖本身要落库成回合，
+            # 否则回合页看不到这笔卖出、用户也无从补录成本。lot 状态不变。
             if fills is None:
+                if oversell_units > 0:
+                    closed.append(_snapshot_bare_oversell(event, security_code))
                 continue
             # 有配对 Fill → current 必定存在（BUY 先建 lot，lot 消耗产生 fill）
             assert current is not None, "fills 非空意味着 lot 被消耗，lot 来自 BUY → current 必存在"
@@ -338,6 +341,34 @@ def _snapshot_closed(state: _RoundState, *, oversell_units: int) -> Round:
         data_error=False,
         oversell_units=oversell_units,
         fills=tuple(state.fills),
+    )
+
+
+def _snapshot_bare_oversell(event: FifoEvent, security_code: str) -> Round:
+    """纯超卖（无任何可配 lot）落库成 oversell 回合。
+
+    口径：数量取卖出数量、卖款取卖出金额（已计入现金与总资产）、成本与盈亏为 0
+    （超卖部分不构成交易损益）。用户补录成本后，引擎会重新配对成正常 closed 回合。
+    """
+    return Round(
+        key=f"{event.trade_id}:oversell",
+        security_code=security_code,
+        security_name=event.security_name,
+        status="oversell",
+        open_trade_id=event.trade_id,
+        close_trade_id=event.trade_id,
+        open_date=event.trade_date,
+        close_date=event.trade_date,
+        quantity_units=event.quantity_units,
+        cost_units=0,
+        proceeds_units=event.amount_units,
+        dividend_units=0,
+        pnl_units=0,
+        return_rate_units=0,
+        holding_days=0,
+        data_error=False,
+        oversell_units=event.quantity_units,
+        fills=(),
     )
 
 

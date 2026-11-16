@@ -15,7 +15,7 @@ from typing import Any
 from sqlalchemy.ext.asyncio import AsyncSession
 from stock_contracts.clock import Clock
 from stock_contracts.constants import CURSOR_DEFAULT_LIMIT
-from stock_contracts.errors import NotFoundError
+from stock_contracts.errors import ApiError, ErrorCode, NotFoundError
 from stock_core.values import Money, Price, format_quantity
 from stock_platform.audit import record
 from stock_platform.outbox import publish
@@ -26,6 +26,9 @@ from stock_ledger.repositories.trades import TradeRepository
 _EVENT_UPDATED = "ledger.trade.updated"
 _EVENT_DELETED = "ledger.trade.deleted"
 _EVENT_RESTORED = "ledger.trade.restored"
+
+# 人工修订注入行只能通过修订接口整体覆盖/撤回，避免单腿改动或单腿删除导致现金与持仓失衡。
+_REVISION_ROW_MESSAGE = "人工修订注入行不可直接修改，请通过超卖修订接口调整或撤回"
 
 
 @dataclass(slots=True)
@@ -73,6 +76,8 @@ class TradeDTO:
     deleted_at: datetime | None
     created_at: datetime
     updated_at: datetime
+    # 非空 = 人工修订注入行（为 revision_of 指向的卖出流水补录成本，非真实账单）。
+    revision_of: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -99,6 +104,7 @@ class TradeDTO:
             "note": self.note,
             "source": self.source,
             "version": self.version,
+            "revision_of": self.revision_of,
             "deleted_at": self.deleted_at.isoformat() if self.deleted_at else None,
         }
 
@@ -144,6 +150,7 @@ def trade_to_dto(trade: Trade) -> TradeDTO:
         deleted_at=trade.deleted_at,
         created_at=trade.created_at,
         updated_at=trade.updated_at,
+        revision_of=trade.revision_of,
     )
 
 
@@ -169,6 +176,8 @@ def trade_snapshot(trade: Trade) -> dict[str, Any]:
         "category": trade.category,
         "account_masked": trade.account_masked,
         "note": trade.note,
+        "source": trade.source,
+        "revision_of": trade.revision_of,
         "version": trade.version,
         "deleted_at": trade.deleted_at.isoformat() if trade.deleted_at else None,
     }
@@ -234,6 +243,8 @@ async def patch_trade(
     before = await repo.by_id(user_id, trade_id)
     if before is None:
         raise NotFoundError(detail=f"交易 {trade_id} 不存在")
+    if before.revision_of is not None:
+        raise ApiError(ErrorCode.VALIDATION_ERROR, detail=_REVISION_ROW_MESSAGE)
     snapshot_before = trade_snapshot(before)
 
     trade = await repo.update_fields(
@@ -282,6 +293,9 @@ async def delete_trade(
     request_id: str | None = None,
 ) -> TradeDTO:
     repo = TradeRepository(session)
+    existing = await repo.by_id(user_id, trade_id)
+    if existing is not None and existing.revision_of is not None:
+        raise ApiError(ErrorCode.VALIDATION_ERROR, detail=_REVISION_ROW_MESSAGE)
     trade = await repo.soft_delete(user_id, trade_id, at=clock.now())
     deleted_iso = trade.deleted_at.isoformat() if trade.deleted_at is not None else None
     await repo.add_history(
@@ -323,6 +337,9 @@ async def restore_trade(
     request_id: str | None = None,
 ) -> TradeDTO:
     repo = TradeRepository(session)
+    existing = await repo.by_id(user_id, trade_id, include_deleted=True)
+    if existing is not None and existing.revision_of is not None:
+        raise ApiError(ErrorCode.VALIDATION_ERROR, detail=_REVISION_ROW_MESSAGE)
     trade = await repo.restore(user_id, trade_id)
     await repo.add_history(
         user_id,

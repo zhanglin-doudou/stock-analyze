@@ -46,7 +46,19 @@ def test_stable_key_matches_frozen_contract_order() -> None:
         summary="证券买入",
         line_no=7,
     )
-    assert event.stable_key == (date(2024, 1, 2), 7, "证券买入", 100, 200, "t1")
+    assert event.stable_key == (date(2024, 1, 2), 7, 1, "证券买入", 100, 200, "t1")
+    # 人工修订注入行（sort_rank=0）排在同日/同行号的账单行之前。
+    revision = FifoEvent(
+        trade_id="t2",
+        trade_date=date(2024, 1, 2),
+        kind=EventKind.BUY,
+        quantity_units=100,
+        price_units=200,
+        summary="人工修订买入",
+        line_no=7,
+        sort_rank=0,
+    )
+    assert revision.stable_key < event.stable_key
 
 
 def test_stable_key_sorting_breaks_ties_by_line_no_then_fields() -> None:
