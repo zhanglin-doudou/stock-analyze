@@ -2,8 +2,8 @@
 
 ``holdings_at`` 原为 ``dashboard._holdings_at``，提取到这里是为了让
 ``/sectors/overview`` 与 ``/dashboard`` 不会出现「两套持仓市值」：
-货基与普通持仓同口径、可转债发债代码归一；只有 A 股/场内基金读行情，
-债券与伪代码按含费成本估值，待上市新股缺行情按认购成本兜底。
+货币基金（现金等价物）不进持仓列表、并入现金余额；可转债发债代码归一；
+只有 A 股/场内基金读行情，债券与伪代码按含费成本估值，待上市新股缺行情按认购成本兜底。
 
 行为与口径保持不变（`dashboard._holdings_at` 保留为薄包装，兼容既有单测）。
 """
@@ -19,6 +19,7 @@ from stock_platform.ports import MarketDataSource
 from stock_platform.symbols import needs_quote
 
 from stock_review.application.bond_alias import build_bond_alias, canonical_code
+from stock_review.application.money_fund import money_fund_codes
 from stock_review.application.valuation import (
     category,
     close_on_or_before,
@@ -76,6 +77,7 @@ async def holdings_at(
     holdings: dict[str, int] = {}
     cost_basis: dict[str, int] = {}
     names: dict[str, str] = {}
+    fund_codes = money_fund_codes(trades)
 
     for trade in trades:
         if trade.trade_date > as_of:
@@ -83,7 +85,8 @@ async def holdings_at(
         raw_code = (trade.security_code or "").strip()
         if not raw_code:
             continue
-        # 货基无特殊路径：与普通持仓同口径（进持仓、按行情估值）。
+        if raw_code in fund_codes:
+            continue  # 货基是现金等价物：不进持仓列表（资产表现金列已含其余额）
         code = canonical_code(bond_alias, raw_code)
         trade_category = category(trade)
         delta = holding_delta(trade_category, trade.quantity_units, amount_units=trade.amount_units)

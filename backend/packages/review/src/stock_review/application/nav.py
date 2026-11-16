@@ -33,6 +33,11 @@ from stock_platform.symbols import needs_quote
 
 from stock_review.application.bond_alias import build_bond_alias, canonical_code
 from stock_review.application.bridge import _initial_cash
+from stock_review.application.money_fund import (
+    money_fund_balances,
+    money_fund_codes,
+    money_fund_value_units,
+)
 from stock_review.application.rebuild import trades_to_events
 from stock_review.application.valuation import (
     CASHFLOW_CATEGORIES as _CASHFLOW_CATEGORIES,
@@ -188,6 +193,9 @@ async def compute_nav_points(
     if initial is None:
         return [], [], ["无现金余额锚点（无 cash_balance 行）"], False, {}, None, None, {}
     initial_cash, assumption = initial
+    # 货币基金 = 现金等价物（2.3 口径）：余额并入现金，不进持仓/行情/成本。
+    fund_codes = money_fund_codes(trades)
+    fund_balances: dict[str, int] = dict(money_fund_balances(trades, before=period_start))
 
     # 可转债发债→上市代码别名（设计 D3）：从全量明细派生，期初持仓/区间交易/行情统一
     # 用 canonical 代码，避免「754019 申购持仓 + 113xxx 上市卖出」被当成两只证券。
@@ -200,7 +208,7 @@ async def compute_nav_points(
     oversell_proceeds = {
         e.trade_id: e.proceeds_units for e in fifo_all.data_errors if e.kind == "oversell"
     }
-    initial_capital = initial_cash
+    initial_capital = initial_cash + sum(fund_balances.values())
 
     # 3. 期初持仓（区间前 open lots）+ 成本
     # 新股待上市（认购缴款已入库、尚无行情）：按认购成本兜底估值，不阻断（设计 D11）。
@@ -239,10 +247,13 @@ async def compute_nav_points(
         canonical_code(bond_alias, t.security_code)
         for t in all_trades_in_range
         if t.security_code
+        and t.security_code not in fund_codes
         and _holding_delta(_category(t), t.quantity_units, amount_units=t.amount_units) != 0
     }
     all_symbols = sorted(
-        code for code in holding_symbols | set(initial_holdings.keys()) if needs_quote(code)
+        code
+        for code in holding_symbols | set(initial_holdings.keys())
+        if needs_quote(code) and code not in fund_codes
     )
     # 回看窗口：期初基准需要「期初当日或之前」的收盘价，否则第一天就判缺行情。
     ladder, market_causes = await _load_prices(
@@ -356,6 +367,17 @@ async def compute_nav_points(
         for trade in day_trades:
             category = _category(trade)
             code = trade.security_code
+            if code and code in fund_codes:
+                # 货基申赎：金额照常进出券商现金，余额单独累计后并入现金。
+                fund_balances[code] = max(
+                    0, fund_balances.get(code, 0) + money_fund_value_units(trade)
+                )
+                day_cash_delta += trade.amount_units
+                if category in _CASHFLOW_CATEGORIES:
+                    cashflow += trade.amount_units
+                if _is_cash_balance(trade):
+                    balance_override = int(trade.cash_balance_units or 0)
+                continue
             if code:
                 code = canonical_code(bond_alias, code)  # 发债代码归并上市代码（设计 D3）
                 # 持仓数量变化
@@ -409,7 +431,7 @@ async def compute_nav_points(
             blocked_points.append((d, _blocked_reason("缺行情数据", missing, market_causes)))
             continue
 
-        total_value = state.cash_units + market_value
+        total_value = state.cash_units + sum(fund_balances.values()) + market_value
         points.append((d, total_value, cashflow))
         if oversell_today:
             oversell_by_date[d] = oversell_today

@@ -19,6 +19,7 @@ from stock_review.application.assets import (
     MARKET_UNCOVERED_REASON,
     MISSING_PRICE_PREFIX,
     MISSING_QUOTE_HINT,
+    OVERSELL_REASON,
     _ratio_units,
     _session_notice,
     align_to_trading_day,
@@ -251,6 +252,90 @@ def test_pure_cash_days_have_zero_market_and_zero_pnl() -> None:
     assert first["daily_pnl_units"] == 0
     assert first["daily_return_units"] == 0
     assert all(row["daily_pnl_units"] == 0 for row in result.rows)
+
+
+def test_money_fund_merged_into_cash_and_never_held() -> None:
+    """2.3：货基是现金等价物 —— 余额并入现金列，不进持仓/成本/市值/行情，总资产不变。"""
+    trades = [
+        _trade(
+            trade_date=date(2026, 6, 1),
+            category="other",
+            amount_units=0,
+            cash_balance_units=cents("100000.00"),
+        ),
+        _trade(
+            trade_date=date(2026, 6, 2),
+            category="buy",
+            security_code="119924",
+            quantity_units=shares("50000"),
+            price_units=price("1.00"),
+            amount_units=-cents("50000.00"),
+            line_no=2,
+        ),
+        _trade(
+            trade_date=date(2026, 6, 3),
+            category="sell",
+            security_code="119924",
+            quantity_units=shares("20000"),
+            price_units=price("1.00"),
+            amount_units=cents("20000.00"),
+            side="sell",
+            line_no=3,
+        ),
+    ]
+    result = _run(trades, date(2026, 6, 1), date(2026, 6, 3))
+    assert result.global_blocked is False
+
+    first = _row(result, date(2026, 6, 1))
+    assert first["cash_units"] == cents("100000.00")
+    assert first["total_assets_units"] == cents("100000.00")
+
+    # 06-02 申购 50000：券商现金 50000 + 货基 50000 = 现金列 100000，无持仓。
+    bought = _row(result, date(2026, 6, 2))
+    assert bought["cash_units"] == cents("100000.00")
+    assert bought["market_value_units"] == 0
+    assert bought["holding_count"] == 0
+    assert bought["holding_cost_units"] == 0
+    assert bought["status"] == "ok"
+    assert bought["daily_pnl_units"] == 0
+
+    # 06-03 赎回 20000：券商现金 70000 + 货基 30000，总资产仍 100000。
+    sold = _row(result, date(2026, 6, 3))
+    assert sold["cash_units"] == cents("100000.00")
+    assert sold["total_assets_units"] == cents("100000.00")
+    assert sold["holding_count"] == 0
+    assert sold["daily_pnl_units"] == 0
+    assert sold["cashflow_units"] == 0
+
+
+def test_money_fund_reinvested_dividend_counts_as_return() -> None:
+    """货基红利再投（金额 0、份额增加）→ 现金列增加并计入当日收益，不算外部现金流。"""
+    trades = [
+        _trade(
+            trade_date=date(2026, 6, 1),
+            category="buy",
+            security_code="119924",
+            quantity_units=shares("100000"),
+            price_units=price("1.00"),
+            amount_units=-cents("100000.00"),
+            cash_balance_units=0,
+        ),
+        _trade(
+            trade_date=date(2026, 6, 2),
+            category="dividend",
+            security_code="119924",
+            quantity_units=shares("100"),
+            price_units=price("1.00"),
+            amount_units=0,
+            line_no=2,
+        ),
+    ]
+    result = _run(trades, date(2026, 6, 1), date(2026, 6, 2))
+    row = _row(result, date(2026, 6, 2))
+    assert row["cash_units"] == cents("100100.00")
+    assert row["daily_pnl_units"] == cents("100.00")
+    assert row["cashflow_units"] == 0
+    assert row["holding_count"] == 0
 
 
 def test_buy_and_month_end_valuation_matches_oracle() -> None:
@@ -672,8 +757,8 @@ def test_fifo_error_only_degrades_days_with_problem_holdings() -> None:
     assert r2["status_reason"] == FIFO_ERROR_REASON
 
 
-def test_oversell_clamped_to_zero_and_not_degraded() -> None:
-    """超卖：持仓按 0 截断（不产生负市值），卖款进总资产但不算收益、不标资金划转。"""
+def test_oversell_clamped_to_zero_and_degrades_day() -> None:
+    """超卖：持仓按 0 截断（不产生负市值），卖款进总资产但不算收益，当日标 degraded。"""
     trades = [
         _trade(
             trade_date=date(2026, 1, 1),
@@ -703,8 +788,10 @@ def test_oversell_clamped_to_zero_and_not_degraded() -> None:
     row = _row(result, date(2026, 1, 2))
     assert row["market_value_units"] == 0
     assert row["total_assets_units"] == cents("12000.00")
-    assert row["status"] == "ok"
-    assert row["status_reason"] is None
+    # 超卖日降级，提示人工补录成本；无超卖的纯现金日保持 ok。
+    assert row["status"] == "degraded"
+    assert row["status_reason"] == OVERSELL_REASON
+    assert _row(result, date(2026, 1, 1))["status"] == "ok"
     # 卖款已进现金余额，但既不算收益也不标成资金划转：cashflow 仍为 0，日收益为 0。
     assert row["cashflow_units"] == 0
     assert row["daily_pnl_units"] == 0

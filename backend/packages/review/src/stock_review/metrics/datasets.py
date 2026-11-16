@@ -25,6 +25,7 @@ from stock_review.application.assets import (
     valuation_end,
 )
 from stock_review.application.bond_alias import build_bond_alias, canonical_code
+from stock_review.application.money_fund import money_fund_codes
 from stock_review.metrics.views import (
     AssetBuildView,
     AssetDailyView,
@@ -318,6 +319,10 @@ async def load_viewset(
     rounds_raw = await repo.rounds_in_period(user_id, period_start, period_end)
     fills_raw = await repo.fills_in_period(user_id, period_start, period_end)
     trades_raw = await repo.trades_in_period(user_id, period_start, period_end)
+    # 货币基金是现金等价物：不进 FIFO/回合，也不参与交易类指标（换手/费用/择时）。
+    fund_codes = money_fund_codes(trades_raw)
+    if fund_codes:
+        trades_raw = [row for row in trades_raw if row.security_code not in fund_codes]
     # 资产日多取一段回看：beta/drawdown 用「期末回看 60 个交易日」而不是自然月内。
     asset_raw = await repo.asset_daily_in_period(
         user_id, period_start - timedelta(days=_ASSET_LOOKBACK_DAYS), period_end

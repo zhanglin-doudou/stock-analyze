@@ -63,6 +63,7 @@ from stock_review.application.assets import (
 from stock_review.application.bond_alias import build_bond_alias, canonical_code
 from stock_review.application.bridge import bridge_for_period
 from stock_review.application.metrics import KNOWN_BENCHMARKS
+from stock_review.application.money_fund import money_fund_codes
 from stock_review.application.rebuild import trades_to_events
 from stock_review.application.valuation import (
     PRICE_LOOKBACK,
@@ -307,6 +308,8 @@ def _mirror_view(
     begin_snap: tuple[dict[str, int], dict[str, int]] | None = None
     end_snap: tuple[dict[str, int], dict[str, int]] | None = None
     realized = 0
+    # 货币基金是现金等价物：不进持仓/成本/已实现损益（资产表并入现金列）。
+    fund_codes = money_fund_codes(trades)
 
     def capture() -> tuple[dict[str, int], dict[str, int]]:
         return (dict(holdings), dict(costs))
@@ -319,6 +322,8 @@ def _mirror_view(
             break
         raw = (trade.security_code or "").strip()
         if not raw:
+            continue
+        if raw in fund_codes:
             continue
         code = canonical(raw)
         trade_category = category(trade)
@@ -1101,6 +1106,8 @@ async def build_attribution(
     }
     universe.discard("CASH")
     universe.discard("")
+    # 货币基金是现金等价物：不进持仓/行情/归因（余额在资产表现金列里）。
+    universe -= {canonical(code) for code in money_fund_codes(trades)}
     # 只有 A 股/场内基金读行情；债券与伪代码按含费成本估值，不发起行情请求。
     universe = {code for code in universe if needs_quote(code)}
     price_start = min(resolved.start, window.begin_date) - PRICE_LOOKBACK
@@ -1138,11 +1145,14 @@ async def build_attribution(
         new_stocks={canonical(code) for code in new_stock_pending_codes(trades)},
     )
     dividends: dict[str, int] = {}
+    fund_codes = money_fund_codes(trades)
     for trade in trades:
         if not (resolved.start <= trade.trade_date <= resolved.end):
             continue
         if category(trade) != "dividend":
             continue
+        if (trade.security_code or "") in fund_codes:
+            continue  # 货基红利属于现金收益，不归因到证券
         code = canonical(trade.security_code)
         if not code or code == "CASH":
             continue

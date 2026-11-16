@@ -46,6 +46,11 @@ from stock_platform.symbols import needs_quote
 
 from stock_review.application.bond_alias import build_bond_alias, canonical_code
 from stock_review.application.bridge import _initial_cash
+from stock_review.application.money_fund import (
+    money_fund_balances,
+    money_fund_codes,
+    money_fund_value_units,
+)
 from stock_review.application.rebuild import trades_to_events
 from stock_review.application.valuation import (
     CASHFLOW_CATEGORIES,
@@ -82,7 +87,11 @@ log = get_logger("stock_review.assets")
 # 2.1：只有 A 股/场内基金（`needs_quote`）读取行情；债券与伪代码（A40006/970172/119924 等）
 #      不再请求行情、不阻断、不降级，统一按含费成本（买入价）估值并在 remark 留痕。
 #      资产表/净值/指标/归因共用同一口径，bump 触发全量重建。
-ASSET_DEFINITION_VERSION = "2.1"
+# 2.2：当日存在超卖（卖出数量超过可用持仓）时该日标 degraded，资产表页提供人工修订入口；
+#      修订后该日重算恢复 ok。口径变化，bump 触发全量重建。
+# 2.3：货币基金（现金等价物）不进 FIFO/回合/持仓/市值，余额并入现金列（总资产不变）；
+#      识别见 `application.money_fund`。口径变化，bump 触发全量重建。
+ASSET_DEFINITION_VERSION = "2.3"
 # 安全窗：每次有新数据/脏流水/行情 as_of 变化时重算最近 45 天。
 SAFETY_DAYS = 45
 # 水位线重叠窗：PG `now()` = 事务开始时间，覆盖「长事务晚提交」竞态。
@@ -109,6 +118,7 @@ STATE_BLOCKED = "blocked"
 # 统一原因文案（行级 / 全局 / 测试断言共用，避免漂移）。
 NO_ANCHOR_REASON = "无现金余额锚点（无 cash_balance 行）"
 FIFO_ERROR_REASON = "FIFO 数据异常（配股/送转等无可用持仓）"
+OVERSELL_REASON = "超卖（卖出数量超过可用持仓），需人工补录成本"
 MARKET_UNCOVERED_REASON = "行情未覆盖，按最近收盘估值"
 MISSING_PRICE_PREFIX = "缺行情数据"
 # 缺行情补拉一次后仍未取到：给用户的最终提示（构建整体原因 + 行级原因后缀）。
@@ -221,21 +231,27 @@ def _fingerprint(trades: list[Trade]) -> tuple[int, int, datetime | None]:
     return count, version_sum, max_updated
 
 
-def _state_reason(last_status: str, *, fifo_error: bool) -> str | None:
-    """全局状态原因：全局 blocked 必有；FIFO 异常导致的整体 degraded 记录原因。"""
+def _state_reason(last_status: str, *, fifo_error: bool, oversell: bool = False) -> str | None:
+    """全局状态原因：全局 blocked 必有；FIFO 异常 / 超卖导致的整体 degraded 记录原因。"""
     if last_status == BUILD_STATUS_BLOCKED:
         return NO_ANCHOR_REASON
-    if last_status == BUILD_STATUS_DEGRADED and fifo_error:
-        return FIFO_ERROR_REASON
-    return None
+    if last_status != BUILD_STATUS_DEGRADED:
+        return None
+    reasons: list[str] = []
+    if fifo_error:
+        reasons.append(FIFO_ERROR_REASON)
+    if oversell:
+        reasons.append(OVERSELL_REASON)
+    return "；".join(reasons) if reasons else None
 
 
 def _row_status_reason(
     *,
     fifo_error: bool,
     uncovered: bool,
+    oversell: bool = False,
 ) -> str | None:
-    """行级 degraded 原因（FIFO 异常 / 行情未覆盖）。
+    """行级 degraded 原因（FIFO 异常 / 超卖 / 行情未覆盖）。
 
     按成本估值的非行情持仓（债券、伪代码）与新股/可转债的认购成本兜底都视为正常估值，
     不产生 degraded，只在 remark 留痕。都不命中返回 NULL。
@@ -243,6 +259,8 @@ def _row_status_reason(
     reasons: list[str] = []
     if fifo_error:
         reasons.append(FIFO_ERROR_REASON)
+    if oversell:
+        reasons.append(OVERSELL_REASON)
     if uncovered:
         reasons.append(MARKET_UNCOVERED_REASON)
     return "；".join(reasons) if reasons else None
@@ -280,11 +298,13 @@ def compute_daily_valuations(
     """内存重放 `[start, end]`，为 `[rebuild_from, end]` 生成资产日行（纯计算，无 I/O）。
 
     逐日推演口径见设计 §5.3：现金（余额行覆盖优先）/ 持仓数量 / 含费成本 / 外部现金流 /
-    逐标的 floor 市值；缺行情 → 该日 blocked（数值 0、prev/pnl/return NULL）；FIFO 异常或
-    `date > as_of` 且仍有持仓 → degraded（按最近收盘估值）。**周六/周日不写行**（A 股无交易），
-    周末的外部现金流并入下一交易日；`prev_total` 取上一**已写工作日**的非 blocked 总资产，
-    全量首行取期初现金锚点，增量首行用落库的 `prev_row`。
+    逐标的 floor 市值；缺行情 → 该日 blocked（数值 0、prev/pnl/return NULL）；FIFO 异常、
+    当日存在超卖或 `date > as_of` 且仍有持仓 → degraded（按最近收盘估值）。**周六/周日不写行**
+    （A 股无交易），周末的外部现金流/超卖降级标记并入下一交易日；`prev_total` 取上一**已写
+    工作日**的非 blocked 总资产，全量首行取期初现金锚点，增量首行用落库的 `prev_row`。
     持仓/成本键按 `bond_alias` 归一为上市代码（发债代码不请求行情，设计 D3）。
+    货币基金（现金等价物，2.3）：不进持仓/成本/市值/行情，余额并入写库的 `cash_units`，
+    `total_assets = 现金(含货基) + 持仓市值` 不变；申赎是现金内部转换，红利/再投计收益。
 
     `quotes_pull_attempted=True` 表示调用方已为缺行情标的补拉过行情（设计 §6.5）：仍
     blocked 的行在原因后追加「请联系技术支持解决」；受影响标的与日期区间由
@@ -303,7 +323,10 @@ def compute_daily_valuations(
     # 不再并入期初（并入期初会让期初资产虚高，且超卖当日仍会虚增当日收益）。
     # 剔除只在日收益口径生效：`cashflow_units` 仍只记真实外部现金流，不把它标成资金划转。
     oversell_proceeds_by_trade = oversell_proceeds or {}
-    initial_total = initial_cash
+    # 货币基金 = 现金等价物：不进持仓/成本/市值/行情，余额并入现金列（2.3 口径）。
+    fund_codes = money_fund_codes(trades)
+    fund_balances: dict[str, int] = dict(money_fund_balances(trades, before=start))
+    initial_total = initial_cash + sum(fund_balances.values())
 
     by_date = _group_trades_by_date(trades)
     cash_units = initial_cash
@@ -319,18 +342,31 @@ def compute_daily_valuations(
     pending_cashflow = 0
     # 待剔除的超卖净卖款（周末顺延到下一交易日；只影响日收益，不进 cashflow 展示）。
     pending_oversell = 0
+    # 周末/节假日顺延：未写行日期上的超卖合并到下一已写工作日的降级标记。
+    pending_oversell_day = False
 
     cursor_date = start
     while cursor_date <= end:
         day_trades = by_date.get(cursor_date, [])
         cashflow_units = 0
         oversell_adjust = 0
+        day_oversell = False
         day_cash_delta = 0
         balance_override: int | None = None
 
         for trade in day_trades:
             trade_category = category(trade)
             code = trade.security_code
+            if code and code in fund_codes:
+                # 申赎金额照常进出券商现金，货基余额单独累计；两者之和即「现金余额」。
+                # 红利发放/再投行金额为 0、以份额增加余额 → 计入收益（不进外部现金流）。
+                fund_balances[code] = max(
+                    0, fund_balances.get(code, 0) + money_fund_value_units(trade)
+                )
+                day_cash_delta += trade.amount_units
+                if is_cash_balance(trade):
+                    balance_override = int(trade.cash_balance_units or 0)
+                continue
             if code:
                 code = canonical_code(alias, code)  # 发债代码归并上市代码（设计 D3）
                 delta = holding_delta(
@@ -354,7 +390,9 @@ def compute_daily_valuations(
             if trade_category in CASHFLOW_CATEGORIES:
                 cashflow_units += trade.amount_units
             # 超卖净卖款：卖款已在现金里，只从当日收益中剔除，不算外部现金流。
-            oversell_adjust += oversell_proceeds_by_trade.get(trade.id, 0)
+            if trade.id in oversell_proceeds_by_trade:
+                day_oversell = True
+                oversell_adjust += oversell_proceeds_by_trade[trade.id]
             if is_cash_balance(trade):
                 balance_override = int(trade.cash_balance_units or 0)
 
@@ -364,6 +402,7 @@ def compute_daily_valuations(
             cash_units += day_cash_delta
         pending_cashflow += cashflow_units
         pending_oversell += oversell_adjust
+        pending_oversell_day = pending_oversell_day or day_oversell
 
         # 周六/周日不写资产行（A 股无交易，避免周末噪声行）；周末流水并入下一交易日。
         if cursor_date.weekday() >= 5:
@@ -405,10 +444,13 @@ def compute_daily_valuations(
             prior_total = None
             pending_cashflow = 0
             pending_oversell = 0
+            pending_oversell_day = False
             cursor_date += timedelta(days=1)
             continue
 
-        total_assets_units = cash_units + market_value_units
+        # 现金列 = 券商现金 + 货基余额（现金等价物），总资产恒等式不变。
+        cash_total_units = cash_units + sum(fund_balances.values())
+        total_assets_units = cash_total_units + market_value_units
         holding_cost_units = sum(
             cost for code, cost in cost_basis.items() if holdings.get(code, 0) != 0
         )
@@ -416,9 +458,17 @@ def compute_daily_valuations(
         uncovered = cursor_date > as_of and nonzero_holdings > 0
         # FIFO 异常只影响持有问题代码的那些天；对无 FIFO 问题代码持仓的其他天不降级。
         fifo_error_today = any(code in fifo_error_codes for code in holdings)
-        status = ROW_STATUS_DEGRADED if (fifo_error_today or uncovered) else ROW_STATUS_OK
+        # 超卖：当日有卖出数量超过可用持仓 → 该日降级并提示人工补录成本（修订后重算恢复）。
+        oversell_today = pending_oversell_day
+        status = (
+            ROW_STATUS_DEGRADED
+            if (fifo_error_today or oversell_today or uncovered)
+            else ROW_STATUS_OK
+        )
         status_reason = (
-            _row_status_reason(fifo_error=fifo_error_today, uncovered=uncovered)
+            _row_status_reason(
+                fifo_error=fifo_error_today, uncovered=uncovered, oversell=oversell_today
+            )
             if status == ROW_STATUS_DEGRADED
             else None
         )
@@ -448,7 +498,7 @@ def compute_daily_valuations(
                     "id": _asset_id(user_id, cursor_date),
                     "user_id": user_id,
                     "trade_date": cursor_date,
-                    "cash_units": cash_units,
+                    "cash_units": cash_total_units,
                     "market_value_units": market_value_units,
                     "total_assets_units": total_assets_units,
                     "holding_cost_units": holding_cost_units,
@@ -469,6 +519,7 @@ def compute_daily_valuations(
         prior_total = total_assets_units
         pending_cashflow = 0
         pending_oversell = 0
+        pending_oversell_day = False
         cursor_date += timedelta(days=1)
 
     return _DailyValuations(
@@ -583,11 +634,13 @@ def _symbols(live: list[Trade], bond_alias: dict[str, str] | None = None) -> lis
     归并为上市代码：行情请求只发 canonical 代码（申购代码无行情，设计 D3）。
     """
     alias = bond_alias or {}
+    fund_codes = money_fund_codes(live)
     return sorted(
         {
             canonical_code(alias, trade.security_code)
             for trade in live
             if trade.security_code
+            and trade.security_code not in fund_codes
             and needs_quote(trade.security_code)
             and holding_delta(
                 category(trade), trade.quantity_units, amount_units=trade.amount_units
@@ -864,12 +917,13 @@ async def build_assets(
         )
 
     fifo_result = build_rounds(trades_to_events(live, bond_alias=bond_alias))
-    # 超卖视同资金划转（并入期初资产、不计收益），不再作为降级原因；
-    # 其它 FIFO 数据异常（配股无持仓等）仍标 degraded。
+    # 超卖：卖款视同资金划转（计现金、不计收益），行级标 degraded 提供人工修订入口；
+    # 它不再算「FIFO 异常」——其它 FIFO 数据异常（配股/送转无持仓等）语义不变。
     fifo_error_codes: set[str] = {
         e.security_code for e in fifo_result.data_errors if e.kind != "oversell"
     }
     fifo_error_now = bool(fifo_error_codes)
+    oversell_now = any(e.kind == "oversell" for e in fifo_result.data_errors)
     market_as_of = await _market_as_of(session, market_data, clock)
     market_changed = state is not None and state.data_as_of != market_as_of
     # blocked 行是「缺行情占位行」，非终态：其分布可能覆盖历史任意日期，增量 45 天
@@ -1068,7 +1122,7 @@ async def build_assets(
         await repo.delete_after(user_id, end)
     rows_count = await repo.count(user_id)
     overall_status = await repo.overall_status(user_id)
-    state_reason = _state_reason(overall_status, fifo_error=fifo_error_now)
+    state_reason = _state_reason(overall_status, fifo_error=fifo_error_now, oversell=oversell_now)
     blocked_rows = sum(1 for row in valuations.rows if row["status"] == ROW_STATUS_BLOCKED)
     if blocked_rows and quotes_pull_attempted:
         # 补拉一次后仍缺行情：state 原因给用户最终提示（前端直接渲染后端文案，不做判断）。
@@ -1376,6 +1430,7 @@ __all__ = [
     "MISSING_PRICE_PREFIX",
     "MISSING_QUOTE_FINAL_REASON",
     "NO_ANCHOR_REASON",
+    "OVERSELL_REASON",
     "SAFETY_DAYS",
     "WATERMARK_OVERLAP",
     "AssetBuildState",
