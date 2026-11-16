@@ -103,6 +103,7 @@ async def _seed_trade(
     batch_id: str | None = None,
     trade_id: str | None = None,
     line_no: int = 0,
+    category: str | None = None,
 ) -> str:
     trade_id = trade_id or f"trd_{uuid.uuid4().hex[:12]}"
     async with AsyncSession(engine) as session:
@@ -123,7 +124,7 @@ async def _seed_trade(
             other_fee_units=0,
             cash_balance_units=None,
             cash_balance_available=False,
-            category=side,
+            category=category or side,
             occurrence_idx=0,
             source="import",
             version=1,

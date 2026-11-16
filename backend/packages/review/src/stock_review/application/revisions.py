@@ -38,7 +38,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from stock_contracts.clock import Clock
 from stock_contracts.enums import Side
 from stock_contracts.errors import ApiError, ErrorCode, NotFoundError
-from stock_core.fifo import build_rounds
+from stock_core.fifo import EventKind, build_rounds
 from stock_ledger.application.trades import trade_snapshot
 from stock_ledger.models import Trade
 from stock_ledger.repositories.trades import TradeRepository
@@ -47,7 +47,7 @@ from stock_platform.ids import trade_id as new_trade_id
 from stock_platform.outbox import publish
 
 from stock_review.application.bond_alias import build_bond_alias, canonical_code
-from stock_review.application.rebuild import trades_to_events
+from stock_review.application.rebuild import kind_for_trade, trades_to_events
 from stock_review.models import Round
 
 # `ledger.trade.note` 与页面提示共用同一文案，避免两处漂移。
@@ -200,7 +200,9 @@ async def _load_sell(
     sell = await session.scalar(stmt)
     if sell is None:
         raise NotFoundError(detail=f"交易 {sell_id} 不存在")
-    if sell.side != Side.SELL.value:
+    # 买卖口径与 FIFO 引擎一致（按 `category` 分类）：导入行常常只有类别没有方向
+    # （`side=unknown`），用 `side` 把关会拒绝引擎已判为超卖卖出的流水。
+    if kind_for_trade(sell) is not EventKind.SELL:
         raise ApiError(ErrorCode.VALIDATION_ERROR, detail="只有卖出流水支持超卖人工修订")
     if sell.revision_of is not None:
         raise ApiError(ErrorCode.VALIDATION_ERROR, detail="人工修订注入行本身不能再被修订")

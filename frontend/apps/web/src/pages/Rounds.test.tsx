@@ -136,7 +136,7 @@ describe("Rounds 回合列表页", () => {
 
     const section = await screen.findByRole("region", { name: "超卖回合" });
     expect(section.textContent).toContain("300496 中科创达");
-    expect(section.textContent).toContain("人工修订功能暂未开放");
+    expect(section.textContent).toContain("超卖成本补录");
     // 主列表仍只展示正常回合。
     expect(screen.getByText("600519 贵州茅台")).toBeTruthy();
     expect(listRounds).toHaveBeenCalledWith(expect.objectContaining({ status: "oversell" }));

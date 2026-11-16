@@ -1,0 +1,41 @@
+/* 超卖成本补录弹窗（回合详情页与资产表页共用同一组件）。 */
+.revision-dialog {
+  width: min(640px, 92vw);
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  padding: var(--s5);
+  background: var(--surface);
+  color: inherit;
+}
+
+.revision-dialog::backdrop {
+  background: rgb(0 0 0 / 45%);
+}
+
+.revision-dialog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+  margin-bottom: var(--s4);
+}
+
+.revision-dialog-head h2 {
+  margin: 0;
+  font-size: var(--fs-h3);
+}
+
+.revision-dialog-head button {
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.revision-dialog-actions {
+  display: flex;
+  gap: var(--s3);
+  margin-top: var(--s4);
+}

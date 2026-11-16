@@ -11,7 +11,9 @@ import {
   type Job,
   type JobEvent,
   type JobPage,
+  type OversellRevisionOut,
   type Problem,
+  type Round,
 } from "@sa/api-client";
 import { Assets } from "./Assets";
 import assetsSource from "./Assets.tsx?raw";
@@ -29,6 +31,14 @@ vi.mock("../client", () => ({
       get: vi.fn(),
       events: vi.fn(),
     },
+    rounds: {
+      list: vi.fn(),
+    },
+    trades: {
+      oversellRevision: vi.fn(),
+      putOversellRevision: vi.fn(),
+      deleteOversellRevision: vi.fn(),
+    },
   },
 }));
 
@@ -37,6 +47,8 @@ const buildAssets = vi.mocked(api.assets.build);
 const listJobs = vi.mocked(api.jobs.list);
 const getJob = vi.mocked(api.jobs.get);
 const jobEvents = vi.mocked(api.jobs.events);
+const listRounds = vi.mocked(api.rounds.list);
+const getRevision = vi.mocked(api.trades.oversellRevision);
 
 function makeBuild(overrides: Partial<AssetBuildState> = {}): AssetBuildState {
   return {
@@ -250,6 +262,7 @@ beforeEach(() => {
   getJob.mockResolvedValue(makeJob());
   buildAssets.mockResolvedValue(accepted());
   jobEvents.mockImplementation(() => noEvents());
+  listRounds.mockResolvedValue({ items: [], next_cursor: null, has_more: false });
 });
 
 afterEach(cleanup);
@@ -549,18 +562,24 @@ describe("Assets 资产表页", () => {
     expect(screen.getByText("-620.00").className).toBe("money money-neg");
 
     // blocked 行：数值列「—」+ 阻断 badge（status_reason 作为 title）
-    const blockedRowBadges = screen.getAllByText("阻断");
-    expect(blockedRowBadges.length).toBeGreaterThanOrEqual(1);
-    const blockedBadge = blockedRowBadges[0];
-    expect(blockedBadge.className).toContain("badge-blocked");
-    expect(blockedBadge.getAttribute("title")).toBe("缺少 600519 行情");
+    // 注意状态筛选项里也有「阻断 / 降级 / 正常」文案，按 badge 类名定位表格里的徽标。
+    const blockedBadge = screen
+      .getAllByText("阻断")
+      .find((element) => element.className.includes("badge-blocked"));
+    expect(blockedBadge).toBeTruthy();
+    expect(blockedBadge!.getAttribute("title")).toBe("缺少 600519 行情");
     expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(8);
 
     // degraded badge
-    const degraded = screen.getByText("降级");
-    expect(degraded.className).toContain("badge-degraded");
+    const degraded = screen
+      .getAllByText("降级")
+      .find((element) => element.className.includes("badge-degraded"));
+    expect(degraded).toBeTruthy();
     // 正常 badge
-    expect(screen.getByText("正常").className).toContain("badge-ok");
+    const okBadge = screen
+      .getAllByText("正常")
+      .find((element) => element.className.includes("badge-ok"));
+    expect(okBadge).toBeTruthy();
   });
 
   it("FT-05 分页：请求带 cursor，追加不重复", async () => {
@@ -744,5 +763,135 @@ describe("Assets 资产表页", () => {
     expect(assetsSource).not.toMatch(/\.toFixed\s*\(/);
     // 百分比来自后端，不自行换算
     expect(assetsSource).not.toMatch(/daily_return\b(?!_pct)/);
+  });
+});
+
+// ── 筛选 / 自动回填 / 超卖修订入口（2026-11-16）──────────────
+function makeOversellRound(overrides: Partial<Round> = {}): Round {
+  return {
+    round_id: "rnd_over",
+    security_code: "600519",
+    security_name: "贵州茅台",
+    status: "oversell",
+    open_date: "2026-06-19",
+    close_date: "2026-06-19",
+    quantity: "150",
+    cost: "0.00",
+    proceeds: "2250.00",
+    dividend: "0.00",
+    pnl: "0.00",
+    return_rate: "0.00000000",
+    holding_days: 0,
+    open_trade_id: "trd_sell_1",
+    close_trade_id: "trd_sell_1",
+    data_error: false,
+    oversell_quantity: "150",
+    fills_count: 0,
+    rebuilt_at: "2026-06-19T08:00:00Z",
+    ...overrides,
+  };
+}
+
+function makeRevision(overrides: Partial<OversellRevisionOut> = {}): OversellRevisionOut {
+  return {
+    sell: {
+      trade_id: "trd_sell_1",
+      trade_date: "2026-06-19",
+      security_code: "600519",
+      security_name: "贵州茅台",
+      quantity: "150",
+      amount: "2250.00",
+      oversell_quantity: "150",
+      note: null,
+    },
+    status: "none",
+    cost: null,
+    cash_trade: null,
+    buy_trade: null,
+    round_id: null,
+    ...overrides,
+  };
+}
+
+describe("Assets 筛选与超卖修订入口", () => {
+  it("筛选：状态 / 排序 / 时间范围随请求下发", async () => {
+    renderPage();
+    await screen.findByText("2026-06-30");
+
+    fireEvent.change(screen.getByLabelText("状态"), { target: { value: "degraded" } });
+    fireEvent.change(screen.getByLabelText("排序"), { target: { value: "-trade_date" } });
+    // PeriodInput 默认月度；切到年度并选 2026 → token "2026" → from/to 为整年。
+    fireEvent.change(screen.getByLabelText("期间类型"), { target: { value: "year" } });
+    fireEvent.change(screen.getByLabelText("年份"), { target: { value: "2026" } });
+    fireEvent.click(screen.getByRole("button", { name: "应用筛选" }));
+
+    await waitFor(() =>
+      expect(listAssets).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          status: "degraded",
+          sort: "-trade_date",
+          from: "2026-01-01",
+          to: "2026-12-31",
+        }),
+      ),
+    );
+  });
+
+  it("首屏整体状态非正常时自动回填状态筛选并触发一次过滤", async () => {
+    listAssets
+      .mockResolvedValueOnce(
+        makePage({
+          build: makeBuild({
+            last_status: "degraded",
+            status_reason: "超卖（卖出数量超过可用持仓），需人工补录成本",
+          }),
+        }),
+      )
+      .mockResolvedValueOnce(
+        makePage({
+          items: [
+            makePoint({
+              status: "degraded",
+              status_reason: "超卖（卖出数量超过可用持仓），需人工补录成本",
+            }),
+          ],
+        }),
+      );
+
+    renderPage();
+
+    expect(await screen.findByTestId("assets-auto-filter")).toBeTruthy();
+    await waitFor(() => expect(listAssets).toHaveBeenCalledTimes(2));
+    expect(listAssets.mock.calls[1][0]).toMatchObject({ status: "degraded" });
+    expect(screen.getByLabelText("状态")).toBeTruthy();
+    expect((screen.getByLabelText("状态") as HTMLSelectElement).value).toBe("degraded");
+  });
+
+  it("超卖日显示「补录成本」入口，点击打开共享的修订弹窗", async () => {
+    listAssets.mockResolvedValue(
+      makePage({
+        items: [
+          makePoint({
+            date: "2026-06-19",
+            status: "degraded",
+            status_reason: "超卖（卖出数量超过可用持仓），需人工补录成本",
+          }),
+        ],
+      }),
+    );
+    listRounds.mockResolvedValue({
+      items: [makeOversellRound()],
+      next_cursor: null,
+      has_more: false,
+    });
+    getRevision.mockResolvedValue(makeRevision());
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "补录成本" }));
+
+    await waitFor(() => expect(getRevision).toHaveBeenCalledWith("trd_sell_1"));
+    expect(await screen.findByText("超卖成本补录")).toBeTruthy();
+    expect(await screen.findByText("待补录成本")).toBeTruthy();
   });
 });

@@ -3,7 +3,6 @@ import {
   useEffect,
   useRef,
   useState,
-  type FormEvent,
   type ReactElement,
 } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -21,7 +20,7 @@ import { api } from "../client";
 import { signedClass } from "../lib/signed";
 import { ProblemView } from "../ui/Problem";
 import { DataTable, type DataTableColumn, type DataTableExpansion } from "../ui/DataTable";
-import { JobProgress } from "../ui/JobProgress";
+import { OversellRevisionDialog, REVISION_STATUS_LABELS } from "../ui/OversellRevisionDialog";
 import { TradeReasonForm } from "../ui/TradeReasonForm";
 import { Icon } from "../ui/icons";
 import { FlagGlossary } from "../ui/FlagGlossary";
@@ -74,14 +73,6 @@ const STATUS_LABELS: Record<string, string> = {
   stale_price: "最近收盘已过 5 个交易日",
   corporate_action: "窗口内含公司行动（未复权）",
   divisor_missing: "缺基准序列（不排名）",
-};
-
-/** 超卖人工修订状态（后端 status → 中文，前端不做额外推断）。 */
-const REVISION_STATUS_LABELS: Record<OversellRevisionOut["status"], string> = {
-  none: "待补录成本",
-  revised: "已人工修订",
-  superseded: "真实账单已覆盖（待确认）",
-  not_oversell: "无需修订",
 };
 
 /**
@@ -326,15 +317,12 @@ export function RoundDetail() {
   const navigate = useNavigate();
   const sellTradeId = round?.status === "oversell" ? (round.close_trade_id ?? null) : null;
   const [revision, setRevision] = useState<OversellRevisionOut | null>(null);
-  const [revisionCost, setRevisionCost] = useState("");
-  const [revisionBusy, setRevisionBusy] = useState(false);
-  const [revisionError, setRevisionError] = useState<unknown>(null);
-  const [revisionJobId, setRevisionJobId] = useState<string | null>(null);
-  const revisionDialog = useRef<HTMLDialogElement | null>(null);
+  const [revisionOpen, setRevisionOpen] = useState(false);
 
   useEffect(() => {
     if (!sellTradeId) {
       setRevision(null);
+      setRevisionOpen(false);
       return;
     }
     let cancelled = false;
@@ -353,70 +341,18 @@ export function RoundDetail() {
   }, [sellTradeId]);
 
   /** 重算完成后：旧回合 key 已变（`{sell}:oversell` → `{buy}:{sell}`），跳转到新回合。 */
-  const finishRevision = useCallback(async () => {
-    if (!sellTradeId) return;
-    try {
-      const next = await api.trades.oversellRevision(sellTradeId);
+  const handleRevisionSettled = useCallback(
+    (next: OversellRevisionOut): void => {
       setRevision(next);
+      setRevisionOpen(false);
       if (next.round_id && next.round_id !== roundId) {
         navigate(`/rounds/${next.round_id}`);
       } else {
-        await load();
+        void load();
       }
-    } catch (err) {
-      setRevisionError(err);
-    }
-  }, [sellTradeId, roundId, navigate, load]);
-
-  function openRevisionDialog(): void {
-    setRevisionError(null);
-    setRevisionJobId(null);
-    setRevisionCost(revision?.cost ?? "");
-    revisionDialog.current?.showModal();
-  }
-
-  const handleRevisionDone = useCallback(() => {
-    void finishRevision();
-  }, [finishRevision]);
-
-  async function submitRevision(event: FormEvent<HTMLFormElement>): Promise<void> {
-    event.preventDefault();
-    if (!sellTradeId) return;
-    setRevisionBusy(true);
-    setRevisionError(null);
-    try {
-      const result = await api.trades.putOversellRevision(sellTradeId, {
-        cost: revisionCost.trim(),
-      });
-      setRevision(result.revision);
-      if (result.rebuild_job_id) {
-        setRevisionJobId(result.rebuild_job_id);
-      } else {
-        // 已有同参数重建在跑：直接查一次结果（可能尚未算完，页面会提示刷新）。
-        await finishRevision();
-      }
-    } catch (err) {
-      setRevisionError(err);
-    } finally {
-      setRevisionBusy(false);
-    }
-  }
-
-  async function revertRevision(): Promise<void> {
-    if (!sellTradeId) return;
-    setRevisionBusy(true);
-    setRevisionError(null);
-    try {
-      const result = await api.trades.deleteOversellRevision(sellTradeId);
-      setRevision(result.revision);
-      setRevisionJobId(result.rebuild_job_id ?? null);
-      if (!result.rebuild_job_id) await finishRevision();
-    } catch (err) {
-      setRevisionError(err);
-    } finally {
-      setRevisionBusy(false);
-    }
-  }
+    },
+    [roundId, navigate, load],
+  );
 
   const ranking = (insight?.ranking ?? {}) as RankingDetail;
 
@@ -597,7 +533,7 @@ export function RoundDetail() {
                   </>
                 ) : null}
               </p>
-              <button type="button" className="btn" onClick={openRevisionDialog}>
+              <button type="button" className="btn" onClick={() => setRevisionOpen(true)}>
                 补录 / 查看修订
               </button>
             </div>
@@ -761,123 +697,12 @@ export function RoundDetail() {
             </>
           ) : null}
 
-          {round.status === "oversell" && sellTradeId ? (
-            <dialog
-              ref={revisionDialog}
-              className="revision-dialog"
-              aria-labelledby="revision-dialog-title"
-            >
-              <form method="dialog" className="revision-dialog-head">
-                <h2 id="revision-dialog-title">超卖成本补录</h2>
-                <button type="submit" aria-label="关闭">
-                  ×
-                </button>
-              </form>
-
-              {revision ? (
-                <>
-                  <table className="detail-stats">
-                    <tbody>
-                      <tr>
-                        <th>卖出流水</th>
-                        <td>
-                          <code>{revision.sell.trade_id}</code>
-                        </td>
-                        <th>卖出日</th>
-                        <td>{revision.sell.trade_date}</td>
-                      </tr>
-                      <tr>
-                        <th>证券</th>
-                        <td>
-                          {revision.sell.security_code} {revision.sell.security_name}
-                        </td>
-                        <th>卖出数量 / 金额</th>
-                        <td>
-                          {revision.sell.quantity} / {revision.sell.amount}
-                        </td>
-                      </tr>
-                      <tr>
-                        <th>未配对数量</th>
-                        <td>{revision.sell.oversell_quantity}</td>
-                        <th>修订状态</th>
-                        <td>{REVISION_STATUS_LABELS[revision.status]}</td>
-                      </tr>
-                    </tbody>
-                  </table>
-
-                  {revision.status === "superseded" ? (
-                    <div className="notice-warn" role="alert">
-                      重新导入的真实账单已经可以完整配对这笔卖出，人工修订的注入行可能不再需要。
-                      系统不会自动删除历史修订，请确认后在下方撤回。
-                    </div>
-                  ) : null}
-
-                  {revision.cash_trade && revision.buy_trade ? (
-                    <p className="muted">
-                      当前注入行：资金划转 <code>{revision.cash_trade.trade_id}</code>（
-                      {revision.cash_trade.amount}）、买入 <code>{revision.buy_trade.trade_id}</code>
-                      （数量 {revision.buy_trade.quantity}，金额 {revision.buy_trade.amount}），备注「
-                      {revision.buy_trade.note ?? "人工修订，非真实成交账单"}」。
-                    </p>
-                  ) : null}
-
-                  <form onSubmit={(event) => void submitRevision(event)}>
-                    <label htmlFor="revision-cost">未配对部分的总成本（元）</label>
-                    <input
-                      id="revision-cost"
-                      inputMode="decimal"
-                      value={revisionCost}
-                      onChange={(event) => setRevisionCost(event.target.value)}
-                      placeholder="例如 1000.00"
-                      autoComplete="off"
-                    />
-                    <div className="revision-dialog-actions">
-                      <button
-                        type="submit"
-                        className="btn"
-                        disabled={
-                          revisionBusy ||
-                          revision.status === "superseded" ||
-                          revision.status === "not_oversell" ||
-                          revisionCost.trim() === ""
-                        }
-                      >
-                        {revision.status === "revised" ? "更新成本" : "提交修订"}
-                      </button>
-                      {revision.status === "revised" || revision.status === "superseded" ? (
-                        <button
-                          type="button"
-                          className="btn btn-ghost"
-                          disabled={revisionBusy}
-                          onClick={() => void revertRevision()}
-                        >
-                          撤回修订
-                        </button>
-                      ) : null}
-                    </div>
-                  </form>
-
-                  {revision.buy_trade?.amount && revision.cost ? (
-                    <p className="muted">
-                      修订后该回合按 FIFO 重新配对：数量 {revision.buy_trade.quantity}，买入成本{" "}
-                      {revision.cost}；回合盈亏 = 卖出金额 − 买入成本（含原有持仓成本）。
-                    </p>
-                  ) : null}
-                </>
-              ) : (
-                <p className="muted">正在读取该卖出的超卖信息…</p>
-              )}
-
-              {revisionError ? <ProblemView error={revisionError} /> : null}
-              {revisionJobId ? (
-                <JobProgress jobId={revisionJobId} onDone={handleRevisionDone} />
-              ) : null}
-
-              <p className="muted">
-                提交后会在该卖出当日、排在卖出之前插入「资金划转 + 无费用买入」两条流水并自动重算；
-                重算完成后页面会跳转到修订后的回合。
-              </p>
-            </dialog>
+          {sellTradeId ? (
+            <OversellRevisionDialog
+              tradeId={revisionOpen ? sellTradeId : null}
+              onClose={() => setRevisionOpen(false)}
+              onSettled={handleRevisionSettled}
+            />
           ) : null}
         </>
       ) : null}

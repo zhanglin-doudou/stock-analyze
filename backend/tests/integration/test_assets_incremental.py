@@ -39,11 +39,13 @@ from stock_review.application.assets import (
     MARKET_UNCOVERED_REASON,
     MISSING_QUOTE_FINAL_REASON,
     MISSING_QUOTE_HINT,
+    OVERSELL_REASON,
     AssetBuildSummary,
     build_assets,
     build_assets_job,
     list_assets,
 )
+from stock_review.application.revisions import upsert_revision
 from stock_review.models import AssetBuildState, AssetDaily
 from stock_review.repositories.assets import AssetRepository
 
@@ -1067,11 +1069,44 @@ async def test_fifo_error_set_change_triggers_full(
     await _seed_baseline(owner_engine, user_id)
     await _build(app_db, user_id, replay_market)
 
-    # 新增超卖卖出（version=1）→ 指纹变化但版本都是 1；FIFO 异常集合变化必须全量。
+    # 新增一笔数量为 0 的卖出（FIFO invalid_event，非超卖）→ 指纹变化但版本都是 1；
+    # FIFO 异常集合变化必须全量。
     await _seed_trade(
         owner_engine,
         user_id,
         trade_date=date(2026, 6, 20),
+        code="600519",
+        category="sell",
+        side="sell",
+        quantity_units=0,
+        price_units=price("1700.00"),
+        amount_units=0,
+        line_no=4,
+        updated_at=LATER_UPDATED_AT,
+    )
+    summary = await _build(app_db, user_id, replay_market)
+    assert summary.mode == "full"
+    rows = await _rows(app_db, user_id)
+    # FIFO 异常（600519 数量为 0 的卖出）只让**持有 600519 的日期段** degraded；
+    # 纯现金日（2025-12-31 ~ 2026-03-01）保持 ok。
+    degraded = [r for r in rows if r.status == "degraded"]
+    assert len(degraded) > 0, "持有 600519 的日子应 degraded"
+    assert len(degraded) < len(rows), "纯现金日不应因 600519 的 FIFO error 被连带 degraded"
+    assert all(r.status_reason == FIFO_ERROR_REASON for r in degraded)
+
+
+# ── 超卖日降级 + 人工修订后恢复 ──────────────────────────
+
+
+async def test_oversell_day_degrades_until_manual_revision(
+    owner_engine: AsyncEngine, app_db: Database, replay_market: Any
+) -> None:
+    user_id = await _insert_user(owner_engine)
+    await _seed_baseline(owner_engine, user_id)
+    sell_id = await _seed_trade(
+        owner_engine,
+        user_id,
+        trade_date=date(2026, 6, 19),
         code="600519",
         category="sell",
         side="sell",
@@ -1081,15 +1116,32 @@ async def test_fifo_error_set_change_triggers_full(
         line_no=4,
         updated_at=LATER_UPDATED_AT,
     )
-    summary = await _build(app_db, user_id, replay_market)
-    assert summary.mode == "full"
-    rows = await _rows(app_db, user_id)
-    # FIFO 超卖（600519 卖 200 > 持仓 100）只让**持有 600519 的日期段** degraded；
-    # 纯现金日（2025-12-31 ~ 2026-03-01）与超卖清仓日（2026-06-20 ~ ）保持 ok。
-    degraded = [r for r in rows if r.status == "degraded"]
-    assert len(degraded) > 0, "持有 600519 的日子应 degraded"
-    assert len(degraded) < len(rows), "纯现金日 / 清仓日不应因 600519 的 FIFO error 被连带 degraded"
-    assert all(r.status_reason == FIFO_ERROR_REASON for r in degraded)
+    await _build(app_db, user_id, replay_market)
+
+    rows = {row.trade_date: row for row in await _rows(app_db, user_id)}
+    assert rows[date(2026, 6, 19)].status == "degraded"
+    assert rows[date(2026, 6, 19)].status_reason == OVERSELL_REASON
+    assert rows[date(2026, 6, 18)].status == "ok"
+    state = await _state(app_db, user_id)
+    assert state is not None and state.last_status == "degraded"
+    assert state.status_reason == OVERSELL_REASON
+
+    # 人工修订（与 /trades/{id}/oversell-revision 同一套用例）→ 全量重算后该日恢复 ok。
+    async with app_db.tenant_tx(user_id) as session:
+        await upsert_revision(
+            session,
+            user_id=user_id,
+            sell_trade_id=sell_id,
+            cost_units=cents("170000.00"),
+            clock=CLOCK,
+        )
+    await _build(app_db, user_id, replay_market, mode="full")
+
+    rows = {row.trade_date: row for row in await _rows(app_db, user_id)}
+    assert rows[date(2026, 6, 19)].status == "ok"
+    assert rows[date(2026, 6, 19)].status_reason is None
+    state = await _state(app_db, user_id)
+    assert state is not None and state.last_status == "ok"
 
 
 # ── IT-14：指纹竞态兜底 ──────────────────────────────────

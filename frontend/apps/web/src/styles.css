@@ -304,6 +304,13 @@ input[type="checkbox"] {
   color: var(--text);
   white-space: nowrap;
 }
+/* 资产表状态列：状态徽标 + 超卖「补录成本」入口（窄屏自动换行不溢出）。 */
+.assets-status {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--s2);
+}
 .badge-succeeded {
   background: var(--status-ok-soft);
   color: var(--status-ok);

@@ -721,6 +721,8 @@ describe("RoundDetail 超卖成本补录", () => {
   });
 
   it("提交成本后调用 PUT 修订并跳转到重算后的回合", async () => {
+    // 页面卡片与弹窗各自读取一次修订信息，重算完成后再次查询。
+    getRevision.mockResolvedValueOnce(makeRevision());
     getRevision.mockResolvedValueOnce(makeRevision());
     putRevision.mockResolvedValueOnce({
       revision: makeRevision({
@@ -758,11 +760,15 @@ describe("RoundDetail 超卖成本补录", () => {
     getRevision.mockResolvedValueOnce(
       makeRevision({ status: "superseded", cost: "1000.00", round_id: "rnd_new" }),
     );
+    getRevision.mockResolvedValueOnce(
+      makeRevision({ status: "superseded", cost: "1000.00", round_id: "rnd_new" }),
+    );
     deleteRevision.mockResolvedValueOnce({
       revision: makeRevision({ status: "not_oversell" }),
       rebuild_job_id: null,
       assets_job_id: null,
     });
+    getRevision.mockResolvedValueOnce(makeRevision({ status: "not_oversell" }));
 
     renderOversellDetail();
 

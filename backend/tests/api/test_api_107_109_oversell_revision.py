@@ -289,6 +289,40 @@ async def test_put_rejects_invalid_cost(client, api_prefix, user, owner_engine, 
     assert resp.json()["code"] == ErrorCode.VALIDATION_ERROR
 
 
+async def test_revision_accepts_sell_without_side_but_category_sell(
+    client, api_prefix, user, owner_engine
+):
+    """导入行可能只有类别没有方向（`side=unknown`）：按引擎口径仍应可修订。
+
+    回归：曾经按 `side` 把关，导致资产页对这类超卖流水取修订信息直接 422。
+    """
+    sell_id = await _seed_trade(
+        owner_engine,
+        user_id=user.user_id,
+        trade_date=_SELL_DATE,
+        side="unknown",
+        category="sell",
+        quantity_units=_SELL_QTY,
+        price_units=112_392_000,
+        amount_units=112_392,
+        security_code="127061",
+    )
+
+    resp = await client.get(
+        f"{api_prefix}/trades/{sell_id}/oversell-revision", headers=user.headers
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == "none"
+
+    put = await client.put(
+        f"{api_prefix}/trades/{sell_id}/oversell-revision",
+        headers=user.headers,
+        json={"cost": "1000.00"},
+    )
+    assert put.status_code == 200, put.text
+    assert put.json()["revision"]["status"] == "revised"
+
+
 async def test_put_rejects_covered_sell_and_buy_trade(client, api_prefix, user, owner_engine):
     # 有买入覆盖的卖出：不超卖，不需要人工修订。
     buy_id = await _seed_trade(
