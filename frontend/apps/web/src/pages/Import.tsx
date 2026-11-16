@@ -67,6 +67,8 @@ interface TypeRow {
   needsConfirmation: boolean;
   category: string;
   discard: boolean;
+  /** True=首次出现；False=用户此前已确认过该类型（历史类型，默认锁定不可改）。 */
+  isNew: boolean;
 }
 
 interface TypeChoice {
@@ -152,6 +154,7 @@ function typesFromPreview(preview: Preview, saved?: Map<string, TypeChoice>): Ty
       needsConfirmation: Boolean(item.needs_confirmation),
       category,
       discard,
+      isNew: item.is_new !== false,
     };
   });
 }
@@ -189,6 +192,7 @@ export function Import() {
   const [reuseTemplate, setReuseTemplate] = useState(true);
   const [confirmUnmapped, setConfirmUnmapped] = useState(false);
   const [ackReimport, setAckReimport] = useState(false);
+  const [allowEditHistorical, setAllowEditHistorical] = useState(false);
   const [job, setJob] = useState<JobAccepted | null>(null);
   const [batchId, setBatchId] = useState<string | null>(null);
   const [batch, setBatch] = useState<ImportBatch | null>(null);
@@ -656,10 +660,23 @@ export function Import() {
         {preview && step === "types" ? (
           <Card className="tw-mb-4">
             <CardHeader>
-              <CardTitle>3 · 账单类型</CardTitle>
-              <CardDescription>
-                系统建议只做预填，不会自动通过；核对后点击下方按钮整步确认（只涉及本文件的类型）。
-              </CardDescription>
+              <div className="tw-flex tw-items-start tw-justify-between tw-gap-4">
+                <div>
+                  <CardTitle>3 · 账单类型</CardTitle>
+                  <CardDescription>
+                    系统建议只做预填，不会自动通过；核对后点击下方按钮整步确认（只涉及本文件的类型）。
+                    历史类型默认锁定，修改后会触发已解析账单的重新归类。
+                  </CardDescription>
+                </div>
+                <label className="tw-flex tw-items-center tw-gap-2 tw-pt-1 tw-cursor-pointer tw-shrink-0">
+                  <Switch
+                    aria-label="允许修改历史类型"
+                    checked={allowEditHistorical}
+                    onCheckedChange={setAllowEditHistorical}
+                  />
+                  <span className="tw-text-sm">修改历史类型</span>
+                </label>
+              </div>
             </CardHeader>
             <CardContent className="tw-flex tw-flex-col tw-gap-3">
               <Table aria-label="账单类型">
@@ -674,12 +691,23 @@ export function Import() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {types.map((row) => (
+                  {types.map((row) => {
+                    const locked = !row.isNew && !allowEditHistorical;
+                    return (
                     <TableRow key={row.typeKey}>
                       <TableCell>
                         {row.label}
-                        {row.suggestedCategory && row.category === row.suggestedCategory ? (
+                        {row.isNew ? (
+                          <Badge variant="secondary" className="tw-ml-2">
+                            新类型
+                          </Badge>
+                        ) : (
                           <Badge variant="outline" className="tw-ml-2">
+                            历史类型
+                          </Badge>
+                        )}
+                        {row.suggestedCategory && row.category === row.suggestedCategory ? (
+                          <Badge variant="outline" className="tw-ml-1">
                             系统建议
                           </Badge>
                         ) : null}
@@ -695,7 +723,7 @@ export function Import() {
                           onValueChange={(value) =>
                             patchType(row.typeKey, { category: value === "none" ? "" : value, discard: false })
                           }
-                          disabled={row.discard}
+                          disabled={row.discard || locked}
                         >
                           <SelectTrigger aria-label={`分类 ${row.label}`} className="tw-w-36">
                             <SelectValue />
@@ -717,10 +745,12 @@ export function Import() {
                           onCheckedChange={(checked) =>
                             patchType(row.typeKey, { discard: checked, category: checked ? "" : row.category })
                           }
+                          disabled={locked}
                         />
                       </TableCell>
                     </TableRow>
-                  ))}
+                    );
+                  })}
                 </TableBody>
               </Table>
               {unresolvedTypes.length > 0 ? (

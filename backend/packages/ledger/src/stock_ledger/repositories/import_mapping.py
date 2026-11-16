@@ -160,11 +160,18 @@ class ImportBillTypeRepository:
         *,
         batch_id: str | None,
         broker: str | None,
-    ) -> int:
-        """把本次确认/复用的类型写回记忆；返回新增或改动的条数。"""
+    ) -> tuple[int, int]:
+        """把本次确认/复用的类型写回记忆。
+
+        返回 `(changed_count, modified_existing_count)`：
+        - `changed_count`：新增或改动的总条数；
+        - `modified_existing_count`：**已存在**的类型被改动分类/废弃的条数——
+          这类改动会影响历史已解析流水，调用方需触发全量 reclassify 订正。
+        """
         keys = [str(item["type_key"]) for item in resolutions]
         existing = await self.by_keys(user_id, keys)
         changed = 0
+        modified_existing = 0
         for item in resolutions:
             key = str(item["type_key"])
             record = existing.get(key)
@@ -191,8 +198,9 @@ class ImportBillTypeRepository:
                 record.type_label = str(item.get("type_label") or record.type_label)[:120]
                 record.last_write_batch_id = batch_id
                 changed += 1
+                modified_existing += 1
         await self._session.flush()
-        return changed
+        return changed, modified_existing
 
     async def delete_by_last_write(self, user_id: uuid.UUID, batch_id: str) -> int:
         """撤销时只删「本批次首次写入/修改」的类型记忆，复用的旧类型不动。"""

@@ -26,6 +26,7 @@ from stock_contracts.enums import (
 from stock_contracts.errors import ApiError, ErrorCode, FieldError, NotFoundError
 from stock_platform.audit import record
 from stock_platform.jobs import JobQueue
+from stock_platform.obs import get_logger
 from stock_platform.outbox import publish
 
 from stock_ledger.application.chain import (
@@ -47,6 +48,8 @@ from stock_ledger.repositories.imports import ImportBatchRepository, ImportPrevi
 from stock_ledger.repositories.quarantine import QuarantineRepository
 from stock_ledger.repositories.rules import rule_summary_code
 from stock_ledger.repositories.trades import TradeRepository, TradeRow
+
+log = get_logger("stock_ledger.imports")
 
 EVENT_COMMITTED = "ledger.import.committed"
 EVENT_REVOKED = "ledger.import.revoked"
@@ -482,6 +485,7 @@ async def commit_batch(
         # 避免「已撤销批次又被 worker 写回孤儿记忆」（设计 §7.2 第 6 步）。
         templates_written = 0
         types_written = 0
+        types_modified_existing = 0
         if not legacy and finished.revoked_at is None and not covered:
             template_repo = ImportTemplateRepository(session)
             if signature and mapping_items:
@@ -498,12 +502,29 @@ async def commit_batch(
                 )
                 finished.template_id = template.id
                 templates_written = 1
-            types_written = await ImportBillTypeRepository(session).upsert_many(
+            types_written, types_modified_existing = await ImportBillTypeRepository(
+                session
+            ).upsert_many(
                 user_id,
                 type_resolutions,
                 batch_id=finished.id,
                 broker=broker,
             )
+
+        # 历史类型被改动分类/废弃 → 影响已解析流水的 category，触发全量 reclassify 订正。
+        # 仅当本批次真正改了历史类型才触发；新增类型或未改动的复用不触发。
+        if types_modified_existing > 0:
+            try:
+                await queue.enqueue(
+                    session,
+                    kind="reclassify",
+                    user_id=user_id,
+                    scope_key=f"{user_id}:reclassify:all",
+                    params={"reason": "type_mapping_changed"},
+                )
+            except ApiError as exc:
+                # 入队失败不回滚导入：订正可由用户手动从批次页发起。
+                log.warning("import.reclassify_enqueue_skipped", code=exc.code.value)
 
         await publish(
             session,

@@ -131,6 +131,8 @@ class TypeGroup:
     needs_confirmation: bool = True
     discard: bool = False
     category: str | None = None
+    #: True=首次出现（import_bill_type 无记录）；False=用户此前已确认过该类型。
+    is_new: bool = True
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -145,6 +147,7 @@ class TypeGroup:
             "needs_confirmation": self.needs_confirmation,
             "discard": self.discard,
             "category": self.category,
+            "is_new": self.is_new,
         }
 
 
@@ -185,6 +188,7 @@ def aggregate_types(
             group.discard = known.discarded
             group.category = known.category
             group.suggested_category = known.category
+            group.is_new = False
             # E：即使命中历史记忆也不自动通过，仍需用户在类型步骤整步确认。
             group.needs_confirmation = True
             continue
@@ -194,6 +198,7 @@ def aggregate_types(
             group.suggested_category = matched.category
             group.suggested_rule_id = matched.id
             group.category = matched.category
+            group.is_new = True
             # E：摘要规则只决定预填分类，不自动确认；确认范围限当前文件涉及的类型。
             group.needs_confirmation = True
     return groups
