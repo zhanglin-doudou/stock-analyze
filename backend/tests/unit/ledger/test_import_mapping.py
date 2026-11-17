@@ -288,6 +288,51 @@ def test_read_rows_matches_inspection_headers() -> None:
     assert rows[inspection.header_row_index] == inspection.headers
 
 
+def test_trailing_blank_columns_trimmed_for_padded_sheet() -> None:
+    """Excel dimension 被撑到数据列之外时，不应把尾部空列带进表头与预览。"""
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["成交日期", "证券代码", "成交数量", "成交价格", "成交金额", "摘要"])
+    sheet.append(["20260304", "600519", "100", "10.00", "1000.00", "证券买入"])
+    # 只有格式没有内容的单元格会把工作表 dimension 撑到 Z 列。
+    sheet["Z1"] = " "
+    buffer = io.BytesIO()
+    workbook.save(buffer)
+    data = buffer.getvalue()
+
+    rows = read_rows(data, ".xlsx")
+    assert {len(row) for row in rows} == {6}
+
+    inspection = inspect_table(data, "bill.xlsx")
+    assert inspection.headers == [
+        "成交日期",
+        "证券代码",
+        "成交数量",
+        "成交价格",
+        "成交金额",
+        "摘要",
+    ]
+    assert inspection.unresolved_headers == []
+
+
+def test_trailing_blank_columns_trimmed_for_csv() -> None:
+    """CSV 尾部连续空单元格同样裁掉；只有表头的空列仍保留。"""
+    data = (
+        "成交日期,证券代码,成交数量,成交价格,成交金额,摘要,备注,\n"
+        "20260304,600519,100,10.00,1000.00,证券买入,,\n"
+    ).encode()
+    inspection = inspect_table(data, "bill.csv")
+    assert inspection.headers == [
+        "成交日期",
+        "证券代码",
+        "成交数量",
+        "成交价格",
+        "成交金额",
+        "摘要",
+        "备注",
+    ]
+
+
 _TEXT_XLS_HEADERS = (
     "发生日期",
     "业务名称",

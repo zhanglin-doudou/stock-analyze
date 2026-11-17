@@ -74,6 +74,21 @@ def _normalize_text_xls_cell(raw: str) -> str:
     return value
 
 
+def _trim_trailing_empty_columns(rows: list[list[str]]) -> list[list[str]]:
+    """裁掉尾部「整列为空」的列。
+
+    券商 Excel 常把工作表 dimension 撑到实际数据之外（格式/合并单元格遗留的空单元格），
+    openpyxl 会按 dimension 补齐空单元格，于是表头多出一串空列、预览出现空白列。
+    只裁尾部：中间的空列可能是正常占位，不能当噪音删掉。
+    """
+    width = max((len(row) for row in rows), default=0)
+    while width and all(len(row) < width or not row[width - 1] for row in rows):
+        width -= 1
+    if all(len(row) == width for row in rows):
+        return rows
+    return [row[:width] for row in rows]
+
+
 def _read_text_xls(data: bytes) -> list[list[str]] | None:
     """读取 GBK/UTF-8 的 TAB 文本型 XLS；非明确文本格式返回 None，继续走 xlrd。"""
     for encoding in ("utf-8-sig", "gbk"):
@@ -86,10 +101,7 @@ def _read_text_xls(data: bytes) -> list[list[str]] | None:
             return None
         reader = csv.reader(io.StringIO(text), delimiter="\t")
         rows = [[_normalize_text_xls_cell(cell) for cell in row] for row in reader]
-        width = max((len(row) for row in rows), default=0)
-        while width and all(len(row) < width or not row[width - 1] for row in rows):
-            width -= 1
-        return [row[:width] for row in rows]
+        return _trim_trailing_empty_columns(rows)
     return None
 
 
@@ -100,9 +112,12 @@ def read_rows(data: bytes, suffix: str | None = None, file_name: str = "bill") -
         workbook = load_workbook(io.BytesIO(data), read_only=True, data_only=True)
         try:
             sheet = workbook.worksheets[0]
-            return [
-                [normalize_cell(cell) for cell in row] for row in sheet.iter_rows(values_only=True)
-            ]
+            return _trim_trailing_empty_columns(
+                [
+                    [normalize_cell(cell) for cell in row]
+                    for row in sheet.iter_rows(values_only=True)
+                ]
+            )
         finally:
             workbook.close()
     if effective == ".xls":
@@ -111,12 +126,14 @@ def read_rows(data: bytes, suffix: str | None = None, file_name: str = "bill") -
             return text_rows
         book = xlrd.open_workbook(file_contents=data)
         sheet = book.sheet_by_index(0)
-        return [
-            [normalize_cell(sheet.cell_value(r, c)) for c in range(sheet.ncols)]
-            for r in range(sheet.nrows)
-        ]
+        return _trim_trailing_empty_columns(
+            [
+                [normalize_cell(sheet.cell_value(r, c)) for c in range(sheet.ncols)]
+                for r in range(sheet.nrows)
+            ]
+        )
     reader = csv.reader(io.StringIO(_decode_csv(data)))
-    return [[normalize_cell(cell) for cell in row] for row in reader]
+    return _trim_trailing_empty_columns([[normalize_cell(cell) for cell in row] for row in reader])
 
 
 def _rule_attr(rule: object, name: str, default: object = None) -> object:
