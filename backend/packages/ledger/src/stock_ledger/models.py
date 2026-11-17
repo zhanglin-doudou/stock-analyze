@@ -381,6 +381,8 @@ class ImportTemplate(Base):
     date_format: Mapped[str | None] = mapped_column(String(32))
     items: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
     ignored: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
+    #: 本模板引用的 `import_bill_type.id`（按界面顺序，含废弃项）；单向引用、无外键。
+    bill_type_ids: Mapped[list[Any]] = mapped_column(JSONB, nullable=False, default=list)
     origin_batch_id: Mapped[str | None] = mapped_column(String(40))
     last_batch_id: Mapped[str | None] = mapped_column(String(40))
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)

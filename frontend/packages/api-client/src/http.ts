@@ -562,6 +562,7 @@ export function createClient(options: ClientOptions) {
       if (opts.reuse_template !== undefined) {
         form.append("reuse_template", String(opts.reuse_template));
       }
+      if (opts.template_id) form.append("template_id", opts.template_id);
       const headers = opts.flow === "v2" ? { "X-Import-Flow": "v2" } : undefined;
       return send<Preview>({
         path: "/imports/preview",

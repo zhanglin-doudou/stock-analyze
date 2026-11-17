@@ -2136,6 +2136,11 @@ export interface components {
              * @default true
              */
             reuse_template: boolean;
+            /**
+             * Template Id
+             * @description 显式模板：sys:<key> 或本人模板 id
+             */
+            template_id?: string | null;
         };
         /**
          * BridgeIdentityOut
@@ -2942,6 +2947,8 @@ export interface components {
             items?: components["schemas"]["PreviewTemplateOut"][];
             /** Next Cursor */
             next_cursor?: string | null;
+            /** System */
+            system?: components["schemas"]["PreviewTemplateOut"][];
         };
         /** ImportTypeResolutionIn */
         ImportTypeResolutionIn: {
@@ -4075,18 +4082,53 @@ export interface components {
             /** Summary */
             summary?: string | null;
         };
+        /**
+         * PreviewTemplateBillType
+         * @description 模板引用的账单类型；`invalid=True` 表示 id 已失效（不自动删、不阻断）。
+         */
+        PreviewTemplateBillType: {
+            /** Category */
+            category?: string | null;
+            /**
+             * Discarded
+             * @default false
+             */
+            discarded: boolean;
+            /** Id */
+            id?: string | null;
+            /**
+             * Invalid
+             * @default false
+             */
+            invalid: boolean;
+            /** Type Key */
+            type_key?: string | null;
+            /** Type Label */
+            type_label?: string | null;
+        };
         /** PreviewTemplateOut */
         PreviewTemplateOut: {
+            /** Bill Type Ids */
+            bill_type_ids?: string[];
+            /** Bill Types */
+            bill_types?: components["schemas"]["PreviewTemplateBillType"][];
             /** Broker */
             broker: string;
             /** Created At */
             created_at?: string | null;
             /** Date Format */
             date_format?: string | null;
+            /**
+             * Has User Overrides
+             * @default false
+             */
+            has_user_overrides: boolean;
             /** Header Count */
             header_count: number;
             /** Ignored */
             ignored?: string[];
+            /** Invalid Type Ids */
+            invalid_type_ids?: string[];
             /** Items */
             items?: {
                 [key: string]: unknown;
@@ -4095,8 +4137,18 @@ export interface components {
             last_batch_id?: string | null;
             /** Origin Batch Id */
             origin_batch_id?: string | null;
+            /** Preset Key */
+            preset_key?: string | null;
+            /** Preset Version */
+            preset_version?: number | null;
             /** Signature */
             signature: string;
+            /**
+             * Source
+             * @default user
+             * @enum {string}
+             */
+            source: "user" | "system";
             /** Template Id */
             template_id: string;
             /** Updated At */

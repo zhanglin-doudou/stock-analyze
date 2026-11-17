@@ -497,7 +497,25 @@ async def commit_batch(
         types_modified_existing = 0
         if not legacy and finished.revoked_at is None and not covered:
             template_repo = ImportTemplateRepository(session)
+            types_written, types_modified_existing = await ImportBillTypeRepository(
+                session
+            ).upsert_many(
+                user_id,
+                type_resolutions,
+                batch_id=finished.id,
+                broker=broker,
+            )
             if signature and mapping_items:
+                # 类型先落库拿到 id，再按界面顺序（含废弃）整体覆盖模板引用；
+                # 本次未出现的旧 id 因此被静默丢弃（不删 import_bill_type 行）。
+                type_rows = await ImportBillTypeRepository(session).by_keys(
+                    user_id, [str(item["type_key"]) for item in type_resolutions]
+                )
+                bill_type_ids = [
+                    type_rows[key].id
+                    for item in type_resolutions
+                    if (key := str(item.get("type_key"))) in type_rows
+                ]
                 template = await template_repo.upsert(
                     user_id,
                     broker=broker,
@@ -508,17 +526,10 @@ async def commit_batch(
                     ignored=ignored_columns,
                     origin_batch_id=finished.id,
                     last_batch_id=finished.id,
+                    bill_type_ids=bill_type_ids,
                 )
                 finished.template_id = template.id
                 templates_written = 1
-            types_written, types_modified_existing = await ImportBillTypeRepository(
-                session
-            ).upsert_many(
-                user_id,
-                type_resolutions,
-                batch_id=finished.id,
-                broker=broker,
-            )
 
         # 历史类型被改动分类/废弃 → 影响已解析流水的 category，触发全量 reclassify 订正。
         # 仅当本批次真正改了历史类型才触发；新增类型或未改动的复用不触发。

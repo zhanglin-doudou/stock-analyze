@@ -15,6 +15,12 @@ vi.mock("../client", () => ({
       commit: vi.fn(),
       getBatch: vi.fn(),
       revoke: vi.fn(),
+      listTemplates: vi.fn().mockResolvedValue({
+        items: [],
+        system: [],
+        next_cursor: null,
+        has_more: false,
+      }),
     },
     jobs: {
       events: vi.fn(async function* (): AsyncGenerator<JobEvent, void, void> {

@@ -1964,6 +1964,18 @@
             "description": "复用同签名模板",
             "title": "Reuse Template",
             "type": "boolean"
+          },
+          "template_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "显式模板：sys:<key> 或本人模板 id",
+            "title": "Template Id"
           }
         },
         "required": [
@@ -4305,6 +4317,13 @@
               }
             ],
             "title": "Next Cursor"
+          },
+          "system": {
+            "items": {
+              "$ref": "#/components/schemas/PreviewTemplateOut"
+            },
+            "title": "System",
+            "type": "array"
           }
         },
         "title": "ImportTemplatePage",
@@ -7397,8 +7416,83 @@
         "title": "PreviewQuarantineRow",
         "type": "object"
       },
+      "PreviewTemplateBillType": {
+        "description": "模板引用的账单类型；`invalid=True` 表示 id 已失效（不自动删、不阻断）。",
+        "properties": {
+          "category": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Category"
+          },
+          "discarded": {
+            "default": false,
+            "title": "Discarded",
+            "type": "boolean"
+          },
+          "id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Id"
+          },
+          "invalid": {
+            "default": false,
+            "title": "Invalid",
+            "type": "boolean"
+          },
+          "type_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type Key"
+          },
+          "type_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Type Label"
+          }
+        },
+        "title": "PreviewTemplateBillType",
+        "type": "object"
+      },
       "PreviewTemplateOut": {
         "properties": {
+          "bill_type_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Bill Type Ids",
+            "type": "array"
+          },
+          "bill_types": {
+            "items": {
+              "$ref": "#/components/schemas/PreviewTemplateBillType"
+            },
+            "title": "Bill Types",
+            "type": "array"
+          },
           "broker": {
             "title": "Broker",
             "type": "string"
@@ -7426,6 +7520,11 @@
             ],
             "title": "Date Format"
           },
+          "has_user_overrides": {
+            "default": false,
+            "title": "Has User Overrides",
+            "type": "boolean"
+          },
           "header_count": {
             "title": "Header Count",
             "type": "integer"
@@ -7435,6 +7534,13 @@
               "type": "string"
             },
             "title": "Ignored",
+            "type": "array"
+          },
+          "invalid_type_ids": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Invalid Type Ids",
             "type": "array"
           },
           "items": {
@@ -7467,8 +7573,39 @@
             ],
             "title": "Origin Batch Id"
           },
+          "preset_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preset Key"
+          },
+          "preset_version": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Preset Version"
+          },
           "signature": {
             "title": "Signature",
+            "type": "string"
+          },
+          "source": {
+            "default": "user",
+            "enum": [
+              "user",
+              "system"
+            ],
+            "title": "Source",
             "type": "string"
           },
           "template_id": {
@@ -15686,11 +15823,28 @@
                     "示例"
                   ],
                   "template": {
+                    "bill_type_ids": [
+                      "示例"
+                    ],
+                    "bill_types": [
+                      {
+                        "category": "trade",
+                        "discarded": false,
+                        "id": "018f6b1c-7d2e-7a4b-9c3f-0a1b2c3d4e5f",
+                        "invalid": false,
+                        "type_key": "示例",
+                        "type_label": "示例"
+                      }
+                    ],
                     "broker": "huatai",
                     "created_at": "2026-09-30T09:30:00Z",
                     "date_format": "%Y-%m-%d",
+                    "has_user_overrides": false,
                     "header_count": 1,
                     "ignored": [
+                      "示例"
+                    ],
+                    "invalid_type_ids": [
                       "示例"
                     ],
                     "items": [
@@ -15698,7 +15852,10 @@
                     ],
                     "last_batch_id": "obj_01J9Z6ABCDEFGHJKMNPQRSTVWX",
                     "origin_batch_id": "obj_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                    "preset_key": "示例",
+                    "preset_version": 1,
                     "signature": "示例",
+                    "source": "user",
                     "template_id": "obj_01J9Z6ABCDEFGHJKMNPQRSTVWX",
                     "updated_at": "2026-09-30T09:30:00Z"
                   },
@@ -16035,11 +16192,28 @@
                     "示例"
                   ],
                   "template": {
+                    "bill_type_ids": [
+                      "示例"
+                    ],
+                    "bill_types": [
+                      {
+                        "category": "trade",
+                        "discarded": false,
+                        "id": "018f6b1c-7d2e-7a4b-9c3f-0a1b2c3d4e5f",
+                        "invalid": false,
+                        "type_key": "示例",
+                        "type_label": "示例"
+                      }
+                    ],
                     "broker": "huatai",
                     "created_at": "2026-09-30T09:30:00Z",
                     "date_format": "%Y-%m-%d",
+                    "has_user_overrides": false,
                     "header_count": 1,
                     "ignored": [
+                      "示例"
+                    ],
+                    "invalid_type_ids": [
                       "示例"
                     ],
                     "items": [
@@ -16047,7 +16221,10 @@
                     ],
                     "last_batch_id": "obj_01J9Z6ABCDEFGHJKMNPQRSTVWX",
                     "origin_batch_id": "obj_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                    "preset_key": "示例",
+                    "preset_version": 1,
                     "signature": "示例",
+                    "source": "user",
                     "template_id": "obj_01J9Z6ABCDEFGHJKMNPQRSTVWX",
                     "updated_at": "2026-09-30T09:30:00Z"
                   },
@@ -16366,11 +16543,28 @@
                     "示例"
                   ],
                   "template": {
+                    "bill_type_ids": [
+                      "示例"
+                    ],
+                    "bill_types": [
+                      {
+                        "category": "trade",
+                        "discarded": false,
+                        "id": "018f6b1c-7d2e-7a4b-9c3f-0a1b2c3d4e5f",
+                        "invalid": false,
+                        "type_key": "示例",
+                        "type_label": "示例"
+                      }
+                    ],
                     "broker": "huatai",
                     "created_at": "2026-09-30T09:30:00Z",
                     "date_format": "%Y-%m-%d",
+                    "has_user_overrides": false,
                     "header_count": 1,
                     "ignored": [
+                      "示例"
+                    ],
+                    "invalid_type_ids": [
                       "示例"
                     ],
                     "items": [
@@ -16378,7 +16572,10 @@
                     ],
                     "last_batch_id": "obj_01J9Z6ABCDEFGHJKMNPQRSTVWX",
                     "origin_batch_id": "obj_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                    "preset_key": "示例",
+                    "preset_version": 1,
                     "signature": "示例",
+                    "source": "user",
                     "template_id": "obj_01J9Z6ABCDEFGHJKMNPQRSTVWX",
                     "updated_at": "2026-09-30T09:30:00Z"
                   },
@@ -16724,11 +16921,28 @@
                     "示例"
                   ],
                   "template": {
+                    "bill_type_ids": [
+                      "示例"
+                    ],
+                    "bill_types": [
+                      {
+                        "category": "trade",
+                        "discarded": false,
+                        "id": "018f6b1c-7d2e-7a4b-9c3f-0a1b2c3d4e5f",
+                        "invalid": false,
+                        "type_key": "示例",
+                        "type_label": "示例"
+                      }
+                    ],
                     "broker": "huatai",
                     "created_at": "2026-09-30T09:30:00Z",
                     "date_format": "%Y-%m-%d",
+                    "has_user_overrides": false,
                     "header_count": 1,
                     "ignored": [
+                      "示例"
+                    ],
+                    "invalid_type_ids": [
                       "示例"
                     ],
                     "items": [
@@ -16736,7 +16950,10 @@
                     ],
                     "last_batch_id": "obj_01J9Z6ABCDEFGHJKMNPQRSTVWX",
                     "origin_batch_id": "obj_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                    "preset_key": "示例",
+                    "preset_version": 1,
                     "signature": "示例",
+                    "source": "user",
                     "template_id": "obj_01J9Z6ABCDEFGHJKMNPQRSTVWX",
                     "updated_at": "2026-09-30T09:30:00Z"
                   },
@@ -16977,11 +17194,28 @@
                   "has_more": false,
                   "items": [
                     {
+                      "bill_type_ids": [
+                        "示例"
+                      ],
+                      "bill_types": [
+                        {
+                          "category": "trade",
+                          "discarded": false,
+                          "id": "018f6b1c-7d2e-7a4b-9c3f-0a1b2c3d4e5f",
+                          "invalid": false,
+                          "type_key": "示例",
+                          "type_label": "示例"
+                        }
+                      ],
                       "broker": "huatai",
                       "created_at": "2026-09-30T09:30:00Z",
                       "date_format": "%Y-%m-%d",
+                      "has_user_overrides": false,
                       "header_count": 1,
                       "ignored": [
+                        "示例"
+                      ],
+                      "invalid_type_ids": [
                         "示例"
                       ],
                       "items": [
@@ -16989,12 +17223,54 @@
                       ],
                       "last_batch_id": "obj_01J9Z6ABCDEFGHJKMNPQRSTVWX",
                       "origin_batch_id": "obj_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                      "preset_key": "示例",
+                      "preset_version": 1,
                       "signature": "示例",
+                      "source": "user",
                       "template_id": "obj_01J9Z6ABCDEFGHJKMNPQRSTVWX",
                       "updated_at": "2026-09-30T09:30:00Z"
                     }
                   ],
-                  "next_cursor": "cursor_01J9Z6ABCDEFGHJKMNPQRSTVWX"
+                  "next_cursor": "cursor_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                  "system": [
+                    {
+                      "bill_type_ids": [
+                        "示例"
+                      ],
+                      "bill_types": [
+                        {
+                          "category": "trade",
+                          "discarded": false,
+                          "id": "018f6b1c-7d2e-7a4b-9c3f-0a1b2c3d4e5f",
+                          "invalid": false,
+                          "type_key": "示例",
+                          "type_label": "示例"
+                        }
+                      ],
+                      "broker": "huatai",
+                      "created_at": "2026-09-30T09:30:00Z",
+                      "date_format": "%Y-%m-%d",
+                      "has_user_overrides": false,
+                      "header_count": 1,
+                      "ignored": [
+                        "示例"
+                      ],
+                      "invalid_type_ids": [
+                        "示例"
+                      ],
+                      "items": [
+                        {}
+                      ],
+                      "last_batch_id": "obj_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                      "origin_batch_id": "obj_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                      "preset_key": "示例",
+                      "preset_version": 1,
+                      "signature": "示例",
+                      "source": "user",
+                      "template_id": "obj_01J9Z6ABCDEFGHJKMNPQRSTVWX",
+                      "updated_at": "2026-09-30T09:30:00Z"
+                    }
+                  ]
                 },
                 "schema": {
                   "$ref": "#/components/schemas/ImportTemplatePage"

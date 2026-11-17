@@ -609,6 +609,115 @@ async def test_api_098_remap_from_ready_keeps_user_type_choices(client, api_pref
     assert all(item["needs_confirmation"] for item in again["types"])
 
 
+_HUATAI_PRESET_HEADER = (
+    "日期,币种,股东账号,证券代码,证券名称,摘要,成交数量,成交均价,佣金,印花税,其他费,"
+    "发生金额,资金余额\n"
+)
+
+
+def _huatai_preset_bill(index: int = 1) -> bytes:
+    """与系统预设 huatai 同签名（86a2e1d34c53b1c9）的最小账单。
+
+    `index` 用来换一行不同的成交，避免重复导入被去重成空文件。
+    """
+    balance = 8995.00 - 1005.00 * (index - 1)
+    return (
+        _HUATAI_PRESET_HEADER
+        + f"2026010{index},人民币,A1,60000{index},测试银行{index},证券买入,100,10.00,"
+        f"5.00,0.00,0.00,-1005.00,{balance:.2f}\n"
+    ).encode()
+
+
+async def test_import_template_system_preset_and_writeback(
+    client, api_prefix, user, settings
+) -> None:
+    body = await _preview(client, api_prefix, user, data=_huatai_preset_bill())
+    template = body["template"]
+    assert template["source"] == "system"
+    assert template["template_id"] == "sys:huatai"
+    assert template["preset_version"] == 1
+    assert len(template["bill_types"]) == 18
+    assert template["invalid_type_ids"] == []
+    # 模板覆盖历史记忆/规则建议，且视为已确认 → 直接 ready。
+    buy = next(item for item in body["types"] if item["type_key"] == "证券买入")
+    assert buy["source"] == "template"
+    assert buy["category"] == "buy"
+    assert buy["needs_confirmation"] is False
+    assert body["stage"] == "ready"
+
+    await _commit(client, api_prefix, user, body)
+    await _drain_worker(settings)
+
+    listed = await client.get(f"{api_prefix}/imports/templates", headers=user.headers)
+    assert listed.status_code == 200
+    items = listed.json()["items"]
+    assert len(items) == 1
+    saved = items[0]
+    assert saved["source"] == "user"
+    assert saved["preset_version"] == 1
+    assert saved["has_user_overrides"] is False
+    assert len(saved["bill_type_ids"]) == 1
+    assert [item["type_key"] for item in saved["bill_types"]] == ["证券买入"]
+    # 系统预设只读，不写库；列表里的 system 项固定来自代码。
+    assert listed.json()["system"][0]["template_id"] == "sys:huatai"
+
+    # 再传同文件：命中自己的模板。
+    again = await _preview(client, api_prefix, user, data=_huatai_preset_bill(2))
+    assert again["template"]["source"] == "user"
+    assert again["template"]["template_id"] == saved["template_id"]
+
+
+async def test_import_template_invalid_type_ids_are_marked_not_blocking(
+    client, api_prefix, user, settings, owner_engine: AsyncEngine
+) -> None:
+    body = await _preview(client, api_prefix, user, data=_huatai_preset_bill())
+    await _commit(client, api_prefix, user, body)
+    await _drain_worker(settings)
+
+    # 直接删掉类型行，模拟失效引用（模板里的 id 不做级联删除）。
+    async with owner_engine.begin() as conn:
+        await conn.execute(
+            text("DELETE FROM ledger.import_bill_type WHERE user_id = :uid"),
+            {"uid": user.user_id},
+        )
+
+    again = await _preview(client, api_prefix, user, data=_huatai_preset_bill(2))
+    template = again["template"]
+    assert template["source"] == "user"
+    assert len(template["invalid_type_ids"]) == 1
+    assert template["bill_types"][0]["invalid"] is True
+    # 失效引用不阻断导入：类型回落到规则建议，仍可继续。
+    assert again["stage"] in ("types", "ready")
+
+
+async def test_import_template_preset_updates_do_not_override_user_edits(
+    client, api_prefix, user, settings, owner_engine: AsyncEngine
+) -> None:
+    body = await _preview(client, api_prefix, user, data=_huatai_preset_bill())
+    await _commit(client, api_prefix, user, body)
+    await _drain_worker(settings)
+
+    # 用户改掉模板里的分类 → 出现差异提示，但预设不会被自动覆盖。
+    listed = await client.get(f"{api_prefix}/imports/templates", headers=user.headers)
+    saved = listed.json()["items"][0]
+    async with owner_engine.begin() as conn:
+        await conn.execute(
+            text(
+                "UPDATE ledger.import_bill_type SET category = 'other' "
+                "WHERE user_id = :uid AND type_key = '证券买入'"
+            ),
+            {"uid": user.user_id},
+        )
+
+    again = await _preview(client, api_prefix, user, data=_huatai_preset_bill(2))
+    assert again["template"]["template_id"] == saved["template_id"]
+    assert again["template"]["has_user_overrides"] is True
+    buy = next((item for item in again["types"] if item["type_key"] == "证券买入"), None)
+    assert buy is not None, again["types"]
+    assert buy["category"] == "other"
+    assert buy["source"] == "template"
+
+
 async def test_api_106_cross_account_404(client, api_prefix, user, account_factory) -> None:
     other = await account_factory()
     preview = await _preview(client, api_prefix, user)

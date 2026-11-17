@@ -137,6 +137,17 @@ class PreviewFile(BaseModel):
     bytes: int
 
 
+class PreviewTemplateBillType(BaseModel):
+    """模板引用的账单类型；`invalid=True` 表示 id 已失效（不自动删、不阻断）。"""
+
+    id: str | None = None
+    type_key: str | None = None
+    type_label: str | None = None
+    category: str | None = None
+    discarded: bool = False
+    invalid: bool = False
+
+
 class PreviewTemplateOut(BaseModel):
     template_id: str
     broker: str
@@ -149,6 +160,14 @@ class PreviewTemplateOut(BaseModel):
     last_batch_id: str | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
+    # ── 账单类型映射与预设提示（additive）────────────────────
+    source: Literal["user", "system"] = "user"
+    preset_key: str | None = None
+    preset_version: int | None = None
+    has_user_overrides: bool = False
+    bill_type_ids: list[str] = Field(default_factory=list)
+    bill_types: list[PreviewTemplateBillType] = Field(default_factory=list)
+    invalid_type_ids: list[str] = Field(default_factory=list)
 
 
 class PreviewBlocking(BaseModel):
@@ -262,6 +281,8 @@ class ImportTemplatePage(BaseModel):
     items: list[PreviewTemplateOut] = Field(default_factory=list)
     next_cursor: str | None = None
     has_more: bool = False
+    #: 只读系统预设（`template_id` 形如 `sys:<key>`），供模板选择控件使用。
+    system: list[PreviewTemplateOut] = Field(default_factory=list)
 
 
 class ImportRuleOut(BaseModel):

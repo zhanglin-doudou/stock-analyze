@@ -90,7 +90,13 @@ class ImportTemplateRepository:
         ignored: Sequence[str],
         origin_batch_id: str | None,
         last_batch_id: str | None,
+        bill_type_ids: Sequence[str] | None = None,
     ) -> ImportTemplate:
+        """按签名 upsert；`bill_type_ids=None` 表示本次不改类型映射。
+
+        提交成功时调用方传入本次确认的类型 id（含废弃、按界面顺序），整体覆盖旧值
+        ——失效 id 因此被静默丢弃，不单独删除数据库行。
+        """
         template = await self.by_signature(user_id, signature)
         if template is None:
             template = ImportTemplate(
@@ -102,6 +108,7 @@ class ImportTemplateRepository:
                 date_format=date_format,
                 items=list(items),
                 ignored=list(ignored),
+                bill_type_ids=list(bill_type_ids or []),
                 origin_batch_id=origin_batch_id,
                 last_batch_id=last_batch_id,
             )
@@ -112,6 +119,8 @@ class ImportTemplateRepository:
             template.date_format = date_format
             template.items = list(items)
             template.ignored = list(ignored)
+            if bill_type_ids is not None:
+                template.bill_type_ids = list(bill_type_ids)
             template.last_batch_id = last_batch_id
             template.version += 1
         await self._session.flush()
@@ -152,6 +161,17 @@ class ImportBillTypeRepository:
             )
         )
         return {row.type_key: row for row in rows}
+
+    async def by_ids(self, user_id: uuid.UUID, ids: Sequence[str]) -> dict[str, ImportBillType]:
+        """按 id 取类型（只限本人）；模板里引用但查不到的就是失效 id。"""
+        if not ids:
+            return {}
+        rows = await self._session.scalars(
+            select(ImportBillType).where(
+                ImportBillType.user_id == user_id, ImportBillType.id.in_(list(ids))
+            )
+        )
+        return {row.id: row for row in rows}
 
     async def upsert_many(
         self,

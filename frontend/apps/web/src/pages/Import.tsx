@@ -5,6 +5,7 @@ import {
   type ImportBatch,
   type ImportMappingIn,
   type ImportTypesIn,
+  type ImportTemplateOut,
   type JobAccepted,
   type JobStatus,
   type Preview,
@@ -64,6 +65,7 @@ interface TypeRow {
   amountSum: string;
   samples: string[];
   suggestedCategory: string | null;
+  source: string;
   needsConfirmation: boolean;
   category: string;
   discard: boolean;
@@ -246,6 +248,7 @@ function typesFromPreview(preview: Preview, saved?: Map<string, TypeChoice>): Ty
       amountSum: String(item.amount_sum ?? "0.00"),
       samples: (item.samples as string[] | undefined) ?? [],
       suggestedCategory: suggested,
+      source: String(item.source ?? "none"),
       needsConfirmation: Boolean(item.needs_confirmation),
       category,
       discard,
@@ -284,7 +287,11 @@ export function Import() {
   const [types, setTypes] = useState<TypeRow[]>([]);
   const [dateFormat, setDateFormat] = useState("");
   const [broker, setBroker] = useState("auto");
-  const [reuseTemplate, setReuseTemplate] = useState(true);
+  const [templateChoice, setTemplateChoice] = useState("auto");
+  const [templateOptions, setTemplateOptions] = useState<{
+    system: ImportTemplateOut[];
+    mine: ImportTemplateOut[];
+  }>({ system: [], mine: [] });
   const [confirmUnmapped, setConfirmUnmapped] = useState(false);
   const [ackReimport, setAckReimport] = useState(false);
   const [allowEditHistorical, setAllowEditHistorical] = useState(false);
@@ -316,6 +323,26 @@ export function Import() {
     return () => {
       node.remove();
       setPortal(null);
+    };
+  }, []);
+
+  // 模板选择控件：系统预设（只读）与本人模板（提交后 copy-on-write 生成）。
+  useEffect(() => {
+    let alive = true;
+    api.imports
+      .listTemplates({ limit: 50 })
+      .then((page) => {
+        if (!alive) return;
+        setTemplateOptions({
+          system: page.system ?? [],
+          mine: page.items ?? [],
+        });
+      })
+      .catch(() => {
+        // 选不到模板不影响导入，自动匹配仍可用。
+      });
+    return () => {
+      alive = false;
     };
   }, []);
 
@@ -374,7 +401,9 @@ export function Import() {
       const dto = await api.imports.preview(file, {
         flow: "v2",
         broker,
-        reuse_template: reuseTemplate,
+        reuse_template: templateChoice === "auto",
+        template_id:
+          templateChoice !== "auto" && templateChoice !== "none" ? templateChoice : undefined,
       });
       applyPreview(dto);
     } catch (err) {
@@ -583,13 +612,39 @@ export function Import() {
                   <SelectItem value="generic">通用</SelectItem>
                 </SelectContent>
               </Select>
-              <Label htmlFor="import-reuse">复用已确认的列对应</Label>
-              <Switch
-                id="import-reuse"
-                aria-label="复用已确认的列对应"
-                checked={reuseTemplate}
-                onCheckedChange={setReuseTemplate}
-              />
+              <Label htmlFor="import-template">列对应模板</Label>
+              <Select value={templateChoice} onValueChange={setTemplateChoice}>
+                <SelectTrigger id="import-template" aria-label="列对应模板" className="tw-w-60">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="auto">自动匹配（推荐）</SelectItem>
+                  <SelectItem value="none">不复用模板</SelectItem>
+                  {templateOptions.system.length > 0 ? (
+                    <SelectGroup>
+                      <SelectLabel>系统预设</SelectLabel>
+                      {templateOptions.system.map((item) => (
+                        <SelectItem key={item.template_id} value={item.template_id}>
+                          {item.broker === "huatai" ? "华泰证券" : item.broker}
+                          {item.preset_version ? ` · v${item.preset_version}` : ""}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  ) : null}
+                  {templateOptions.mine.length > 0 ? (
+                    <SelectGroup>
+                      <SelectLabel>我的模板</SelectLabel>
+                      {templateOptions.mine.map((item) => (
+                        <SelectItem key={item.template_id} value={item.template_id}>
+                          {item.broker === "huatai" ? "华泰证券" : item.broker}
+                          {` · ${item.signature}`}
+                          {item.has_user_overrides ? " · 已自定义" : ""}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  ) : null}
+                </SelectContent>
+              </Select>
             </div>
             <Uploader disabled={busy} onFile={(file) => void onFile(file)} />
           </CardContent>
@@ -611,7 +666,18 @@ export function Import() {
               <CardTitle>2 · 列对应</CardTitle>
               <CardDescription>
                 文件：{preview.file.name}（{preview.file.bytes} 字节，哈希 {preview.file.sha256.slice(0, 8)}）
-                {preview.template ? " · 已复用你确认过的列对应，可修改" : ""}
+                {preview.template ? (
+                  <span>
+                    {" · "}
+                    {preview.template.source === "system" ? (
+                      <>已套用系统预设（华泰）列对应，可修改；确认导入后保存为你自己的模板</>
+                    ) : (
+                      <>已复用你确认过的列对应，可修改；改动会在确认导入后保存</>
+                    )}
+                  </span>
+                ) : (
+                  ""
+                )}
               </CardDescription>
             </CardHeader>
             <CardContent className="tw-flex tw-flex-col tw-gap-3">
@@ -827,6 +893,12 @@ export function Import() {
                   </div>
                 ) : null}
               </div>
+              {(preview.template?.invalid_type_ids ?? []).length > 0 ? (
+                <p role="alert" className="tw-text-sm tw-text-amber-600">
+                  模板中有 {preview.template?.invalid_type_ids?.length} 个类型引用已失效，本次已跳过（不影响导入）；
+                  确认导入后会从模板里移除。
+                </p>
+              ) : null}
               <Table aria-label="账单类型">
                 <TableHeader>
                   <TableRow>
@@ -854,7 +926,15 @@ export function Import() {
                             历史类型
                           </Badge>
                         )}
-                        {row.suggestedCategory && row.category === row.suggestedCategory ? (
+                        {row.source === "template" ? (
+                          <Badge variant="outline" className="tw-ml-1">
+                            模板
+                          </Badge>
+                        ) : row.source === "import_type" ? (
+                          <Badge variant="outline" className="tw-ml-1">
+                            历史记忆
+                          </Badge>
+                        ) : row.source === "summary_rule" ? (
                           <Badge variant="outline" className="tw-ml-1">
                             系统建议
                           </Badge>
@@ -931,7 +1011,16 @@ export function Import() {
                 <dt>券商</dt>
                 <dd>{preview.broker}</dd>
                 <dt>映射来源</dt>
-                <dd>{preview.template ? "已复用模板" : "手动确认"}</dd>
+                <dd>
+                  {preview.template ? (
+                    <>
+                      {preview.template.source === "system" ? "系统预设" : "我的模板"}
+                      {preview.template.has_user_overrides ? "（已自定义，保存为我的模板）" : ""}
+                    </>
+                  ) : (
+                    "手动确认"
+                  )}
+                </dd>
                 <dt>忽略列</dt>
                 <dd>{preview.ignored_columns?.length ?? 0}</dd>
                 <dt>预估</dt>
@@ -941,6 +1030,21 @@ export function Import() {
                   {preview.estimated.discarded}
                 </dd>
               </dl>
+              {(preview.template?.invalid_type_ids ?? []).length > 0 ? (
+                <p role="alert" className="tw-text-sm tw-text-amber-600">
+                  模板中有 {preview.template?.invalid_type_ids?.length} 个类型引用已失效，本次已跳过（不影响导入）；
+                  确认导入后会从模板里移除。
+                </p>
+              ) : null}
+              {preview.template?.source === "user" && preview.template.has_user_overrides ? (
+                <p className="tw-text-sm tw-text-muted-foreground">
+                  你的模板与系统预设{preview.template.preset_version ? `（v${preview.template.preset_version}）` : ""}
+                  存在差异，已保留你的自定义设置，系统更新不会自动覆盖。
+                </p>
+              ) : null}
+              <p className="tw-text-sm tw-text-muted-foreground">
+                确认导入成功后，本次列对应与 {types.length} 个账单类型映射会保存到你的模板，下次同格式自动复用。
+              </p>
               {(preview.blocking ?? []).length > 0 ? (
                 <ul role="alert" className="tw-text-sm tw-text-destructive">
                   {(preview.blocking ?? []).map((item) => (
@@ -1045,7 +1149,8 @@ export function Import() {
                   </div>
                   {batch.mapping_source !== "legacy" ? (
                     <p className="muted">
-                      本次列对应已保存{batch.mapping?.is_origin ? "（首次导入，撤销会一并删除）" : "（增量导入，撤销保留列对应）"}，
+                      本次列对应与账单类型映射已保存
+                      {batch.mapping?.is_origin ? "（首次导入，撤销会一并删除）" : "（增量导入，撤销保留）"}，
                       下次同格式账单会自动复用。
                     </p>
                   ) : null}
