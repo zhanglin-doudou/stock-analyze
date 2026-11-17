@@ -119,12 +119,18 @@ def settings() -> Settings:
 
 
 @pytest_asyncio.fixture
-async def owner_engine(settings: Settings) -> AsyncIterator[AsyncEngine]:
+async def owner_engine(
+    request: pytest.FixtureRequest, settings: Settings
+) -> AsyncIterator[AsyncEngine | None]:
     """owner 引擎：脚手架（造用户 / TRUNCATE / 系统行）。
 
     与默认的函数级事件循环同域，避免跨 loop 复用 asyncpg 连接。
     创建前先校验目标库：非 Docker 开发库（5433）直接拒绝，保护本机 5432 数据。
+    `@pytest.mark.no_db` 用例返回 None，不建立连接。
     """
+    if request.node.get_closest_marker("no_db") is not None:
+        yield None
+        return
     _assert_docker_test_db(settings)
     engine = create_async_engine(settings.owner_dsn(), pool_pre_ping=True)
     try:
@@ -144,11 +150,20 @@ async def app_engine(settings: Settings) -> AsyncIterator[AsyncEngine]:
 
 
 @pytest_asyncio.fixture(autouse=True)
-async def _clean_db(owner_engine: AsyncEngine) -> AsyncIterator[None]:
+async def _clean_db(
+    request: pytest.FixtureRequest, owner_engine: AsyncEngine | None
+) -> AsyncIterator[None]:
     """每个用例前清空业务表并重置自增；插入开发账号 DEV_EMAIL/DEV_PASSWORD。
+
+    `@pytest.mark.no_db` 标记的静态/架构用例不连库（例如只读迁移文件的版本守卫），
+    此时 owner_engine 为 None，直接跳过。
 
     market schema 不在清空范围（公共行情缓存，跨用例共享）。
     """
+    if request.node.get_closest_marker("no_db") is not None:
+        yield
+        return
+    assert owner_engine is not None
     async with owner_engine.begin() as conn:
         await conn.execute(text(_TRUNCATE_SQL))
     await _insert_user(owner_engine, email=DEV_EMAIL, password=DEV_PASSWORD)
