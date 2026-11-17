@@ -35,6 +35,7 @@ from stock_ledger.application.chain import (
     plan_chain_by_account,
 )
 from stock_ledger.application.classify import (
+    category_after_amount_fallback,
     load_rules,
     match_rule,
     side_from_category,
@@ -396,8 +397,10 @@ async def commit_batch(
                     unknown_summary_rows.append(parsed)
                     continue
                 trade_row = _parsed_to_trade_row(parsed, batch.id)
-                trade_row.category = rule.category
-                trade_row.side = side_from_category(rule.category)
+                # 零金额登记动作自动降级（摘要含"新股"但 amount==0 → broker_action）
+                final_category = category_after_amount_fallback(rule.category, parsed.amount_units)
+                trade_row.category = final_category
+                trade_row.side = side_from_category(final_category)
                 trade_row.summary_code = rule_summary_code(rule)
                 to_insert.append(trade_row)
                 continue

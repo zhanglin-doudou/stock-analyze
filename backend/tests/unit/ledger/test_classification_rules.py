@@ -327,3 +327,104 @@ def test_real_statement_excerpt_parse_and_classify() -> None:
         "新股入帐": {"broker_action"},
         "赎回确认": {"sell"},
     }
+
+
+# ── 零金额登记动作降级 ──────────────────────────────────────────────────────────
+#
+# 规则表只管 pattern + category；发生金额=0 的登记动作在 classify 层按
+# _CATEGORY_ZERO_AMOUNT_FALLBACK 集中降级，避免把不扣款的登记行误判为建仓。
+
+
+@pytest.mark.parametrize(
+    ("category", "amount_units", "expected"),
+    [
+        # new_stock 是唯一注册在 fallback 表里的 category
+        ("new_stock", 0, "broker_action"),
+        ("new_stock", -500000, "new_stock"),  # -5000.00 元 → 真扣款，保留 new_stock
+        ("new_stock", 1000, "new_stock"),  # 正金额（罕见）也不降级
+        # 不在 fallback 表里的 category 即使 amount=0 也原样返回
+        ("buy", 0, "buy"),
+        ("sell", 0, "sell"),
+        ("broker_action", 0, "broker_action"),
+        ("transfer", 0, "transfer"),
+    ],
+)
+def test_category_after_amount_fallback_degrades_new_stock_on_zero(
+    category: str, amount_units: int, expected: str
+) -> None:
+    from stock_ledger.application.classify import category_after_amount_fallback
+
+    assert category_after_amount_fallback(category, amount_units) == expected
+
+
+def test_resolve_type_category_zero_amount_degrades_rule_hit() -> None:
+    """规则命中 new_stock 但 amount=0 → resolve_type_category 返回 broker_action。"""
+    from stock_ledger.application.classify import resolve_type_category
+    from stock_ledger.parsers.mapping import normalize_type_key
+
+    rules = _rules()
+    # 摘要"新股上市"含"新股"，命中 sys_new_stock（priority 14）
+    category, summary_code, discarded = resolve_type_category(
+        normalize_type_key("新股上市"),
+        known_types={},
+        rules=rules,
+        summary="新股上市",
+        amount_units=0,
+    )
+    assert discarded is False
+    assert category == "broker_action"
+    assert summary_code == "sys_new_stock"  # 短码仍保留，方便追溯原始规则
+
+
+def test_resolve_type_category_nonzero_amount_keeps_new_stock() -> None:
+    """规则命中 new_stock 且 amount<0 → 保留 new_stock（真扣款）。"""
+    from stock_ledger.application.classify import resolve_type_category
+    from stock_ledger.parsers.mapping import normalize_type_key
+
+    rules = _rules()
+    category, summary_code, discarded = resolve_type_category(
+        normalize_type_key("新股申购缴款"),
+        known_types={},
+        rules=rules,
+        summary="新股申购缴款",
+        amount_units=-500000,  # -5000.00 元
+    )
+    assert discarded is False
+    assert category == "new_stock"
+    assert summary_code == "sys_new_stock"
+
+
+def test_resolve_type_category_zero_amount_degrades_known_type_too() -> None:
+    """用户类型记忆确认了 new_stock 但 amount=0 → 仍降级为 broker_action。
+
+    设计意图：记忆是 type_key 级别的（同一摘要的历史确认），但零金额登记行可能
+    出现在任何文件里；在单行粒度做 final 降级比让用户记住"选了 new_stock 就不
+    会被降级"更安全——误判为建仓的代价远高于自动降级。
+    """
+    # resolve_type_category 只访问 known.category 和 known.discarded，用
+    # types.SimpleNamespace 构造轻量替身即可，不必实例化完整 SQLAlchemy ORM。
+    from types import SimpleNamespace
+
+    from stock_ledger.application.classify import resolve_type_category
+    from stock_ledger.parsers.mapping import normalize_type_key
+
+    known_type = SimpleNamespace(category="new_stock", discarded=False)
+    known_types = {normalize_type_key("新股上市"): known_type}
+
+    category, _summary_code, discarded = resolve_type_category(
+        normalize_type_key("新股上市"),
+        known_types=known_types,
+        rules=_rules(),
+        summary="新股上市",
+        amount_units=0,
+    )
+    assert discarded is False
+    assert category == "broker_action"
+
+
+def test_side_from_degraded_category_is_unknown() -> None:
+    """new_stock 降级为 broker_action 后 side 变为 unknown（而非 buy）。"""
+    from stock_ledger.application.classify import side_from_category
+
+    assert side_from_category("broker_action") == "unknown"
+    assert side_from_category("new_stock") == "buy"

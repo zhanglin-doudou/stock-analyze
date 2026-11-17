@@ -68,6 +68,9 @@ _BASE_SYSTEM_RULES: tuple[tuple[str, str, str, str, str, str, int], ...] = (
     # 「中签」「缴款」不再单独归入（登记类见上方 broker_action）；上市后卖出统一走 sell。
     # 「新股」「认购」放 14：早于基金「申购确认」(15)，保证「新股申购确认缴款」不被当成
     # 基金买入；单字「申购」放 16：晚于基金，避免把「申购确认」抢成打新。
+    # 零金额降级（classify._CATEGORY_ZERO_AMOUNT_FALLBACK）：规则表本身只负责 pattern 匹配，
+    # 发生金额=0 的登记动作（如中签登记、获配登记）在分类应用层自动降级为 broker_action，
+    # 避免把不扣款的登记行误判为建仓并虚增持仓成本。
     ("sys_new_stock", "新股→新股申购", "new_stock", "both", "contains", "新股", 14),
     ("sys_new_sub", "认购→新股申购", "new_stock", "both", "contains", "认购", 14),
     # 上市后卖出统一走 sell：新股口径收窄后含「新股」的规则只认建仓，这里给「新股卖出」

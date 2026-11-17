@@ -55,6 +55,22 @@ def side_from_category(category: str | None) -> str:
     return _CATEGORY_TO_SIDE.get(category, Side.UNKNOWN.value)
 
 
+#: 规则命中的 category 若在零金额 fallback 表里且 amount_units==0，降级到右侧 category。
+# 设计意图：pattern 匹配只管"摘要文字说什么"，amount 分流管"这笔有没有实际资金进出"；
+# 两者解耦避免把规则表搞成条件组合引擎（运维改 pattern 还要记得带 amount 条件）。
+# 后期加新规则只需在这里追加一行，规则表 pattern 保持纯语义。
+_CATEGORY_ZERO_AMOUNT_FALLBACK: dict[str, str] = {
+    BillCategory.NEW_STOCK.value: BillCategory.BROKER_ACTION.value,
+}
+
+
+def category_after_amount_fallback(category: str, amount_units: int) -> str:
+    """零金额登记动作的分类降级；amount_units!=0 时原样返回。"""
+    if amount_units == 0:
+        return _CATEGORY_ZERO_AMOUNT_FALLBACK.get(category, category)
+    return category
+
+
 def _matches(rule: SummaryRule, summary: str) -> bool:
     if rule.match_type == "regex":
         # 正则按原文匹配（用户可能显式依赖换行/空格）；其余匹配类型统一去折行。
@@ -89,17 +105,26 @@ def resolve_type_category(
     known_types: dict[str, ImportBillType],
     rules: list[SummaryRule],
     summary: str | None,
+    amount_units: int = 0,
 ) -> tuple[str | None, str | None, bool]:
-    """返回 `(category, summary_code, discarded)`；用户类型记忆优先于摘要规则。"""
+    """返回 `(category, summary_code, discarded)`；用户类型记忆优先于摘要规则。
+
+    category 在返回前统一走 `category_after_amount_fallback`，零金额登记动作自动降级
+    到 broker_action（由 `_CATEGORY_ZERO_AMOUNT_FALLBACK` 集中维护）。
+    """
     known = known_types.get(normalize_type_key(type_key))
     rule = match_rule(rules, summary)
     summary_code = rule_summary_code(rule) if rule is not None else None
     if known is not None:
         if known.discarded:
             return None, None, True
-        return known.category, summary_code, False
+        # known.discarded=False → known.category 非 None（DB CheckConstraint 保证）
+        assert known.category is not None, "ImportBillType: non-discarded 行必须有 category"
+        final = category_after_amount_fallback(known.category, amount_units)
+        return final, summary_code, False
     if rule is not None:
-        return rule.category, summary_code, False
+        final = category_after_amount_fallback(rule.category, amount_units)
+        return final, summary_code, False
     return None, None, False
 
 
@@ -163,6 +188,7 @@ async def reclassify_user(
             known_types=known_types,
             rules=rules,
             summary=trade.summary,
+            amount_units=trade.amount_units,
         )
         if discarded:
             # 废弃只影响后续导入；复算不删除、不改写已经存在的历史流水。
@@ -220,12 +246,13 @@ async def _backfill_resolved(
         trade = await trade_repo.by_id(user_id, row.resolved_trade_id)
         if trade is None or trade.category is not None:
             continue
-        trade.category = rule.category
+        trade.category = category_after_amount_fallback(rule.category, trade.amount_units)
         backfilled += 1
     return backfilled
 
 
 __all__ = [
+    "category_after_amount_fallback",
     "load_rules",
     "match_rule",
     "reclassify_user",
