@@ -268,21 +268,26 @@ def test_unsupported_file_rejected() -> None:
 
 
 def test_side_column_absent_not_required() -> None:
-    # 「买卖标志」列缺失不再报缺列；方向回退摘要识别（证券买入 → buy）。
-    headers = [header for header in _HEADERS if header != "买卖标志"]
-    row = [
-        value
-        for header, value in zip(_HEADERS, _buy_row(摘要="证券买入"), strict=True)
-        if header != "买卖标志"
+    # 「买卖标志」列缺失不再报缺列；方向统一由分类阶段 Category 决定，解析器回落 unknown。
+    # 金额由带符号「发生金额」列直接承载，不再依赖 side 换算。
+    headers = [header for header in _HEADERS if header != "买卖标志"] + ["发生金额"]
+    base = _buy_row(摘要="证券买入")
+    row = [value for header, value in zip(_HEADERS, base, strict=True) if header != "买卖标志"] + [
+        "-168042.00"
     ]
     bill = _parse(_xlsx(headers, [row]))
     assert "买卖标志" not in bill.columns
-    assert bill.rows[0].side == "buy"
+    assert bill.rows[0].side == "unknown"
+    assert bill.rows[0].amount_units == -168042_00
 
 
 def test_side_from_summary_sell() -> None:
-    bill = _parse(_xlsx(_HEADERS, [_buy_row(买卖标志="", 摘要="证券卖出")]))
-    assert bill.rows[0].side == "sell"
+    # 摘要不再推断方向：无「买卖标志」列时 side=unknown，方向由分类阶段 Category 决定。
+    headers = [*_HEADERS, "发生金额"]
+    row = [*_buy_row(买卖标志="", 摘要="证券卖出"), "167958.00"]
+    bill = _parse(_xlsx(headers, [row]))
+    assert bill.rows[0].side == "unknown"
+    assert bill.rows[0].amount_units == 167958_00
 
 
 def test_side_unknown_when_nothing_matches() -> None:
@@ -294,28 +299,27 @@ def test_side_unknown_when_nothing_matches() -> None:
 
 
 def test_non_trade_bank_transfer_in() -> None:
-    """银行转存：无证券代码，资金流入 → side=sell，代码占位 CASH。"""
-    row = _buy_row(
-        证券代码="",
-        证券名称="",
-        买卖标志="",
-        摘要="银行转存",
-        成交金额="188.58",
-        佣金="0.00",
-    )
-    bill = _parse(_xlsx(_HEADERS, [row]))
+    """银行转存：无证券代码 → CASH 占位；方向由分类阶段 Category 决定，解析器 side=unknown。"""
+    headers = [*_HEADERS, "发生金额"]
+    row = [
+        *_buy_row(
+            证券代码="", 证券名称="", 买卖标志="", 摘要="银行转存", 成交金额="188.58", 佣金="0.00"
+        ),
+        "188.58",
+    ]
+    bill = _parse(_xlsx(headers, [row]))
     assert len(bill.rows) == 1
     assert bill.quarantined == []
     r = bill.rows[0]
     assert r.security_code == "CASH"
     assert r.security_name == "银行转存"
-    assert r.side == "sell"
-    # 毛额 188.58、零费用 → 净现金流 +188.58（资金流入为正）。
+    assert r.side == "unknown"
+    # 「发生金额」带符号净额直接入 amount，资金流入为正。
     assert r.amount_units == 188_58
 
 
 def test_non_trade_bank_transfer_out() -> None:
-    """银行转取：无证券代码，资金流出 → side=buy。"""
+    """银行转取：无证券代码 → CASH 占位；方向由 Category 决定。"""
     row = _buy_row(证券代码="", 证券名称="", 买卖标志="", 摘要="银行转取", 成交金额="-800.00")
     bill = _parse(_xlsx(_HEADERS, [row]))
     assert len(bill.rows) == 1
@@ -323,16 +327,16 @@ def test_non_trade_bank_transfer_out() -> None:
     r = bill.rows[0]
     assert r.security_code == "CASH"
     assert r.security_name == "银行转取"
-    assert r.side == "buy"
+    assert r.side == "unknown"
     assert r.amount_units == -800_00
 
 
 @pytest.mark.parametrize(
     ("summary", "amount", "expected_side"),
     [
-        ("银证转入", "100.00", "sell"),
-        ("跨行转入", "100.00", "sell"),
-        ("跨行转出", "-100.00", "buy"),
+        ("银证转入", "100.00", "unknown"),
+        ("跨行转入", "100.00", "unknown"),
+        ("跨行转出", "-100.00", "unknown"),
         ("带资金补登", "0.00", "unknown"),
         ("资产账户币种开户", "0.00", "unknown"),
     ],
@@ -340,15 +344,10 @@ def test_non_trade_bank_transfer_out() -> None:
 def test_non_trade_cash_business_summary_aliases(
     summary: str, amount: str, expected_side: str
 ) -> None:
-    """券商资金业务无证券代码时使用 CASH，不因缺少股票代码误隔离。"""
-    row = _buy_row(
-        证券代码="",
-        证券名称="",
-        买卖标志="",
-        摘要=summary,
-        成交金额=amount,
-    )
-    bill = _parse(_xlsx(_HEADERS, [row]))
+    """券商资金业务无证券代码时使用 CASH，不因缺少股票代码误隔离；方向由 Category 决定。"""
+    headers = [*_HEADERS, "发生金额"]
+    row = [*_buy_row(证券代码="", 证券名称="", 买卖标志="", 摘要=summary, 成交金额=amount), amount]
+    bill = _parse(_xlsx(headers, [row]))
     assert len(bill.rows) == 1
     assert bill.quarantined == []
     assert bill.rows[0].security_code == "CASH"
@@ -356,43 +355,51 @@ def test_non_trade_cash_business_summary_aliases(
 
 
 def test_non_trade_dividend_with_code() -> None:
-    """股息入帐：有证券代码，资金流入 → side=sell。"""
-    row = _buy_row(
-        证券代码="603886",
-        证券名称="元祖股份",
-        买卖标志="",
-        摘要="股息入帐",
-        成交数量="0",
-        成交价格="0.00",
-        成交金额="1700.00",
-        佣金="0.00",
-    )
-    bill = _parse(_xlsx(_HEADERS, [row]))
+    """股息入帐：有证券代码，资金流入；方向由 Category 决定。"""
+    headers = [*_HEADERS, "发生金额"]
+    row = [
+        *_buy_row(
+            证券代码="603886",
+            证券名称="元祖股份",
+            买卖标志="",
+            摘要="股息入帐",
+            成交数量="0",
+            成交价格="0.00",
+            成交金额="1700.00",
+            佣金="0.00",
+        ),
+        "1700.00",
+    ]
+    bill = _parse(_xlsx(headers, [row]))
     assert len(bill.rows) == 1
     assert bill.quarantined == []
     r = bill.rows[0]
     assert r.security_code == "603886"
     assert r.security_name == "元祖股份"
-    assert r.side == "sell"
+    assert r.side == "unknown"
     assert r.amount_units == 1700_00
 
 
 def test_non_trade_interest() -> None:
-    """利息归本：无证券代码，资金流入 → side=sell。"""
-    row = _buy_row(
-        证券代码="", 证券名称="", 买卖标志="", 摘要="利息归本", 成交金额="0.35", 佣金="0.00"
-    )
-    bill = _parse(_xlsx(_HEADERS, [row]))
+    """利息归本：无证券代码 → CASH 占位；方向由 Category 决定。"""
+    headers = [*_HEADERS, "发生金额"]
+    row = [
+        *_buy_row(
+            证券代码="", 证券名称="", 买卖标志="", 摘要="利息归本", 成交金额="0.35", 佣金="0.00"
+        ),
+        "0.35",
+    ]
+    bill = _parse(_xlsx(headers, [row]))
     assert len(bill.rows) == 1
     assert bill.quarantined == []
     r = bill.rows[0]
     assert r.security_code == "CASH"
-    assert r.side == "sell"
+    assert r.side == "unknown"
     assert r.amount_units == 35
 
 
 def test_non_trade_dividend_tax_with_newline() -> None:
-    """股息红利税补缴（含换行符）：无证券代码，资金流出 → side=buy。"""
+    """股息红利税补缴（含换行符）：无证券代码 → CASH 占位；方向由 Category 决定。"""
     row = _buy_row(
         证券代码="", 证券名称="", 买卖标志="", 摘要="股息红利税\n补缴", 成交金额="-60.00"
     )
@@ -401,7 +408,7 @@ def test_non_trade_dividend_tax_with_newline() -> None:
     assert bill.quarantined == []
     r = bill.rows[0]
     assert r.security_code == "CASH"
-    assert r.side == "buy"
+    assert r.side == "unknown"
     assert r.amount_units == -60_00
 
 
@@ -423,7 +430,7 @@ def test_non_trade_market_value_subscription_is_cash_row() -> None:
     r = bill.rows[0]
     assert r.security_code == "CASH"
     assert r.security_name == "市值认购资金扣收"
-    assert r.side == "buy"
+    assert r.side == "unknown"
     assert r.amount_units == -1000_00
 
 
@@ -476,24 +483,23 @@ def test_real_bill_amount_is_signed_net_cash_flow() -> None:
 
     by_line = {row.line_no: row for row in bill.rows}
     buy = by_line[15]
-    assert buy.side == "buy"
-    # 200 股 × 37.05 = 7410.00 毛额；佣金 5.00 + 其他费 0.15 → 净额 -7415.15。
+    # 方向不再由解析器 side 推断，由金额符号体现（买入负/卖出正）。
+    assert buy.summary == "证券买入"
     assert buy.amount_units == -7415_15
     sell = by_line[17]
-    assert sell.side == "sell"
+    assert sell.summary == "证券卖出"
     assert sell.amount_units == 7031_82
 
-    # 全零的「转存管转入/转出」行已隔离，剩余行方向全为已知。
-    assert all(row.side in {"buy", "sell"} for row in bill.rows)
+    # 全零的「转存管转入/转出」行已隔离；剩余行方向由金额符号表达。
     for row in bill.rows:
-        if row.side == "buy":
+        if row.summary == "证券买入":
             assert row.amount_units < 0, row.line_no
-        elif row.side == "sell":
+        elif row.summary == "证券卖出":
             assert row.amount_units > 0, row.line_no
 
 
 def test_fund_redemption_confirmation_not_quarantined() -> None:
-    """基金账单（无「买卖标志」列）：申赎确认按摘要定方向，赎回确认不能被隔离。"""
+    """基金账单（无「买卖标志」列）：申赎确认方向由分类阶段 Category 决定，不被隔离。"""
     bill = _parse(_FUND_BILL.read_bytes(), file_name=_FUND_BILL.name)
     assert len(bill.rows) == 7
     # 零金额的「红利发放」按账单分类正常入账，不再隔离。
@@ -502,14 +508,14 @@ def test_fund_redemption_confirmation_not_quarantined() -> None:
     by_line = {row.line_no: row for row in bill.rows}
     redeem = by_line[17]
     assert redeem.summary == "赎回确认"
-    assert redeem.side == "sell"
+    assert redeem.side == "unknown"
     assert redeem.quantity_units == 116295_3800
     # 「发生金额」原生带符号 → 直接采用，不翻号、不重复扣费。
     assert redeem.amount_units == 116295_38
 
     subscribe = by_line[18]
     assert subscribe.summary == "申购确认"
-    assert subscribe.side == "buy"
+    assert subscribe.side == "unknown"
     assert subscribe.amount_units == -106708_53
 
     # 股东账号在解析入口即脱敏：夹具里账号列为空 → 落库/隔离 raw 均不出现明文。
@@ -536,12 +542,12 @@ def test_statement_stops_at_total_row_before_holdings_sections() -> None:
 
 
 def test_wrapped_summary_newline_normalized_for_side_and_parse() -> None:
-    """摘要被券商折行（[省心投]申\\n购确认 / 新股申购确\\n认缴款）仍能识别方向。"""
+    """摘要被券商折行（[省心投]申\\n购确认 / 新股申购确\\n认缴款）仍能正确解析。"""
     bill = _parse(_STATEMENT_BILL.read_bytes(), file_name=_STATEMENT_BILL.name)
     by_line = {row.line_no: row for row in bill.rows}
     subscribe = by_line[21]
     assert subscribe.summary == "[省心投]申\n购确认"
-    assert subscribe.side == "buy"
+    assert subscribe.side == "unknown"
     # 「[省心投]申购确认」视同银行转出（设计 D14）：CASH 占位、无份额语义；
     # 发生金额（负值流出）与资金余额原样保留，分类走 transfer。
     assert subscribe.security_code == "CASH"
@@ -549,10 +555,10 @@ def test_wrapped_summary_newline_normalized_for_side_and_parse() -> None:
     assert subscribe.price_units == 0
     assert subscribe.amount_units == -10000_00
     assert subscribe.cash_balance_units == 27196_66
-    # 打新缴款摘要同样含「申购确认」，但方向仍是买入（分类由 new_stock 规则兜底）。
+    # 打新缴款摘要同样含「申购确认」，方向由分类 new_stock 规则兜底。
     ipo_payment = by_line[23]
     assert ipo_payment.summary == "新股申购确\n认缴款"
-    assert ipo_payment.side == "buy"
+    assert ipo_payment.side == "unknown"
     assert ipo_payment.amount_units == -26630_00
     # 托管转出发生金额 0 但资金余额非 0 → 保留为 unknown 方向；证券清理全零 → 隔离。
     assert by_line[22].side == "unknown"
@@ -585,7 +591,7 @@ def test_sxt_dividend_enters_ledger_even_with_cash_balance() -> None:
 
 
 def test_plain_fund_subscribe_unaffected_by_sxt_caliber() -> None:
-    """普通基金「申购确认」（无 [省心投] 前缀）不受 D14 影响：仍按买入入流水。"""
+    """普通基金「申购确认」（无 [省心投] 前缀）不受 D14 影响：按证券代码正常入流水。"""
     row = _buy_row(
         证券代码="940018",
         证券名称="华泰紫金天天发货币",
@@ -600,7 +606,7 @@ def test_plain_fund_subscribe_unaffected_by_sxt_caliber() -> None:
     assert len(bill.rows) == 1
     parsed = bill.rows[0]
     assert parsed.security_code == "940018"
-    assert parsed.side == "buy"
+    assert parsed.side == "unknown"
 
 
 def test_blank_code_unknown_summary_quarantined() -> None:
@@ -832,6 +838,7 @@ def _money_row(
 
 def test_non_trade_asset_transfer_without_code_is_cash_row() -> None:
     """无证券代码的「资管转让资金上账」必须按资金行导入，不能 INVALID_ROW 隔离。"""
+    headers = [*_HEADERS, "发生金额"]
     rows = [
         [
             "20261026",
@@ -846,14 +853,15 @@ def test_non_trade_asset_transfer_without_code_is_cash_row() -> None:
             "0.00",
             "180100.05",
             "资管转让资\n金上账",
+            "179999.00",
         ]
     ]
-    bill = _parse(_xlsx(_HEADERS, rows))
+    bill = _parse(_xlsx(headers, rows))
     assert bill.quarantined == []
     assert len(bill.rows) == 1
     row = bill.rows[0]
     assert row.security_code == "CASH"
-    assert row.side == "sell"
+    assert row.side == "unknown"
     assert row.amount_units == 179999_00
     assert row.cash_balance_units == 180100_05
 

@@ -365,8 +365,7 @@ async def create_preview(
         if unknown_rows:
             warnings.append(WarningCode.UNKNOWN_SUMMARY.value)
             assumptions["unknown_summary_rows"] = [
-                {"line_no": row.line_no, "summary": row.summary, "side": row.side}
-                for row in unknown_rows
+                {"line_no": row.line_no, "summary": row.summary} for row in unknown_rows
             ]
         inserted = 0
         skipped = 0
@@ -845,7 +844,7 @@ async def _has_reimport_conflict(
 def _legacy_unknown(row: ParsedRow, rules: list[Any]) -> bool:
     from stock_ledger.application.classify import match_rule
 
-    return match_rule(rules, row.summary, row.side) is None
+    return match_rule(rules, row.summary) is None
 
 
 def _plan_columns(inspection: Any, plan: MappingPlan) -> dict[str, str]:

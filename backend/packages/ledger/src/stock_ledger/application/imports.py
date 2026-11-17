@@ -34,7 +34,12 @@ from stock_ledger.application.chain import (
     apply_multi_chain_plan,
     plan_chain_by_account,
 )
-from stock_ledger.application.classify import load_rules, match_rule, suggest_rule
+from stock_ledger.application.classify import (
+    load_rules,
+    match_rule,
+    side_from_category,
+    suggest_rule,
+)
 from stock_ledger.application.import_analysis import row_type_key
 from stock_ledger.application.preview import default_object_store
 from stock_ledger.models import SummaryRule
@@ -181,7 +186,7 @@ def _unknown_summary_quarantine_rows(
                 "line_no": parsed.line_no,
             },
             "reason_code": QuarantineReason.UNKNOWN_SUMMARY.value,
-            "suggested_rule_id": suggest_rule(rules, parsed.summary, parsed.side),
+            "suggested_rule_id": suggest_rule(rules, parsed.summary),
         }
         for parsed in parsed_rows
     ]
@@ -386,12 +391,13 @@ async def commit_batch(
                 continue
             seen.add(parsed.dedupe_key)
             if legacy:
-                rule = match_rule(rules, parsed.summary, parsed.side)
+                rule = match_rule(rules, parsed.summary)
                 if rule is None:
                     unknown_summary_rows.append(parsed)
                     continue
                 trade_row = _parsed_to_trade_row(parsed, batch.id)
                 trade_row.category = rule.category
+                trade_row.side = side_from_category(rule.category)
                 trade_row.summary_code = rule_summary_code(rule)
                 to_insert.append(trade_row)
                 continue
@@ -413,6 +419,7 @@ async def commit_batch(
                 )
             trade_row = _parsed_to_trade_row(parsed, batch.id)
             trade_row.category = str(category)
+            trade_row.side = side_from_category(str(category))
             rule_id = resolution.get("suggested_rule_id")
             matched_rule = rules_by_id.get(str(rule_id)) if rule_id else None
             trade_row.summary_code = rule_summary_code(matched_rule) if matched_rule else None
@@ -427,8 +434,7 @@ async def commit_batch(
         if unknown_summary_rows:
             warnings.append(WarningCode.UNKNOWN_SUMMARY.value)
             assumptions["unknown_summary_rows"] = [
-                {"line_no": row.line_no, "summary": row.summary, "side": row.side}
-                for row in unknown_summary_rows
+                {"line_no": row.line_no, "summary": row.summary} for row in unknown_summary_rows
             ]
         batch.warnings = warnings
         batch.assumptions = assumptions

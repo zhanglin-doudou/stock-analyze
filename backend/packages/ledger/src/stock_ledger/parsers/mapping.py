@@ -16,7 +16,6 @@ from dataclasses import dataclass
 from dataclasses import field as dataclass_field
 from typing import Any, Final
 
-from stock_contracts.enums import Side
 from stock_contracts.errors import ApiError, ErrorCode, FieldError
 from stock_contracts.import_fields import (
     AMOUNT_OPTION_KEYS,
@@ -230,13 +229,13 @@ def normalize_type_key(summary: str | None) -> str:
     return ascii_lower[:TYPE_KEY_MAX_LEN]
 
 
-def derive_type_key(side: str, amount_units: int, balance_units: int = 0) -> str:
-    """无摘要时按方向 + 金额/余额符号派生类型键（D-13），矛盾时归入 unknown。"""
+def derive_type_key(amount_units: int, balance_units: int = 0) -> str:
+    """无摘要时按金额符号派生类型键（D-13）：负=买入、正=卖出、零=zero。"""
     if amount_units == 0 and balance_units == 0:
         return f"{DERIVED_TYPE_PREFIX}zero"
-    if side == Side.BUY.value and amount_units < 0:
+    if amount_units < 0:
         return f"{DERIVED_TYPE_PREFIX}buy"
-    if side == Side.SELL.value and amount_units > 0:
+    if amount_units > 0:
         return f"{DERIVED_TYPE_PREFIX}sell"
     return f"{DERIVED_TYPE_PREFIX}unknown"
 

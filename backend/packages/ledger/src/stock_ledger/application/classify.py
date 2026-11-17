@@ -13,7 +13,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from stock_contracts.clock import Clock
-from stock_contracts.enums import JobStatus, QuarantineReason
+from stock_contracts.enums import BillCategory, JobStatus, QuarantineReason, Side
 from stock_platform.jobs import JobQueue
 
 from stock_ledger.models import ImportBillType, SummaryRule
@@ -40,9 +40,22 @@ async def load_rules(session: AsyncSession, user_id: uuid.UUID) -> list[SummaryR
     return await SummaryRuleRepository(session).list_enabled(user_id)
 
 
-def _matches(rule: SummaryRule, summary: str, side: str) -> bool:
-    if rule.side != "both" and rule.side != side:
-        return False
+#: Category → 买卖方向：只有 buy/new_stock 是买入、sell 是卖出，其余方向 unknown。
+_CATEGORY_TO_SIDE: dict[str, str] = {
+    BillCategory.BUY.value: Side.BUY.value,
+    BillCategory.NEW_STOCK.value: Side.BUY.value,
+    BillCategory.SELL.value: Side.SELL.value,
+}
+
+
+def side_from_category(category: str | None) -> str:
+    """按业务分类派生买卖方向（buy/new_stock→buy，sell→sell，其余→unknown）。"""
+    if category is None:
+        return Side.UNKNOWN.value
+    return _CATEGORY_TO_SIDE.get(category, Side.UNKNOWN.value)
+
+
+def _matches(rule: SummaryRule, summary: str) -> bool:
     if rule.match_type == "regex":
         # 正则按原文匹配（用户可能显式依赖换行/空格）；其余匹配类型统一去折行。
         try:
@@ -60,12 +73,12 @@ def _matches(rule: SummaryRule, summary: str, side: str) -> bool:
     return False
 
 
-def match_rule(rules: list[SummaryRule], summary: str | None, side: str) -> SummaryRule | None:
-    """按优先级顺序返回首个命中规则（rules 已按 priority 升序）。"""
+def match_rule(rules: list[SummaryRule], summary: str | None) -> SummaryRule | None:
+    """按优先级顺序返回首个命中规则（rules 已按 priority 升序）。方向由 Category 决定，不再按 side 过滤。"""
     if not summary:
         return None
     for rule in rules:
-        if _matches(rule, summary, side):
+        if _matches(rule, summary):
             return rule
     return None
 
@@ -76,11 +89,10 @@ def resolve_type_category(
     known_types: dict[str, ImportBillType],
     rules: list[SummaryRule],
     summary: str | None,
-    side: str,
 ) -> tuple[str | None, str | None, bool]:
     """返回 `(category, summary_code, discarded)`；用户类型记忆优先于摘要规则。"""
     known = known_types.get(normalize_type_key(type_key))
-    rule = match_rule(rules, summary, side)
+    rule = match_rule(rules, summary)
     summary_code = rule_summary_code(rule) if rule is not None else None
     if known is not None:
         if known.discarded:
@@ -91,15 +103,13 @@ def resolve_type_category(
     return None, None, False
 
 
-def suggest_rule(rules: list[SummaryRule], summary: str | None, side: str) -> str | None:
+def suggest_rule(rules: list[SummaryRule], summary: str | None) -> str | None:
     """给未命中摘要推荐一条“最接近”的规则 id（无则 None）。"""
     if not summary:
         return None
     text = normalize_summary(summary)
     best: SummaryRule | None = None
     for rule in rules:
-        if rule.side != "both" and rule.side != side:
-            continue
         if rule.match_type not in ("prefix", "contains"):
             continue
         pattern = normalize_summary(rule.pattern)
@@ -133,7 +143,7 @@ async def reclassify_user(
         trades = [trade for trade in trades if trade.batch_id == batch_id]
     type_keys = {
         trade.id: normalize_type_key(trade.summary)
-        or derive_type_key(trade.side, trade.amount_units, trade.cash_balance_units or 0)
+        or derive_type_key(trade.amount_units, trade.cash_balance_units or 0)
         for trade in trades
     }
     known_types = await ImportBillTypeRepository(session).by_keys(
@@ -153,15 +163,20 @@ async def reclassify_user(
             known_types=known_types,
             rules=rules,
             summary=trade.summary,
-            side=trade.side,
         )
         if discarded:
             # 废弃只影响后续导入；复算不删除、不改写已经存在的历史流水。
             continue
         if category is not None:
-            if trade.category != category or trade.summary_code != summary_code:
+            derived_side = side_from_category(category)
+            if (
+                trade.category != category
+                or trade.summary_code != summary_code
+                or trade.side != derived_side
+            ):
                 trade.category = category
                 trade.summary_code = summary_code
+                trade.side = derived_side
                 updated += 1
         elif trade.id not in already_flagged:
             await quarantine_repo.add(
@@ -169,7 +184,7 @@ async def reclassify_user(
                 reason_code=QuarantineReason.UNKNOWN_SUMMARY.value,
                 raw={"trade_id": trade.id, "summary": trade.summary},
                 batch_id=trade.batch_id,
-                suggested_rule_id=suggest_rule(rules, trade.summary, trade.side),
+                suggested_rule_id=suggest_rule(rules, trade.summary),
             )
             already_flagged.add(trade.id)
             quarantined += 1

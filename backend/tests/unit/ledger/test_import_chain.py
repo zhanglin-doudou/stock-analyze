@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from datetime import date
 
+import pytest
 from stock_contracts.enums import QuarantineReason
-from stock_contracts.errors import ErrorCode
+from stock_contracts.errors import ApiError, ErrorCode
 from stock_ledger.application.chain import (
     ChainMode,
     ChainPlan,
@@ -101,7 +102,7 @@ def test_walk_chain_unknown_side_is_verified_but_not_anchored() -> None:
 
 
 def test_walk_chain_unknown_balance_cannot_absorb_gap() -> None:
-    # 方向未知行的余额「凭空少了 5,000」也不能当锚点：缺口留到下一条可核对行暴露。
+    # 方向不再影响链核对：任一带余额的行都参与核对，缺口当场暴露（不再递延到下一行）。
     rows = [
         _row(1, -100, 9_900),
         _row(2, -500, 4_900, side="unknown"),
@@ -109,11 +110,10 @@ def test_walk_chain_unknown_balance_cannot_absorb_gap() -> None:
     ]
     walk = walk_chain(rows, start_balance_units=10_000, epsilon_units=0)
 
-    assert [row.line_no for row in walk.accepted] == [1, 2]
-    assert [item.line_no for item in walk.quarantined] == [3]
-    # 期望 = 9,900 − 500 + 0 = 9,400；实际 4,900 → 差额 −45.00
+    assert [row.line_no for row in walk.accepted] == [1]
+    assert [item.line_no for item in walk.quarantined] == [2, 3]
+    # 期望 = 9,900 − 500 = 9,400；实际 4,900 → 差额 −45.00
     assert walk.quarantined[0].raw["_chain_delta"] == "-45.00"
-    # 差额是相对「通过核对的行」算的，提示不能指向未定锚的 unknown 行（第 2 行）。
     assert walk.quarantined[0].raw["_chain_counterpart"] == "第 1 行"
 
 
@@ -192,3 +192,39 @@ def test_chain_discontinuous_error_carries_line_and_delta() -> None:
     assert error.code == ErrorCode.IMPORT_CHAIN_DISCONTINUOUS
     assert error.errors[0].field == "7"
     assert "-123.45" in error.errors[0].message
+
+
+def test_append_seam_break_raises_instead_of_silent_quarantine() -> None:
+    """增量追加接缝接不上：必须报断链，而不是把整份文件隔离成 0 行“成功”。"""
+    from types import SimpleNamespace
+
+    from stock_ledger.application.chain import _verify_append_seam
+
+    previous = SimpleNamespace(trade_date=date(2023, 7, 18), cash_balance_units=48_535)
+    rows = [_row(2, 78_484, 127_024, day=date(2024, 7, 24))]
+    walk = walk_chain(rows, start_balance_units=48_535, epsilon_units=0)
+    assert [item.line_no for item in walk.quarantined] == [2]
+
+    with pytest.raises(ApiError) as excinfo:
+        _verify_append_seam(walk, previous=previous, rows=rows)
+    assert excinfo.value.code == ErrorCode.IMPORT_CHAIN_DISCONTINUOUS
+    assert "2023-07-18" in excinfo.value.detail
+    assert "2024-07-24" in excinfo.value.detail
+
+
+def test_append_seam_internal_break_stays_quarantine_only() -> None:
+    """断点在文件内部（已有行通过核对）时保持既有语义：只隔离，不整批报错。"""
+    from types import SimpleNamespace
+
+    from stock_ledger.application.chain import _verify_append_seam
+
+    previous = SimpleNamespace(trade_date=date(2023, 7, 18), cash_balance_units=48_535)
+    rows = [
+        _row(1, 78_484, 127_019, day=date(2024, 7, 24)),
+        _row(2, 100, 1_000, day=date(2024, 7, 25)),  # 期望 127_119
+    ]
+    walk = walk_chain(rows, start_balance_units=48_535, epsilon_units=0)
+    assert [row.line_no for row in walk.accepted] == [1]
+    assert [item.line_no for item in walk.quarantined] == [2]
+
+    _verify_append_seam(walk, previous=previous, rows=rows)  # 不应抛错

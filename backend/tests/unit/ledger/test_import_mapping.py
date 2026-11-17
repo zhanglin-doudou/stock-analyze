@@ -114,11 +114,11 @@ def test_fee_merge_is_int_domain() -> None:
 
 
 def test_derive_type_key_never_guesses() -> None:
-    assert derive_type_key("buy", -100) == "derived:buy"
-    assert derive_type_key("sell", 100) == "derived:sell"
-    assert derive_type_key("buy", 100) == "derived:unknown"
-    assert derive_type_key("unknown", 0) == "derived:zero"
-    assert derive_type_key("buy", 0, 500) == "derived:unknown"
+    assert derive_type_key(-100) == "derived:buy"
+    assert derive_type_key(100) == "derived:sell"
+    assert derive_type_key(100) == "derived:sell"
+    assert derive_type_key(0) == "derived:zero"
+    assert derive_type_key(0, 500) == "derived:unknown"
 
 
 def test_suggest_items_maps_huatai_headers_and_signed_amount() -> None:
@@ -256,7 +256,8 @@ def test_other_fee_multi_column_is_summed_in_plan() -> None:
     bill = parse_bill_with_plan(data, "bill.xlsx", plan=plan, date_format=None, clock=CLOCK)
     row = bill.rows[0]
     assert row.other_fee_units == 150
-    assert row.amount_units == -(1000_00 + 150)
+    # 无买卖标志列时，毛额无法确定符号 → amount=0（方向由后续 Category 决定）。
+    assert row.amount_units == 0
     assert WarningCode.MISSING_CASH_BALANCE in bill.warnings
 
 
@@ -561,7 +562,7 @@ def test_resolve_type_category_prefers_memory_then_rule() -> None:
     )
     known = SimpleNamespace(category="dividend", discarded=False)
     assert resolve_type_category(
-        " 证券 买入 ", known_types={"证券买入": known}, rules=[rule], summary="证券买入", side="buy"
+        " 证券 买入 ", known_types={"证券买入": known}, rules=[rule], summary="证券买入"
     ) == ("dividend", "sys_test", False)
 
     discarded = SimpleNamespace(category=None, discarded=True)
@@ -570,14 +571,17 @@ def test_resolve_type_category_prefers_memory_then_rule() -> None:
         known_types={"证券买入": discarded},
         rules=[rule],
         summary="证券买入",
-        side="buy",
     ) == (None, None, True)
-    assert resolve_type_category(
-        "证券买入", known_types={}, rules=[rule], summary="证券买入", side="buy"
-    ) == ("transfer", "sys_test", False)
-    assert resolve_type_category(
-        "其他", known_types={}, rules=[rule], summary="其他", side="unknown"
-    ) == (None, None, False)
+    assert resolve_type_category("证券买入", known_types={}, rules=[rule], summary="证券买入") == (
+        "transfer",
+        "sys_test",
+        False,
+    )
+    assert resolve_type_category("其他", known_types={}, rules=[rule], summary="其他") == (
+        None,
+        None,
+        False,
+    )
 
 
 def _two_fee_csv(*, fee_a: str = "1.00", second_balance: str = "10098.00") -> bytes:

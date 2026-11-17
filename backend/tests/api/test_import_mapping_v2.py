@@ -338,9 +338,9 @@ async def test_api_098_duplicate_fee_headers_map_independently(client, api_prefi
 async def test_api_010_shareholder_codes_are_not_accounts(client, api_prefix, user) -> None:
     """沪/深股东代码不再是资金账号：不得据此判定多账户、不得挡单。"""
     data = (
-        "成交日期,证券代码,成交数量,成交价格,成交金额,其他费,过户费,资金余额,股东代码,摘要\n"
-        "2026-04-01,600001,100,10.00,1000.00,1.00,0.50,8998.50,A,证券买入\n"
-        "2026-04-02,600001,100,11.00,1100.00,0.25,0.25,10098.00,B,证券卖出\n"
+        "成交日期,证券代码,买卖标志,成交数量,成交价格,成交金额,其他费,过户费,资金余额,股东代码,摘要\n"
+        "2026-04-01,600001,买入,100,10.00,1000.00,1.00,0.50,8998.50,A,证券买入\n"
+        "2026-04-02,600001,卖出,100,11.00,1100.00,0.25,0.25,10098.00,B,证券卖出\n"
     ).encode()
     preview = await _preview(client, api_prefix, user, data=data, filename="accounts.csv")
     assert preview["blocking"] == []

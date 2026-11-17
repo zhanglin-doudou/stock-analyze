@@ -187,7 +187,9 @@ async def test_real_bill_all_rows_classified_and_zero_unknown(
     )
     body = reco.json()
     assert body["status"] == "ok", body["breaks"][:3]
-    assert body["checked_rows"] == 174
+    # 非交易类（transfer/dividend/interest/fee）方向为 unknown，reconcile 不将其计入
+    # checked_rows（金额并入 pending 由下一条交易行整体核对）；仅 buy/sell 行被核对。
+    assert body["checked_rows"] == 145
     assert body["break_count"] == 0
     assert body["filled_count"] == 0
 
@@ -300,11 +302,11 @@ async def test_real_statement_excerpt_quarantine_only_zero_amount(
     assert len(trades) == 6
     assert all(item["category"] for item in trades)
     by_summary = {item["summary"]: item for item in trades}
-    # [省心投]申购确认视同银行转出（设计 D14）：category=transfer，CASH 占位、方向 buy。
+    # [省心投]申购确认视同银行转出（设计 D14）：category=transfer，CASH 占位、方向由 Category 派生（transfer→unknown）。
     assert by_summary["[省心投]申\n购确认"]["category"] == "transfer"
     assert by_summary["[省心投]申\n购确认"]["security_code"] == "CASH"
     assert by_summary["新股申购确\n认缴款"]["category"] == "new_stock"
-    assert by_summary["[省心投]申\n购确认"]["side"] == "buy"
+    assert by_summary["[省心投]申\n购确认"]["side"] == "unknown"
     # 券商登记动作（托管转出/新股入帐/证券清理…）归 broker_action：不影响持仓与成本（资产口径 1.9）。
     assert by_summary["托管转出"]["category"] == "broker_action"
     assert by_summary["新股入帐"]["category"] == "broker_action"
@@ -334,7 +336,7 @@ async def test_unknown_summary_preview_equals_commit_quarantine(
     }
     assert "UNKNOWN_SUMMARY" in {warning["code"] for warning in preview["warnings"]}
     assert preview["assumptions"]["unknown_summary_rows"] == [
-        {"line_no": 3, "summary": "未知业务XYZ", "side": "buy"}
+        {"line_no": 3, "summary": "未知业务XYZ"}
     ]
 
     accepted = await _commit(client, api_prefix, user, preview["preview_id"])
@@ -350,7 +352,7 @@ async def test_unknown_summary_preview_equals_commit_quarantine(
     }
     assert "UNKNOWN_SUMMARY" in batch["warnings"]
     assert batch["assumptions"]["unknown_summary_rows"] == [
-        {"line_no": 3, "summary": "未知业务XYZ", "side": "buy"}
+        {"line_no": 3, "summary": "未知业务XYZ"}
     ]
 
     trades = await _trades(client, api_prefix, user)

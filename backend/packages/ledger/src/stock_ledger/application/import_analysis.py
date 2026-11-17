@@ -97,14 +97,8 @@ def completeness_issues(plan: MappingPlan) -> list[dict[str, Any]]:
                         "message": f"纯资金流水必须映射{field_label(name)}",
                     }
                 )
-    if "summary" not in fields and "side" not in fields:
-        issues.append(
-            {
-                "field": "summary",
-                "code": ErrorCode.IMPORT_CLASSIFICATION_SOURCE_MISSING.value,
-                "message": "摘要与买卖标志至少映射一个，才能确定业务分类",
-            }
-        )
+    # 注意：交易账单若缺摘要列，方向由 Category 派生、类型键按金额符号派生
+    # （derived:buy/sell/zero），用户在类型步骤整步确认即可，故不阻断。
     return issues
 
 
@@ -124,7 +118,6 @@ class TypeGroup:
     raw_samples: list[str] = field(default_factory=list)
     row_count: int = 0
     amount_units: int = 0
-    side: str = "unknown"
     suggested_category: str | None = None
     suggested_rule_id: str | None = None
     source: str = "none"
@@ -156,7 +149,7 @@ def row_type_key(row: ParsedRow) -> tuple[str, str]:
     if key:
         return key, row.summary or key
     balance = row.cash_balance_units or 0
-    derived = derive_type_key(row.side, row.amount_units, balance)
+    derived = derive_type_key(row.amount_units, balance)
     return derived, DERIVED_LABELS.get(derived, derived)
 
 
@@ -178,8 +171,6 @@ def aggregate_types(
         group.amount_units += row.amount_units
         if row.summary and row.summary not in group.raw_samples:
             group.raw_samples.append(row.summary)
-        if group.side == "unknown" and row.side in {"buy", "sell"}:
-            group.side = row.side
 
     for key, group in groups.items():
         known = known_types.get(key)
@@ -208,7 +199,7 @@ def _match_summary_rule(rules: list[SummaryRule], group: TypeGroup) -> SummaryRu
     from stock_ledger.application.classify import match_rule
 
     for sample in group.raw_samples or [group.type_label]:
-        matched = match_rule(rules, sample, group.side)
+        matched = match_rule(rules, sample)
         if matched is not None:
             return matched
     return None
@@ -421,10 +412,6 @@ def verify_fee_merge(
         for current in ordered[1:]:
             previous = anchor
             if previous.cash_balance_units is None or current.cash_balance_units is None:
-                skipped += 1
-                anchor = current
-                continue
-            if current.side == Side.UNKNOWN.value:
                 skipped += 1
                 anchor = current
                 continue

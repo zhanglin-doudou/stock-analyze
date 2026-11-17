@@ -154,6 +154,53 @@ async def test_sub_accounts_reconcile_independently_and_merge(
     assert quarantine == []
 
 
+async def test_append_seam_gap_raises_chain_discontinuous(
+    client: AsyncClient, api_prefix: str, user: Any, settings: Any
+) -> None:
+    """增量追加接不起库内最后一条账单 → 422 断链，而不是静默隔离成 0 行“成功”。"""
+    first = await _preview(client, api_prefix, user, _SINGLE_BILL)
+    await _commit_and_drain(
+        client, api_prefix, user, await _to_ready(client, api_prefix, user, first), settings
+    )
+
+    # 首日期 2026-06-01 晚于库末 2026-04-02 → append；期初应为 10,100，实为 10,100.05。
+    gap_bill = (
+        "成交日期,证券代码,证券名称,买卖标志,成交数量,成交价格,成交金额,"
+        "佣金,印花税,其他费,资金余额,摘要\n"
+        "2026-06-01,600001,测试,买入,100,10.00,1000.00,0,0,0,9100.05,证券买入\n"
+    ).encode()
+    resp = await client.post(
+        f"{api_prefix}/imports/preview",
+        headers={**user.headers, **V2},
+        files={"file": ("gap.csv", gap_bill, "text/csv")},
+    )
+    assert resp.status_code == 422, resp.text
+    body = resp.json()
+    assert body["code"] == "IMPORT_CHAIN_DISCONTINUOUS"
+    assert "2026-04-02" in body["detail"]
+    assert "2026-06-01" in body["detail"]
+
+
+async def test_append_seam_closes_when_previous_period_imported(
+    client: AsyncClient, api_prefix: str, user: Any, settings: Any
+) -> None:
+    """补齐中间区间后，接缝闭合，后续账单正常按 append 接受。"""
+    first = await _preview(client, api_prefix, user, _SINGLE_BILL)
+    await _commit_and_drain(
+        client, api_prefix, user, await _to_ready(client, api_prefix, user, first), settings
+    )
+
+    # 期初 10,100 → 买入 1,000 → 余额 9,100，接缝闭合。
+    contiguous = (
+        "成交日期,证券代码,证券名称,买卖标志,成交数量,成交价格,成交金额,"
+        "佣金,印花税,其他费,资金余额,摘要\n"
+        "2026-06-01,600001,测试,买入,100,10.00,1000.00,0,0,0,9100.00,证券买入\n"
+    ).encode()
+    preview = await _preview(client, api_prefix, user, contiguous)
+    assert preview["assumptions"]["coverage"]["mode"] == "append"
+    assert preview["estimated"]["quarantined"] == 0
+
+
 async def test_bill_without_account_column_defaults_to_single_account(
     client: AsyncClient, api_prefix: str, user: Any
 ) -> None:

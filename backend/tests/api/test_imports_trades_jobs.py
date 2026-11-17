@@ -388,8 +388,9 @@ async def test_api_010_preview_real_bill_resolves_side_from_summary(
         "estimated_available": True,
     }
     assert body["sample"]
-    # 非交易行按资金流向分配 side（sell=流入，buy=流出），交易行正常买卖。
-    assert all(sample["side"] in {"buy", "sell"} for sample in body["sample"])
+    # 无「买卖标志」列：解析阶段 side 统一为 unknown，方向在提交时由 Category 派生
+    # （buy/new_stock→buy，sell→sell，其余→unknown）。
+    assert all(sample["side"] == "unknown" for sample in body["sample"])
     # 预览的 columns 里也不能回显明文账号。
     account_detail = next((c for c in body["columns"] if c["name"] == "股东账号"), None)
     assert account_detail is not None
@@ -450,7 +451,8 @@ async def test_api_011_commit_real_bill_worker_end_to_end(
         await client.get(f"{api_prefix}/imports/{batch_id}/quarantine", headers=user.headers)
     ).json()["items"]
     assert {item["reason_code"] for item in quarantine} == {"INVALID_AMOUNT"}
-    assert {item["side"] for item in items} <= {"buy", "sell"}
+    # 方向由 Category 派生：buy/new_stock→buy、sell→sell，其余（transfer/dividend/interest/fee）→unknown。
+    assert {item["side"] for item in items} <= {"buy", "sell", "unknown"}
     # 股东账号不是资金账号：不落 account_masked（明细里不应出现明文或摘要）。
     assert all(item["account_masked"] is None for item in items)
 
@@ -1262,7 +1264,9 @@ async def test_api_026_real_bill_reconciles_with_zero_breaks(
     """P0-1 回归：真实账单（「发生金额」带符号净额）导入后余额链必须 0 断链。
 
     177 行中 2 行五金额全 0（转存管转入/转出）→ INVALID_AMOUNT 隔离，剩 175 行；
-    175 行产生 174 次相邻转移，全方向已知 → checked_rows = 174，break_count = 0。
+    方向由 Category 派生：buy/new_stock→buy、sell→sell，其余 30 行（transfer/dividend/interest/fee）
+    → unknown，reconcile 不计入 checked_rows（金额并入 pending 由下一条交易行整体核对）；
+    故 checked_rows = 145（83 buy + 62 sell），break_count = 0。
     旧实现按 side 反号并再扣费用（真实账单已含费用），实测 156/175 假断链。
     """
     preview = await client.post(
@@ -1287,7 +1291,7 @@ async def test_api_026_real_bill_reconciles_with_zero_breaks(
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["status"] == "ok", body["breaks"][:3]
-    assert body["checked_rows"] == 174
+    assert body["checked_rows"] == 145
     assert body["break_count"] == 0
     assert body["filled_count"] == 0
 

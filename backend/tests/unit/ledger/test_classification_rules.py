@@ -14,8 +14,7 @@ from stock_contracts.clock import FrozenClock
 from stock_ledger.application.classify import match_rule
 from stock_ledger.models import SummaryRule
 from stock_ledger.parsers.columns import (
-    FUND_SUMMARY_SIDE,
-    NON_TRADE_SUMMARY_SIDE,
+    NON_TRADE_SUMMARY_KEYWORDS,
     TRANSFER_SUMMARY_KEYWORDS,
 )
 from stock_ledger.parsers.huatai import parse_bill
@@ -67,7 +66,7 @@ def _rules() -> list[SummaryRule]:
     ],
 )
 def test_real_bill_summaries_all_match(summary: str, side: str, category: str, code: str) -> None:
-    rule = match_rule(_rules(), summary, side)
+    rule = match_rule(_rules(), summary)
     assert rule is not None, summary
     assert rule.category == category
     assert rule.code == code
@@ -83,7 +82,7 @@ def test_real_bill_summaries_all_match(summary: str, side: str, category: str, c
     ],
 )
 def test_fund_summaries_all_match(summary: str, side: str, category: str, code: str) -> None:
-    rule = match_rule(_rules(), summary, side)
+    rule = match_rule(_rules(), summary)
     assert rule is not None, summary
     assert rule.category == category
     assert rule.code == code
@@ -93,24 +92,26 @@ def test_fund_rules_beat_generic_rules_without_swallowing_others() -> None:
     rules = _rules()
     # 「申购确认」必须命中基金买入：单字「申购」→new_stock 的规则(16)晚于基金(15)，
     # 避免把基金申购确认抢成打新。
-    buy_confirm = match_rule(rules, "申购确认", "buy")
+    buy_confirm = match_rule(rules, "申购确认")
     assert buy_confirm is not None and buy_confirm.code == "sys_fund_buy"
     # 新股申购（无「确认」）仍归打新建仓，不被基金规则抢走。
-    new_apply = match_rule(rules, "新股申购", "buy")
+    new_apply = match_rule(rules, "新股申购")
     assert new_apply is not None and new_apply.code == "sys_new_stock"
     # 只认「赎回确认」形态：赎回费属于费用，不能被赎回规则误吞。
-    redeem_fee = match_rule(rules, "赎回费", "buy")
+    redeem_fee = match_rule(rules, "赎回费")
     assert redeem_fee is not None and redeem_fee.code == "sys_fee"
 
 
 def test_fund_rules_reuse_parser_vocabulary() -> None:
-    """G3：解析器能识别方向的基金申赎摘要，分类规则必须同样命中（防词汇漂移）。"""
+    """G3：基金申赎确认摘要，分类规则必须命中（防词汇漂移）。方向由 Category 决定。"""
     rules = _rules()
-    for keyword, side in FUND_SUMMARY_SIDE:
-        rule = match_rule(rules, keyword, side)
+    # 申购确认 → buy，赎回确认 → sell
+    fund_keywords = (("申购确认", "buy"), ("赎回确认", "sell"))
+    for keyword, category in fund_keywords:
+        rule = match_rule(rules, keyword)
         assert rule is not None, keyword
         assert rule.pattern == keyword
-        assert rule.category == side
+        assert rule.category == category
 
 
 @pytest.mark.parametrize(
@@ -133,7 +134,7 @@ def test_fund_rules_reuse_parser_vocabulary() -> None:
 def test_wrapped_real_statement_summaries_all_match(
     summary: str, side: str, category: str, code: str
 ) -> None:
-    rule = match_rule(_rules(), summary, side)
+    rule = match_rule(_rules(), summary)
     assert rule is not None, summary
     assert rule.category == category
     assert rule.code == code
@@ -142,9 +143,9 @@ def test_wrapped_real_statement_summaries_all_match(
 def test_new_stock_rule_beats_fund_buy_rule_for_ipo_payment() -> None:
     """「新股申购确认缴款」含「申购确认」子串，新股建仓规则(14)必须早于货基(15)。"""
     rules = _rules()
-    rule = match_rule(rules, "新股申购确认缴款", "buy")
+    rule = match_rule(rules, "新股申购确认缴款")
     assert rule is not None and rule.code == "sys_new_stock"
-    fund = match_rule(rules, "申购确认", "buy")
+    fund = match_rule(rules, "申购确认")
     assert fund is not None and fund.code == "sys_fund_buy"
 
 
@@ -178,7 +179,7 @@ def test_new_stock_rule_beats_fund_buy_rule_for_ipo_payment() -> None:
 def test_new_stock_narrowed_to_winning_lots(
     summary: str, side: str, category: str, code: str
 ) -> None:
-    rule = match_rule(_rules(), summary, side)
+    rule = match_rule(_rules(), summary)
     assert rule is not None, summary
     assert rule.category == category
     assert rule.code == code
@@ -197,15 +198,15 @@ def test_new_stock_narrowed_to_winning_lots(
     ],
 )
 def test_synthetic_fixture_summaries_match(summary: str, side: str, category: str) -> None:
-    rule = match_rule(_rules(), summary, side)
+    rule = match_rule(_rules(), summary)
     assert rule is not None, summary
     assert rule.category == category
 
 
 def test_unknown_summary_does_not_match() -> None:
-    assert match_rule(_rules(), "未知业务XYZ", "buy") is None
-    assert match_rule(_rules(), None, "buy") is None
-    assert match_rule(_rules(), "", "buy") is None
+    assert match_rule(_rules(), "未知业务XYZ") is None
+    assert match_rule(_rules(), None) is None
+    assert match_rule(_rules(), "") is None
 
 
 def test_fee_rule_is_lowest_priority_and_does_not_swallow_other_summaries() -> None:
@@ -213,12 +214,12 @@ def test_fee_rule_is_lowest_priority_and_does_not_swallow_other_summaries() -> N
     fee_rule = next(rule for rule in rules if rule.code == "sys_fee")
     assert fee_rule.priority == max(rule.priority for rule in rules)
     # 语义明确的摘要不会被 contains「费」的宽泛规则吃掉。
-    div_tax = match_rule(rules, "股息红利税\n补缴", "buy")
+    div_tax = match_rule(rules, "股息红利税\n补缴")
     assert div_tax is not None and div_tax.code == "sys_div_tax"
-    transfer = match_rule(rules, "银行转存手续费", "sell")
+    transfer = match_rule(rules, "银行转存手续费")
     assert transfer is not None and transfer.code == "sys_transfer_in"
     # 只有「费」类摘要才落到 sys_fee。
-    fee = match_rule(rules, "佣金及其他费用", "both")
+    fee = match_rule(rules, "佣金及其他费用")
     assert fee is not None and fee.code == "sys_fee"
 
 
@@ -237,7 +238,7 @@ def test_transfer_rules_reuse_parser_vocabulary() -> None:
     # 是后补的独立业务类型，不在共享词表内，这里按词表过滤后再比对。
     transfer_rules = [rule for rule in _rules() if rule.pattern in TRANSFER_SUMMARY_KEYWORDS]
     assert [rule.pattern for rule in transfer_rules] == list(TRANSFER_SUMMARY_KEYWORDS)
-    parser_keywords = {keyword for keyword, _ in NON_TRADE_SUMMARY_SIDE}
+    parser_keywords = set(NON_TRADE_SUMMARY_KEYWORDS)
     shared = parser_keywords & set(TRANSFER_SUMMARY_KEYWORDS)
     assert shared == {
         "银行转存",
@@ -260,7 +261,7 @@ def test_synthetic_fixture_rows_classified_except_intentional_unknown() -> None:
         date_format=None,
         clock=FrozenClock(datetime(2026, 7, 1, 9, 0, tzinfo=UTC)),
     )
-    unknown = [row for row in bill.rows if match_rule(_rules(), row.summary, row.side) is None]
+    unknown = [row for row in bill.rows if match_rule(_rules(), row.summary) is None]
     # G4 若调整生成器/夹具内容，只要求「未命中的都是有意保留的未知摘要演示行」。
     assert all(row.summary == "未知业务XYZ" for row in unknown)
 
@@ -281,7 +282,7 @@ def test_fund_fixture_parse_and_classify_zero_quarantine() -> None:
     rules = _rules()
     categories: dict[str, set[str]] = {}
     for row in bill.rows:
-        rule = match_rule(rules, row.summary, row.side)
+        rule = match_rule(rules, row.summary)
         assert rule is not None, row.summary
         categories.setdefault(row.summary or "", set()).add(rule.category)
     assert categories == {
@@ -313,7 +314,7 @@ def test_real_statement_excerpt_parse_and_classify() -> None:
     rules = _rules()
     categories: dict[str, set[str]] = {}
     for row in bill.rows:
-        rule = match_rule(rules, row.summary, row.side)
+        rule = match_rule(rules, row.summary)
         assert rule is not None, row.summary
         categories.setdefault(row.summary or "", set()).add(rule.category)
     assert categories == {

@@ -25,8 +25,8 @@
 边界口径：
 - 同一日期中排在锚点之前的文件行直接跳过（已在库中，不重复导入）；
 - 本行无资金余额 → 无法核对，接受、金额计入待核对合计但不推进锚点（与 reconcile 一致）；
-- 方向 `unknown` 的行不做单独核对，金额计入待核对合计，余额不作下一行锚点；
 - 向前补历史接不上 → `IMPORT_CHAIN_DISCONTINUOUS`（整批回滚，报断行行号与差额）；
+- 增量追加的接缝接不上 → 同上（说明中间区间账单缺失/被撤销，不能静默隔离成 0 行）；
 - 覆盖区段与库内前后剩余账单的接缝不闭合 → 同上（覆盖本身不再是拒绝理由）。
 """
 
@@ -41,7 +41,7 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from stock_contracts.constants import EPS_AMT
-from stock_contracts.enums import QuarantineReason, Side
+from stock_contracts.enums import QuarantineReason
 from stock_contracts.errors import ApiError, ErrorCode, FieldError
 from stock_core.values import Money
 
@@ -276,12 +276,6 @@ def walk_chain(
             anchor_row = row
             pending_units = 0
             continue
-        if row.side == Side.UNKNOWN.value:
-            # 方向未知的行不单独定锚：接受、金额并入待核对合计，余额不作下一行基准。
-            walk.accepted.append(row)
-            walk.last_row = row
-            pending_units += row.amount_units
-            continue
         expected = walk.last_balance_units + pending_units + row.amount_units
         delta = balance - expected
         if abs(delta) <= epsilon_units:
@@ -399,6 +393,53 @@ def _verify_backfill(walk: ChainWalk, db_first: Trade, *, epsilon_units: int) ->
                 f"上一行余额 + 本行金额与库内首条账单余额相差 {Money(delta)}"
             ),
         )
+
+
+def _verify_append_seam(
+    walk: ChainWalk,
+    *,
+    previous: Trade,
+    rows: list[ParsedRow],
+) -> None:
+    """增量追加：文件首条可核对行必须与库内最后一条账单闭合。
+
+    接不上说明库内与本文件之间存在缺口（中间区间账单未导入，或该区间的批次被撤销），
+    此时 `walk_chain` 会把整份文件从第一行隔离到链尾，预览变成 0 行、类型步骤为空，
+    提交还会“成功写入 0 行”。因此这里必须显式报断链，让用户先补导缺失区间。
+
+    仅处理**接缝**断点：`_chain_counterpart == "起始锚点"` 表示第一条可核对行就对不上
+    库内锚点；若断点在文件内部（已有多行通过核对），保持“断行起隔离到链尾”的既有语义。
+    """
+    if not walk.quarantined:
+        return
+    first_break = walk.quarantined[0]
+    if first_break.raw.get("_chain_counterpart") != "起始锚点":
+        return
+    delta = int(first_break.raw.get("_chain_delta_units") or 0)
+    expected = int(first_break.raw.get("_chain_expected_units") or 0)
+    actual = int(first_break.raw.get("_chain_actual_units") or 0)
+    db_balance = (
+        str(Money(int(previous.cash_balance_units)))
+        if previous.cash_balance_units is not None
+        else "未知"
+    )
+    file_from = min(row.trade_date for row in rows) if rows else previous.trade_date
+    gap_hint = (
+        f"{previous.trade_date.isoformat()}（库内最后一条）与 "
+        f"{file_from.isoformat()}（本文件首日）之间"
+    )
+    raise _discontinuous(
+        line_no=first_break.line_no,
+        delta_units=delta,
+        counterpart=f"库内最后一条账单（{previous.trade_date.isoformat()}）",
+        detail=(
+            f"本文件第 {first_break.line_no} 行接不上库内最后一条账单"
+            f"（{previous.trade_date.isoformat()}，余额 {db_balance}）："
+            f"按库内余额推算应为 {Money(expected)}，账单实际为 {Money(actual)}，"
+            f"相差 {Money(delta)}。{gap_hint}的账单可能尚未导入（或被撤销），"
+            "请先补导该区间后再导入本文件。"
+        ),
+    )
 
 
 def _verify_seam(
@@ -526,6 +567,7 @@ async def plan_chain(
             epsilon_units=epsilon_units,
             skip_before=anchor,
         )
+        _verify_append_seam(walk, previous=last, rows=rows)
         return ChainPlan(
             mode=ChainMode.APPEND,
             accepted=walk.accepted,
@@ -583,6 +625,7 @@ async def plan_chain(
             epsilon_units=epsilon_units,
             skip_before=anchor,
         )
+        _verify_append_seam(walk, previous=last, rows=rows)
         return ChainPlan(
             mode=ChainMode.APPEND,
             accepted=walk.accepted,
