@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from pathlib import Path
 
 import pytest
@@ -17,7 +17,7 @@ from stock_ledger.parsers.columns import (
     NON_TRADE_SUMMARY_KEYWORDS,
     TRANSFER_SUMMARY_KEYWORDS,
 )
-from stock_ledger.parsers.huatai import parse_bill
+from stock_ledger.parsers.huatai import ParsedRow, parse_bill
 from stock_ledger.repositories.rules import (
     SUMMARY_CODE_MAX_LENGTH,
     SYSTEM_RULES,
@@ -428,3 +428,133 @@ def test_side_from_degraded_category_is_unknown() -> None:
 
     assert side_from_category("broker_action") == "unknown"
     assert side_from_category("new_stock") == "buy"
+
+
+# ── preview 建议层（aggregate_types）也必须走零金额降级 ─────────────────────
+# 上一轮只修了单行粒度的 legacy commit / 复算 / 隔离行回填，漏了 preview 的
+# aggregate_types，导致用户在 types 步骤看到的 suggested_category 还是 new_stock。
+# 这里把 preview 层面的三种分支都覆盖掉——规则命中、已知类型记忆、真扣款保留。
+
+
+def _fake_row(summary: str, amount_units: int) -> ParsedRow:
+    """构造最小可用的 ParsedRow（dedupe_key 用摘要+金额，其他字段填 0/空）。"""
+    return ParsedRow(
+        line_no=1,
+        trade_date=date(2026, 11, 10),
+        security_code="600001",
+        security_name="测试",
+        side="unknown",
+        quantity_units=0,
+        price_units=0,
+        amount_units=amount_units,
+        commission_units=0,
+        stamp_tax_units=0,
+        other_fee_units=0,
+        cash_balance_units=None,
+        cash_balance_available=False,
+        summary=summary,
+        summary_code=None,
+        account_masked=None,
+        occurrence_idx=0,
+        dedupe_key=f"{summary}|{amount_units}",
+        raw={},
+    )
+
+
+def test_aggregate_types_zero_amount_new_stock_degrades_preview_suggestion() -> None:
+    """preview types 步骤：摘要含'新股'但 group 全零金额 → suggested_category 应为 broker_action。
+
+    这是用户实际观测到的漏网点：之前只在 legacy commit / 复算 / 隔离行回填三条单行粒度
+    路径加了 fallback，漏掉了 preview 层面的 aggregate_types——用户在 types 步骤看到的
+    suggested_category 还是 new_stock，但实际提交时 legacy 路径又会降级。
+    """
+
+    from stock_ledger.application.import_analysis import aggregate_types
+    from stock_ledger.parsers.huatai import ParsedBill
+
+    bill = ParsedBill(
+        rows=[
+            _fake_row("中签登记新股001", 0),
+            _fake_row("中签登记新股001", 0),
+        ]
+    )
+    groups = aggregate_types(bill, known_types={}, rules=_rules())
+    assert len(groups) == 1
+    group = next(iter(groups.values()))
+    # 规则 sys_new_stock 命中（priority 14，contains "新股"），但 group.amount_units==0 降级
+    assert group.source == "summary_rule"
+    assert group.suggested_category == "broker_action"
+    assert group.category == "broker_action"
+    assert group.suggested_rule_id is not None  # 短码仍保留，方便追溯原始规则
+    # group.amount_units 是两行 0 累加 → 0
+    assert group.amount_units == 0
+
+
+def test_aggregate_types_nonzero_amount_keeps_new_stock_suggestion() -> None:
+    """preview types 步骤：摘要含'新股'且真扣款 → suggested_category 应为 new_stock。"""
+
+    from stock_ledger.application.import_analysis import aggregate_types
+    from stock_ledger.parsers.huatai import ParsedBill
+
+    bill = ParsedBill(
+        rows=[
+            # -500000 units = -5000.00 元（Money scale 2）
+            _fake_row("新股申购缴款确认", -500000),
+        ]
+    )
+    groups = aggregate_types(bill, known_types={}, rules=_rules())
+    assert len(groups) == 1
+    group = next(iter(groups.values()))
+    assert group.source == "summary_rule"
+    assert group.suggested_category == "new_stock"
+    assert group.category == "new_stock"
+
+
+def test_aggregate_types_known_type_zero_amount_also_degrades() -> None:
+    """preview types 步骤：历史记忆已确认 new_stock，但本文件里该 type_key 全零金额 → 仍降级。"""
+
+    from types import SimpleNamespace
+
+    from stock_ledger.application.import_analysis import aggregate_types
+    from stock_ledger.parsers.huatai import ParsedBill
+    from stock_ledger.parsers.mapping import normalize_type_key
+
+    bill = ParsedBill(
+        rows=[
+            _fake_row("中签登记新股001", 0),
+            _fake_row("中签登记新股001", 0),
+        ]
+    )
+    # 用户历史对同一 type_key 确认过 new_stock（过往真扣款文件）
+    known_types = {
+        normalize_type_key("中签登记新股001"): SimpleNamespace(
+            category="new_stock", discarded=False
+        ),
+    }
+    groups = aggregate_types(bill, known_types=known_types, rules=_rules())
+    assert len(groups) == 1
+    group = next(iter(groups.values()))
+    assert group.source == "import_type"
+    # 历史记忆是 new_stock，但本文件全是零金额登记行 → 降级
+    assert group.suggested_category == "broker_action"
+    assert group.is_new is False  # 仍然是历史记忆，不是新类型
+
+
+def test_aggregate_types_discarded_known_type_gives_no_suggestion() -> None:
+    """preview types 步骤：历史记忆已废弃 → 不提供任何建议，让用户显式决定。"""
+
+    from types import SimpleNamespace
+
+    from stock_ledger.application.import_analysis import aggregate_types
+    from stock_ledger.parsers.huatai import ParsedBill
+    from stock_ledger.parsers.mapping import normalize_type_key
+
+    bill = ParsedBill(rows=[_fake_row("中签登记新股001", 0)])
+    known_types = {
+        normalize_type_key("中签登记新股001"): SimpleNamespace(category=None, discarded=True),
+    }
+    groups = aggregate_types(bill, known_types=known_types, rules=_rules())
+    group = next(iter(groups.values()))
+    assert group.discard is True
+    assert group.category is None
+    assert group.suggested_category is None

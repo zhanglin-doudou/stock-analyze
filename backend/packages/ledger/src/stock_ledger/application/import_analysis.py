@@ -21,6 +21,7 @@ from stock_contracts.import_fields import (
 from stock_core.values import Money
 
 from stock_ledger.application.chain import group_rows_by_account
+from stock_ledger.application.classify import category_after_amount_fallback
 from stock_ledger.models import ImportBillType, SummaryRule
 from stock_ledger.parsers.huatai import ParsedBill, ParsedRow
 from stock_ledger.parsers.mapping import (
@@ -177,18 +178,30 @@ def aggregate_types(
         if known is not None:
             group.source = "import_type"
             group.discard = known.discarded
-            group.category = known.category
-            group.suggested_category = known.category
             group.is_new = False
             # E：即使命中历史记忆也不自动通过，仍需用户在类型步骤整步确认。
             group.needs_confirmation = True
+            if known.discarded:
+                # 废弃类型记忆不提供建议，让用户显式决定。
+                group.category = None
+                group.suggested_category = None
+                continue
+            # known.discarded=False → known.category 非 None（DB CheckConstraint 保证）
+            assert known.category is not None, "ImportBillType: non-discarded 行必须有 category"
+            # 历史记忆 category 也走零金额降级——同一 type_key 在本文件里全是登记行时
+            # 应该降级为 broker_action，哪怕该记忆在过往真扣款文件里是 new_stock。
+            group.category = category_after_amount_fallback(known.category, group.amount_units)
+            group.suggested_category = group.category
             continue
         matched = _match_summary_rule(rules, group)
         if matched is not None:
+            # 规则命中后也走零金额降级：group.amount_units==0 代表同一摘要的全部行
+            # 都是登记动作，不应该按规则原始 category 预填 new_stock。
+            final_category = category_after_amount_fallback(matched.category, group.amount_units)
             group.source = "summary_rule"
-            group.suggested_category = matched.category
+            group.suggested_category = final_category
             group.suggested_rule_id = matched.id
-            group.category = matched.category
+            group.category = final_category
             group.is_new = True
             # E：摘要规则只决定预填分类，不自动确认；确认范围限当前文件涉及的类型。
             group.needs_confirmation = True
