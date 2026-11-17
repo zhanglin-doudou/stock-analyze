@@ -568,11 +568,11 @@ export function Import() {
         <Card className="tw-mb-4">
           <CardHeader>
             <CardTitle>1 · 上传</CardTitle>
-            <CardDescription>支持 .xls / .xlsx / .csv，≤20MB；券商默认自动识别。</CardDescription>
+            <CardDescription>支持 .xls / .xlsx / .csv，≤20MB；<b>主动选择对应券商模板</b>可以降低账单解析的复杂度，更快得到结果！</CardDescription>
           </CardHeader>
           <CardContent className="tw-flex tw-flex-col tw-gap-3">
             <div className="tw-flex tw-items-center tw-gap-3">
-              <Label htmlFor="import-broker">券商</Label>
+              <Label htmlFor="import-broker">券商模板</Label>
               <Select value={broker} onValueChange={setBroker}>
                 <SelectTrigger id="import-broker" aria-label="券商" className="tw-w-40">
                   <SelectValue />
