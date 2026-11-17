@@ -56,8 +56,9 @@ def _rules() -> list[SummaryRule]:
         ("证券买入", "buy", "buy", "sys_buy_stock"),
         ("证券卖出", "sell", "sell", "sys_sell_stock"),
         ("利息归本", "sell", "interest", "sys_interest"),
-        ("股息入帐", "sell", "dividend", "sys_div_bonus"),
-        ("股息红利税\n补缴", "buy", "fee", "sys_div_tax"),
+        ("股息入帐", "sell", "dividend", "sys_div_bonus_1"),
+        # 红利税按分红口径入账（负数冲减分红收入），不再计入费用。
+        ("股息红利税\n补缴", "buy", "dividend", "sys_div_tax"),
         ("银行转存", "sell", "transfer", "sys_transfer_in"),
         ("银行转取", "buy", "transfer", "sys_transfer_out"),
         ("转存管转入", "unknown", "transfer", "sys_custody_in"),
@@ -90,13 +91,12 @@ def test_fund_summaries_all_match(summary: str, side: str, category: str, code: 
 
 def test_fund_rules_beat_generic_rules_without_swallowing_others() -> None:
     rules = _rules()
-    # 「申购确认」必须命中基金买入：单字「申购」→new_stock 的规则(16)晚于基金(15)，
-    # 避免把基金申购确认抢成打新。
+    # 「申购确认」必须命中基金买入：新股规则只认「新股申购*」，不会抢走货基申购确认。
     buy_confirm = match_rule(rules, "申购确认")
     assert buy_confirm is not None and buy_confirm.code == "sys_fund_buy"
     # 新股申购（无「确认」）仍归打新建仓，不被基金规则抢走。
     new_apply = match_rule(rules, "新股申购")
-    assert new_apply is not None and new_apply.code == "sys_new_stock"
+    assert new_apply is not None and new_apply.code == "sys_new_apply"
     # 只认「赎回确认」形态：赎回费属于费用，不能被赎回规则误吞。
     redeem_fee = match_rule(rules, "赎回费")
     assert redeem_fee is not None and redeem_fee.code == "sys_fee"
@@ -170,10 +170,10 @@ def test_new_stock_rule_beats_fund_buy_rule_for_ipo_payment() -> None:
         ("市值认购资金扣收", "unknown", "transfer", "sys_mkt_sub_out"),
         # 配股（含配股缴款）既有股票变更也有扣费：归 rights，不被新股/申购规则抢走。
         ("配股缴款", "buy", "rights", "sys_rights"),
-        # 真实扣款的打新/可转债认购仍是特殊买入，按缴款金额（含费）建仓。
+        # 真实扣款的打新/新股认购仍是特殊买入，按缴款金额（含费）建仓。
         ("新股申购确认缴款", "buy", "new_stock", "sys_new_stock"),
-        ("可转债认购", "buy", "new_stock", "sys_new_sub"),
-        ("申购", "both", "new_stock", "sys_new_apply"),
+        ("新股认购", "buy", "new_stock", "sys_new_sub"),
+        ("新股申购", "both", "new_stock", "sys_new_apply"),
     ],
 )
 def test_new_stock_narrowed_to_winning_lots(
@@ -183,6 +183,27 @@ def test_new_stock_narrowed_to_winning_lots(
     assert rule is not None, summary
     assert rule.category == category
     assert rule.code == code
+
+
+def test_registration_summaries_go_to_broker_action_without_preempting_payments() -> None:
+    """「认购」「上市」的登记行归券商行为，且不能抢占真正扣款、配股与资金划转。"""
+    cases = {
+        # 不扣款的登记/行情事件：归券商行为
+        "可转债认购": ("broker_action", "sys_brk_cb_sub"),
+        "新股上市": ("broker_action", "sys_brk_new_list"),
+        "认购": ("broker_action", "sys_brk_sub"),
+        "上市": ("broker_action", "sys_brk_list"),
+        # 既有口径不退化
+        "市值认购资金扣收": ("transfer", "sys_mkt_sub_out"),
+        "新股申购确认缴款": ("new_stock", "sys_new_stock"),
+        "新股申购": ("new_stock", "sys_new_apply"),
+        "新股认购": ("new_stock", "sys_new_sub"),
+        "配股缴款": ("rights", "sys_rights"),
+    }
+    for summary, expected in cases.items():
+        rule = match_rule(_rules(), summary)
+        assert rule is not None, summary
+        assert (rule.category, rule.code) == expected, summary
 
 
 @pytest.mark.parametrize(
@@ -363,17 +384,17 @@ def test_resolve_type_category_zero_amount_degrades_rule_hit() -> None:
     from stock_ledger.parsers.mapping import normalize_type_key
 
     rules = _rules()
-    # 摘要"新股上市"含"新股"，命中 sys_new_stock（priority 14）
+    # 摘要"新股申购"命中 sys_new_apply（priority 14）
     category, summary_code, discarded = resolve_type_category(
-        normalize_type_key("新股上市"),
+        normalize_type_key("新股申购"),
         known_types={},
         rules=rules,
-        summary="新股上市",
+        summary="新股申购",
         amount_units=0,
     )
     assert discarded is False
     assert category == "broker_action"
-    assert summary_code == "sys_new_stock"  # 短码仍保留，方便追溯原始规则
+    assert summary_code == "sys_new_apply"  # 短码仍保留，方便追溯原始规则
 
 
 def test_resolve_type_category_nonzero_amount_keeps_new_stock() -> None:
@@ -391,7 +412,7 @@ def test_resolve_type_category_nonzero_amount_keeps_new_stock() -> None:
     )
     assert discarded is False
     assert category == "new_stock"
-    assert summary_code == "sys_new_stock"
+    assert summary_code == "sys_new_apply"
 
 
 def test_resolve_type_category_zero_amount_degrades_known_type_too() -> None:
@@ -462,7 +483,7 @@ def _fake_row(summary: str, amount_units: int) -> ParsedRow:
 
 
 def test_aggregate_types_zero_amount_new_stock_degrades_preview_suggestion() -> None:
-    """preview types 步骤：摘要含'新股'但 group 全零金额 → suggested_category 应为 broker_action。
+    """preview types 步骤：摘要命中新股申购规则，但 group 全零金额 → 建议应为 broker_action。
 
     这是用户实际观测到的漏网点：之前只在 legacy commit / 复算 / 隔离行回填三条单行粒度
     路径加了 fallback，漏掉了 preview 层面的 aggregate_types——用户在 types 步骤看到的
@@ -474,14 +495,14 @@ def test_aggregate_types_zero_amount_new_stock_degrades_preview_suggestion() -> 
 
     bill = ParsedBill(
         rows=[
-            _fake_row("中签登记新股001", 0),
-            _fake_row("中签登记新股001", 0),
+            _fake_row("新股申购", 0),
+            _fake_row("新股申购", 0),
         ]
     )
     groups = aggregate_types(bill, known_types={}, rules=_rules())
     assert len(groups) == 1
     group = next(iter(groups.values()))
-    # 规则 sys_new_stock 命中（priority 14，contains "新股"），但 group.amount_units==0 降级
+    # 规则 sys_new_apply 命中（priority 14），但 group.amount_units==0 降级
     assert group.source == "summary_rule"
     assert group.suggested_category == "broker_action"
     assert group.category == "broker_action"

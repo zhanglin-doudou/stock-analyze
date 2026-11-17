@@ -154,14 +154,14 @@ async def test_real_bill_all_rows_classified_and_zero_unknown(
     trades = await _trades(client, api_prefix, user)
     assert len(trades) == 175
     assert all(item["category"] for item in trades), "真实账单必须 100% 分类"
-    # 分类分布：买入 83 / 卖出 62 / 资金划转 24（转存管 2 行全零被隔离）/ 分红 3 / 利息 2 / 费用 1。
+    # 分类分布：买入 83 / 卖出 62 / 资金划转 24（转存管 2 行全零被隔离）/ 分红 4
+    # （3 笔红利 + 1 笔红利税负数冲减）/ 利息 2。
     assert Counter(item["category"] for item in trades) == {
         "buy": 83,
         "sell": 62,
         "transfer": 24,
-        "dividend": 3,
+        "dividend": 4,
         "interest": 2,
-        "fee": 1,
     }
     # 非交易摘要命中资金划转，而不是被「费」等宽泛规则吞掉或被隔离。
     transfer_summaries = {item["summary"] for item in trades if item["category"] == "transfer"}
