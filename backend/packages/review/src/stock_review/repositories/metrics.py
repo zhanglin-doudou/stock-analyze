@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from datetime import date, datetime
 
 from sqlalchemy import delete, func, insert, select
@@ -144,6 +144,27 @@ class MetricDatasetRepository:
         rows = await self._session.scalars(
             select(Trade)
             .where(Trade.user_id == user_id, Trade.trade_date >= start, Trade.trade_date <= end)
+            .order_by(Trade.trade_date, Trade.line_no, Trade.id)
+        )
+        return list(rows)
+
+    async def trades_for_codes(
+        self, user_id: uuid.UUID, codes: Collection[str], end: date
+    ) -> list[Trade]:
+        """指定代码、截至 `end` 的**未删除**流水（配股降级判定专用，稳定序）。
+
+        `codes` 由调用方用 `zero_amount_rights_codes` 收窄；空集直接返回，不发查询。
+        """
+        if not codes:
+            return []
+        rows = await self._session.scalars(
+            select(Trade)
+            .where(
+                Trade.user_id == user_id,
+                Trade.trade_date <= end,
+                Trade.deleted_at.is_(None),
+                Trade.security_code.in_(set(codes)),
+            )
             .order_by(Trade.trade_date, Trade.line_no, Trade.id)
         )
         return list(rows)

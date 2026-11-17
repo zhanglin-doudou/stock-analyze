@@ -65,6 +65,9 @@ class TradeView:
     version: int
     # 视图 additive（2026-10-30）：识别伪代码/发债归并用，不参与旧 compute。
     security_name: str = ""
+    # 视图 additive（2026-11-17）：配股前置校验后的有效分类（空=沿用 `category`）。
+    # 与 FIFO/资产表/归因同源，避免指标侧出现第二套口径。
+    effective_category: str = ""
 
 
 @dataclass(frozen=True, slots=True)

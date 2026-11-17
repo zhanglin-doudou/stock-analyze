@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "metric_id": "behavior.hhi",
-  "definition_version": "1.0",
+  "definition_version": "1.1",
   "fixture": {"id": "fx_hhi_small"},
   "period": "2026-09",
   "scope": "day",

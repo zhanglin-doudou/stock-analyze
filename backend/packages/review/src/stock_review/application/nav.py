@@ -38,7 +38,7 @@ from stock_review.application.money_fund import (
     money_fund_codes,
     money_fund_value_units,
 )
-from stock_review.application.rebuild import trades_to_events
+from stock_review.application.rebuild import rights_resolution, trades_to_events
 from stock_review.application.valuation import (
     CASHFLOW_CATEGORIES as _CASHFLOW_CATEGORIES,
 )
@@ -50,9 +50,6 @@ from stock_review.application.valuation import (
 )
 from stock_review.application.valuation import (
     blocked_price_reason as _blocked_reason,
-)
-from stock_review.application.valuation import (
-    category as _category,
 )
 from stock_review.application.valuation import (
     close_on_or_before as _close_on_or_before,
@@ -201,6 +198,9 @@ async def compute_nav_points(
     # 用 canonical 代码，避免「754019 申购持仓 + 113xxx 上市卖出」被当成两只证券。
     bond_alias, _unresolved = build_bond_alias((t.security_code, t.security_name) for t in trades)
 
+    # 配股前置校验：零金额且此前无持仓的配股按 broker_action 处理（与 FIFO/资产表同源）。
+    rights = rights_resolution(trades, bond_alias=bond_alias)
+
     # 2. FIFO 结果用于检测 data_error（降级）
     fifo_all = build_rounds(trades_to_events(trades, bond_alias=bond_alias))
     degraded = any(r.status == "data_error" for r in fifo_all.rounds)
@@ -248,7 +248,7 @@ async def compute_nav_points(
         for t in all_trades_in_range
         if t.security_code
         and t.security_code not in fund_codes
-        and _holding_delta(_category(t), t.quantity_units, amount_units=t.amount_units) != 0
+        and _holding_delta(rights.category(t), t.quantity_units, amount_units=t.amount_units) != 0
     }
     all_symbols = sorted(
         code
@@ -365,7 +365,7 @@ async def compute_nav_points(
         balance_override: int | None = None
 
         for trade in day_trades:
-            category = _category(trade)
+            category = rights.category(trade)
             code = trade.security_code
             if code and code in fund_codes:
                 # 货基申赎：金额照常进出券商现金，余额单独累计后并入现金。

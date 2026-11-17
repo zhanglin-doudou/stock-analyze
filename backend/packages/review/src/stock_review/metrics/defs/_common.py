@@ -36,6 +36,15 @@ TRADE_LEGS: frozenset[str] = frozenset({"buy", "sell"})
 _PRICE_QTY_TO_MONEY: int = 10 ** (SCALE_QTY + SCALE_PRICE - SCALE_AMOUNT)  # 1e8
 
 
+def effective_category(trade: TradeView) -> str:
+    """指标口径的有效分类：与 FIFO/资产表/归因同源（配股前置校验的结果）。
+
+    数据集装配时已按完整历史算好并写入 `effective_category`；为空说明是旧视图/未标注，
+    回退原分类。
+    """
+    return trade.effective_category or trade.category
+
+
 def closed_rounds(ctx: MetricContext) -> list[RoundView]:
     """`status=closed` 且 `close_date ∈ period` 的回合；`data_error` 一律剔除（§7.1 域公共口径）。"""
     rows = [

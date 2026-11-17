@@ -26,6 +26,7 @@ from stock_review.application.assets import (
     compute_daily_valuations,
     valuation_end,
 )
+from stock_review.application.rebuild import rights_resolution
 from stock_review.application.valuation import closing_price_ladder
 from stock_review.models import AssetDaily
 
@@ -215,6 +216,7 @@ def _run(
     bond_alias: dict[str, str] | None = None,
     oversell_proceeds: dict[str, int] | None = None,
     quotes_pull_attempted: bool = False,
+    rights=None,
 ):
     return compute_daily_valuations(
         trades,
@@ -231,7 +233,39 @@ def _run(
         bond_alias=bond_alias,
         oversell_proceeds=oversell_proceeds,
         quotes_pull_attempted=quotes_pull_attempted,
+        rights=rights,
     )
+
+
+def test_zero_amount_rights_without_holding_adds_no_position_or_cash() -> None:
+    """零金额且无持仓的配股按券商行为处理：不建仓、不改现金、不虚增总资产。"""
+    trades = [
+        _trade(
+            trade_date=date(2026, 1, 2),
+            category="other",
+            amount_units=0,
+            cash_balance_units=cents("1000.00"),
+        ),
+        _trade(
+            trade_date=date(2026, 1, 2),
+            category="rights",
+            amount_units=0,
+            quantity_units=shares("300"),
+        ),
+    ]
+    ladder = _ladder(_bar("600519", date(2026, 1, 2), "10.00"))
+    result = _run(
+        trades,
+        date(2026, 1, 2),
+        date(2026, 1, 3),
+        ladder=ladder,
+        rights=rights_resolution(trades),
+    )
+
+    row = _row(result, date(2026, 1, 2))
+    assert row["market_value_units"] == 0
+    assert row["cash_units"] == cents("1000.00")
+    assert row["total_assets_units"] == cents("1000.00")
 
 
 def _row(result, trade_date: date) -> dict[str, object]:

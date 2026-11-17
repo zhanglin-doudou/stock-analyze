@@ -64,7 +64,8 @@ from stock_review.application.bond_alias import build_bond_alias, canonical_code
 from stock_review.application.bridge import bridge_for_period
 from stock_review.application.metrics import KNOWN_BENCHMARKS
 from stock_review.application.money_fund import money_fund_codes
-from stock_review.application.rebuild import trades_to_events
+from stock_review.application.rebuild import rights_resolution, trades_to_events
+from stock_review.application.rights import RightsResolution
 from stock_review.application.valuation import (
     PRICE_LOOKBACK,
     category,
@@ -125,7 +126,7 @@ __all__ = [
 ]
 
 # 归因口径版本（§5.6；口径变更需 docs/migrations/ATTRIBUTION-* 并 bump）。
-ATTRIBUTION_DEFINITION_VERSION: Final[str] = "1.0"
+ATTRIBUTION_DEFINITION_VERSION: Final[str] = "1.1"
 # 公开 taxonomy 值（application/sectors.py 的 `_DB_TAXONOMY` 是私有的，不跨模块 import）。
 _DB_TAXONOMY_INDUSTRY: Final[str] = "industry_sw"
 # 归因读的同步状态数据集：live 同步链写 `sector`（sector_live.DATASET_KEY）；
@@ -296,13 +297,16 @@ def _mirror_view(
     ladder: dict[str, list[tuple[date, int]]],
     canonical: Callable[[str], str],
     new_stocks: set[str],
+    rights: RightsResolution | None = None,
 ) -> _Mirror:
     """单遍扫描 trades，在 `begin_date`/`end_date` 两个时点快照（资产表同口径）。
 
     持仓/成本推演与 `assets._build` 循环一致：可转债发债代码归一、卖出按数量比例结转
-    成本、超卖按 0 截断、新股中签通知行不建仓。估值走共用原语 `valued_position_units`：
-    债券/伪代码不读行情、按含费成本计入；待上市新股缺行情按认购成本兜底。
+    成本、超卖按 0 截断、新股中签通知行不建仓、零金额无持仓配股按券商行为不建仓。
+    估值走共用原语 `valued_position_units`：债券/伪代码不读行情、按含费成本计入；
+    待上市新股缺行情按认购成本兜底。
     """
+    rights = rights or RightsResolution(frozenset())
     holdings: dict[str, int] = {}
     costs: dict[str, int] = {}
     begin_snap: tuple[dict[str, int], dict[str, int]] | None = None
@@ -326,7 +330,7 @@ def _mirror_view(
         if raw in fund_codes:
             continue
         code = canonical(raw)
-        trade_category = category(trade)
+        trade_category = rights.category(trade)
         delta = holding_delta(trade_category, trade.quantity_units, amount_units=trade.amount_units)
         if delta:
             old_qty = holdings.get(code, 0)
@@ -1081,6 +1085,8 @@ async def build_attribution(
         (trade.security_code, trade.security_name) for trade in trades
     )
     canonical = partial(canonical_code, bond_alias)
+    # 配股前置校验：零金额且此前无持仓的配股按券商行为处理（与 FIFO/资产表同源）。
+    rights = rights_resolution(trades, bond_alias=bond_alias)
     # 名称来源：仓库无独立证券主数据表，`security_name` 随账单落在 `ledger.trade`；
     # 按 canonical 代码记最新非空名称（与 nav/dashboard 同口径），缺失即 None。
     code_names: dict[str, str] = {}
@@ -1097,7 +1103,7 @@ async def build_attribution(
         )
     )
     corporate = corporate_action_symbols(
-        trades, t0=resolved.start, t1=resolved.end, canonical=canonical
+        trades, t0=resolved.start, t1=resolved.end, canonical=canonical, rights=rights
     )
 
     # ── 7. 行情（只读缓存；P0 参考日可早于 T0）────────────────────
@@ -1143,6 +1149,7 @@ async def build_attribution(
         ladder=ladder,
         canonical=canonical,
         new_stocks={canonical(code) for code in new_stock_pending_codes(trades)},
+        rights=rights,
     )
     dividends: dict[str, int] = {}
     fund_codes = money_fund_codes(trades)

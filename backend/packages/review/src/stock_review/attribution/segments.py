@@ -35,6 +35,8 @@ from stock_core.fifo import FifoResult, Fill, OpenLot
 from stock_ledger.models import Trade
 from stock_platform.symbols import classify_symbol
 
+from stock_review.application.rebuild import rights_resolution
+from stock_review.application.rights import RightsResolution
 from stock_review.application.valuation import (
     QTY_PRICE_SCALE,
     category,
@@ -208,6 +210,9 @@ def build_symbol_plans(
     由调用方算好传入，本模块零时钟）。
     """
     trade_by_id = {t.id: t for t in trades}
+    # 配股前置校验：零金额且此前无持仓的配股按券商行为处理（与 FIFO/资产表同源），
+    # 因此既不算持仓类流水、也不进候选标的。
+    rights = rights_resolution(trades)
     # 新股排除按**本期窗口**判定（§4.4）：只在窗口 [t0, t1] 内出现新股缴款行的标的
     # 才按 `new_stock` 排除；历史中签、本期无新股行的标的本期按普通 `stock` 参与归因。
     # 估值兜底（缺价按认购成本）仍用全历史的 `new_stock_pending_codes`（D11）。
@@ -234,7 +239,10 @@ def build_symbol_plans(
     # 候选标的：FIFO 涉及标的 ∪ 窗口内有持仓类行（buy/sell/bonus/rights/new_stock）的标的。
     codes: set[str] = set(fills_by_code) | set(open_by_code)
     for trade in trades:
-        if t0 <= trade.trade_date <= t1 and category(trade) in _COST_ADD | {"sell", "bonus"}:
+        if t0 <= trade.trade_date <= t1 and rights.category(trade) in _COST_ADD | {
+            "sell",
+            "bonus",
+        }:
             code = canonical(trade.security_code)
             if code:
                 codes.add(code)
@@ -264,6 +272,7 @@ def build_symbol_plans(
             expected_p1_date=expected_p1_date,
             dividends=dividends,
             fallback_anchors=fallback_anchors,
+            rights=rights,
         )
         bundle.plans.append(plan)
         if plan.attributed and klass == "stock":
@@ -305,12 +314,16 @@ def _plan_for_symbol(
     expected_p1_date: date,
     dividends: Mapping[str, int],
     fallback_anchors: Mapping[str, int],
+    rights: RightsResolution | None = None,
 ) -> SymbolPlan:
     """单标的计划：先判「本期是否参与」与剔除优先级，再两级分摊构段（§3.3）。"""
+    rights = rights or RightsResolution(frozenset())
     trades_amount = sum(t.amount_units for t in trades_sym)
     closed_fills = [f for f in fills_sym if t0 <= f.close_date <= t1]
     open_lots = list(open_sym)
-    holding_rows = [t for t in trades_sym if category(t) in _COST_ADD | {"sell", "bonus"}]
+    holding_rows = [
+        t for t in trades_sym if rights.category(t) in _COST_ADD | {"sell", "bonus"}
+    ]
     # 候选集来自**全历史** FIFO（长期持有/已清仓标的都会生成 plan），但只有在本期仍有
     # 未平仓 lot、区间内平仓、或区间内有持仓类流水时才算「参与本期」。
     participating = bool(closed_fills or open_lots or holding_rows)

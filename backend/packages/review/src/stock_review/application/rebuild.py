@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -34,6 +34,7 @@ from stock_platform.obs import get_logger
 
 from stock_review.application.bond_alias import build_bond_alias, canonical_code
 from stock_review.application.money_fund import money_fund_codes
+from stock_review.application.rights import RightsResolution, resolve_rights
 from stock_review.metrics.context import parse_period_label
 from stock_review.models import Round, RoundBuildState
 from stock_review.repositories.rounds import FillInput, RoundInput, RoundRepository
@@ -106,12 +107,12 @@ def kind_for_trade(trade: Trade) -> EventKind:
     return _KIND_BY_CATEGORY.get(category, EventKind.OTHER)
 
 
-def trades_to_events(
+def _base_events(
     trades: list[Trade] | tuple[Trade, ...],
     *,
     bond_alias: dict[str, str] | None = None,
 ) -> list[FifoEvent]:
-    """ledger Trade → `FifoEvent` 的纯映射（不碰 session、不读系统时间）。
+    """ledger Trade → `FifoEvent` 的纯映射（未应用配股降级；见 `trades_to_events`）。
 
     口径：
     - `amount_units` 原样透传：ledger 里已是带符号净现金流（买入为负、卖出/股息/利息为正）；
@@ -157,6 +158,40 @@ def trades_to_events(
             )
         )
     return events
+
+
+def rights_resolution(
+    trades: list[Trade] | tuple[Trade, ...],
+    *,
+    bond_alias: dict[str, str] | None = None,
+) -> RightsResolution:
+    """该批流水的配股有效分类（与 `trades_to_events` 同源，供资产表/净值/归因/指标复用）。
+
+    判定见 `application.rights`：`rights` 且 `amount_units == 0` 且该证券此前无正持仓
+    → 按 `broker_action` 处理。其余（含金额非 0 的配股）保持原分类。
+    """
+    return resolve_rights(_base_events(trades, bond_alias=bond_alias))
+
+
+def trades_to_events(
+    trades: list[Trade] | tuple[Trade, ...],
+    *,
+    bond_alias: dict[str, str] | None = None,
+) -> list[FifoEvent]:
+    """ledger Trade → `FifoEvent`（含配股前置校验的唯一入口）。
+
+    在 `_base_events` 的纯映射之后，把「零金额且无前置持仓」的配股改判为
+    `BROKER_ACTION`：引擎因此不建仓、不产生回合，资产表/净值/归因共用同一结论。
+    有持仓的配股与金额非 0 的配股不受影响。
+    """
+    events = _base_events(trades, bond_alias=bond_alias)
+    demoted = resolve_rights(events).demoted
+    if not demoted:
+        return events
+    return [
+        replace(event, kind=EventKind.BROKER_ACTION) if event.trade_id in demoted else event
+        for event in events
+    ]
 
 
 def build_round_id(user_id: uuid.UUID, security_code: str, key: str) -> str:
@@ -488,5 +523,6 @@ __all__ = [
     "parse_period",
     "rebuild_rounds_for_user",
     "rebuild_rounds_job",
+    "rights_resolution",
     "trades_to_events",
 ]

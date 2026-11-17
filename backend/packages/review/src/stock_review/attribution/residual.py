@@ -33,6 +33,7 @@ from datetime import date
 
 from stock_ledger.models import Trade
 
+from stock_review.application.rebuild import rights_resolution
 from stock_review.application.valuation import category
 from stock_review.attribution.segments import SymbolPlan
 
@@ -97,6 +98,9 @@ def split_residual(
     canonical: Callable[[str], str],
 ) -> ResidualSplit:
     """按 §3.6 桶公式拆分（纯内存；`residual` 本身由 decompose 给出）。"""
+    # 配股前置校验：零金额且此前无持仓的配股按券商行为处理（金额为 0，不影响金额桶，
+    # 但不应把它当作「持仓类流水」把一个无持仓标的拉进 bucketed 分支）。
+    rights = rights_resolution(trades)
     attributed_codes = {plan.security_code for plan in plans if plan.attributed}
     # `new_stock` 分类排除的标的单列「打新收益」桶（账户级，与 interest 同级）；
     # 其余非归因标的仍进 `unattributed_price_pnl`。
@@ -128,7 +132,7 @@ def split_residual(
             continue
         begin_qty, end_qty = holdings_at.get(code, (0, 0))
         has_position = begin_qty != 0 or end_qty != 0
-        has_trade = any(category(t) in _POSITION_CATEGORIES for t in rows)
+        has_trade = any(rights.category(t) in _POSITION_CATEGORIES for t in rows)
         if not (has_position or has_trade):
             # 无持仓无交易：行按类别落固定桶（无持仓股息/利息/其他）。
             _positionless_rows(rows, buckets, split)

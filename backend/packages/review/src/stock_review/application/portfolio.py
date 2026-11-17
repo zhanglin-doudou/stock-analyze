@@ -21,8 +21,8 @@ from stock_platform.symbols import needs_quote
 
 from stock_review.application.bond_alias import build_bond_alias, canonical_code
 from stock_review.application.money_fund import money_fund_codes
+from stock_review.application.rebuild import rights_resolution
 from stock_review.application.valuation import (
-    category,
     close_on_or_before,
     holding_delta,
     load_prices,
@@ -157,6 +157,9 @@ async def holdings_at(
     bond_alias, _unresolved = build_bond_alias(
         (trade.security_code, trade.security_name) for trade in trades
     )
+    # 配股前置校验：零金额且此前无持仓的配股按 broker_action 处理（与 FIFO/资产表同源）。
+    # 降级只取决于「该笔之前」的流水，因此即使 trades 含未来行，结论也不受影响。
+    resolution = rights_resolution(trades, bond_alias=bond_alias)
     holdings: dict[str, int] = {}
     cost_basis: dict[str, int] = {}
     names: dict[str, str] = {}
@@ -171,7 +174,7 @@ async def holdings_at(
         if raw_code in fund_codes:
             continue  # 货基是现金等价物：不进持仓列表（资产表现金列已含其余额）
         code = canonical_code(bond_alias, raw_code)
-        trade_category = category(trade)
+        trade_category = resolution.category(trade)
         delta = holding_delta(trade_category, trade.quantity_units, amount_units=trade.amount_units)
         if delta:
             # 超卖部分视同资金划转：持仓按 0 截断，不产生负持仓/负市值。
