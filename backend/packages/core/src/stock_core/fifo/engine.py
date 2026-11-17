@@ -149,8 +149,11 @@ def _process_security(
                 errors.append(_invalid_event(event, security_code, detail="卖出数量必须为正"))
                 continue
             fills, oversell_units = _apply_sell(event, security_code, lots, errors)
-            # 无可配对 lot（持 0 股卖出等）：跳过 fill 追加，lot 状态不变
+            # 无可配对 lot（持 0 股卖出等）：不产生 Fill，但超卖本身要落库成回合，
+            # 否则回合页看不到这笔卖出、用户也无从补录成本。lot 状态不变。
             if fills is None:
+                if oversell_units > 0:
+                    closed.append(_snapshot_bare_oversell(event, security_code))
                 continue
             # 有配对 Fill → current 必定存在（BUY 先建 lot，lot 消耗产生 fill）
             assert current is not None, "fills 非空意味着 lot 被消耗，lot 来自 BUY → current 必存在"
@@ -191,7 +194,6 @@ def _process_security(
                     _snapshot_closed(
                         current,
                         oversell_units=current.oversell_units,
-                        data_error=current.oversell_units > 0,
                     )
                 )
                 current = None
@@ -222,8 +224,8 @@ def _apply_sell(
 
     上层已保证 quantity_units > 0，此函数只处理 lot 消耗逻辑。
     """
-    # FIFO 取可用 lot；超出部分只记 data_error，绝不产生负持仓。
-    # 货基（allow_oversell）：红利发放行被隔离未入账，赎回份额略多于申购是常态，不记错。
+    # FIFO 取可用 lot；超出部分视同资金划转（只记 data_error 供桥接并入期初，
+    # 绝不产生负持仓），不计交易损益。
     remaining = event.quantity_units
     chunks: list[tuple[_Lot, int]] = []
     for lot in lots:
@@ -234,9 +236,6 @@ def _apply_sell(
         remaining -= take
     oversell_units = remaining
     if not chunks:
-        if event.allow_oversell:
-            # 货基全额超卖：账单期前本金赎回，无成本信息——静默跳过，不记错、不计损益。
-            return None, 0
         errors.append(
             DataError(
                 trade_id=event.trade_id,
@@ -245,6 +244,7 @@ def _apply_sell(
                 kind="oversell",
                 quantity_units=oversell_units,
                 detail="卖出数量超过可用持仓，无可配对买入",
+                proceeds_units=event.amount_units,
             )
         )
         return None, oversell_units
@@ -287,36 +287,18 @@ def _apply_sell(
         )
 
     if oversell_units:
-        if event.allow_oversell:
-            # 货基部分超卖：超出份额 = 被隔离的红利再投利息，零成本——卖款全额计为收益。
-            interest_proceeds = event.amount_units - proceeds_total
-            fills.append(
-                Fill(
-                    buy_trade_id="",
-                    sell_trade_id=event.trade_id,
-                    sequence=len(fills) + 1,
-                    quantity_units=oversell_units,
-                    buy_cost_units=0,
-                    sell_proceeds_units=interest_proceeds,
-                    dividend_units=0,
-                    pnl_units=interest_proceeds,
-                    open_date=event.trade_date,
-                    close_date=event.trade_date,
-                    holding_days=0,
-                )
+        errors.append(
+            DataError(
+                trade_id=event.trade_id,
+                security_code=security_code,
+                trade_date=event.trade_date,
+                kind="oversell",
+                quantity_units=oversell_units,
+                detail="卖出数量超过可用持仓，超出部分未配对",
+                # 未配对份额按数量比例分摊到的净卖款（含费，不再二次扣费）。
+                proceeds_units=event.amount_units - proceeds_total,
             )
-            oversell_units = 0
-        else:
-            errors.append(
-                DataError(
-                    trade_id=event.trade_id,
-                    security_code=security_code,
-                    trade_date=event.trade_date,
-                    kind="oversell",
-                    quantity_units=oversell_units,
-                    detail="卖出数量超过可用持仓，超出部分未配对",
-                )
-            )
+        )
     lots[:] = [lot for lot in lots if lot.quantity_units > 0]
     return fills, oversell_units
 
@@ -328,8 +310,8 @@ def _round_display_name(state: _RoundState) -> str:
     return state.security_name
 
 
-def _snapshot_closed(state: _RoundState, *, oversell_units: int, data_error: bool) -> Round:
-    """把一个刚归零的周期状态 snapshot 为 closed Round。"""
+def _snapshot_closed(state: _RoundState, *, oversell_units: int) -> Round:
+    """把一个刚归零的周期状态 snapshot 为 closed / oversell Round。"""
     weighted_days = sum(f.holding_days * f.quantity_units for f in state.fills)
     holding_days = (
         max((weighted_days + state.matched_units // 2) // state.matched_units, 1)
@@ -344,7 +326,7 @@ def _snapshot_closed(state: _RoundState, *, oversell_units: int, data_error: boo
         key=key,
         security_code=state.security_code,
         security_name=_round_display_name(state),
-        status="data_error" if data_error else "closed",
+        status="oversell" if oversell_units else "closed",
         open_trade_id=state.open_trade_id,
         close_trade_id=close_trade_id,
         open_date=state.open_date,
@@ -356,20 +338,51 @@ def _snapshot_closed(state: _RoundState, *, oversell_units: int, data_error: boo
         pnl_units=pnl_units,
         return_rate_units=_return_rate_units(pnl_units, state.cost_units),
         holding_days=holding_days,
-        data_error=data_error,
+        data_error=False,
         oversell_units=oversell_units,
         fills=tuple(state.fills),
+    )
+
+
+def _snapshot_bare_oversell(event: FifoEvent, security_code: str) -> Round:
+    """纯超卖（无任何可配 lot）落库成 oversell 回合。
+
+    口径：数量取卖出数量、卖款取卖出金额（已计入现金与总资产）、成本与盈亏为 0
+    （超卖部分不构成交易损益）。用户补录成本后，引擎会重新配对成正常 closed 回合。
+    """
+    return Round(
+        key=f"{event.trade_id}:oversell",
+        security_code=security_code,
+        security_name=event.security_name,
+        status="oversell",
+        open_trade_id=event.trade_id,
+        close_trade_id=event.trade_id,
+        open_date=event.trade_date,
+        close_date=event.trade_date,
+        quantity_units=event.quantity_units,
+        cost_units=0,
+        proceeds_units=event.amount_units,
+        dividend_units=0,
+        pnl_units=0,
+        return_rate_units=0,
+        holding_days=0,
+        data_error=False,
+        oversell_units=event.quantity_units,
+        fills=(),
     )
 
 
 def _snapshot_open(state: _RoundState, lots: list[_Lot]) -> Round:
     """把期末仍在进行的周期 snapshot 为 open Round（含累计 fills）。
 
-    恒等式不变量：pnl = proceeds - cost + dividend（open / closed 通用）。
-    - quantity_units 取 matched_units（已 FIFO 配对的股数）；
-    - cost_units = 已消耗 lot 成本（剩余 lot 成本在 open_lots 独立展示，避免重复）；
-    - dividend_units = 已消耗 lot 股息（剩余 lot 股息也在 open_lots 独立展示）。
+    open 回合展示**当前剩余持仓**：
+    - quantity_units = 剩余 lot 数量合计（不是已配对卖出数量）；
+    - cost_units = 剩余 lot 成本合计；
+    - proceeds_units / dividend_units = 已卖出金额 / 已消耗 lot 股息；
+    - pnl_units = proceeds - 已消耗成本 + 已消耗股息（已实现盈亏，不含浮动盈亏）。
     """
+    remaining_quantity = sum(lot.quantity_units for lot in lots)
+    remaining_cost = sum(lot.cost_units for lot in lots)
     pnl_units = state.proceeds_units - state.cost_units + state.dividend_units
     key = f"{state.open_trade_id}:open"
     return Round(
@@ -381,8 +394,8 @@ def _snapshot_open(state: _RoundState, lots: list[_Lot]) -> Round:
         close_trade_id=None,
         open_date=state.open_date,
         close_date=None,
-        quantity_units=state.matched_units,
-        cost_units=state.cost_units,
+        quantity_units=remaining_quantity,
+        cost_units=remaining_cost,
         proceeds_units=state.proceeds_units,
         dividend_units=state.dividend_units,
         pnl_units=pnl_units,

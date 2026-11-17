@@ -115,6 +115,8 @@
   --shadow-1: 0 1px 2px rgba(27, 29, 25, 0.04);
   --shadow-2: 0 8px 24px rgba(27, 29, 25, 0.06);
   --focus-ring: 0 0 0 3px rgba(59, 95, 75, 0.28);
+  /* 弹层遮罩（命令面板与导入弹窗共用同一观感） */
+  --scrim: rgba(27, 29, 25, 0.34);
 
   /* ── 密度（Phase 1 起由 ThemeProvider 写 data-density）──── */
   --row-h: 40px;
@@ -254,6 +256,7 @@
   --shadow-1: 0 1px 2px rgba(0, 0, 0, 0.35);
   --shadow-2: 0 8px 24px rgba(0, 0, 0, 0.45);
   --focus-ring: 0 0 0 3px rgba(159, 191, 174, 0.35);
+  --scrim: rgba(0, 0, 0, 0.55);
 
   --chart-1: #9fbfae;
   --chart-2: #6f8f7f;

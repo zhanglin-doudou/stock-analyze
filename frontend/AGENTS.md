@@ -118,7 +118,7 @@ export default defineConfig({
 - **主题**：`<html data-theme="light|dark" data-density="cozy|compact" data-trend="red-up|green-up">`；默认 `light + cozy + red-up`（A 股红涨绿跌），深色由同名 token 覆盖（Phase 5，Settings 可切）。
 - **数字排版**：金额/比率列右对齐 + `font-variant-numeric: tabular-nums`；格式（千分位/小数位/符号）一律来自后端字符串，前端不补零/不四舍五入。
 - **状态语义**：`build_state` 与 `data_status` 两轴共用一组 status token；禁止只用颜色表达状态（WCAG 2.2 1.4.1），必须带文案与形状。
-- **图表**：Phase 1 先自研 SVG，几何投影收敛到 `src/charts/geometry.ts`（唯一允许 `Number()` 的模块，配 golden `path d` 测试）；Phase 2 起后端 `GET /views/*` 返回归一化序列为主路径。总资产图上的银证净转入/转出圆环由 API-085 的 `cashflow_direction` 驱动，金额用后端 `cashflow` 定点串，前端不解析符号/不做金额运算。
+- **图表**：Phase 1 先自研 SVG，几何投影收敛到 `src/charts/geometry.ts`（唯一允许 `Number()` 的模块，配 golden `path d` 测试）；Phase 2 起后端 `GET /views/*` 返回归一化序列为主路径。总资产图上的资金划转净转入/转出圆环由 API-085 的 `cashflow_direction` 驱动，金额用后端 `cashflow` 定点串，前端不解析符号/不做金额运算。
 - **键盘**：`⌘K`/`Ctrl+K` 命令面板；`Esc` 关闭面板。
 - **菜单**：一级分组为「核心 / 分析 / 数据」（2026-11-07 由「概览」改名「核心」，分组 id `core`）；手风琴互斥展开（默认当前路由组，根路径默认第一组）；大屏显示图标+中文，中屏仅图标（hover 文字、点击二级 flyout）；`/rounds/insights` 不得被 `/rounds` 前缀误命中。大屏右边界中点提供手动收起/展开按钮（持久化 `sa.nav.collapsed`）；底部设置区用 `margin-top:auto`，不再使用空 flex 占位节点；高度不足时导航区滚动并把当前项滚入可视区。
 - **菜单图标**：`ui/icons.tsx` 自研线性图标，18 个图标**形状必须两两不同**（分组图标不得复用任一二级项图标；历史上「概览」=「看板」都是 grid、「数据」=「资产」都是 assets，已修）。新增/改图标后 `layout/navigation.test.tsx` 会做同名去重 + 渲染形状去重双重校验，撞形即失败。
@@ -130,6 +130,14 @@ export default defineConfig({
 - **Dashboard 容器**：板块级容器恰 2 个 `[data-board]`（`asset-overview` / `history-overview`）；`SectorBlock` 是子块，标 `data-board-member="asset-overview"`，测试同时断言两者。
 - **概念警示**：概念表无“基准/主动”列，`concept.caveat` 由后端提供并原样渲染（`ui/Caveat.tsx`），前端不拼结论文案。
 - **深链**：`/sectors?taxonomy=industry&level=1|2|3&parent=<code>&as_of=<date>`；`level` 用字符串比较回填，不做数值解析。
+
+### 10. `/import` 向导的 Tailwind + shadcn 限定例外（2026-11-13，设计 H-1 已批准）
+
+- **范围**：Tailwind 3.4 与 shadcn 风格 Radix 组件只服务 `/import`；其余页面继续手写 CSS + 语义 token，不得扩散引入。
+- **隔离**：`tailwind.config.ts` 必须保持 `prefix: "tw-"`、`preflight: false`，content 只覆盖 `Import.tsx`、`components/ui` 与 `features/import`；`features/import/import.css` 只由 Import 页引入，作用域为 `[data-import-ui]`。
+- **组件**：组件源码入 `apps/web/src/components/ui`（不跑 shadcn CLI），`components.json` 保留生成约定；Tailwind 颜色只映射 `tokens.css` 语义变量。
+- **Portal**：Radix Portal 必须挂到 `#import-portal[data-import-ui]`，通过 `components/ui/portal.ts` 的 context 注入，避免弹出层逃离样式作用域。
+- **测试**：jsdom polyfill 集中在 `src/test/setup.ts`；不得注入 `matchMedia` stub（会改变 AppShell 无该 API 时的默认紧凑布局行为）。
 
 ## 文件清单
 
@@ -148,7 +156,7 @@ export default defineConfig({
 | `apps/web/src/charts/geometry.ts` | Phase 1 图表像素投影（零口径唯一白名单） |
 | `apps/web/src/ui/status.ts` | Phase 1 两轴状态语义（文案/色调/优先级） |
 | `apps/web/src/ui/format.ts` | Phase 1 符号/空值展示辅助（只读后端字符串） |
-| `apps/web/src/charts/TrendChart.tsx` | 总资产趋势图（自研 SVG；API-085 银证净转入/转出圆环 + hover/focus tooltip + 可展开数据表） |
+| `apps/web/src/charts/TrendChart.tsx` | 总资产趋势图（自研 SVG；API-085 资金划转净转入/转出圆环 + hover/focus tooltip + 可展开数据表） |
 | `apps/web/src/pages/dashboard/SectorBlock.tsx` | Dashboard 板块子块（4 KPI + 偏好 + 概念警示 + 深链，`data-board-member`） |
 | `apps/web/src/pages/Sectors.tsx` | `/sectors` 详情页（行业三级下钻 / 概念暴露，深链与 `keepPreviousData`） |
 | `apps/web/src/pages/sectors/SectorTable.tsx` | 板块明细表（行业含基准/主动列；概念含暴露/多归属列） |

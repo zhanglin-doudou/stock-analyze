@@ -119,7 +119,12 @@ export function Trades() {
       priority: 1,
       render: (row) => `${row.security_code} ${row.security_name ?? ""}`.trim(),
     },
-    { key: "side", header: "方向", priority: 1, render: (row) => row.side },
+    {
+      key: "category",
+      header: "明细类型",
+      priority: 1,
+      render: (row) => row.category_label,
+    },
     { key: "quantity", header: "数量", priority: 2, align: "right", render: (row) => row.quantity },
     { key: "price", header: "价格", priority: 2, align: "right", render: (row) => row.price },
     { key: "amount", header: "金额", priority: 2, align: "right", render: (row) => row.amount },
@@ -129,13 +134,6 @@ export function Trades() {
       priority: 3,
       align: "right",
       render: (row) => row.cash_balance,
-    },
-    {
-      key: "money_fund_balance",
-      header: "货币基金余额",
-      priority: 3,
-      align: "right",
-      render: (row) => row.money_fund_balance,
     },
     { key: "version", header: "版本", priority: 3, align: "right", render: (row) => row.version },
     {

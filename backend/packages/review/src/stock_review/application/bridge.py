@@ -11,11 +11,16 @@
   `pnl - dividend` 之和），期末未平仓 lot 成本进 `open_cost`；
 - `dividend` 计净股息、`interest` 计利息、`fee` 计正费用（amount 为负，取反）、
   `transfer` 计外部资金流；
+- `broker_action`（券商行为）按金额计入外部资金流 `cashflows`：登记行金额为 0 时无影响；
+  若账单确实带非 0 金额（如「申购还款」回款），必须作为外部现金流剔除出收益，否则会虚增
+  收益并让桥接失衡；它不进 `other`，因此不产生残差、不触发降级；
 - `new_stock/other/missing/NULL` 等未分类现金流进 `other` 并把状态降级为 `degraded`
   （打新冻结/解冻、对账补差等语义无法拆分，只能整体补差）；
 - `rights`（配股缴款）**不进 other**：其缴款额已被 FIFO 计入买入 lot 成本
   （core `RIGHTS` 成本取 `abs(amount_units)`），再计一次会让恒等式双边重复；
-- `bonus`（送转）零金额、不产生现金流，同样不参与分类。
+- `bonus`（送转）零金额、不产生现金流，同样不参与分类；
+- 货币基金是现金等价物：期初/期末现金都含货基余额，申赎不产生现金流（不重复计入
+  收益），只有红利/利息（现金发放或再投份额的净额）才计入 `dividends`/`interest`。
 
 现金锚点：
 - 期初 = `period_start` 之前最后一条 `cash_balance`（`statement`）；缺失时用
@@ -30,16 +35,27 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from stock_contracts.clock import Clock
-from stock_core.fifo import BridgeIdentity, BridgeLedger, build_rounds, compute_bridge
+from stock_core.fifo import (
+    BridgeIdentity,
+    BridgeLedger,
+    build_rounds,
+    compute_bridge,
+)
 from stock_ledger.models import Trade
 from stock_ledger.repositories.trades import TradeRepository
 
 from stock_review.application.bond_alias import build_bond_alias
+from stock_review.application.money_fund import (
+    money_fund_codes,
+    money_fund_total_units,
+    money_fund_value_units,
+)
 from stock_review.application.rebuild import trades_to_events
+from stock_review.application.valuation import CASHFLOW_CATEGORIES as _CASHFLOW_CATEGORIES
 from stock_review.application.valuation import category as _category
 from stock_review.application.valuation import is_cash_balance as _is_cash_balance
 
@@ -183,16 +199,27 @@ async def bridge_for_period(
     initial = _initial_cash(trades, period_start)
     if initial is None:
         return _blocked(period, clock)
-    initial_cash, _anchor_source = initial
+    initial_cash_broker, _anchor_source = initial
 
     # 区间前持仓成本（FIFO open lots）与区间内平仓损益、期末未平仓成本。
     # 可转债发债代码从全量明细派生别名后归一（设计 D3）：申购缴款与上市卖出配对，
     # 卖出的实现损益才能进 trading_pnl。
     bond_alias, _unresolved = build_bond_alias((t.security_code, t.security_name) for t in trades)
+    # 货币基金 = 现金等价物（2.3 口径）：期初/期末现金都含货基余额；申赎是现金内部
+    # 转换（不产生现金流），只有红利/利息（现金发放或再投份额）才计入收益。
+    fund_codes = money_fund_codes(trades)
+    initial_cash = initial_cash_broker + money_fund_total_units(trades, before=period_start)
     result_start = build_rounds(
         trades_to_events([t for t in trades if t.trade_date < period_start], bond_alias=bond_alias)
     )
     result_end = build_rounds(trades_to_events(trades, bond_alias=bond_alias))
+    # 超卖未配对卖款已在期末现金里，但不计入期初、不算收益：桥接恒等式需要它出现在
+    # 现金流一侧才能闭合。仅内部对账使用，资产表 `cashflow_units` 与前端都不标成资金划转。
+    oversell_units = sum(
+        error.proceeds_units
+        for error in result_end.data_errors
+        if error.kind == "oversell" and period_start <= error.trade_date <= period_end
+    )
     initial_open_cost = sum(lot.cost_units for lot in result_start.open_lots)
     open_cost = sum(lot.cost_units for lot in result_end.open_lots)
     # 新引擎：round = 0→非0→0 仓位周期；open round 内含部分卖出的 fills（做T）。
@@ -204,16 +231,35 @@ async def bridge_for_period(
         if period_start <= fill.close_date <= period_end
     )
 
+    # 期末现金用与期初相同的锚点口径推导（超卖卖款已含在流水里，不额外补记）。
     ending_cash, cash_source = _ending_cash(
-        trades, period_start, period_end, initial_cash=initial_cash
+        trades, period_start, period_end, initial_cash=initial_cash_broker
     )
+    # 期末现金 = 券商现金 + 货基余额（区间末当日收盘后的余额）。
+    ending_cash += money_fund_total_units(trades, before=period_end + timedelta(days=1))
     degraded = cash_source != "statement"
 
-    cashflows = dividends = interest = fees = other = 0
+    cashflows = oversell_units
+    dividends = interest = fees = other = 0
     for trade in trades:
         if not (period_start <= trade.trade_date <= period_end):
             continue
         category = _category(trade)
+        if trade.security_code and trade.security_code in fund_codes:
+            # 货基：申赎是现金内部转换（amount 与余额变动相互抵消，净额为 0）；
+            # 红利/利息（现金发放或再投份额）按净额计入收益，不产生桥接残差。
+            extra = trade.amount_units + money_fund_value_units(trade)
+            if extra:
+                if category == "dividend":
+                    dividends += extra
+                elif category == "interest":
+                    interest += extra
+                elif category == "fee":
+                    fees += -extra
+                else:
+                    other += extra
+                    degraded = True
+            continue
         if category in _ROUND_CATEGORIES or category in _NON_CASH_CATEGORIES:
             continue
         if category == "new_stock":
@@ -230,7 +276,9 @@ async def bridge_for_period(
         elif category == "fee":
             # fee 行 amount 为负（资金流出），桥接公式里 fees 是正数费用。
             fees += -trade.amount_units
-        elif category == "transfer":
+        elif category in _CASHFLOW_CATEGORIES:
+            # transfer（资金划转）与 broker_action（券商行为，金额非 0 时即真实回款）
+            # 都是外部现金流，不计入投资收益。
             cashflows += trade.amount_units
         else:
             other += trade.amount_units

@@ -11,7 +11,9 @@ import {
   type Job,
   type JobEvent,
   type JobPage,
+  type OversellRevisionOut,
   type Problem,
+  type Round,
 } from "@sa/api-client";
 import { Assets } from "./Assets";
 import assetsSource from "./Assets.tsx?raw";
@@ -29,6 +31,14 @@ vi.mock("../client", () => ({
       get: vi.fn(),
       events: vi.fn(),
     },
+    rounds: {
+      list: vi.fn(),
+    },
+    trades: {
+      oversellRevision: vi.fn(),
+      putOversellRevision: vi.fn(),
+      deleteOversellRevision: vi.fn(),
+    },
   },
 }));
 
@@ -37,6 +47,8 @@ const buildAssets = vi.mocked(api.assets.build);
 const listJobs = vi.mocked(api.jobs.list);
 const getJob = vi.mocked(api.jobs.get);
 const jobEvents = vi.mocked(api.jobs.events);
+const listRounds = vi.mocked(api.rounds.list);
+const getRevision = vi.mocked(api.trades.oversellRevision);
 
 function makeBuild(overrides: Partial<AssetBuildState> = {}): AssetBuildState {
   return {
@@ -60,8 +72,6 @@ function makePoint(overrides: Partial<AssetPoint> = {}): AssetPoint {
   return {
     date: "2026-06-30",
     cash: "-70000.00",
-    money_fund: "20000.00",
-    balance: "-50000.00",
     market_value: "170620.00",
     total_assets: "100620.00",
     holding_cost: "170000.00",
@@ -252,6 +262,7 @@ beforeEach(() => {
   getJob.mockResolvedValue(makeJob());
   buildAssets.mockResolvedValue(accepted());
   jobEvents.mockImplementation(() => noEvents());
+  listRounds.mockResolvedValue({ items: [], next_cursor: null, has_more: false });
 });
 
 afterEach(cleanup);
@@ -386,6 +397,32 @@ describe("Assets 资产表页", () => {
     expect(buildAssets).toHaveBeenCalledTimes(1);
   });
 
+  it("FT-03g 自动触发收敛：noop 构建只刷新 last_built_at、状态仍 stale 时不重复 POST", async () => {
+    // 线上死循环复现：构建端与判定端口径版本不一致 → 每次构建都 noop，
+    // 状态永远 stale，只有 last_built_at 在前进（不得据此生成新的 stale 代次）。
+    listAssets
+      .mockResolvedValueOnce(
+        makePage({
+          build: makeBuild({ state: "stale", last_built_at: "2026-09-30T08:00:00Z" }),
+        }),
+      )
+      .mockResolvedValue(
+        makePage({
+          build: makeBuild({ state: "stale", last_built_at: "2026-09-30T08:00:01Z" }),
+        }),
+      );
+    getJob.mockResolvedValue(makeJob({ status: "succeeded" }));
+
+    renderPage();
+
+    await waitFor(() => expect(buildAssets).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(listAssets.mock.calls.length).toBeGreaterThanOrEqual(2));
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    });
+    expect(buildAssets).toHaveBeenCalledTimes(1);
+  });
+
   it("FT-03e 自动触发失败：展示后端文案 + 手动重试按钮，且不自动重复 POST", async () => {
     listAssets.mockResolvedValue(makePage({ build: makeBuild({ state: "stale" }) }));
     buildAssets.mockRejectedValueOnce(new ApiProblemError(buildProblem()));
@@ -472,8 +509,6 @@ describe("Assets 资产表页", () => {
           makePoint({
             date: "2026-06-28",
             cash: null,
-            money_fund: null,
-            balance: null,
             market_value: null,
             total_assets: null,
             holding_cost: null,
@@ -527,18 +562,24 @@ describe("Assets 资产表页", () => {
     expect(screen.getByText("-620.00").className).toBe("money money-neg");
 
     // blocked 行：数值列「—」+ 阻断 badge（status_reason 作为 title）
-    const blockedRowBadges = screen.getAllByText("阻断");
-    expect(blockedRowBadges.length).toBeGreaterThanOrEqual(1);
-    const blockedBadge = blockedRowBadges[0];
-    expect(blockedBadge.className).toContain("badge-blocked");
-    expect(blockedBadge.getAttribute("title")).toBe("缺少 600519 行情");
+    // 注意状态筛选项里也有「阻断 / 降级 / 正常」文案，按 badge 类名定位表格里的徽标。
+    const blockedBadge = screen
+      .getAllByText("阻断")
+      .find((element) => element.className.includes("badge-blocked"));
+    expect(blockedBadge).toBeTruthy();
+    expect(blockedBadge!.getAttribute("title")).toBe("缺少 600519 行情");
     expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(8);
 
     // degraded badge
-    const degraded = screen.getByText("降级");
-    expect(degraded.className).toContain("badge-degraded");
+    const degraded = screen
+      .getAllByText("降级")
+      .find((element) => element.className.includes("badge-degraded"));
+    expect(degraded).toBeTruthy();
     // 正常 badge
-    expect(screen.getByText("正常").className).toContain("badge-ok");
+    const okBadge = screen
+      .getAllByText("正常")
+      .find((element) => element.className.includes("badge-ok"));
+    expect(okBadge).toBeTruthy();
   });
 
   it("FT-05 分页：请求带 cursor，追加不重复", async () => {
@@ -641,6 +682,21 @@ describe("Assets 资产表页", () => {
     expect(screen.getByText(/部分日期存在阻断\/降级/)).toBeTruthy();
   });
 
+  it("FT-08 degraded 提示：后端 status_reason 原样展示（缺行情最终文案由后端给）", async () => {
+    listAssets.mockResolvedValue(
+      makePage({
+        build: makeBuild({
+          last_status: "degraded",
+          status_reason: "缺少行情数据，请联系技术支持解决",
+        }),
+      }),
+    );
+
+    renderPage();
+
+    expect(await screen.findByText("缺少行情数据，请联系技术支持解决")).toBeTruthy();
+  });
+
   it("FT-10 可访问性：提交中按钮 disabled + aria-busy + 「构建中…」", async () => {
     listAssets.mockResolvedValue(missingPage());
     let resolveBuild: (value: AssetBuildAccepted) => void = () => undefined;
@@ -707,5 +763,135 @@ describe("Assets 资产表页", () => {
     expect(assetsSource).not.toMatch(/\.toFixed\s*\(/);
     // 百分比来自后端，不自行换算
     expect(assetsSource).not.toMatch(/daily_return\b(?!_pct)/);
+  });
+});
+
+// ── 筛选 / 自动回填 / 超卖修订入口（2026-11-16）──────────────
+function makeOversellRound(overrides: Partial<Round> = {}): Round {
+  return {
+    round_id: "rnd_over",
+    security_code: "600519",
+    security_name: "贵州茅台",
+    status: "oversell",
+    open_date: "2026-06-19",
+    close_date: "2026-06-19",
+    quantity: "150",
+    cost: "0.00",
+    proceeds: "2250.00",
+    dividend: "0.00",
+    pnl: "0.00",
+    return_rate: "0.00000000",
+    holding_days: 0,
+    open_trade_id: "trd_sell_1",
+    close_trade_id: "trd_sell_1",
+    data_error: false,
+    oversell_quantity: "150",
+    fills_count: 0,
+    rebuilt_at: "2026-06-19T08:00:00Z",
+    ...overrides,
+  };
+}
+
+function makeRevision(overrides: Partial<OversellRevisionOut> = {}): OversellRevisionOut {
+  return {
+    sell: {
+      trade_id: "trd_sell_1",
+      trade_date: "2026-06-19",
+      security_code: "600519",
+      security_name: "贵州茅台",
+      quantity: "150",
+      amount: "2250.00",
+      oversell_quantity: "150",
+      note: null,
+    },
+    status: "none",
+    cost: null,
+    cash_trade: null,
+    buy_trade: null,
+    round_id: null,
+    ...overrides,
+  };
+}
+
+describe("Assets 筛选与超卖修订入口", () => {
+  it("筛选：状态 / 排序 / 时间范围随请求下发", async () => {
+    renderPage();
+    await screen.findByText("2026-06-30");
+
+    fireEvent.change(screen.getByLabelText("状态"), { target: { value: "degraded" } });
+    fireEvent.change(screen.getByLabelText("排序"), { target: { value: "-trade_date" } });
+    // PeriodInput 默认月度；切到年度并选 2026 → token "2026" → from/to 为整年。
+    fireEvent.change(screen.getByLabelText("期间类型"), { target: { value: "year" } });
+    fireEvent.change(screen.getByLabelText("年份"), { target: { value: "2026" } });
+    fireEvent.click(screen.getByRole("button", { name: "应用筛选" }));
+
+    await waitFor(() =>
+      expect(listAssets).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          status: "degraded",
+          sort: "-trade_date",
+          from: "2026-01-01",
+          to: "2026-12-31",
+        }),
+      ),
+    );
+  });
+
+  it("首屏整体状态非正常时自动回填状态筛选并触发一次过滤", async () => {
+    listAssets
+      .mockResolvedValueOnce(
+        makePage({
+          build: makeBuild({
+            last_status: "degraded",
+            status_reason: "超卖（卖出数量超过可用持仓），需人工补录成本",
+          }),
+        }),
+      )
+      .mockResolvedValueOnce(
+        makePage({
+          items: [
+            makePoint({
+              status: "degraded",
+              status_reason: "超卖（卖出数量超过可用持仓），需人工补录成本",
+            }),
+          ],
+        }),
+      );
+
+    renderPage();
+
+    expect(await screen.findByTestId("assets-auto-filter")).toBeTruthy();
+    await waitFor(() => expect(listAssets).toHaveBeenCalledTimes(2));
+    expect(listAssets.mock.calls[1][0]).toMatchObject({ status: "degraded" });
+    expect(screen.getByLabelText("状态")).toBeTruthy();
+    expect((screen.getByLabelText("状态") as HTMLSelectElement).value).toBe("degraded");
+  });
+
+  it("超卖日显示「补录成本」入口，点击打开共享的修订弹窗", async () => {
+    listAssets.mockResolvedValue(
+      makePage({
+        items: [
+          makePoint({
+            date: "2026-06-19",
+            status: "degraded",
+            status_reason: "超卖（卖出数量超过可用持仓），需人工补录成本",
+          }),
+        ],
+      }),
+    );
+    listRounds.mockResolvedValue({
+      items: [makeOversellRound()],
+      next_cursor: null,
+      has_more: false,
+    });
+    getRevision.mockResolvedValue(makeRevision());
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole("button", { name: "补录成本" }));
+
+    await waitFor(() => expect(getRevision).toHaveBeenCalledWith("trd_sell_1"));
+    expect(await screen.findByText("超卖成本补录")).toBeTruthy();
+    expect(await screen.findByText("待补录成本")).toBeTruthy();
   });
 });

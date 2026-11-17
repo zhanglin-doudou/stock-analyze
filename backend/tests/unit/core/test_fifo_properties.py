@@ -159,15 +159,26 @@ def _assert_no_negative_positions(events: list[FifoEvent]) -> None:
         assert round_.cost_units >= 0
         assert round_.dividend_units >= 0
         assert round_.oversell_units >= 0
-        # 周期语义不变量（open / closed 通用）：
-        # - pnl 恒等式：pnl = proceeds - cost + dividend
-        # - 有 fills 时 Σ fill.quantity == round.quantity_units（matched）
-        assert round_.pnl_units == (
-            round_.proceeds_units - round_.cost_units + round_.dividend_units
-        )
-        if round_.fills:
-            assert sum(fill.quantity_units for fill in round_.fills) == round_.quantity_units
-            assert sum(fill.pnl_units for fill in round_.fills) == round_.pnl_units
+        # 周期语义不变量：
+        # - closed/data_error/oversell：pnl = proceeds - cost + dividend，Σfills.qty == round.qty；
+        # - open：cost 是剩余持仓成本，pnl = proceeds - 已消耗成本 + 已消耗股息，
+        #   Σfills.qty == 已配对卖出数（≠ round.qty 剩余持仓）。
+        if round_.status == "open":
+            matched_cost = sum(fill.buy_cost_units for fill in round_.fills)
+            assert round_.pnl_units == (
+                round_.proceeds_units - matched_cost + round_.dividend_units
+            )
+            if round_.fills:
+                assert sum(fill.pnl_units for fill in round_.fills) == round_.pnl_units
+        elif round_.status == "oversell" and not round_.fills:
+            assert round_.pnl_units == 0
+        else:
+            assert round_.pnl_units == (
+                round_.proceeds_units - round_.cost_units + round_.dividend_units
+            )
+            if round_.fills:
+                assert sum(fill.quantity_units for fill in round_.fills) == round_.quantity_units
+                assert sum(fill.pnl_units for fill in round_.fills) == round_.pnl_units
         # data_error 状态与 oversell_units 对齐
         if round_.status == "data_error":
             assert round_.data_error is True
@@ -193,8 +204,12 @@ def test_buy_sell_quantity_and_cost_conservation(events: list[FifoEvent]) -> Non
     )
 
     matched_quantity = sum(
-        round_.quantity_units
-        for round_ in result.rounds  # 含 open / closed，都是已 FIFO 配对量
+        # closed 回合 quantity = 已配对；open 回合 quantity = 剩余持仓，需从 fills 取已配对。
+        sum(fill.quantity_units for fill in round_.fills)
+        if round_.status == "open"
+        else round_.quantity_units
+        for round_ in result.rounds
+        if round_.fills or round_.status != "oversell"
     )
     open_quantity = sum(lot.quantity_units for lot in result.open_lots)
     oversell_quantity = sum(
@@ -204,11 +219,17 @@ def test_buy_sell_quantity_and_cost_conservation(events: list[FifoEvent]) -> Non
     assert open_quantity == aggregates["open_quantity"]
     assert oversell_quantity == aggregates["oversell_quantity"]
 
-    # 成本守恒：Σ买入成本 + Σ配股缴款 = Σ closed round.cost（已消耗）+ Σ open_lot.cost（剩余）
-    # （open round.cost 也是已消耗，已在 closed 里）
-    closed_cost = sum(round_.cost_units for round_ in result.rounds)
-    open_lot_cost = sum(lot.cost_units for lot in result.open_lots)
-    assert aggregates["buy_cost"] + aggregates["rights_payment"] == closed_cost + open_lot_cost
+    # 成本守恒：Σ买入成本 + Σ配股缴款 = 已消耗成本 + 剩余成本
+    # 已消耗 = closed rounds cost + open rounds fills buy_cost；剩余 = open round cost
+    matched_cost = sum(
+        sum(fill.buy_cost_units for fill in round_.fills)
+        if round_.status == "open"
+        else round_.cost_units
+        for round_ in result.rounds
+        if round_.fills or round_.status != "oversell"
+    )
+    remaining_cost = sum(round_.cost_units for round_ in result.rounds if round_.status == "open")
+    assert aggregates["buy_cost"] + aggregates["rights_payment"] == matched_cost + remaining_cost
 
 
 @SETTINGS
@@ -253,9 +274,12 @@ def test_invariants_buy_sell_only(events: list[FifoEvent]) -> None:
         aggregates["buy_quantity"] == aggregates["matched_quantity"] + aggregates["open_quantity"]
     )
     assert aggregates["buy_cost"] == sum(
-        round_.cost_units
-        for round_ in result.rounds  # 含 open / closed，都是已消耗 cost
-    ) + sum(lot.cost_units for lot in result.open_lots)
+        # closed 回合 cost = 已消耗；open 回合 cost = 剩余持仓成本（== open_lots）
+        sum(fill.buy_cost_units for fill in round_.fills)
+        if round_.status == "open"
+        else round_.cost_units
+        for round_ in result.rounds
+    ) + sum(round_.cost_units for round_ in result.rounds if round_.status == "open")
 
 
 @SETTINGS

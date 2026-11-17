@@ -41,6 +41,22 @@ EXEMPT: dict[tuple[str, str], str] = {
     ): "基于本人 preview_id 提交导入，跨账号 preview 由 404 兜底；API-011 用例覆盖",
     (
         "GET",
+        "/admin/import-column-rules",
+    ): "全局管理员配置而非租户资源；非 admin 403 由 API-102 用例覆盖，401 参数化已覆盖",
+    (
+        "POST",
+        "/admin/import-column-rules",
+    ): "新建全局管理员配置，无跨租户资源 ID；非 admin 403 由 API-103 用例覆盖",
+    (
+        "PATCH",
+        "/admin/import-column-rules/{rule_id}",
+    ): "规则 id 属于全局管理员配置，不存在跨租户归属；非 admin 403 与不存在 404 由 API 用例覆盖",
+    (
+        "DELETE",
+        "/admin/import-column-rules/{rule_id}",
+    ): "规则 id 属于全局管理员配置，不存在跨租户归属；非 admin 403 与不存在 404 由 API 用例覆盖",
+    (
+        "GET",
         "/metrics",
     ): "指标 id 是全局代码资产（非用户资源）；数据隔离由仓储显式 user_id + RLS 保证；401/403 参数化已覆盖",
     (

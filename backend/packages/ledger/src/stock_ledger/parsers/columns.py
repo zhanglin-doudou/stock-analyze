@@ -26,10 +26,24 @@ COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
     "other_fee": ("其他费", "过户费", "其他费用"),
     "cash_balance": ("资金余额", "余额"),
     "summary": ("摘要", "业务名称", "备注"),
-    "account": ("资金账号", "股东代码", "客户号", "资金账户", "股东账号"),
+    # account 只认资金账号类列：股东代码/股东账号是沪/深股东号，一张账单会有两个，
+    # 当作账户会误拆对账链；客户号也不是资金账号（口径与 v2 FIELD_ALIASES 一致）。
+    "account": ("资金账号", "资金帐号", "资金账户", "资金帐户"),
 }
 
 REQUIRED_FIELDS: tuple[str, ...] = ("trade_date", "security_code", "quantity", "price")
+
+#: 需要脱敏的账户类表头：即使这些列不再映射 `account`（如沪/深股东代码），
+#: 其明文也不能落到隔离区 raw 或预览 sample 里，源头统一抹成 MD5。
+SENSITIVE_ACCOUNT_ALIASES: tuple[str, ...] = (
+    "资金账号",
+    "资金帐号",
+    "资金账户",
+    "资金帐户",
+    "股东代码",
+    "股东账号",
+    "客户号",
+)
 
 # 金额列语义：这些表头原生就是「带符号的发生金额/净现金流」（买入为负、卖出为正、已含费用），
 # 解析器直接使用；其余（典型是「成交金额」毛额）必须按方向 + 费用换算成带符号净额。
@@ -105,7 +119,13 @@ def _match_field(header_norm: str) -> str | None:
 
 
 def map_columns(headers: list[str], *, mapping: dict[str, str] | None = None) -> ColumnMapping:
-    """把表头映射到字段名；`mapping`（表头 → 字段）优先于自动识别。"""
+    """把表头映射到字段名；`mapping`（表头 → 字段）优先于自动识别。
+
+    `amount` 字段特殊处理：库列语义是「带符号净现金流」，当账单同时有「成交金额」
+    （毛额）与「发生金额/发生额」（带符号净额）时，必须让带符号列拿到 `amount`，
+    否则非交易资金行（银证转入/利息归本/红股派息等）的毛额恒为 0，现金流会被静默
+    丢弃、余额链断链。口径与 v2 `suggest_items`（`FIELD_ALIASES`）一致。
+    """
     normalized_mapping = {normalize_header(key): value for key, value in (mapping or {}).items()}
     result = ColumnMapping()
     used: set[str] = set()
@@ -119,6 +139,26 @@ def map_columns(headers: list[str], *, mapping: dict[str, str] | None = None) ->
             continue
         result.columns[original] = field_name
         used.add(field_name)
+
+    # amount 列优先带符号净额：若当前 amount 落在毛额列（如「成交金额」），且 unresolved
+    # 里有带符号列（「发生金额/发生额」），则交换——让带符号列拿 amount，毛额列进 unresolved。
+    amount_header = next(
+        (h for h, f in result.columns.items() if f == "amount"),
+        None,
+    )
+    if amount_header is not None and not is_signed_amount_header(amount_header):
+        signed_idx = next(
+            (idx for idx, h in enumerate(result.unresolved) if is_signed_amount_header(h)),
+            None,
+        )
+        if signed_idx is not None:
+            signed_header = result.unresolved.pop(signed_idx)
+            del result.columns[amount_header]
+            result.columns[signed_header] = "amount"
+            result.unresolved.append(amount_header)
+    # 重建 unresolved 为表头顺序，避免换出列位置漂移导致 legacy 与 v2 计划不一致。
+    resolved = set(result.columns)
+    result.unresolved = [h for h in headers if h not in resolved]
     return result
 
 
@@ -199,44 +239,36 @@ def classify_side(raw: str) -> str | None:
     return None
 
 
-_SUMMARY_BUY_TOKEN = "证券买入"
-_SUMMARY_SELL_TOKEN = "证券卖出"
-
-# 货币基金申赎确认摘要 → 资金方向。
-# 货基对账单通常没有「买卖标志」列，摘要只写「申购确认/赎回确认」；不识别就会落
-# unknown，分类规则按方向匹配时命中不了。只认「确认」形态，避免把「赎回费」等
-# 费用类摘要误判成交易方向（费用仍走 unknown + 费用规则）。
-FUND_SUMMARY_SIDE: tuple[tuple[str, str], ...] = (
-    ("申购确认", Side.BUY.value),
-    ("赎回确认", Side.SELL.value),
-)
-
-
-def classify_side_from_summary(raw: str) -> str | None:
-    """摘要兜底：证券买卖 / 基金申赎确认 → buy/sell；否则 None。"""
-    text = normalize_summary(raw)
-    if _SUMMARY_BUY_TOKEN in text:
-        return Side.BUY.value
-    if _SUMMARY_SELL_TOKEN in text:
-        return Side.SELL.value
-    for keyword, side in FUND_SUMMARY_SIDE:
-        if keyword in text:
-            return side
-    return None
-
-
-# 非交易类摘要 → side（按资金方向：流入=sell，流出=buy，无金额变化=unknown）。
-# 分类规则（repositories/rules.py SYSTEM_RULES）复用同一份词汇，避免「解析器认识、分类器不认识」
-# 导致的真实账单误隔离（P1-8 / G3）。
-NON_TRADE_SUMMARY_SIDE: tuple[tuple[str, str], ...] = (
-    ("银行转存", Side.SELL.value),
-    ("银行转取", Side.BUY.value),
-    ("股息入帐", Side.SELL.value),
-    ("利息归本", Side.SELL.value),
-    ("股息红利税", Side.BUY.value),
-    ("转存管转入", Side.UNKNOWN.value),
-    ("转存管转出", Side.UNKNOWN.value),
-    ("资管转让资金上账", Side.SELL.value),
+# 非交易类（资金类）摘要关键词：这些行没有真实证券代码，导入时用 CASH 占位。
+# 方向不再由摘要推断——统一在分类阶段由 Category 决定（buy/new_stock→买入，sell→卖出）。
+# 词表与分类系统规则（repositories/rules.py）保持同源，避免「解析器认识、分类器不认识」
+# 导致的真实资金行被误隔离（P1-8 / G3）。
+NON_TRADE_SUMMARY_KEYWORDS: tuple[str, ...] = (
+    "银行转存",
+    "银行转取",
+    "银证转入",
+    "银证转出",
+    "跨行转入",
+    "跨行转出",
+    "带资金补登",
+    "资产账户币种开户",
+    "股息入帐",
+    "利息归本",
+    "股息红利税",
+    "转存管转入",
+    "转存管转出",
+    "资管转让资金上账",
+    # 打新/可转债申购的资金腿：冻结/缴款是资金流出，解冻/还款/退款是资金退回。
+    # 这些行证券代码可为空，纳入非交易词汇后用 CASH 占位导入，避免被当成字段缺失行隔离、
+    # 打断资金余额链。
+    "申购冻结",
+    "申购解冻",
+    "申购还款",
+    "申购退款",
+    "中签退款",
+    # 「市值认购资金扣收」：按市值认购可转债/新股的缴款腿，华泰账单里证券代码为空，
+    # 只有发生金额（负）与资金余额。与上面的申购资金腿同构，用 CASH 占位导入。
+    "市值认购资金扣收",
 )
 
 # 资金划转（银证转账 / 转存管）摘要关键词：分类规则与方向识别共用同一词表。
@@ -250,57 +282,44 @@ TRANSFER_SUMMARY_KEYWORDS: tuple[str, ...] = (
     "转存管转入",
     "转存管转出",
     "资管转让资金上账",
+    # 银证转账的另一种摘要写法（华泰「银证转入/银证转出」）：与解析词表对称，避免
+    # 「解析器认识、分类器不认识」导致真实资金行在分类阶段被隔离。
+    "银证转入",
+    "银证转出",
 )
 
 
-def classify_side_from_non_trade_summary(raw: str) -> str | None:
-    """非交易摘要 → side；无匹配返回 None。
+def is_non_trade_summary(raw: str) -> bool:
+    """摘要是否属于非交易类（资金类）业务——这些行用 CASH 占位导入。
 
-    银行转存/股息入帐/利息归本等资金类业务，证券代码可为空，但摘要能判定资金方向。
+    方向不再由此判定，统一在分类阶段由 Category 决定。
     """
     text = normalize_summary(raw)
-    for keyword, side in NON_TRADE_SUMMARY_SIDE:
-        if keyword in text:
-            return side
-    return None
-
-
-def is_non_trade_summary(raw: str) -> bool:
-    """摘要是否属于非交易类（资金类）业务。"""
-    return classify_side_from_non_trade_summary(raw) is not None
+    return any(keyword in text for keyword in NON_TRADE_SUMMARY_KEYWORDS)
 
 
 def resolve_side(raw_side: str, raw_summary: str) -> str:
-    """方向解析：买卖标志列优先 → 摘要兜底 → 非交易摘要 → 默认 unknown。
+    """方向解析：只认「买卖标志」列；无列或空值时回落 unknown。
 
-    账单可能根本没有「买卖标志」列（或该单元格为空），此时从摘要里识别方向；
-    银行转存/股息入帐等非交易类业务按资金流向分配方向；
-    两边都识别不出则回落为 `unknown`，不再整行隔离。
+    买入/卖出方向不再由摘要推断——分类阶段由 Category 决定（buy/new_stock→买入，
+    sell→卖出）。保留买卖标志列仅用于毛额账单（仅有「成交金额」无「发生金额」时）
+    的金额符号换算。
     """
     side = classify_side(raw_side)
     if side is not None:
         return side
-    summary_side = classify_side_from_summary(raw_summary)
-    if summary_side is not None:
-        return summary_side
-    non_trade_side = classify_side_from_non_trade_summary(raw_summary)
-    if non_trade_side is not None:
-        return non_trade_side
     return Side.UNKNOWN.value
 
 
 __all__ = [
     "COLUMN_ALIASES",
     "DATE_FORMATS",
-    "FUND_SUMMARY_SIDE",
-    "NON_TRADE_SUMMARY_SIDE",
+    "NON_TRADE_SUMMARY_KEYWORDS",
     "REQUIRED_FIELDS",
     "SIGNED_AMOUNT_HEADERS",
     "TRANSFER_SUMMARY_KEYWORDS",
     "ColumnMapping",
     "classify_side",
-    "classify_side_from_non_trade_summary",
-    "classify_side_from_summary",
     "detect_date_format",
     "is_non_trade_summary",
     "is_signed_amount_header",

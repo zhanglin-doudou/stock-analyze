@@ -48,6 +48,10 @@ PREFIX_EXPORT = "exp"
 PREFIX_SHARE = "shr"
 PREFIX_RECON = "rec"
 PREFIX_BACKUP = "bak"
+# 导入映射 v2（2026-11-13）：用户字段模板 / 账单类型映射 / 系统列规则。
+PREFIX_IMPORT_TEMPLATE = "imt"
+PREFIX_IMPORT_BILL_TYPE = "ibt"
+PREFIX_IMPORT_COLUMN_RULE = "icr"
 
 
 def trade_id(now_ms: int | None = None) -> str:
@@ -76,3 +80,15 @@ def token_id(now_ms: int | None = None) -> str:
 
 def backup_id(now_ms: int | None = None) -> str:
     return new_id(PREFIX_BACKUP, now_ms)
+
+
+def import_template_id(now_ms: int | None = None) -> str:
+    return new_id(PREFIX_IMPORT_TEMPLATE, now_ms)
+
+
+def import_bill_type_id(now_ms: int | None = None) -> str:
+    return new_id(PREFIX_IMPORT_BILL_TYPE, now_ms)
+
+
+def import_column_rule_id(now_ms: int | None = None) -> str:
+    return new_id(PREFIX_IMPORT_COLUMN_RULE, now_ms)

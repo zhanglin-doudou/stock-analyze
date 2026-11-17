@@ -19,6 +19,9 @@ import type {
   ErrorCatalogOut,
   HealthOut,
   ImportBatch,
+  ImportMappingIn,
+  ImportTemplatePage,
+  ImportTypesIn,
   Job,
   JobAccepted,
   JobList,
@@ -31,6 +34,9 @@ import type {
   MetricDrilldown,
   MetricExplain,
   Nav,
+  OversellRevisionIn,
+  OversellRevisionMutationOut,
+  OversellRevisionOut,
   PatCreateResponse,
   Preview,
   PreviewOptions,
@@ -550,10 +556,51 @@ export function createClient(options: ClientOptions) {
     preview(file: File, opts: PreviewOptions = {}) {
       const form = new FormData();
       form.append("file", file);
-      // 仅使用契约 Body_previewImport 声明的字段（此前多余的 columns/mode/broker 后端并不读取）。
       if (opts.mapping) form.append("mapping", opts.mapping);
       if (opts.date_format) form.append("date_format", opts.date_format);
-      return send<Preview>({ path: "/imports/preview", method: "POST", formData: form }).then((r) => r.data);
+      if (opts.broker) form.append("broker", opts.broker);
+      if (opts.reuse_template !== undefined) {
+        form.append("reuse_template", String(opts.reuse_template));
+      }
+      const headers = opts.flow === "v2" ? { "X-Import-Flow": "v2" } : undefined;
+      return send<Preview>({
+        path: "/imports/preview",
+        method: "POST",
+        formData: form,
+        headers,
+      }).then((r) => r.data);
+    },
+    /** API-106：刷新预览（不重算映射/类型，直接读落库状态）。 */
+    getPreview(previewId: string) {
+      return send<Preview>({ path: `/imports/previews/${previewId}` }).then((r) => r.data);
+    },
+    /** API-098：保存列映射并重跑类型分析（`If-Match` 传当前 mapping_version）。 */
+    saveMapping(previewId: string, body: ImportMappingIn, ifMatch: string) {
+      return send<Preview>({
+        path: `/imports/previews/${previewId}/mapping`,
+        method: "PUT",
+        body,
+        ifMatch,
+      }).then((r) => r.data);
+    },
+    /** API-099：保存类型确认（全部确认后预览进入 ready）。 */
+    saveTypes(previewId: string, body: ImportTypesIn, ifMatch: string) {
+      return send<Preview>({
+        path: `/imports/previews/${previewId}/types`,
+        method: "PUT",
+        body,
+        ifMatch,
+      }).then((r) => r.data);
+    },
+    /** API-100：本人列映射模板列表。 */
+    listTemplates(query: CursorQuery = {}) {
+      return send<ImportTemplatePage>({ path: "/imports/templates", query }).then((r) => r.data);
+    },
+    /** API-101：删除本人模板（origin 撤销/手动重配用）。 */
+    deleteTemplate(templateId: string) {
+      return send<void>({ path: `/imports/templates/${templateId}`, method: "DELETE" }).then(
+        (r) => r.data,
+      );
     },
     commit(body: CommitImportBody, idempotencyKey: string) {
       return send<JobAccepted>({ path: "/imports", method: "POST", body, idempotencyKey }).then((r) => r.data);
@@ -727,6 +774,29 @@ export function createClient(options: ClientOptions) {
         method: "DELETE",
         ifMatch: version === undefined ? undefined : `"${version}"`,
       }).then(() => undefined);
+    },
+    /** API-107：该卖出的超卖与人工修订状态（只读）。 */
+    oversellRevision(tradeId: string) {
+      return send<OversellRevisionOut>({
+        path: `/trades/${tradeId}/oversell-revision`,
+      }).then((r) => r.data);
+    },
+    /** API-108：补录/覆盖修订成本（幂等；返回注入行与重算任务 id）。 */
+    putOversellRevision(tradeId: string, body: OversellRevisionIn, idempotencyKey?: string) {
+      return send<OversellRevisionMutationOut>({
+        path: `/trades/${tradeId}/oversell-revision`,
+        method: "PUT",
+        body,
+        idempotencyKey,
+      }).then((r) => r.data);
+    },
+    /** API-109：撤回人工修订（软删注入行，幂等）。 */
+    deleteOversellRevision(tradeId: string, idempotencyKey?: string) {
+      return send<OversellRevisionMutationOut>({
+        path: `/trades/${tradeId}/oversell-revision`,
+        method: "DELETE",
+        idempotencyKey,
+      }).then((r) => r.data);
     },
   };
 

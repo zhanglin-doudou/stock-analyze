@@ -2,12 +2,11 @@
 
 桶代数（已由独立整数原型 + 手算 golden 验证）：
 
-- **标的级桶**（仅 bucketed 标的：非 CASH、非货基、非归因，且期初/期末有持仓或窗口有
+- **标的级桶**（仅 bucketed 标的：非 CASH、非归因，且期初/期末有持仓或窗口有
   持仓类行）：
   `bucket_x = (MV_x(d_end) − MV_x(d_begin)) + Σ_{x 窗口行} amount + Σ_{x 窗口行} 三费列`
   ——加三费列是因为账单「发生金额」已含费（买 = −(成交额+费)、卖 = +(成交额−费)），
   桶是**毛损益**；费用由 fee 因子集中承接（`F_u`），避免双计。
-- **货基桶**（镜像资产表余额覆盖制）：`(bal_end − bal_begin) + Σ_{mf 行} amount`。
 - **CASH 不进标的级桶**（避免与 interest/other_cashflow 双计）。
 - **归因标的**：段因子已覆盖其全部窗口损益；仅其独立 `fee` 行（红利税）进 `F_indep`。
 - **F_u** = Σ bucketed 三费列（fee 因子承接，桶内已还原毛额）；**F_indep** =
@@ -34,7 +33,7 @@ from datetime import date
 
 from stock_ledger.models import Trade
 
-from stock_review.application.valuation import category, is_money_fund_row
+from stock_review.application.valuation import category
 from stock_review.attribution.segments import SymbolPlan
 
 # 桶键（§3.6；valuation_gap 为 plug 由应用层计算）。
@@ -93,7 +92,6 @@ def split_residual(
     begin_date: date,
     end_date: date,
     bucket_mv: Mapping[str, tuple[int, int]],
-    money_fund_balances: Mapping[str, tuple[int, int]],
     holdings_at: Mapping[str, tuple[int, int]],
     corporate: Mapping[str, str],
     canonical: Callable[[str], str],
@@ -103,11 +101,6 @@ def split_residual(
     # `new_stock` 分类排除的标的单列「打新收益」桶（账户级，与 interest 同级）；
     # 其余非归因标的仍进 `unattributed_price_pnl`。
     ipo_codes = {plan.security_code for plan in plans if plan.symbol_class == "new_stock"}
-    money_fund_codes = {
-        canonical(trade.security_code) for trade in trades if is_money_fund_row(trade)
-    }
-    money_fund_codes.discard("")
-    money_fund_codes |= set(money_fund_balances)
 
     buckets: dict[str, int] = {key: 0 for key in BUCKET_KEYS if key != BUCKET_GAP}
     split = ResidualSplit(buckets=buckets, fee_bucketed_units=0, fee_indep_units=0)
@@ -130,15 +123,8 @@ def split_residual(
                 if category(trade) == "fee":
                     split.fee_indep_units += -trade.amount_units
             continue
-        if code == _CASH_CODE or code in money_fund_codes:
-            # CASH / 货基：不进标的级 MV 桶。
-            if code in money_fund_codes:
-                begin_bal, end_bal = money_fund_balances.get(code, (0, 0))
-                value = (end_bal - begin_bal) + sum(t.amount_units for t in rows)
-                buckets[BUCKET_UNATTRIBUTED] += value
-                split.per_symbol[code] = value
-            else:
-                _cash_rows(rows, buckets, split)
+        if code == _CASH_CODE:
+            _cash_rows(rows, buckets, split)
             continue
         begin_qty, end_qty = holdings_at.get(code, (0, 0))
         has_position = begin_qty != 0 or end_qty != 0

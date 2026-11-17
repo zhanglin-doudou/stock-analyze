@@ -32,7 +32,7 @@ _XLSX_CONTENT_TYPE = "application/vnd.openxmlformats-officedocument.spreadsheetm
 _UNKNOWN_BILL = (
     "成交日期,证券代码,证券名称,买卖标志,成交数量,成交价格,成交金额,佣金,印花税,其他费,资金余额,摘要\n"
     "2026-06-30,600519,贵州茅台,买入,100,1500.00,150000.00,5.00,0.00,0.10,100000.00,证券买入\n"
-    "2026-06-30,000001,平安银行,买入,200,10.00,2000.00,0.50,0.00,0.01,95000.00,未知业务XYZ\n"
+    "2026-06-30,000001,平安银行,买入,200,10.00,2000.00,0.50,0.00,0.01,97999.49,未知业务XYZ\n"
 ).encode()
 
 
@@ -128,14 +128,27 @@ async def test_real_bill_all_rows_classified_and_zero_unknown(
     preview = await _preview(
         client, api_prefix, user, _MOCK_BILL.read_bytes(), _MOCK_BILL.name, _XLSX_CONTENT_TYPE
     )
-    assert preview["estimated"] == {"parsed": 175, "inserted": 175, "skipped": 0, "quarantined": 2}
+    assert preview["estimated"] == {
+        "parsed": 175,
+        "inserted": 175,
+        "skipped": 0,
+        "quarantined": 2,
+        "discarded": 0,
+        "estimated_available": True,
+    }
     assert "UNKNOWN_SUMMARY" not in {warning["code"] for warning in preview["warnings"]}
 
     accepted = await _commit(client, api_prefix, user, preview["preview_id"])
     await _drain_worker(settings)
 
     batch = await _batch(client, api_prefix, user, accepted["batch_id"])
-    assert batch["counts"] == {"parsed": 175, "inserted": 175, "skipped": 0, "quarantined": 2}
+    assert batch["counts"] == {
+        "parsed": 175,
+        "inserted": 175,
+        "skipped": 0,
+        "quarantined": 2,
+        "discarded": 0,
+    }
     assert "UNKNOWN_SUMMARY" not in batch["warnings"]
 
     trades = await _trades(client, api_prefix, user)
@@ -174,33 +187,48 @@ async def test_real_bill_all_rows_classified_and_zero_unknown(
     )
     body = reco.json()
     assert body["status"] == "ok", body["breaks"][:3]
-    assert body["checked_rows"] == 174
+    # 非交易类（transfer/dividend/interest/fee）方向为 unknown，reconcile 不将其计入
+    # checked_rows（金额并入 pending 由下一条交易行整体核对）；仅 buy/sell 行被核对。
+    assert body["checked_rows"] == 145
     assert body["break_count"] == 0
     assert body["filled_count"] == 0
 
 
-async def test_money_fund_bill_imports_with_zero_amount_quarantine(
+async def test_fund_bill_imports_with_zero_amount_dividend(
     client, api_prefix, user, settings
 ) -> None:
-    """货币基金账单：申赎确认命中规则；零金额红利只调货基余额、不隔离。"""
+    """货币基金账单：申赎确认命中规则；零金额「红利发放」按账单分类正常入账。"""
     preview = await _preview(
         client, api_prefix, user, _FUND_BILL.read_bytes(), _FUND_BILL.name, _XLSX_CONTENT_TYPE
     )
-    assert preview["estimated"] == {"parsed": 6, "inserted": 6, "skipped": 0, "quarantined": 0}
+    assert preview["estimated"] == {
+        "parsed": 7,
+        "inserted": 7,
+        "skipped": 0,
+        "quarantined": 0,
+        "discarded": 0,
+        "estimated_available": True,
+    }
     assert "UNKNOWN_SUMMARY" not in {warning["code"] for warning in preview["warnings"]}
 
     accepted = await _commit(client, api_prefix, user, preview["preview_id"])
     await _drain_worker(settings)
 
     batch = await _batch(client, api_prefix, user, accepted["batch_id"])
-    assert batch["counts"] == {"parsed": 6, "inserted": 6, "skipped": 0, "quarantined": 0}
+    assert batch["counts"] == {
+        "parsed": 7,
+        "inserted": 7,
+        "skipped": 0,
+        "quarantined": 0,
+        "discarded": 0,
+    }
     assert "UNKNOWN_SUMMARY" not in set(batch["warnings"])
 
     items = await _quarantine(client, api_prefix, user, accepted["batch_id"])
     assert items == []
 
     trades = await _trades(client, api_prefix, user)
-    assert len(trades) == 6
+    assert len(trades) == 7
     assert all(item["category"] for item in trades)
     by_summary = {(item["summary"], item["side"]): item for item in trades}
 
@@ -208,23 +236,22 @@ async def test_money_fund_bill_imports_with_zero_amount_quarantine(
     assert redeem["category"] == "sell"
     assert redeem["summary_code"] == "sys_redeem"
     assert redeem["amount"] == "116295.38"
-    # 货基行带余额（份额 × 1.0000）；红利发放（零金额份额行）参与余额推演后，
-    # 期初按 -min(累计净额) 反推为 116295.38：赎回后 = 0.00，申购后 = 106708.53。
-    assert redeem["money_fund_balance"] == "0.00"
 
     subscribe = by_summary[("申购确认", "buy")]
     assert subscribe["category"] == "buy"
     assert subscribe["summary_code"] == "sys_fund_buy"
     assert subscribe["amount"] == "-106708.53"
-    assert subscribe["money_fund_balance"] == "106708.53"
 
-    assert {item["category"] for item in trades} == {"buy", "sell", "transfer"}
+    dividend = next(item for item in trades if item["summary"] == "红利发放")
+    assert dividend["category"] == "dividend"
+    assert dividend["amount"] == "0.00"
+    assert {item["category"] for item in trades} == {"buy", "sell", "transfer", "dividend"}
 
 
 async def test_real_statement_excerpt_quarantine_only_zero_amount(
     client, api_prefix, user, settings
 ) -> None:
-    """真实对账单节选：折行摘要全部命中、持仓区不入隔离，全零金额行隔离 INVALID_AMOUNT。"""
+    """真实对账单节选：折行摘要全部命中；零金额「红利发放」入账，其余全零行仍隔离。"""
     preview = await _preview(
         client,
         api_prefix,
@@ -233,46 +260,65 @@ async def test_real_statement_excerpt_quarantine_only_zero_amount(
         _STATEMENT_BILL.name,
         _XLSX_CONTENT_TYPE,
     )
-    assert preview["estimated"] == {"parsed": 5, "inserted": 5, "skipped": 0, "quarantined": 5}
+    assert preview["estimated"] == {
+        "parsed": 6,
+        "inserted": 6,
+        "skipped": 0,
+        "quarantined": 4,
+        "discarded": 0,
+        "estimated_available": True,
+    }
     assert "UNKNOWN_SUMMARY" not in {warning["code"] for warning in preview["warnings"]}
 
     accepted = await _commit(client, api_prefix, user, preview["preview_id"])
     await _drain_worker(settings)
 
     batch = await _batch(client, api_prefix, user, accepted["batch_id"])
-    assert batch["counts"] == {"parsed": 5, "inserted": 5, "skipped": 0, "quarantined": 5}
+    assert batch["counts"] == {
+        "parsed": 6,
+        "inserted": 6,
+        "skipped": 0,
+        "quarantined": 4,
+        "discarded": 0,
+    }
     assert "UNKNOWN_SUMMARY" not in set(batch["warnings"])
     # 节选夹具余额链自洽 → 导入对账不产生补差。
     assert batch["filled_count"] == 0
     assert batch["fills"] == []
 
     items = await _quarantine(client, api_prefix, user, accepted["batch_id"])
-    assert len(items) == 5
-    # 3 条 [省心投]红利发放 → ZERO_AMOUNT_INFO（设计 D14）；转托管确认 + 证券清理全零
-    # → INVALID_AMOUNT。
-    assert {item["reason_code"] for item in items} == {"INVALID_AMOUNT", "ZERO_AMOUNT_INFO"}
-    assert {item["line_no"] for item in items} == {17, 18, 19, 20, 25}
+    assert len(items) == 4
+    # 3 条零金额「红利发放」内容完全一致：1 条按账单分类入账，2 条文件内重复；
+    # 转托管确认与证券清理（全零）仍隔离 INVALID_AMOUNT。
+    assert {item["reason_code"] for item in items} == {
+        "INVALID_AMOUNT",
+        "DUPLICATE_IN_FILE",
+    }
+    assert {item["line_no"] for item in items} == {18, 19, 20, 25}
     # 持仓/声明区块（夹具第 27 行起）不应出现在隔离区。
     assert all(item["line_no"] < 27 for item in items)
 
     trades = await _trades(client, api_prefix, user)
-    assert len(trades) == 5
+    assert len(trades) == 6
     assert all(item["category"] for item in trades)
     by_summary = {item["summary"]: item for item in trades}
-    # [省心投]申购确认视同银行转出（设计 D14）：category=transfer，CASH 占位、方向 buy。
+    # [省心投]申购确认视同银行转出（设计 D14）：category=transfer，CASH 占位、方向由 Category 派生（transfer→unknown）。
     assert by_summary["[省心投]申\n购确认"]["category"] == "transfer"
     assert by_summary["[省心投]申\n购确认"]["security_code"] == "CASH"
     assert by_summary["新股申购确\n认缴款"]["category"] == "new_stock"
-    assert by_summary["[省心投]申\n购确认"]["side"] == "buy"
+    assert by_summary["[省心投]申\n购确认"]["side"] == "unknown"
+    # 券商登记动作（托管转出/新股入帐/证券清理…）归 broker_action：不影响持仓与成本（资产口径 1.9）。
+    assert by_summary["托管转出"]["category"] == "broker_action"
+    assert by_summary["新股入帐"]["category"] == "broker_action"
+    assert by_summary["[省心投]红\n利发放"]["category"] == "dividend"
+    assert by_summary["[省心投]红\n利发放"]["amount"] == "0.00"
     assert {item["category"] for item in trades} == {
         "sell",
         "transfer",
         "new_stock",
+        "broker_action",
+        "dividend",
     }
-    # 基金持仓区块是期末锚点：940018 赎回后余额 = 参考市值 51859.86；省心投申购行已转
-    # CASH 资金行，不再产生货基余额。
-    balances = {item["money_fund_balance"] for item in trades if item["money_fund_balance"]}
-    assert balances == {"51859.86"}
 
 
 async def test_unknown_summary_preview_equals_commit_quarantine(
@@ -280,20 +326,33 @@ async def test_unknown_summary_preview_equals_commit_quarantine(
 ) -> None:
     """未知摘要：预览警告（含行号/摘要）+ 预估隔离 == 提交实际隔离；该行不写 trade。"""
     preview = await _preview(client, api_prefix, user, _UNKNOWN_BILL)
-    assert preview["estimated"] == {"parsed": 2, "inserted": 1, "skipped": 0, "quarantined": 1}
+    assert preview["estimated"] == {
+        "parsed": 2,
+        "inserted": 1,
+        "skipped": 0,
+        "quarantined": 1,
+        "discarded": 0,
+        "estimated_available": True,
+    }
     assert "UNKNOWN_SUMMARY" in {warning["code"] for warning in preview["warnings"]}
     assert preview["assumptions"]["unknown_summary_rows"] == [
-        {"line_no": 3, "summary": "未知业务XYZ", "side": "buy"}
+        {"line_no": 3, "summary": "未知业务XYZ"}
     ]
 
     accepted = await _commit(client, api_prefix, user, preview["preview_id"])
     await _drain_worker(settings)
 
     batch = await _batch(client, api_prefix, user, accepted["batch_id"])
-    assert batch["counts"] == {"parsed": 2, "inserted": 1, "skipped": 0, "quarantined": 1}
+    assert batch["counts"] == {
+        "parsed": 2,
+        "inserted": 1,
+        "skipped": 0,
+        "quarantined": 1,
+        "discarded": 0,
+    }
     assert "UNKNOWN_SUMMARY" in batch["warnings"]
     assert batch["assumptions"]["unknown_summary_rows"] == [
-        {"line_no": 3, "summary": "未知业务XYZ", "side": "buy"}
+        {"line_no": 3, "summary": "未知业务XYZ"}
     ]
 
     trades = await _trades(client, api_prefix, user)
@@ -314,7 +373,7 @@ async def test_unknown_summary_preview_equals_commit_quarantine(
 async def test_unknown_summary_reimport_keeps_dedupe_skipped(
     client, api_prefix, user, settings
 ) -> None:
-    """重传同一文件：已插入行 skipped（不重复插入），未知摘要行仍稳定隔离且计数一致。"""
+    """重传同一文件：文件日期已被库内完全覆盖 → 整文件 covered no-op，不重复隔离。"""
     first = await _preview(client, api_prefix, user, _UNKNOWN_BILL)
     first_job = await _commit(client, api_prefix, user, first["preview_id"])
     await _drain_worker(settings)
@@ -323,17 +382,20 @@ async def test_unknown_summary_reimport_keeps_dedupe_skipped(
         "inserted": 1,
         "skipped": 0,
         "quarantined": 1,
+        "discarded": 0,
     }
 
     second = await _preview(client, api_prefix, user, _UNKNOWN_BILL)
-    assert second["estimated"] == {"parsed": 2, "inserted": 0, "skipped": 1, "quarantined": 1}
+    assert second["assumptions"]["coverage"]["mode"] == "covered"
+    assert second["estimated"]["inserted"] == 0
     second_job = await _commit(client, api_prefix, user, second["preview_id"])
     await _drain_worker(settings)
     assert (await _batch(client, api_prefix, user, second_job["batch_id"]))["counts"] == {
         "parsed": 2,
         "inserted": 0,
-        "skipped": 1,
-        "quarantined": 1,
+        "skipped": 2,
+        "quarantined": 0,
+        "discarded": 0,
     }
     assert len(await _trades(client, api_prefix, user)) == 1
 
@@ -375,7 +437,9 @@ async def test_synthetic_fixture_preview_equals_commit(client, api_prefix, user,
     await _drain_worker(settings)
 
     batch = await _batch(client, api_prefix, user, accepted["batch_id"])
-    assert preview["estimated"] == batch["counts"]
+    estimated = dict(preview["estimated"])
+    estimated.pop("estimated_available", None)
+    assert estimated == batch["counts"]
 
     fills = batch["filled_count"]
     trades = await _trades(client, api_prefix, user)

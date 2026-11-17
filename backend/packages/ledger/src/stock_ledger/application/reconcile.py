@@ -161,21 +161,29 @@ async def reconcile(
     now = clock.now()
     if has_balance:
         anchor = trades[0]
+        # 方向未知/无余额行的金额先并入待核对合计，由下一条可核对行整体验证：
+        # 它们的余额不作锚点，避免缺口被「重设基准」悄悄吸收。
+        anchor_balance = anchor.cash_balance_units
+        pending_units = 0
         for index in range(1, len(trades)):
             current = trades[index]
             if current.id in stale_fill_ids:
                 # 已判陈旧的补差行：不再作为链节，链条从 anchor 直接续到后继行。
                 continue
-            previous = anchor
-            if previous.cash_balance_units is None or current.cash_balance_units is None:
+            if current.cash_balance_units is None:
+                pending_units += _cash_delta_units(current)
+                continue
+            if anchor_balance is None:
+                # 区间首行无余额：第一条带余额行直接作起点（无从比对）。
                 anchor = current
+                anchor_balance = current.cash_balance_units
+                pending_units = 0
                 continue
             if current.side == Side.UNKNOWN.value:
-                # 方向未知的行不做链式核对：金额虽带符号，但方向语义无法独立复核。
-                # 其余额仍是下一行的期初锚点，跳过本行不会造成后续假断链。
-                anchor = current
+                # 方向未知的行不做单独核对：金额并入待核对合计，余额不作锚点。
+                pending_units += _cash_delta_units(current)
                 continue
-            expected = previous.cash_balance_units + _cash_delta_units(current)
+            expected = anchor_balance + pending_units + _cash_delta_units(current)
             actual = current.cash_balance_units
             delta = actual - expected
             if abs(delta) > epsilon_units and current.side == Side.MISSING.value:
@@ -197,17 +205,19 @@ async def reconcile(
                     and nxt.cash_balance_units is not None
                     and abs(
                         nxt.cash_balance_units
-                        - (previous.cash_balance_units + _cash_delta_units(nxt))
+                        - (anchor_balance + pending_units + _cash_delta_units(nxt))
                     )
                     <= epsilon_units
                 ):
                     for stale_index in range(index, run_end + 1):
                         await repo.soft_delete(user_id, trades[stale_index].id, at=now)
                         stale_fill_ids.add(trades[stale_index].id)
-                    continue  # anchor 不前进：下一次核对从 previous 直接到 nxt
+                    continue  # anchor 不前进：下一次核对从 anchor 直接到 nxt
             checked += 1
             if abs(delta) <= epsilon_units:
                 anchor = current
+                anchor_balance = actual
+                pending_units = 0
                 continue
             if current.line_no is None:
                 # 手工录入行没有账单行号，补差行无法稳定插到「上一行→本行」之间
@@ -227,13 +237,15 @@ async def reconcile(
                     }
                 )
                 anchor = current
+                anchor_balance = actual
+                pending_units = 0
                 continue
             fill, created = await _insert_fill(
                 repo,
                 user_id,
-                previous,
+                anchor,
                 current,
-                previous_balance=previous.cash_balance_units,
+                previous_balance=anchor_balance + pending_units,
                 current_balance=actual,
                 fill_batch_id=fill_batch_id,
             )
@@ -253,6 +265,8 @@ async def reconcile(
                 }
             )
             anchor = current
+            anchor_balance = actual
+            pending_units = 0
 
     # 区间内仍存在的系统补差行（本轮判陈旧软删的不算）：链已闭合但数据经过自愈，降级提示。
     has_missing_rows = any(

@@ -13,6 +13,7 @@ from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Header, Query, Request, Response
 from fastapi.responses import JSONResponse
+from stock_contracts.enums import BILL_CATEGORY_LABELS
 from stock_contracts.errors import ApiError, ErrorCode
 from stock_core.values import Money, Price, Qty, format_quantity
 from stock_ledger.application.trades import (
@@ -24,10 +25,18 @@ from stock_ledger.application.trades import (
     list_trades,
     patch_trade,
     restore_trade,
+    trade_to_dto,
 )
 from stock_ledger.parsers.dedupe import dedupe_key as compute_dedupe_key
 from stock_ledger.repositories.trades import TradeRepository
+from stock_platform.obs import get_logger
 from stock_platform.tenant import TenantContext
+from stock_review.application.revisions import (
+    OversellRevision,
+    delete_revision,
+    get_revision,
+    upsert_revision,
+)
 from stock_review.insights import reasons as reason_service
 from stock_review.insights.reasons import ReasonDTO
 from stock_review.metrics.datasets import DEFAULT_BENCHMARK, benchmark_fetch_symbol
@@ -35,6 +44,10 @@ from stock_review.metrics.datasets import DEFAULT_BENCHMARK, benchmark_fetch_sym
 from stock_api.deps import get_state, get_tenant
 from stock_api.routing import StrictQueryRoute
 from stock_api.schemas import (
+    OversellRevisionIn,
+    OversellRevisionMutationOut,
+    OversellRevisionOut,
+    OversellRevisionSellOut,
     TradeHistoryItem,
     TradeHistoryOut,
     TradeMutationOut,
@@ -47,6 +60,7 @@ from stock_api.schemas import (
 )
 
 router = APIRouter(tags=["trades"], route_class=StrictQueryRoute)
+log = get_logger("stock_api.trades")
 
 # API-017 sort 白名单（Catalog §2.1）；非法 → 400 INVALID_SORT_FIELD
 _ALLOWED_SORTS: frozenset[str] = frozenset(
@@ -55,6 +69,8 @@ _ALLOWED_SORTS: frozenset[str] = frozenset(
 # fields 裁剪白名单：TradeOut 字段名 + `id` 别名（§0.4）
 _ALLOWED_FIELDS: frozenset[str] = frozenset(TradeOut.model_fields)
 _ID_ALIASES = {"id": "trade_id"}
+# 无 category / 未登记枚举值的统一展示文案（前端零口径，只渲染该字符串）。
+_UNCATEGORIZED_LABEL = "未分类"
 
 
 def _reason_out(dto: ReasonDTO | None) -> TradeReasonOut | None:
@@ -95,20 +111,17 @@ def _trade_out(dto: TradeDTO, reason: ReasonDTO | None = None) -> TradeOut:
             str(Money(dto.cash_balance_units)) if dto.cash_balance_units is not None else None
         ),
         cash_balance_available=dto.cash_balance_available,
-        money_fund_balance=(
-            str(Money(dto.money_fund_balance_units))
-            if dto.money_fund_balance_units is not None
-            else None
-        ),
         account_masked=dto.account_masked,
         summary=dto.summary,
         summary_code=dto.summary_code,
         category=dto.category,
+        category_label=BILL_CATEGORY_LABELS.get(dto.category or "", _UNCATEGORIZED_LABEL),
         dedupe_key=compute_dedupe_key(dto),
         version=dto.version,
         source=dto.source,
         batch_id=dto.batch_id,
         note=dto.note,
+        revision_of=dto.revision_of,
         deleted_at=dto.deleted_at,
         created_at=dto.created_at,
         updated_at=dto.updated_at,
@@ -162,10 +175,6 @@ def _patch_changes(payload: TradePatchIn) -> dict[str, Any]:
             changes[f"{name}_units"] = _parse_units(value, Money, name)
         elif name == "cash_balance":
             changes["cash_balance_units"] = (
-                None if value is None else _parse_units(value, Money, name)
-            )
-        elif name == "money_fund_balance":
-            changes["money_fund_balance_units"] = (
                 None if value is None else _parse_units(value, Money, name)
             )
     return changes
@@ -520,3 +529,134 @@ async def delete_trade_reason(
             request_id=request.headers.get("x-request-id"),
         )
     return Response(status_code=204)
+
+
+# ── 超卖卖出人工修订（API-107~109）─────────────────────────
+def _revision_out(revision: OversellRevision) -> OversellRevisionOut:
+    """修订 DTO → API 边界模型（金额/数量定点字符串，注入行复用 TradeOut）。"""
+    sell = revision.sell
+    return OversellRevisionOut(
+        sell=OversellRevisionSellOut(
+            trade_id=sell.id,
+            trade_date=sell.trade_date,
+            security_code=sell.security_code,
+            security_name=sell.security_name,
+            quantity=format_quantity(sell.quantity_units),
+            amount=str(Money(sell.amount_units)),
+            oversell_quantity=format_quantity(revision.oversell_units),
+            note=sell.note,
+        ),
+        status=revision.status,
+        cost=str(Money(revision.cost_units)) if revision.cost_units is not None else None,
+        cash_trade=_trade_out(trade_to_dto(revision.cash)) if revision.cash else None,
+        buy_trade=_trade_out(trade_to_dto(revision.buy)) if revision.buy else None,
+        round_id=revision.round_id,
+    )
+
+
+async def _enqueue_revision_rebuilds(
+    state: Any, session: Any, user_id: Any
+) -> tuple[str | None, str | None]:
+    """修订落库后只派发全量回合重建，不自动构建资产表。
+
+    回合需立即重建（超卖状态/配对关系变化），资产表交给用户在全部补录完成后
+    手动点「更新资产表」触发——避免每补一笔就跑一次全量资产构建。
+    入队失败只记日志（不回滚修订）。
+    """
+    rebuild_job_id: str | None = None
+    assets_job_id: str | None = None
+    try:
+        rebuild_job_id, _reused = await state.queue.enqueue(
+            session,
+            kind="rebuild_rounds",
+            user_id=user_id,
+            scope_key=f"{user_id}:full",
+            params={"scope": "full", "reason": "manual_revision"},
+        )
+    except ApiError as exc:
+        log.warning("revision.rebuild_enqueue_skipped", code=exc.code.value)
+    return rebuild_job_id, assets_job_id
+
+
+@router.get(
+    "/trades/{trade_id}/oversell-revision",
+    response_model=OversellRevisionOut,
+    operation_id="getOversellRevision",
+)
+async def get_oversell_revision(
+    trade_id: str,
+    request: Request,
+    ctx: Annotated[TenantContext, Depends(get_tenant)],
+) -> OversellRevisionOut:
+    """API-107：查询该卖出的超卖数量与人工修订状态（只读）。"""
+    ctx.forbid_admin_trades()
+    user_id = ctx.require_user()
+    state = get_state(request)
+    async with state.db.session(user_id=user_id, begin=True) as session:
+        revision = await get_revision(session, user_id=user_id, sell_trade_id=trade_id)
+    return _revision_out(revision)
+
+
+@router.put(
+    "/trades/{trade_id}/oversell-revision",
+    response_model=OversellRevisionMutationOut,
+    operation_id="upsertOversellRevision",
+)
+async def put_oversell_revision(
+    trade_id: str,
+    payload: OversellRevisionIn,
+    request: Request,
+    ctx: Annotated[TenantContext, Depends(get_tenant)],
+) -> OversellRevisionMutationOut:
+    """API-108：补录/覆盖修订成本，幂等；同一卖出至多一条资金腿 + 一条买入腿。"""
+    ctx.forbid_admin_trades()
+    user_id = ctx.require_write()
+    state = get_state(request)
+    cost_units = _parse_units(payload.cost, Money, "cost")
+    async with state.db.session(user_id=user_id, begin=True) as session:
+        revision = await upsert_revision(
+            session,
+            user_id=user_id,
+            sell_trade_id=trade_id,
+            cost_units=cost_units,
+            clock=state.clock,
+            actor_id=user_id,
+            request_id=request.headers.get("x-request-id"),
+        )
+        rebuild_job_id, assets_job_id = await _enqueue_revision_rebuilds(state, session, user_id)
+    return OversellRevisionMutationOut(
+        revision=_revision_out(revision),
+        rebuild_job_id=rebuild_job_id,
+        assets_job_id=assets_job_id,
+    )
+
+
+@router.delete(
+    "/trades/{trade_id}/oversell-revision",
+    response_model=OversellRevisionMutationOut,
+    operation_id="deleteOversellRevision",
+)
+async def delete_oversell_revision(
+    trade_id: str,
+    request: Request,
+    ctx: Annotated[TenantContext, Depends(get_tenant)],
+) -> OversellRevisionMutationOut:
+    """API-109：撤回人工修订（软删注入行，幂等）并派发重算。"""
+    ctx.forbid_admin_trades()
+    user_id = ctx.require_write()
+    state = get_state(request)
+    async with state.db.session(user_id=user_id, begin=True) as session:
+        revision = await delete_revision(
+            session,
+            user_id=user_id,
+            sell_trade_id=trade_id,
+            clock=state.clock,
+            actor_id=user_id,
+            request_id=request.headers.get("x-request-id"),
+        )
+        rebuild_job_id, assets_job_id = await _enqueue_revision_rebuilds(state, session, user_id)
+    return OversellRevisionMutationOut(
+        revision=_revision_out(revision),
+        rebuild_job_id=rebuild_job_id,
+        assets_job_id=assets_job_id,
+    )

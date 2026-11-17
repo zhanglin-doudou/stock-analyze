@@ -2,7 +2,7 @@
 
 ## 份额法 TWR（单位净值法）
 
-外部现金流（银证转账等）按发生时点的单位净值折成份额，
+外部现金流（资金划转等）按发生时点的单位净值折成份额，
 这样收益率不受出入金规模扭曲——衡量"策略本身"的表现。
 
 算法（现金流日末发生假设，INTERFACE/PRD FR-R3）：
@@ -43,6 +43,7 @@ TWR      = Π(1 + r_t) - 1
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
@@ -111,6 +112,8 @@ def _from_decimal(value: Decimal, scale: int) -> int:
 
 def build_nav_series(
     daily_points: list[tuple[date, int, int]],
+    *,
+    excluded_cashflows: Mapping[date, int] | None = None,
 ) -> NavSeries:
     """份额法 TWR 计算。
 
@@ -119,6 +122,10 @@ def build_nav_series(
             `total_value_units` 当日日末总资产（持仓市值+现金，分）；
             `cashflow_units` 当日外部现金流（入金正、出金负，分）。
             至少需要 1 个点（期初快照）；空序列返回空 NavSeries。
+        excluded_cashflows: 在 TWR 计算中视同外部现金流剔除、但不作为外部现金流展示的
+            金额（按日期）。用于「资产已进总资产、但不是收益」的场景（如超卖净卖款），
+            只影响 NAV/份额/收益率，不影响 `NavPoint.cashflow_units` 与
+            `total_cashflow_units`。
 
     Returns:
         NavSeries：逐日净值点 + TWR 汇总。
@@ -154,6 +161,9 @@ def build_nav_series(
     for idx, (d, value_units, cf_units) in enumerate(daily_points):
         value = _to_decimal(value_units, _SCALE_MONEY)
         cf = _to_decimal(cf_units, _SCALE_MONEY)
+        # 仅用于 NAV/份额/收益率的口径调整（不对外展示）。
+        excluded = _to_decimal((excluded_cashflows or {}).get(d, 0), _SCALE_MONEY)
+        cf_for_return = cf + excluded
         total_cf += cf_units
 
         if idx == 0:
@@ -162,10 +172,10 @@ def build_nav_series(
             ret = Decimal(0)
         else:
             # NAV_t = (V_t - CF_t) / shares_{t-1}；份额归 0 不应发生（防御）
-            nav = value - cf if shares == 0 else (value - cf) / shares
+            nav = value - cf_for_return if shares == 0 else (value - cf_for_return) / shares
             # 新增份额 = CF / NAV；若 NAV 为 0 则不折份额（极端防御）
-            if nav != 0 and cf != 0:
-                shares += cf / nav
+            if nav != 0 and cf_for_return != 0:
+                shares += cf_for_return / nav
             ret = nav / prev_nav - Decimal(1) if prev_nav not in (None, Decimal(0)) else Decimal(0)
 
         points.append(

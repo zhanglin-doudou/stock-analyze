@@ -186,7 +186,7 @@ GRANT SELECT ON ... TO stock_backup;
   - `data_as_of` 血缘留痕；
   - 日期 > `as_of` 且持仓数 > 0 → 该行 `degraded`（原因"行情未覆盖，按最近收盘估值"）；纯现金行不降级。
   - 不再用 `end = min(today, as_of)`，避免 live 多进程 as_of 回退导致水位线振荡/`delete_after` 反复删补。
-- 行粒度：`[start, end]` **每个工作日一行**（周一至周五；周六/周日跳过，价格 carry-forward，现金不变）。周末发生的银证转账并入下一交易日现金流（`cashflow_units` 与 `daily_pnl` 同口径）。
+- 行粒度：`[start, end]` **每个工作日一行**（周一至周五；周六/周日跳过，价格 carry-forward，现金不变）。周末发生的资金划转并入下一交易日现金流（`cashflow_units` 与 `daily_pnl` 同口径）。
 - 价格阶梯：`[rebuild_from - 45 天, end]`（全量时 `[start - 45, end]`）的 bars，取"当日或之前最近收盘价"（复用 `_PRICE_LOOKBACK=45` 行为）。
 
 ### 5.2 期初锚点与初始持仓
@@ -359,6 +359,7 @@ await repo.update_state_cas(                       # WHERE version=:expected
 11. **FIFO 异常集合**：`last_fifo_error` 变化 → 全量；保证"全局 degraded"在增量后与全量等价（IT-01）。
 12. **周末不写行（定义版本 1.7）**：`compute_daily_valuations` 跳过 `weekday>=5` 的日期；周末 `transfer` 现金流累加到 `pending_cashflow`，写入下一个工作日行；写行后清零。`prev_total` 取"上一已写工作日"；增量窗口前置行用 `repo.latest(on_or_before=rebuild_from-1)`（`rebuild_from` 为周一时前一日是周日无行，不能用精确日期查询）。
 13. **整体状态**：写完后 `EXISTS(status != 'ok')` 决定 `last_status`（有逐日 blocked/degraded → degraded），不要仅看本次窗口。
+14. **缺行情自愈（2026-11-15）**：推演出现 blocked 行时，向**可补拉**的行情源按「缺失标的 + 缺失日期区间」补拉一次并重算一次（见 §6.5）；补拉后仍缺才把「缺少行情数据，请联系技术支持解决」写入行级原因与 `state.status_reason`。
 
 ### 6.4 边界行为表
 
@@ -380,7 +381,24 @@ await repo.update_state_cas(                       # WHERE version=:expected
 | FIFO 异常集合变化 | **是** | start | 全量，保证全表 degraded 一致 |
 | 行情修正（45 天内、且 end 前进） | 否 | 安全窗 | 吸收 |
 | 行情修正（无 end 前进 / >45 天） | 否/手工 full | — | **不自动吸收**（D9）；需 `mode=full` |
+| 缺行情导致 blocked（可补拉行情源） | 否 | — | 构建内按「缺失标的 + 缺失区间」补拉一次并重算一次；仍缺 → blocked 行 + 最终提示（§6.5） |
 | 构建中途失败 | — | — | 事务回滚，旧数据/旧 state 完好 |
+
+### 6.5 缺行情自愈：构建内单次补拉（2026-11-15）
+
+**问题**：缺行情时整日 blocked（数值 0、链路断开），用户只能等收盘后的 `make sync-market` 或手工排查；个股缺口（新买入、补拉漏掉的标的）往往要等到下一次全量同步。
+
+**做法**（`build_assets` 第 7b 步）：
+
+1. **定位缺口**：第一次纯内存推演（`compute_daily_valuations`）在产出 blocked 行时，把「缺行情的标的 → (首个受影响日期, 最后一个受影响日期)」记入 `missing_quotes`。判定仍是「当日或之前没有任何收盘价」，因此**停牌/节假日**（沿用最近收盘）、**上市前**（新股按成本兜底）不会被算成缺行情；周末本就不写行。
+2. **补拉一次**：仅当行情源具备 `sync_daily_bars`（`SyncableMarketSource`，即 live + 本地缓存；replay/纯透传端口没有该能力则跳过）时，按标的逐个调用一次，区间 = `首个缺行情日 − PRICE_LOOKBACK(45 天)` ~ `最后一个缺行情日`（不晚于构建终点）。向前留回溯窗是为了在长停牌/节假日后仍能找到可用的前收盘；**不拉资产表窗口以外的更早区间**。
+3. **重算一次**：只要补拉发生过，就重读一次 `load_prices`、重算一次 `market_as_of`（补拉可能推进覆盖日，避免刚补齐的日期仍被判「未覆盖」），再跑一次逐日推演。**不循环、不递归**：每个标的至多一次 `sync_daily_bars`，单个标的异常只记 `assets.quotes_pull_failed` 并继续其它标的。
+4. **仍缺的文案**：补拉后仍 blocked →
+   - 行级 `status_reason`：`缺行情数据：<标的>…，请联系技术支持解决`（列宽 256 内截断标的清单，不截断提示）；
+   - `state.status_reason`：`缺少行情数据，请联系技术支持解决`（若同时有 FIFO 等降级原因，用「；」拼接）；
+   - 前端只渲染后端 `build.status_reason`，不做判断。
+
+**不做的事**：不因 `date > as_of`（行情尾部未同步）而补拉 —— 该情形由 `session_notice=sync_pending` 提示，且收盘后上游当日 bar 可能尚未生成，补拉会造成误报。补拉不改变「读路径只读缓存」：`GET /assets`、看板等读端点仍然只读 `market.daily_bar`。
 
 ---
 
@@ -531,7 +549,7 @@ await repo.update_state_cas(                       # WHERE version=:expected
 | UT-02 | 买入 + 月末估值 | 05-29 余额 100000；06-30 买 100@1700（-170000，余额 -70000）；600519 06-30 收盘 1706.20 | cash=-70000.00、market=170620.00、total=100620.00、cost=170000、unrealized=620、pnl=620、return=0.0062（620000 units） |
 | UT-03 | 卖出结转成本 | 买 200@10（-2000），卖 100@12（+1200） | 剩余 qty=100、cost=1000 |
 | UT-04 | 分红/利息/费用 | dividend/interest/fee | 现金按 amount 变化；不改持仓/成本；非 transfer 不计 cashflow |
-| UT-05 | 银证转账 | transfer +50000 | cashflow=50000；pnl 不含该 50000 |
+| UT-05 | 资金划转 | transfer +50000 | cashflow=50000；pnl 不含该 50000 |
 | UT-06 | 送转/配股 | bonus 零金额正数量；rights 负金额 | bonus 加数量不改成本；rights 加数量且成本 += -amount |
 | UT-07 | 余额覆盖优先 + 已知限制 | 同日多笔含余额行；余额行之后仍有 amount | 现金取当日最后一笔余额；**记录**"其后 amount 被覆盖"的既有简化（v1 不修，用例固定行为） |
 | UT-08 | 周末不写行 + 现金流并入 | 周末（周六/周日）发生 transfer，跨周末持仓 | 周末**无行**；周末 transfer 并入下一工作日 `cashflow`；工作日行用最近收盘；相邻工作日连续（跳过周末） |
@@ -553,6 +571,7 @@ await repo.update_state_cas(                       # WHERE version=:expected
 | UT-24 | status_reason 语义 | blocked/degraded/ok | blocked 必填；degraded 可填；ok 为 NULL |
 | UT-25 | 全部未软删 | 全部流水软删 | 0 行；state 重置（各字段显式 NULL/0） |
 | UT-26 | FIFO 异常集合变化 | 新增一笔造成超卖（version=1） | auto 触发 full；全表（含旧日期行）同一 degraded 口径；与 full 相等 |
+| UT-27 | 缺行情补拉区间与提示 | 缺行情跨多个工作日；`quotes_pull_attempted` 开关 | `missing_quotes` 覆盖首尾（只含 blocked 的工作日）；补拉后行级原因追加「，请联系技术支持解决」；未补拉时不追加 |
 
 ### 9.3 API 验收（AT）
 **API-081 `GET /assets`**
@@ -611,6 +630,8 @@ await repo.update_state_cas(                       # WHERE version=:expected
 | IT-15 | 构建摘要 | owner 读 job.result 键齐全；`build` 块 `last_*` 与 job.result 的 mode/rebuild_from/rows_written/built_through 语义一致 |
 | IT-16 | worker 行情 | replay 模式 WorkerRunner 可完成 build_assets；live 分支需 akshare（标记 live 用例） |
 | IT-17 | as_of 前进修复 degraded | 先在有持仓且 date > as_of 时构建（末段 degraded）→ 推进 as_of（end 不变）→ auto：窗口重算，末段变 ok，结果与 full 相等 |
+| IT-18 | blocked 后修复 | 缺行情 build → 补行情 → auto：blocked 行变 ok，结果与 full 相等 |
+| IT-19 | 缺行情自愈 | 桩行情可补拉：断言每只缺失标的只补拉一次、区间 = 首日−45 天 ~ 末日，补拉后行 ok；上游无数据 → 不重试，`state.status_reason` = 最终提示、行级原因带同一后缀；只有更早收盘（停牌）→ 不触发补拉 |
 
 ### 9.5 前端测试（FT）
 | ID | 场景 | 断言 |

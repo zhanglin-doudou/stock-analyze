@@ -9,7 +9,6 @@
 from __future__ import annotations
 
 from datetime import UTC, datetime
-from itertools import pairwise
 from pathlib import Path
 
 from stock_contracts.clock import FrozenClock
@@ -31,19 +30,30 @@ def _parse_fixture() -> ParsedBill:
 
 
 def _breaks(rows: list[ParsedRow]) -> list[tuple[int, int, int]]:
-    """复算余额链：`prev.cash_balance + current.amount == current.cash_balance`。
+    """复算余额链：`锚点余额 + 待核对合计 + 本行金额 == 本行余额`。
 
-    返回 `(line_no, expected_units, actual_units)`；方向 unknown 的行与真实对账一致跳过。
+    返回 `(line_no, expected_units, actual_units)`；方向 unknown / 无余额行与真实对账一致：
+    金额并入待核对合计，余额不作锚点，由下一条可核对行整体验证。
     """
     breaks: list[tuple[int, int, int]] = []
-    for previous, current in pairwise(rows):
-        if previous.cash_balance_units is None or current.cash_balance_units is None:
+    anchor: ParsedRow | None = None
+    pending_units = 0
+    for current in rows:
+        if current.cash_balance_units is None:
+            pending_units += current.amount_units
+            continue
+        if anchor is None:
+            anchor = current
+            pending_units = 0
             continue
         if current.side == "unknown":
+            pending_units += current.amount_units
             continue
-        expected = previous.cash_balance_units + current.amount_units
+        expected = anchor.cash_balance_units + pending_units + current.amount_units
         if abs(expected - current.cash_balance_units) > _EPSILON_UNITS:
             breaks.append((current.line_no, expected, current.cash_balance_units))
+        anchor = current
+        pending_units = 0
     return breaks
 
 

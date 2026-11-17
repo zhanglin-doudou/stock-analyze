@@ -8,13 +8,43 @@ from __future__ import annotations
 
 import uuid
 from collections.abc import Sequence
+from datetime import date
 from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from stock_contracts.enums import QuarantineReason
 from stock_contracts.errors import NotFoundError
+from stock_contracts.import_fields import FIELD_ALIASES
 
 from stock_ledger.models import QuarantineRow
+
+
+# 隔离行没有日期列：日期在 `raw` 的日期别名里，格式随账单模板不同。
+def _parse_raw_date(text: Any) -> date | None:
+    """解析隔离行里的日期文本（`2021-07-12` / `2021/7/12` / `20210712`）。"""
+    cleaned = str(text).strip().strip('="')[:10]
+    if len(cleaned) == 8 and cleaned.isdigit():
+        cleaned = f"{cleaned[:4]}-{cleaned[4:6]}-{cleaned[6:]}"
+    parts = cleaned.replace("/", "-").split("-")
+    if len(parts) != 3 or not all(part.isdigit() for part in parts):
+        return None
+    try:
+        return date(int(parts[0]), int(parts[1]), int(parts[2]))
+    except ValueError:
+        return None
+
+
+def _raw_row_date(raw: dict[str, Any]) -> date | None:
+    """从隔离行原始 JSON 里取交易日（兼容新映射「发生日期」与旧格式「日期」）。"""
+    for alias in FIELD_ALIASES["trade_date"]:
+        text = raw.get(alias)
+        if not text:
+            continue
+        parsed = _parse_raw_date(text)
+        if parsed is not None:
+            return parsed
+    return None
 
 
 class QuarantineRepository:
@@ -100,6 +130,33 @@ class QuarantineRepository:
             )
             or 0
         )
+
+    async def earliest_unresolved_break_date(
+        self,
+        user_id: uuid.UUID,
+        *,
+        after: date | None = None,
+        on_or_before: date | None = None,
+    ) -> date | None:
+        """日期窗口内最早一条未处理的余额链断开日期（`RECONCILIATION_BREAK`）。
+
+        用于在不对账页面上直接给出「哪一天开始断」：隔离行本身不带日期列，日期从
+        `raw` 的日期别名解析（解析失败的行跳过，不影响其余行）。窗口用于把断点定位到
+        某次现金缺口附近，避免被历史上已自愈的断链（净额为 0）抢走。
+        """
+        rows = await self._session.scalars(
+            select(QuarantineRow.raw).where(
+                QuarantineRow.user_id == user_id,
+                QuarantineRow.reason_code == QuarantineReason.RECONCILIATION_BREAK.value,
+                QuarantineRow.resolved.is_(False),
+            )
+        )
+        dates = [item for raw in rows if (item := _raw_row_date(raw)) is not None]
+        if after is not None:
+            dates = [item for item in dates if item >= after]
+        if on_or_before is not None:
+            dates = [item for item in dates if item <= on_or_before]
+        return min(dates) if dates else None
 
     async def resolve(
         self,

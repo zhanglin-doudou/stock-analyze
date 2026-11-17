@@ -24,8 +24,8 @@ export interface StaleAssetBuild {
   submit(mode?: AssetBuildMode): Promise<void>;
   /** 失败后手动重试：丢弃该 stale 代次的失败记录再重新 POST。 */
   retry(): void;
-  /** 透传给 `<JobProgress onDone>`：SSE 与轮询收敛到同一完成路径。 */
-  handleJobDone(status: JobStatus): void;
+  /** 透传给 `<JobProgress onDone>`：SSE 与兜底轮询收敛到同一完成路径。 */
+  handleJobDone(status: JobStatus, _resultRef: string | null, error?: unknown): void;
 }
 
 export interface UseStaleAssetBuildOptions {
@@ -44,11 +44,15 @@ export interface UseStaleAssetBuildOptions {
 const autoBuildSubmissions = new Map<string, Promise<string | null>>();
 
 /** 一次 stale 代次的指纹：只用后端只读字段，前端不做 staleness 计算。
- *  `last_built_at` 每次构建都会刷新 → 构建完成后即为新代次。 */
+ *
+ *  刻意**不含** `last_built_at`：no-op 构建（流水/行情/水位线都没变）也会刷新该时间，
+ *  若把它算进指纹，每次「stale → 自动 POST → noop → 仍 stale」都会生成新代次，
+ *  自动触发便永不收敛（实测 1 次/秒无限构建）。改用「数据身份」字段：只有真正完成
+ *  重建（`last_built_through` / `rows_count` / 口径版本变化）才是下一代。
+ */
 export function staleFingerprint(build: AssetBuildState): string {
   return [
     build.state,
-    build.last_built_at ?? "",
     build.last_built_through ?? "",
     build.rows_count,
     build.definition_version,
@@ -59,8 +63,6 @@ export function staleFingerprint(build: AssetBuildState): string {
 export function resetAutoBuildGuard(): void {
   autoBuildSubmissions.clear();
 }
-
-const TERMINAL: ReadonlySet<JobStatus> = new Set<JobStatus>(["succeeded", "failed", "cancelled"]);
 
 /** job failed 且后端未给出 7807 错误体时，用错误码兜底渲染。 */
 function jobFailureProblem(status: JobStatus): Problem {
@@ -97,8 +99,10 @@ function missingMarketProblem(res: AssetBuildFailed): Problem {
  * 资产表 stale 自动构建（前端检测 + 显式触发）。
  *
  * 时序：`build.state == "stale"` → effect 内 `POST /assets/build{mode:auto}`（带
- * Idempotency-Key）→ 轮询 job 到终态 → succeeded 调 `onRefresh()`；失败转手动重试。
- * 判定与文案全部来自后端，本 hook 只做编排与去重。
+ * Idempotency-Key）→ 交给 `<JobProgress>` 收尾（SSE 为主、失效后低频兜底轮询）→
+ * succeeded 调 `onRefresh()`；失败转手动重试。
+ * 本 hook 只做编排与去重，不发起轮询：终态订阅与兜底都在 JobProgress 内。
+ * 判定与文案全部来自后端。
  */
 export function useStaleAssetBuild({
   build,
@@ -176,9 +180,9 @@ export function useStaleAssetBuild({
   );
 
   const handleJobDone = useCallback(
-    (status: JobStatus): void => {
+    (status: JobStatus, _resultRef: string | null, jobError?: unknown): void => {
       if (!activeJobId) return;
-      void finishJob(activeJobId, status);
+      void finishJob(activeJobId, status, jobError);
     },
     [activeJobId, finishJob],
   );
@@ -208,35 +212,6 @@ export function useStaleAssetBuild({
       cancelled = true;
     };
   }, []);
-
-  // 轮询兜底：JobProgress 只负责 SSE（失败会重试 SSE 但不轮询）。
-  // 卸载/路由切换时置 cancelled 并清定时器，不再发起下一次轮询。
-  useEffect(() => {
-    if (!activeJobId) return;
-    const jobId = activeJobId;
-    let cancelled = false;
-    let timer: ReturnType<typeof setTimeout> | null = null;
-
-    async function poll(): Promise<void> {
-      try {
-        const job = await api.jobs.get(jobId);
-        if (cancelled) return;
-        if (TERMINAL.has(job.status)) {
-          await finishJob(jobId, job.status, job.error ?? undefined);
-          return;
-        }
-      } catch (err) {
-        if (!cancelled) setError(err);
-      }
-      if (!cancelled) timer = setTimeout(() => void poll(), 800);
-    }
-
-    void poll();
-    return () => {
-      cancelled = true;
-      if (timer !== null) clearTimeout(timer);
-    };
-  }, [activeJobId, finishJob]);
 
   // 页面数据换到新代次（构建完成 / 数据刷新）→ 清掉旧代次的失败提示；
   // 未构建/已最新状态下手动构建失败时指纹不变，提示保持到用户重试或数据变化。

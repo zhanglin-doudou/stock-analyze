@@ -105,9 +105,13 @@ class PatListOut(BaseModel):
 # ── 导入（API-010~016）──────────────────────────────────────
 class PreviewColumn(BaseModel):
     index: int
+    key: str | None = None
     name: str
     sample: list[str] = Field(default_factory=list)
+    samples: list[str] = Field(default_factory=list)
     suggested_field: str | None = None
+    suggested_options: dict[str, Any] = Field(default_factory=dict)
+    level: str | None = None
     confidence: float = 0.0
 
 
@@ -123,12 +127,58 @@ class PreviewEstimated(BaseModel):
     inserted: int
     skipped: int
     quarantined: int
+    discarded: int = 0
+    estimated_available: bool = True
 
 
 class PreviewFile(BaseModel):
     name: str
     sha256: str
     bytes: int
+
+
+class PreviewTemplateOut(BaseModel):
+    template_id: str
+    broker: str
+    signature: str
+    header_count: int
+    date_format: str | None = None
+    items: list[dict[str, Any]] = Field(default_factory=list)
+    ignored: list[str] = Field(default_factory=list)
+    origin_batch_id: str | None = None
+    last_batch_id: str | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class PreviewBlocking(BaseModel):
+    field: str | None = None
+    code: str
+    message: str
+    line_no: int | None = None
+
+
+class PreviewMappingItem(BaseModel):
+    column_key: str
+    field: str
+    options: dict[str, Any] = Field(default_factory=dict)
+
+
+class PreviewQuarantineRow(BaseModel):
+    """隔离行明细：提交前弹窗逐行展示，不参与提交校验（不阻断）。"""
+
+    line_no: int | None = None
+    reason_code: str
+    reason: str
+    suggested_rule_id: str | None = None
+    date: str | None = None
+    security_code: str | None = None
+    security_name: str | None = None
+    summary: str | None = None
+    quantity: str | None = None
+    price: str | None = None
+    amount: str | None = None
+    cash_balance: str | None = None
 
 
 class PreviewOut(BaseModel):
@@ -143,6 +193,26 @@ class PreviewOut(BaseModel):
     assumptions: dict[str, Any] = Field(default_factory=dict)
     sample: list[dict[str, Any]] = Field(default_factory=list)
     expires_at: datetime
+    # ── v2 两步确认（additive）──────────────────────────────
+    stage: Literal["mapping", "types", "ready", "legacy"] = "legacy"
+    broker: str = "huatai"
+    broker_detection: dict[str, Any] = Field(default_factory=dict)
+    signature: str | None = None
+    mapping_version: int = 0
+    mapping_fingerprint: str | None = None
+    template: PreviewTemplateOut | None = None
+    catalog: list[dict[str, Any]] = Field(default_factory=list)
+    categories: list[dict[str, str]] = Field(default_factory=list)
+    system_categories: list[str] = Field(default_factory=list)
+    types: list[dict[str, Any]] = Field(default_factory=list)
+    verification: dict[str, Any] = Field(default_factory=dict)
+    blocking: list[PreviewBlocking] = Field(default_factory=list)
+    unmapped_columns: list[str] = Field(default_factory=list)
+    mapping_items: list[PreviewMappingItem] = Field(default_factory=list)
+    ignored_columns: list[str] = Field(default_factory=list)
+    discarded_count: int = 0
+    quarantine_rows: list[PreviewQuarantineRow] = Field(default_factory=list)
+    requires_reimport_ack: bool = False
 
 
 class ImportRange(StrictModel):
@@ -157,6 +227,87 @@ class ImportCommitIn(StrictModel):
     mode: Literal["full", "replace_range"] = "full"
     range: ImportRange | None = None
     mapping: dict[str, str] | None = None
+    note: str | None = Field(default=None, max_length=200)
+    mapping_version: int | None = Field(default=None, ge=0)
+    acknowledge_reimport: bool = False
+
+
+class ImportMappingItemIn(StrictModel):
+    column_key: str = Field(min_length=1, max_length=64)
+    target_field: str = Field(min_length=1, max_length=24)
+    options: dict[str, Any] = Field(default_factory=dict)
+
+
+class ImportMappingIn(StrictModel):
+    mapping_version: int | None = Field(default=None, ge=0)
+    items: list[ImportMappingItemIn] = Field(default_factory=list, max_length=64)
+    ignored: list[str] = Field(default_factory=list, max_length=64)
+    acknowledge_unmapped: bool = False
+    date_format: str | None = Field(default=None, max_length=32)
+    broker: str | None = Field(default=None, min_length=1, max_length=16)
+
+
+class ImportTypeResolutionIn(StrictModel):
+    type_key: str = Field(min_length=1, max_length=64)
+    category: str | None = Field(default=None, max_length=24)
+    discard: bool = False
+
+
+class ImportTypesIn(StrictModel):
+    mapping_version: int | None = Field(default=None, ge=0)
+    resolutions: list[ImportTypeResolutionIn] = Field(default_factory=list, max_length=200)
+
+
+class ImportTemplatePage(BaseModel):
+    items: list[PreviewTemplateOut] = Field(default_factory=list)
+    next_cursor: str | None = None
+    has_more: bool = False
+
+
+class ImportRuleOut(BaseModel):
+    rule_id: str
+    broker: str
+    header_norm: str
+    match_type: Literal["exact", "prefix", "contains"]
+    target_field: str
+    options: dict[str, Any] = Field(default_factory=dict)
+    priority: int
+    enabled: bool
+    is_system: bool
+    is_fingerprint: bool
+    weight: int
+    version: int
+    note: str | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class ImportRulePage(BaseModel):
+    items: list[ImportRuleOut] = Field(default_factory=list)
+    next_cursor: str | None = None
+
+
+class ImportRuleIn(StrictModel):
+    broker: str = Field(min_length=1, max_length=16)
+    header_norm: str = Field(min_length=1, max_length=128)
+    match_type: Literal["exact", "prefix", "contains"] = "exact"
+    target_field: str = Field(min_length=1, max_length=24)
+    options: dict[str, Any] = Field(default_factory=dict)
+    priority: int = Field(default=100, ge=1, le=999)
+    enabled: bool = True
+    is_fingerprint: bool = False
+    weight: int = Field(default=1, ge=1, le=10)
+    note: str | None = Field(default=None, max_length=200)
+
+
+class ImportRulePatchIn(StrictModel):
+    match_type: Literal["exact", "prefix", "contains"] | None = None
+    target_field: str | None = Field(default=None, min_length=1, max_length=24)
+    options: dict[str, Any] | None = None
+    priority: int | None = Field(default=None, ge=1, le=999)
+    enabled: bool | None = None
+    is_fingerprint: bool | None = None
+    weight: int | None = Field(default=None, ge=1, le=10)
     note: str | None = Field(default=None, max_length=200)
 
 
@@ -178,6 +329,17 @@ class BatchCounts(BaseModel):
     inserted: int
     skipped: int
     quarantined: int
+    discarded: int = 0
+
+
+class BatchMappingInfo(BaseModel):
+    """批次映射来源（API-013，决定撤销对话框文案）。"""
+
+    source: Literal["legacy", "manual", "template"] = "legacy"
+    template_id: str | None = None
+    signature: str | None = None
+    remap_required: bool = False
+    is_origin: bool = False
 
 
 class BatchOut(BaseModel):
@@ -195,6 +357,7 @@ class BatchOut(BaseModel):
     finished_at: datetime | None = None
     revoked_at: datetime | None = None
     can_revoke: bool = False
+    mapping_source: Literal["legacy", "manual", "template"] = "legacy"
 
 
 class BatchFill(BaseModel):
@@ -210,6 +373,7 @@ class BatchFill(BaseModel):
 
 class BatchDetailOut(BatchOut):
     fills: list[BatchFill] = Field(default_factory=list)
+    mapping: BatchMappingInfo | None = None
 
 
 class BatchPage(BaseModel):
@@ -252,12 +416,18 @@ class AffectedMetric(BaseModel):
     status: Literal["stale", "blocked", "unreliable", "ok"]
 
 
+class MappingRevoked(BaseModel):
+    mapping_deleted: bool = False
+    types_deleted: int = 0
+
+
 class RevokeOut(BaseModel):
     batch_id: str
     status: Literal["revoked"] = "revoked"
     reverted: dict[str, int]
     revoked_at: datetime
     affected_metrics: list[AffectedMetric] = Field(default_factory=list)
+    mapping_revoked: MappingRevoked | None = None
 
 
 # ── 任务（API-061~064）──────────────────────────────────────
@@ -325,17 +495,20 @@ class TradeOut(BaseModel):
     other_fee: str
     cash_balance: str | None = None
     cash_balance_available: bool
-    # 货币基金余额（该行发生后该标的的份额余额）；non-null 即货基行。
-    money_fund_balance: str | None = None
     account_masked: str | None = None
     summary: str | None = None
     summary_code: str | None = None
     category: str | None = None
+    # 明细类型中文文案（contracts `BILL_CATEGORY_LABELS`，后端唯一口径）；
+    # 无 category 的历史/手工行为「未分类」，前端原样渲染、不做映射。
+    category_label: str | None = None
     dedupe_key: str
     version: int
     source: Literal["import", "manual", "system"] = "import"
     batch_id: str | None = None
     note: str | None = None
+    # 非空 = 人工修订注入行（为 revision_of 指向的卖出流水补录成本，非真实账单）。
+    revision_of: str | None = None
     deleted_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
@@ -361,7 +534,6 @@ class TradePatchIn(StrictModel):
     stamp_tax: str | None = None
     other_fee: str | None = None
     cash_balance: str | None = None
-    money_fund_balance: str | None = None
     note: str | None = Field(default=None, max_length=200)
 
 
@@ -388,6 +560,43 @@ class TradeHistoryItem(BaseModel):
 class TradeHistoryOut(BaseModel):
     trade_id: str
     items: list[TradeHistoryItem]
+
+
+# ── 超卖卖出人工修订（API-107~109）──────────────────────────
+class OversellRevisionIn(StrictModel):
+    """PUT 入参：该卖出未配对部分的总成本（正数，定点字符串）。"""
+
+    cost: str
+
+
+class OversellRevisionSellOut(BaseModel):
+    trade_id: str
+    trade_date: date
+    security_code: str
+    security_name: str
+    quantity: str
+    amount: str
+    # 当前仍未配对的数量（修订生效后为 0）。
+    oversell_quantity: str
+    note: str | None = None
+
+
+class OversellRevisionOut(BaseModel):
+    sell: OversellRevisionSellOut
+    # none=可修订 / revised=已修订 / superseded=真实账单已覆盖（待确认）/ not_oversell=无需修订
+    status: Literal["none", "revised", "superseded", "not_oversell"]
+    cost: str | None = None
+    # 注入的两条流水（未修订为 null），页面据此展示「非真实成交账单」标记。
+    cash_trade: TradeOut | None = None
+    buy_trade: TradeOut | None = None
+    # 重算后该卖出对应的回合（未重算为 null），前端可跳转展示配对结果。
+    round_id: str | None = None
+
+
+class OversellRevisionMutationOut(BaseModel):
+    revision: OversellRevisionOut
+    rebuild_job_id: str | None = None
+    assets_job_id: str | None = None
 
 
 # ── 摘要规则与对账（API-022~026）────────────────────────────
@@ -493,7 +702,7 @@ class RoundOut(BaseModel):
     round_id: str
     security_code: str
     security_name: str
-    status: Literal["open", "closed", "data_error"]
+    status: Literal["open", "closed", "oversell", "data_error"]
     open_date: date
     close_date: date | None = None
     quantity: str
@@ -637,11 +846,8 @@ class AssetPointOut(StrictModel):
     date: date
     # blocked 行以下金额/比率字段一律 null（不是 "0.00"、也不是省略键）。
     cash: str | None = None
-    # 货币基金余额（单位净值恒 1.0000；不再作为持仓估值）
-    money_fund: str | None = None
-    # 资产余额 = 现金 + 货币基金（用户口径：页面「余额」统一显示资产余额）
-    balance: str | None = None
     market_value: str | None = None
+    # 总资产 = 现金 + 持仓市值
     total_assets: str | None = None
     holding_cost: str | None = None
     unrealized_pnl: str | None = None
@@ -750,7 +956,7 @@ class AssetBuildFailed(StrictModel):
 class AssetChartPointOut(StrictModel):
     """API-085：图表点（v 为后端归一化无量纲字符串，前端只做几何投影）。
 
-    cashflow 为当日银证转账净额（定点字符串，正数=净转入、负数=净转出）；
+    cashflow 为当日资金划转净额（定点字符串，正数=净转入、负数=净转出）；
     cashflow_direction 是后端判定的展示方向，前端不解析符号、不做金额运算。
     """
 
@@ -759,7 +965,7 @@ class AssetChartPointOut(StrictModel):
     v: str
     label: str
     amount_label: str
-    # 当日净银证转账（分→元定点字符串）；无转账为 "0.00"。
+    # 当日净资金划转（分→元定点字符串）；无划转为 "0.00"。
     cashflow: str
     cashflow_direction: Literal["in", "out", "none"]
 
@@ -866,7 +1072,7 @@ class DashboardMaxDrawdownOut(StrictModel):
 class DashboardAssetOverviewOut(StrictModel):
     """资产概览：当前快照（最新资产日）+ 峰值转入成本/总收益/费用。
 
-    `max_invested_cost` 语义为**银证转账峰值转入成本**（累计净转入的峰值），
+    `max_invested_cost` 语义为**资金划转峰值转入成本**（累计净转入的峰值），
     `max_cost_return_pct` = 总收益 / 峰值转入成本（字段名保留以兼容旧客户端）。
     """
 
@@ -874,9 +1080,6 @@ class DashboardAssetOverviewOut(StrictModel):
     holdings: list[DashboardHoldingOut]
     market_value: str | None = None
     cash: str | None = None
-    # 货币基金余额 + 资产余额（= 现金 + 货币基金），页面「余额」统一用资产余额。
-    money_fund: str | None = None
-    balance: str | None = None
     total_assets: str | None = None
     position_pct: str | None = None
     total_profit: str | None = None
@@ -894,8 +1097,6 @@ class DashboardAssetOverviewOut(StrictModel):
     # 后端已格式化的展示串（千分位金额）；前端优先使用，raw 保留兼容。
     market_value_display: str | None = None
     cash_display: str | None = None
-    money_fund_display: str | None = None
-    balance_display: str | None = None
     total_assets_display: str | None = None
     total_profit_display: str | None = None
     max_invested_cost_display: str | None = None

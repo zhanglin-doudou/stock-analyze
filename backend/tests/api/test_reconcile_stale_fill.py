@@ -69,7 +69,7 @@ async def _fills(client, api_prefix, user) -> list[dict]:
 async def test_incremental_import_does_not_fill_on_healed_gap(
     client, api_prefix, account_factory, settings
 ) -> None:
-    """增量导入收尾对账不得对「已愈合缺口上的残留补差行」级联补差，且应清理陈旧补差行。"""
+    """增量导入停用自动补差：不清理陈旧补差行，清理由独立对账 API 负责。"""
     user = await account_factory()
     batch1 = await _import(client, api_prefix, user, settings, _BASE, "base.xlsx")
     assert batch1["filled_count"] == 0
@@ -101,12 +101,12 @@ async def test_incremental_import_does_not_fill_on_healed_gap(
     )
     assert resp.status_code == 200, resp.text
 
-    # 增量导入新账单：收尾对账应软删 F1，而不是对 F1 再补差。
+    # 增量导入新账单：导入链路不再自动对账，不得新增补差，也不清理 F1。
     batch2 = await _import(client, api_prefix, user, settings, _INCR, "incr.xlsx")
     assert batch2["filled_count"] == 0, batch2.get("fills")
-    assert await _fills(client, api_prefix, user) == []
+    assert len(await _fills(client, api_prefix, user)) == 1
 
-    # 月度对账复查：链完全自洽，无断链、无补差残留（状态 ok 而非 degraded）。
+    # 独立对账 API 复查：链完全自洽，清理陈旧补差后无断链、无补差残留。
     resp = await client.get(
         f"{api_prefix}/reconciliation", headers=user.headers, params={"period": "2021-11"}
     )
@@ -114,6 +114,7 @@ async def test_incremental_import_does_not_fill_on_healed_gap(
     body = resp.json()
     assert body["status"] == "ok", body
     assert body["filled_count"] == 0
+    assert await _fills(client, api_prefix, user) == []
 
 
 async def test_fresh_account_direct_import_has_no_fill(

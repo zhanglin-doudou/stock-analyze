@@ -33,7 +33,7 @@ pytestmark = pytest.mark.api
 
 API_PREFIX = "/api/v1"
 _CLOCK = FrozenClock("2026-07-15T09:00:00+08:00")
-_ASSET_DEFINITION_VERSION = "1.7"
+_ASSET_DEFINITION_VERSION = "1.9"
 
 _INSERT_ASSET_DAILY_SQL = """
 insert into review.asset_daily (

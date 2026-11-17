@@ -16,21 +16,46 @@ from typing import Any
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from stock_contracts.clock import Clock
-from stock_contracts.enums import ImportBatchStatus, JobStatus, QuarantineReason, WarningCode
+from stock_contracts.enums import (
+    ImportBatchStatus,
+    ImportStage,
+    JobStatus,
+    QuarantineReason,
+    WarningCode,
+)
 from stock_contracts.errors import ApiError, ErrorCode, FieldError, NotFoundError
 from stock_platform.audit import record
 from stock_platform.jobs import JobQueue
+from stock_platform.obs import get_logger
 from stock_platform.outbox import publish
 
-from stock_ledger.application.classify import load_rules, match_rule, suggest_rule
+from stock_ledger.application.chain import (
+    ChainMode,
+    apply_multi_chain_plan,
+    plan_chain_by_account,
+)
+from stock_ledger.application.classify import (
+    category_after_amount_fallback,
+    load_rules,
+    match_rule,
+    side_from_category,
+    suggest_rule,
+)
+from stock_ledger.application.import_analysis import row_type_key
 from stock_ledger.application.preview import default_object_store
-from stock_ledger.application.reconcile import reconcile
 from stock_ledger.models import SummaryRule
-from stock_ledger.parsers.huatai import ParsedRow, parse_bill
+from stock_ledger.parsers.huatai import ParsedRow, parse_bill, parse_bill_with_plan
+from stock_ledger.parsers.mapping import MappingItem, MappingPlan
+from stock_ledger.repositories.import_mapping import (
+    ImportBillTypeRepository,
+    ImportTemplateRepository,
+)
 from stock_ledger.repositories.imports import ImportBatchRepository, ImportPreviewRepository
 from stock_ledger.repositories.quarantine import QuarantineRepository
 from stock_ledger.repositories.rules import rule_summary_code
 from stock_ledger.repositories.trades import TradeRepository, TradeRow
+
+log = get_logger("stock_ledger.imports")
 
 EVENT_COMMITTED = "ledger.import.committed"
 EVENT_REVOKED = "ledger.import.revoked"
@@ -104,11 +129,48 @@ def _parsed_to_trade_row(parsed: ParsedRow, batch_id: str) -> TradeRow:
         other_fee_units=parsed.other_fee_units,
         cash_balance_units=parsed.cash_balance_units,
         cash_balance_available=parsed.cash_balance_available,
-        money_fund_balance_units=parsed.money_fund_balance_units,
         occurrence_idx=parsed.occurrence_idx,
         account_masked=parsed.account_masked,
         line_no=parsed.line_no,
     )
+
+
+def _snapshot_value(snapshot: Any, key: str, default: Any = None) -> Any:
+    if isinstance(snapshot, dict):
+        return snapshot.get(key, default)
+    return getattr(snapshot, key, default)
+
+
+def _plan_from_snapshot(snapshot: Any, *, ignored_columns: list[str]) -> MappingPlan:
+    """用提交时落入批次/任务的快照构造计划，不重读可变 preview 草稿。"""
+    return MappingPlan(
+        header_row_index=_snapshot_value(snapshot, "header_row_index") or 0,
+        items=tuple(
+            MappingItem.from_dict(item)
+            for item in (_snapshot_value(snapshot, "mapping_items", []) or [])
+        ),
+        ignored=tuple(ignored_columns),
+    )
+
+
+def _discarded_quarantine_rows(
+    parsed_rows: list[ParsedRow], *, batch_id: str
+) -> list[dict[str, Any]]:
+    """用户标记为废弃的账单类型：落隔离区但单独计 `discarded_count`。"""
+    return [
+        {
+            "batch_id": batch_id,
+            "line_no": parsed.line_no,
+            "raw": {
+                **parsed.raw,
+                "summary": parsed.summary or "",
+                "line_no": parsed.line_no,
+            },
+            "reason_code": QuarantineReason.BILL_TYPE_DISCARDED.value,
+            "suggested_rule_id": None,
+        }
+        for parsed in parsed_rows
+    ]
 
 
 def _unknown_summary_quarantine_rows(
@@ -125,7 +187,7 @@ def _unknown_summary_quarantine_rows(
                 "line_no": parsed.line_no,
             },
             "reason_code": QuarantineReason.UNKNOWN_SUMMARY.value,
-            "suggested_rule_id": suggest_rule(rules, parsed.summary, parsed.side),
+            "suggested_rule_id": suggest_rule(rules, parsed.summary),
         }
         for parsed in parsed_rows
     ]
@@ -159,14 +221,79 @@ async def commit_batch(
         preview = await preview_repo.by_id(user_id, preview_id, now=clock.now())
         await queue.progress(session, job_id, percent=5, stage="parsing", message=None)
 
+        adopted_id = params.get("batch_id")
+        batch = await batch_repo.by_id(user_id, str(adopted_id)) if adopted_id is not None else None
+        if adopted_id is not None and batch is None:
+            raise NotFoundError(detail=f"导入批次 {adopted_id} 不存在")
+
+        # v2 的权威输入是提交时落入批次/任务的快照；preview 只提供原文件与 legacy 兼容字段。
+        snapshot: Any = batch if batch is not None else params
+        snapshot_stage = str(params.get("stage") or preview.stage)
+        legacy = snapshot_stage == ImportStage.LEGACY.value
+        if not legacy and snapshot_stage != ImportStage.READY.value:
+            raise ApiError(
+                ErrorCode.IMPORT_STAGE_CONFLICT,
+                detail="预览尚未完成列对应与类型确认，不能提交",
+            )
+        ignored_columns = [str(item) for item in (params.get("ignored_columns") or [])]
+        if "ignored_columns" not in params and legacy:
+            ignored_columns = list(preview.ignored_columns or [])
+        snapshot_date_format = params.get("date_format")
+        if snapshot_date_format is None and "date_format" not in params:
+            snapshot_date_format = preview.date_format
+        plan = None if legacy else _plan_from_snapshot(snapshot, ignored_columns=ignored_columns)
         data = await default_object_store().get_bytes(preview.object_key)
-        bill = parse_bill(
-            data,
-            preview.file_name,
-            mapping=dict(preview.mapping) or None,
-            date_format=preview.date_format,
-            clock=clock,
+        if legacy:
+            bill = parse_bill(
+                data,
+                preview.file_name,
+                mapping=(
+                    dict(params.get("mapping") or {})
+                    if "mapping" in params
+                    else dict(preview.mapping or {})
+                )
+                or None,
+                date_format=snapshot_date_format,
+                clock=clock,
+            )
+        else:
+            assert plan is not None
+            broker = str(params.get("broker") or _snapshot_value(snapshot, "broker"))
+            bill = parse_bill_with_plan(
+                data,
+                preview.file_name,
+                plan=plan,
+                date_format=snapshot_date_format,
+                clock=clock,
+                broker=broker,
+            )
+        broker = "huatai" if legacy else broker
+        mapping_items = list(_snapshot_value(snapshot, "mapping_items", []) or [])
+        type_resolutions = list(_snapshot_value(snapshot, "type_resolutions", []) or [])
+        signature = _snapshot_value(snapshot, "signature") if not legacy else None
+        template_id = _snapshot_value(snapshot, "template_id") if not legacy else None
+        mapping_source = (
+            ImportStage.LEGACY.value
+            if legacy
+            else str(
+                _snapshot_value(snapshot, "mapping_source")
+                or params.get("mapping_source")
+                or "manual"
+            )
         )
+        # 写库前先做对账链规划：选起点、断行先隔离、覆盖区段以文件为准。
+        # 导入链路不再自动补差（补差只保留给独立对账 API）。
+        chain = await plan_chain_by_account(
+            session,
+            user_id=user_id,
+            rows=bill.rows,
+            force_replace=mode == "replace_range",
+        )
+        apply_multi_chain_plan(bill, chain)
+        covered = chain.mode == ChainMode.COVERED
+        if covered:
+            # 整文件已被库内覆盖：no-op，不写明细、不写隔离、不写记忆。
+            bill.quarantined = []
 
         if await queue.is_cancel_requested(session, job_id):
             await queue.finish(
@@ -176,13 +303,8 @@ async def commit_batch(
 
         await queue.progress(session, job_id, percent=35, stage="writing", message=None)
 
-        adopted_id = params.get("batch_id")
-        if adopted_id:
-            # 收养 API-011 同步创建的 PENDING 批次（否则会出现两条批次）。
-            batch = await batch_repo.by_id(user_id, str(adopted_id))
-            if batch is None:
-                raise NotFoundError(detail=f"导入批次 {adopted_id} 不存在")
-            batch.broker = "huatai"
+        if batch is not None:
+            # 收养 API-011 同步创建的 PENDING 批次；快照字段保持提交时原值。
             batch.file_name = preview.file_name
             batch.file_sha256 = preview.file_sha256
             batch.file_bytes = preview.file_bytes
@@ -196,7 +318,7 @@ async def commit_batch(
                 user_id,
                 preview_id=preview_id,
                 mode=mode,
-                broker="huatai",
+                broker=broker,
                 file_name=preview.file_name,
                 file_sha256=preview.file_sha256,
                 file_bytes=preview.file_bytes,
@@ -204,6 +326,17 @@ async def commit_batch(
                 date_format=bill.date_format,
                 assumptions=bill.assumptions,
                 warnings=[warning.value for warning in bill.warnings],
+                template_id=template_id,
+                signature=signature,
+                header_row_index=(
+                    _snapshot_value(snapshot, "header_row_index") if not legacy else None
+                ),
+                mapping_fingerprint=(
+                    _snapshot_value(snapshot, "mapping_fingerprint") if not legacy else None
+                ),
+                mapping_items=mapping_items,
+                type_resolutions=type_resolutions,
+                mapping_source=mapping_source,
             )
 
         trade_repo = TradeRepository(session)
@@ -222,42 +355,89 @@ async def commit_batch(
                     ErrorCode.VALIDATION_ERROR,
                     errors=[FieldError("range", "required", "replace_range 模式必须提供 range")],
                 )
-            replaced = await trade_repo.soft_delete_range(
-                user_id, date_from=replace_from, date_to=replace_to, at=clock.now()
-            )
+        if mode == "replace_range":
+            if replace_from is not None and replace_to is not None:
+                replaced = await trade_repo.soft_delete_range(
+                    user_id, date_from=replace_from, date_to=replace_to, at=clock.now()
+                )
+        else:
+            # 对账链判定的覆盖区段以文件为准：按子账户分别软删各自区段后整段重写。
+            for account, range_from, range_to in chain.replace_ranges():
+                replaced += await trade_repo.soft_delete_range(
+                    user_id,
+                    date_from=range_from,
+                    date_to=range_to,
+                    at=clock.now(),
+                    account=account,
+                )
 
-        # 分类：与 preview 同一套规则与同一执行顺序（dedupe → 分类），保证隔离计数一致。
+        # 分类：与 preview 同一顺序（dedupe → 类型/规则），保证隔离计数一致。
+        # legacy 走摘要规则；v2 以 `type_resolutions` 快照为准（stage=ready 已保证全覆盖）。
         rules = await load_rules(session, user_id)
+        rules_by_id = {rule.id: rule for rule in rules}
+        resolutions = (
+            {} if legacy else {str(item.get("type_key")): item for item in type_resolutions}
+        )
         existing_keys = await trade_repo.existing_dedupe_keys(
             user_id, [row.dedupe_key for row in bill.rows]
         )
         seen: set[str] = set()
         to_insert: list[TradeRow] = []
         unknown_summary_rows: list[ParsedRow] = []
-        skipped = 0
+        discarded_rows: list[ParsedRow] = []
+        skipped = chain.skipped
         for parsed in bill.rows:
             if parsed.dedupe_key in existing_keys or parsed.dedupe_key in seen:
                 skipped += 1
                 continue
             seen.add(parsed.dedupe_key)
-            rule = match_rule(rules, parsed.summary, parsed.side)
-            if rule is None:
-                unknown_summary_rows.append(parsed)
+            if legacy:
+                rule = match_rule(rules, parsed.summary)
+                if rule is None:
+                    unknown_summary_rows.append(parsed)
+                    continue
+                trade_row = _parsed_to_trade_row(parsed, batch.id)
+                # 零金额登记动作自动降级（摘要含"新股"但 amount==0 → broker_action）
+                final_category = category_after_amount_fallback(rule.category, parsed.amount_units)
+                trade_row.category = final_category
+                trade_row.side = side_from_category(final_category)
+                trade_row.summary_code = rule_summary_code(rule)
+                to_insert.append(trade_row)
                 continue
+            type_key, _ = row_type_key(parsed)
+            resolution = resolutions.get(type_key)
+            if resolution is None:
+                raise ApiError(
+                    ErrorCode.IMPORT_BILL_TYPES_UNRESOLVED,
+                    detail=f"账单类型 {type_key} 未确认，不能提交",
+                )
+            if bool(resolution.get("discard")):
+                discarded_rows.append(parsed)
+                continue
+            category = resolution.get("category")
+            if not category:
+                raise ApiError(
+                    ErrorCode.IMPORT_BILL_TYPES_UNRESOLVED,
+                    detail=f"账单类型 {type_key} 缺少分类，不能提交",
+                )
             trade_row = _parsed_to_trade_row(parsed, batch.id)
-            trade_row.category = rule.category
-            trade_row.summary_code = rule_summary_code(rule)
+            trade_row.category = str(category)
+            trade_row.side = side_from_category(str(category))
+            rule_id = resolution.get("suggested_rule_id")
+            matched_rule = rules_by_id.get(str(rule_id)) if rule_id else None
+            trade_row.summary_code = rule_summary_code(matched_rule) if matched_rule else None
             to_insert.append(trade_row)
         inserted = await trade_repo.insert_many(user_id, to_insert)
 
         # 批次警告/假设与 preview 对齐：未知摘要也要打 UNKNOWN_SUMMARY 并留行号明细。
-        warnings = [warning.value for warning in bill.warnings]
+        warnings = [
+            warning.value for warning in bill.warnings if warning != WarningCode.UNKNOWN_SUMMARY
+        ]
         assumptions: dict[str, Any] = dict(bill.assumptions)
         if unknown_summary_rows:
             warnings.append(WarningCode.UNKNOWN_SUMMARY.value)
             assumptions["unknown_summary_rows"] = [
-                {"line_no": row.line_no, "summary": row.summary, "side": row.side}
-                for row in unknown_summary_rows
+                {"line_no": row.line_no, "summary": row.summary} for row in unknown_summary_rows
             ]
         batch.warnings = warnings
         batch.assumptions = assumptions
@@ -275,69 +455,85 @@ async def commit_batch(
         quarantine_payloads.extend(
             _unknown_summary_quarantine_rows(unknown_summary_rows, batch_id=batch.id, rules=rules)
         )
+        quarantine_payloads.extend(_discarded_quarantine_rows(discarded_rows, batch_id=batch.id))
         if quarantine_payloads:
             await QuarantineRepository(session).add_many(user_id, quarantine_payloads)
 
         await queue.progress(session, job_id, percent=85, stage="finalizing", message=None)
-        range_from = replace_from if mode == "replace_range" else bill_from
-        range_to = replace_to if mode == "replace_range" else bill_to
+        coverage_from = replace_from if replace_from is not None else bill_from
+        coverage_to = replace_to if replace_to is not None else bill_to
         ranges: dict[str, Any] = (
-            {"from": range_from.isoformat(), "to": range_to.isoformat()}
-            if range_from is not None and range_to is not None
+            {"from": coverage_from.isoformat(), "to": coverage_to.isoformat()}
+            if coverage_from is not None and coverage_to is not None
             else {}
         )
         ranges["replaced_trades"] = replaced
+        ranges["coverage"] = chain.coverage.get("mode", ChainMode.EMPTY.value)
 
-        # 导入收尾即对账：基于已入库明细跑一次余额链核对，缺口自动写 side=missing 补差行。
-        # 补差行归属本批次（batch_id=batch.id），撤销批次时随之软删；有补差则打警告让用户
-        # 知道账单存在缺失，并把补差明细挂在 assumptions.reconciliation 供批次详情展示。
+        # 导入链路停用自动补差：缺口只做链式隔离，不再写 side=missing 补差行。
         fill_count = 0
-        fills: list[dict[str, Any]] = []
-        if range_from is not None and range_to is not None:
-            reco = await reconcile(
-                session,
-                clock=clock,
-                user_id=user_id,
-                period_start=range_from,
-                period_end=range_to,
-                fill_batch_id=batch.id,
-            )
-            fills = [
-                {
-                    "trade_id": item["filled_trade_id"],
-                    "line_no": item.get("line_no"),
-                    "trade_date": item.get("trade_date"),
-                    "amount_units": item["delta_units"],
-                    "expected_units": item["expected_units"],
-                    "actual_units": item["actual_units"],
-                }
-                for item in reco.breaks
-                if item.get("filled")
-            ]
-            fill_count = len(fills)
-            # 注意：不能用 warnings.append / assumptions[...] 原地改——它们已赋给 batch，
-            # JSONB 的快照引用同一对象，原地改会被判断成“值未变化”而漏写 UPDATE。
-            new_warnings = list(warnings)
-            if fill_count:
-                new_warnings.append(WarningCode.RECONCILIATION_AUTOFILLED.value)
-            batch.warnings = new_warnings
-            batch.assumptions = {
-                **assumptions,
-                "reconciliation": {"status": reco.status, "filled_count": fill_count},
-            }
 
+        batch.discarded_count = len(discarded_rows)
         finished = await batch_repo.finish(
             user_id,
             batch.id,
             status=ImportBatchStatus.SUCCEEDED,
-            parsed_count=len(bill.rows),
+            # parsed = 进入插入循环的行（接受行 + 因锚点已存在而跳过的行）；
+            # 链式隔离行只进 quarantined，不计入 parsed。
+            parsed_count=len(bill.rows) + chain.skipped,
             inserted_count=inserted,
             skipped_count=skipped,
-            quarantined_count=len(quarantine_payloads),
+            # 废弃类型单独计数（`discarded_count`），不并入 quarantined（设计 D-12）。
+            quarantined_count=len(bill.quarantined) + len(unknown_summary_rows),
             ranges=ranges,
             at=clock.now(),
         )
         await preview_repo.mark_consumed(user_id, preview_id, at=clock.now())
+
+        # 用户级记忆（模板/类型）：只在 v2 成功提交时写；写前再读一次撤销标记，
+        # 避免「已撤销批次又被 worker 写回孤儿记忆」（设计 §7.2 第 6 步）。
+        templates_written = 0
+        types_written = 0
+        types_modified_existing = 0
+        if not legacy and finished.revoked_at is None and not covered:
+            template_repo = ImportTemplateRepository(session)
+            if signature and mapping_items:
+                template = await template_repo.upsert(
+                    user_id,
+                    broker=broker,
+                    signature=str(signature),
+                    header_count=len(bill.columns) + len(bill.unresolved),
+                    date_format=bill.date_format,
+                    items=mapping_items,
+                    ignored=ignored_columns,
+                    origin_batch_id=finished.id,
+                    last_batch_id=finished.id,
+                )
+                finished.template_id = template.id
+                templates_written = 1
+            types_written, types_modified_existing = await ImportBillTypeRepository(
+                session
+            ).upsert_many(
+                user_id,
+                type_resolutions,
+                batch_id=finished.id,
+                broker=broker,
+            )
+
+        # 历史类型被改动分类/废弃 → 影响已解析流水的 category，触发全量 reclassify 订正。
+        # 仅当本批次真正改了历史类型才触发；新增类型或未改动的复用不触发。
+        if types_modified_existing > 0:
+            try:
+                await queue.enqueue(
+                    session,
+                    kind="reclassify",
+                    user_id=user_id,
+                    scope_key=f"{user_id}:reclassify:all",
+                    params={"reason": "type_mapping_changed"},
+                )
+            except ApiError as exc:
+                # 入队失败不回滚导入：订正可由用户手动从批次页发起。
+                log.warning("import.reclassify_enqueue_skipped", code=exc.code.value)
 
         await publish(
             session,
@@ -349,8 +545,11 @@ async def commit_batch(
                 "batch_id": finished.id,
                 "inserted": inserted,
                 "skipped": skipped,
-                "quarantined": len(quarantine_payloads),
+                "quarantined": finished.quarantined_count,
+                "discarded": finished.discarded_count,
                 "filled": fill_count,
+                "covered": covered,
+                "mapping_source": finished.mapping_source,
             },
         )
         await record(
@@ -364,10 +563,13 @@ async def commit_batch(
                 "inserted": inserted,
                 "skipped": skipped,
                 "filled": fill_count,
+                "discarded": finished.discarded_count,
+                "templates_written": templates_written,
+                "types_written": types_written,
             },
         )
 
-        result = _committed_result(finished, reused=False, filled_count=fill_count)
+        result = _committed_result(finished, reused=False, filled_count=fill_count, covered=covered)
         await queue.finish(session, job_id, status=JobStatus.SUCCEEDED, result=result)
         await savepoint.commit()
         return result
@@ -377,14 +579,18 @@ async def commit_batch(
         return await _fail_job(queue, session, job_id, exc)
 
 
-def _committed_result(batch: Any, *, reused: bool, filled_count: int = 0) -> dict[str, Any]:
+def _committed_result(
+    batch: Any, *, reused: bool, filled_count: int = 0, covered: bool = False
+) -> dict[str, Any]:
     return {
         "batch_id": batch.id,
         "status": batch.status,
         "inserted": batch.inserted_count,
         "skipped": batch.skipped_count,
         "quarantined": batch.quarantined_count,
+        "discarded": batch.discarded_count,
         "filled_count": filled_count,
+        "covered": covered,
         "reused": reused,
     }
 
@@ -414,13 +620,40 @@ async def revoke_batch_now(
     )
     batch = await batch_repo.revoke(user_id, batch_id, reason=reason, at=clock.now())
 
+    # 类型记忆：只删本批次新增/修改的（复用的旧类型保留，保护其他批次）。
+    types_deleted = await ImportBillTypeRepository(session).delete_by_last_write(user_id, batch_id)
+    # 字段模板：origin 批次撤销删除整条模板；增量批次只把 last_batch_id 回退到最近有效批次。
+    mapping_deleted = False
+    templates = ImportTemplateRepository(session)
+    if batch.signature:
+        template = await templates.by_signature(user_id, batch.signature)
+        if template is not None:
+            if template.origin_batch_id == batch.id:
+                mapping_deleted = await templates.delete(user_id, template.id)
+            elif template.last_batch_id == batch.id:
+                latest = await batch_repo.latest_active_by_signature(
+                    user_id, batch.signature, exclude_batch_id=batch.id
+                )
+                template.last_batch_id = (
+                    latest.id if latest is not None else template.origin_batch_id
+                )
+                await session.flush()
+    if mapping_deleted or types_deleted:
+        batch.assumptions = {**batch.assumptions, "mapping_revoked": True}
+
     await publish(
         session,
         event_type=EVENT_REVOKED,
         aggregate="import_batch",
         aggregate_id=batch.id,
         user_id=user_id,
-        payload={"batch_id": batch.id, "removed_trades": removed, "reason": reason},
+        payload={
+            "batch_id": batch.id,
+            "removed_trades": removed,
+            "reason": reason,
+            "mapping_deleted": mapping_deleted,
+            "types_deleted": types_deleted,
+        },
     )
     await record(
         session,
@@ -432,12 +665,30 @@ async def revoke_batch_now(
         request_id=request_id,
         source="api",
     )
+    await record(
+        session,
+        action="import.mapping_revoked",
+        actor_id=actor_id or user_id,
+        target_type="import_batch",
+        target_id=batch.id,
+        meta={
+            "signature": batch.signature,
+            "mapping_deleted": mapping_deleted,
+            "types_deleted": types_deleted,
+        },
+        request_id=request_id,
+        source="api",
+    )
     return {
         "batch_id": batch.id,
         "status": batch.status,
         "revoked": True,
         "removed_trades": removed,
         "revoked_at": batch.revoked_at,
+        "mapping_revoked": {
+            "mapping_deleted": mapping_deleted,
+            "types_deleted": types_deleted,
+        },
     }
 
 
@@ -460,6 +711,7 @@ async def revoke_batch(
             "batch_id": outcome["batch_id"],
             "revoked": True,
             "removed_trades": outcome["removed_trades"],
+            "mapping_revoked": outcome["mapping_revoked"],
         }
         await queue.finish(session, job_id, status=JobStatus.SUCCEEDED, result=result)
         await savepoint.commit()

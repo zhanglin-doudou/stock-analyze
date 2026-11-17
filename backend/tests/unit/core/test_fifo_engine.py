@@ -223,11 +223,11 @@ def test_add_position_two_lots_fifo_pairing() -> None:
     assert round_.key == "b1:open"
     assert round_.status == "open"
     assert round_.open_trade_id == "b1"
-    assert round_.quantity_units == shares(150)
-    assert round_.cost_units == cents("1550.00")  # 已消耗 1000+550，剩余 550 在 open_lots
+    assert round_.quantity_units == shares(50)  # 剩余持仓 50 股（b2 剩余）
+    assert round_.cost_units == cents("550.00")  # 剩余持仓成本（b2 剩余 50 @11）
     assert round_.proceeds_units == cents("1800.00")
     assert round_.dividend_units == 0
-    assert round_.pnl_units == cents("250.00")
+    assert round_.pnl_units == cents("250.00")  # 1800 - 已消耗 1550
     # FIFO 配对填充
     assert [fill.buy_trade_id for fill in round_.fills] == ["b1", "b2"]
     assert [fill.sequence for fill in round_.fills] == [1, 2]
@@ -332,10 +332,10 @@ def test_other_event_kinds_are_ignored_by_engine() -> None:
     assert result.open_lots == ()
 
 
-# ── 超卖 data_error ──────────────────────────────────────
+# ── 超卖 oversell ────────────────────────────────────────
 
 
-def test_partial_oversell_marks_data_error_without_negative_position() -> None:
+def test_partial_oversell_marks_oversell_status_without_negative_position() -> None:
     result = build_rounds(
         [
             buy("b1", date(2024, 1, 2), 100, "10.00", line_no=1),
@@ -344,8 +344,8 @@ def test_partial_oversell_marks_data_error_without_negative_position() -> None:
     )
     assert len(result.rounds) == 1
     round_ = result.rounds[0]
-    assert round_.status == "data_error"
-    assert round_.data_error is True
+    assert round_.status == "oversell"
+    assert round_.data_error is False
     assert round_.quantity_units == shares(100)
     # 可配对部分 = 100/150 股（成本 1000.00）；现金按可配对数量比例 = 1950.00 × 100/150 = 1300.00
     assert round_.cost_units == cents("1000.00")
@@ -358,7 +358,10 @@ def test_partial_oversell_marks_data_error_without_negative_position() -> None:
     assert error.kind == "oversell"
     assert error.trade_id == "s1"
     assert error.quantity_units == shares(50)
-    # data_error 回合不计入 closed / realized
+    # 未配对 50/150 股分摊净卖款 = 1950.00 × 50/150 = 650.00（计入当日外部现金流，不计收益）
+    assert error.proceeds_units == cents("650.00")
+    assert result.oversell_proceeds_units == cents("650.00")
+    # oversell 回合不计入 closed / realized
     assert result.closed_rounds == ()
     assert result.realized_pnl_units == 0
 
@@ -378,15 +381,39 @@ def test_partial_oversell_proceeds_prorated_with_floor() -> None:
     assert round_.proceeds_units == 1_300
     assert round_.pnl_units == 1_300 - cents("1000.00")
     assert sum(fill.sell_proceeds_units for fill in round_.fills) == round_.proceeds_units
+    assert result.oversell_proceeds_units == 1_951 - 1_300
 
 
-def test_sell_without_any_holding_records_only_data_error() -> None:
+def test_sell_without_any_holding_records_oversell_round_and_data_error() -> None:
+    """纯超卖：无 lot 可配对也要落库成 oversell 回合（回合页可见），便于人工补录成本。"""
     result = build_rounds([sell("s1", date(2024, 1, 10), 100, "12.00")])
-    assert result.rounds == ()
     assert result.open_lots == ()
+    assert len(result.rounds) == 1
+    round_ = result.rounds[0]
+    assert round_.key == "s1:oversell"
+    assert round_.status == "oversell"
+    assert round_.data_error is False
+    assert round_.open_trade_id == "s1"
+    assert round_.close_trade_id == "s1"
+    assert round_.open_date == date(2024, 1, 10)
+    assert round_.close_date == date(2024, 1, 10)
+    assert round_.quantity_units == shares(100)
+    assert round_.oversell_units == shares(100)
+    assert round_.cost_units == 0
+    assert round_.proceeds_units == cents("1200.00")
+    assert round_.pnl_units == 0
+    assert round_.return_rate_units == 0
+    assert round_.holding_days == 0
+    assert round_.fills == ()
     assert len(result.data_errors) == 1
     assert result.data_errors[0].kind == "oversell"
     assert result.data_errors[0].quantity_units == shares(100)
+    # 全部未配对：整笔净卖款 1200.00 均视为期初资产，不产生交易损益
+    assert result.data_errors[0].proceeds_units == cents("1200.00")
+    assert result.oversell_proceeds_units == cents("1200.00")
+    # oversell 回合不计入 closed / realized
+    assert result.closed_rounds == ()
+    assert result.realized_pnl_units == 0
     # 后续买入可正常配对，不被此前的无主卖出影响
     result = build_rounds(
         [
@@ -395,8 +422,8 @@ def test_sell_without_any_holding_records_only_data_error() -> None:
             sell("s2", date(2024, 1, 15), 100, "12.00"),
         ]
     )
-    assert len(result.rounds) == 1
-    assert result.rounds[0].key == "b1:s2"
+    assert [round_.key for round_ in result.rounds] == ["s1:oversell", "b1:s2"]
+    assert result.rounds[1].status == "closed"
 
 
 # ── 新股认购：NEW_STOCK 缴款行建仓，上市卖出可配对成回合（设计 D11）──
@@ -454,84 +481,6 @@ def test_new_stock_paid_position_stays_open_without_sell() -> None:
     assert result.rounds[0].open_date == date(2026, 5, 18)
     assert [lot.quantity_units for lot in result.open_lots] == [shares(500)]
     assert [lot.cost_units for lot in result.open_lots] == [cents("26630.00")]
-
-
-# ── 货基超卖容忍（allow_oversell）：红利发放行隔离未入账，超出份额 = 利息 ──
-
-
-def _mf_sell(
-    trade_id: str,
-    day: date,
-    count: int,
-    yuan: str,
-    *,
-    line_no: int = 0,
-) -> FifoEvent:
-    """货基赎回事件（价恒 1.0000，打 allow_oversell 标记）。"""
-    return FifoEvent(
-        trade_id=trade_id,
-        trade_date=day,
-        kind=EventKind.SELL,
-        security_code="940018",
-        security_name="华泰紫金天天发货币",
-        quantity_units=shares(count),
-        price_units=price_of("1.00"),
-        amount_units=cents(yuan),
-        line_no=line_no,
-        allow_oversell=True,
-    )
-
-
-def test_money_fund_partial_oversell_excess_becomes_zero_cost_interest() -> None:
-    """买 100 赎 101：超出 1 份 = 被隔离的红利利息，零成本，卖款全额计收益。"""
-    result = build_rounds(
-        [
-            buy("b1", date(2024, 1, 2), 100, "1.00", code="940018", name="华泰紫金天天发货币"),
-            _mf_sell("s1", date(2024, 1, 10), 101, "101.00"),
-        ]
-    )
-    assert result.data_errors == ()
-    assert len(result.rounds) == 1
-    round_ = result.rounds[0]
-    assert round_.status == "closed"
-    assert round_.data_error is False
-    assert round_.oversell_units == 0
-    assert round_.cost_units == cents("100.00")
-    assert round_.proceeds_units == cents("101.00")
-    assert round_.pnl_units == cents("1.00")
-    assert result.realized_pnl_units == cents("1.00")
-    # 利息 fill：零成本、买卖同日、buy_trade_id 为空（无对应买入流水）
-    interest = round_.fills[-1]
-    assert interest.buy_trade_id == ""
-    assert interest.sell_trade_id == "s1"
-    assert interest.quantity_units == shares(1)
-    assert interest.buy_cost_units == 0
-    assert interest.sell_proceeds_units == cents("1.00")
-    assert interest.pnl_units == cents("1.00")
-    assert interest.holding_days == 0
-    # fills 与回合聚合守恒
-    assert sum(f.sell_proceeds_units for f in round_.fills) == round_.proceeds_units
-    assert sum(f.buy_cost_units for f in round_.fills) == round_.cost_units
-
-
-def test_money_fund_full_oversell_silently_skipped() -> None:
-    """期初本金赎回（无任何已入账申购）：静默跳过，不记错、不计损益。"""
-    result = build_rounds([_mf_sell("s1", date(2024, 1, 10), 100, "100.00")])
-    assert result.rounds == ()
-    assert result.data_errors == ()
-    assert result.open_lots == ()
-    # 跳过不影响后续正常配对
-    result = build_rounds(
-        [
-            _mf_sell("s0", date(2024, 1, 5), 50, "50.00"),
-            buy("b1", date(2024, 1, 8), 100, "1.00", code="940018", name="华泰紫金天天发货币"),
-            _mf_sell("s1", date(2024, 1, 10), 100, "100.00"),
-        ]
-    )
-    assert result.data_errors == ()
-    assert len(result.rounds) == 1
-    assert result.rounds[0].status == "closed"
-    assert result.rounds[0].pnl_units == 0
 
 
 # ── 非法事件 ─────────────────────────────────────────────
@@ -599,8 +548,42 @@ def test_invalid_buy_does_not_create_lot_and_sell_afterwards_oversells() -> None
         sell("s1", date(2024, 1, 10), 100, "12.00"),
     ]
     result = build_rounds(events)
-    assert result.rounds == ()
+    # 无效买入不建 lot；随后的卖出变成纯超卖，落库成 oversell 回合（无 fill）。
+    assert [round_.key for round_ in result.rounds] == ["s1:oversell"]
+    assert result.rounds[0].fills == ()
     assert [error.kind for error in result.data_errors] == ["invalid_event", "oversell"]
+
+
+def test_revision_row_sorts_before_sell_on_same_day() -> None:
+    """人工修订注入行 `sort_rank=0`：同交易日/同行号时先建 lot，再被卖出配对。"""
+    revision_buy = FifoEvent(
+        trade_id="rev_buy",
+        trade_date=date(2024, 1, 10),
+        kind=EventKind.BUY,
+        security_code="600000",
+        security_name="浦发银行",
+        quantity_units=shares(100),
+        price_units=price_of("10.00"),
+        amount_units=-cents("1000.00"),
+        line_no=259,
+        sort_rank=0,
+    )
+    sale = sell("s1", date(2024, 1, 10), 100, "12.00", line_no=259)
+    # 故意把卖出放在前面：验证按稳定序（sort_rank）而不是输入顺序
+    result = build_rounds([sale, revision_buy])
+
+    assert result.data_errors == ()
+    assert result.open_lots == ()
+    assert len(result.rounds) == 1
+    round_ = result.rounds[0]
+    assert round_.key == "rev_buy:s1"
+    assert round_.status == "closed"
+    assert round_.quantity_units == shares(100)
+    assert round_.oversell_units == 0
+    assert round_.cost_units == cents("1000.00")
+    assert round_.proceeds_units == cents("1200.00")
+    assert round_.pnl_units == cents("200.00")
+    assert len(round_.fills) == 1
 
 
 # ── 股息 ─────────────────────────────────────────────────
@@ -673,11 +656,11 @@ def test_dividend_does_not_change_cost_and_open_lot_keeps_undistributed_share() 
     round_ = result.rounds[0]
     assert round_.key == "b1:open"
     assert round_.status == "open"
-    assert round_.quantity_units == shares(100)  # 已匹配
-    assert round_.cost_units == cents("1000.00")  # 已消耗 b1 的 1000 元，剩余 2000 在 open_lots
+    assert round_.quantity_units == shares(200)  # 剩余持仓（b2 的 200 股）
+    assert round_.cost_units == cents("2000.00")  # 剩余持仓成本（b2）
     assert round_.proceeds_units == cents("1000.00")
     assert round_.dividend_units == 33  # 已消耗 lot 分到的股息（尾差 68 在 open_lots）
-    assert round_.pnl_units == 33  # 100000 - 100000 + 33
+    assert round_.pnl_units == 33  # 100000 - 已消耗 100000 + 33
 
     assert len(round_.fills) == 1
     fill = round_.fills[0]
@@ -904,8 +887,8 @@ def test_open_rounds_per_lot_sorted_by_open_date_then_key() -> None:
     assert round_.fills == ()
     assert round_.holding_days == 0
     assert round_.proceeds_units == 0
-    assert round_.quantity_units == 0  # 还没卖过
-    assert round_.cost_units == 0  # 没有 SELL，已消耗 cost = 0
+    assert round_.quantity_units == shares(300)  # 剩余持仓 300 股（无卖出）
+    assert round_.cost_units == cents("3000.00")  # 剩余持仓成本（900+1100+1000）
     assert round_.dividend_units == 0
     assert round_.pnl_units == 0
     assert round_.return_rate_units == 0
@@ -996,15 +979,15 @@ def test_open_round_return_rate_uses_dividend_over_cost() -> None:
     result = build_rounds(events)
     open_round = result.rounds[0]
     assert open_round.status == "open"
-    assert open_round.quantity_units == 0  # 还没卖过
+    assert open_round.quantity_units == shares(100)  # 剩余持仓 100 股
     assert open_round.fills == ()
     assert open_round.proceeds_units == 0
-    # 没有 SELL → 已消耗 cost=0，股息还在 open_lots 里（未消耗）
-    assert open_round.cost_units == 0
+    # 剩余持仓成本 = 1000；股息还在 open_lots 里（未消耗）
+    assert open_round.cost_units == cents("1000.00")
     assert open_round.dividend_units == 0
-    # pnl = proceeds - cost + dividend = 0 - 0 + 0
+    # pnl = proceeds - 已消耗成本 + 已消耗股息 = 0 - 0 + 0
     assert open_round.pnl_units == 0
-    # return_rate = pnl / cost，但 cost=0 时为 0（约定）
+    # return_rate = pnl / 已消耗成本，但已消耗 cost=0 时为 0（约定）
     assert open_round.return_rate_units == 0
 
 
@@ -1046,15 +1029,15 @@ def test_conservation_invariants_for_mixed_events() -> None:
     round_ = result.rounds[0]
     assert round_.key == "b1:open"
     assert round_.status == "open"
-    assert round_.quantity_units == shares(350)
-    assert round_.cost_units == 289_999  # 已消耗 lot cost（不是全周期 350000）
+    assert round_.quantity_units == shares(70)  # 剩余持仓 70 股
+    assert round_.cost_units == 60_001  # 剩余持仓成本（b2 剩余 70 股）
     assert round_.proceeds_units == cents("4200.00")  # 350×12
     assert round_.dividend_units == 416  # 已消耗 lot 分到的股息
-    assert round_.pnl_units == 130_417  # 420000 - 289999 + 416
+    assert round_.pnl_units == 130_417  # 420000 - 已消耗 289999 + 416
 
-    # 3 fills 合计 350 股
+    # 3 fills 合计 350 股（已配对卖出数，≠ 剩余持仓 70）
     assert len(round_.fills) == 3
-    assert sum(fill.quantity_units for fill in round_.fills) == round_.quantity_units
+    assert sum(fill.quantity_units for fill in round_.fills) == shares(350)
     # fills 的 pnl 合计
     assert sum(fill.pnl_units for fill in round_.fills) == 58_166 + 37_846 + 34_405  # 130417
 
@@ -1068,24 +1051,26 @@ def test_conservation_invariants_for_mixed_events() -> None:
 
     # === 守恒不变量 ===
 
-    # pnl 恒等式：pnl = proceeds - cost + dividend（open / closed 都适用）
-    for r in result.rounds:
-        assert r.pnl_units == r.proceeds_units - r.cost_units + r.dividend_units
+    # open 回合 pnl = proceeds - 已消耗成本 + 已消耗股息（用 fills 反推已消耗成本）
+    matched_cost = sum(fill.buy_cost_units for fill in round_.fills)
+    assert round_.pnl_units == round_.proceeds_units - matched_cost + round_.dividend_units
 
-    # cost 守恒：已消耗 cost + 剩余 lot cost = 总投入
-    assert round_.cost_units + sum(lot.cost_units for lot in result.open_lots) == cents(
-        "1000.00"
-    ) + cents("2200.00") + cents("300.00")  # 350000 分
+    # 剩余成本守恒：round.cost_units == open_lots 成本合计
+    remaining_cost = sum(lot.cost_units for lot in result.open_lots)
+    assert round_.cost_units == remaining_cost
+    # 已消耗 cost + 剩余 cost = 总投入
+    assert matched_cost + remaining_cost == cents("1000.00") + cents("2200.00") + cents("300.00")
 
     # 股息守恒：已消耗 dividend + 剩余 lot dividend = 净股息总额
     assert (
         round_.dividend_units + sum(lot.dividend_units for lot in result.open_lots) == 500
     )  # 600-100 tax
 
-    # 数量守恒：matched + open = 总 420 股
-    assert round_.quantity_units + sum(lot.quantity_units for lot in result.open_lots) == shares(
-        420
-    )
+    # 数量守恒：round.quantity == open_lots 数量合计（剩余持仓）
+    remaining_qty = sum(lot.quantity_units for lot in result.open_lots)
+    assert round_.quantity_units == remaining_qty
+    # 已配对 + 剩余 = 总 420 股
+    assert sum(fill.quantity_units for fill in round_.fills) + remaining_qty == shares(420)
 
 
 def test_build_rounds_is_deterministic() -> None:

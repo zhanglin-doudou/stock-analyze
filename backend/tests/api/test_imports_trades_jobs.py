@@ -55,6 +55,7 @@ async def _seed_trade(
     price_units: int = 1_000_000,
     amount_units: int = 1_000_000,
     cash_balance: int | None = None,
+    category: str | None = None,
     version: int = 1,
     batch_id: str | None = None,
     line_no: int | None = None,
@@ -79,6 +80,7 @@ async def _seed_trade(
                 other_fee_units=0,
                 cash_balance_units=cash_balance,
                 cash_balance_available=cash_balance is not None,
+                category=category,
                 occurrence_idx=0,
                 source="import",
                 version=version,
@@ -377,14 +379,23 @@ async def test_api_010_preview_real_bill_resolves_side_from_summary(
     assert "买卖标志" not in {col["name"] for col in body["columns"]}
     summary_col = next(col for col in body["columns"] if col["name"] == "摘要")
     assert summary_col["suggested_field"] == "summary"
-    assert body["estimated"] == {"parsed": 175, "inserted": 175, "skipped": 0, "quarantined": 2}
+    assert body["estimated"] == {
+        "parsed": 175,
+        "inserted": 175,
+        "skipped": 0,
+        "quarantined": 2,
+        "discarded": 0,
+        "estimated_available": True,
+    }
     assert body["sample"]
-    # 非交易行按资金流向分配 side（sell=流入，buy=流出），交易行正常买卖。
-    assert all(sample["side"] in {"buy", "sell"} for sample in body["sample"])
+    # 无「买卖标志」列：解析阶段 side 统一为 unknown，方向在提交时由 Category 派生
+    # （buy/new_stock→buy，sell→sell，其余→unknown）。
+    assert all(sample["side"] == "unknown" for sample in body["sample"])
     # 预览的 columns 里也不能回显明文账号。
     account_detail = next((c for c in body["columns"] if c["name"] == "股东账号"), None)
     assert account_detail is not None
-    assert account_detail["suggested_field"] == "account"
+    # 股东账号是市场股东号，不再当作资金账号；但仍是敏感列，只落 MD5。
+    assert account_detail["suggested_field"] is None
     # API 边界把原始单个 sample 值包成 list（PreviewColumn.sample: list[str]）。
     # mock 数据中股东账号为 A00000000 / A10000000，只落 MD5 不落明文。
     assert account_detail["sample"] == ["4cda045a46c54164471b5311607f9ab8"]
@@ -424,7 +435,13 @@ async def test_api_011_commit_real_bill_worker_end_to_end(
     batch = (await client.get(f"{api_prefix}/imports", headers=user.headers)).json()["items"][0]
     assert batch["batch_id"] == batch_id
     assert batch["status"] == "succeeded"
-    assert batch["counts"] == {"parsed": 175, "inserted": 175, "skipped": 0, "quarantined": 2}
+    assert batch["counts"] == {
+        "parsed": 175,
+        "inserted": 175,
+        "skipped": 0,
+        "quarantined": 2,
+        "discarded": 0,
+    }
 
     trades = await client.get(f"{api_prefix}/trades?limit=200", headers=user.headers)
     items = trades.json()["items"]
@@ -434,23 +451,21 @@ async def test_api_011_commit_real_bill_worker_end_to_end(
         await client.get(f"{api_prefix}/imports/{batch_id}/quarantine", headers=user.headers)
     ).json()["items"]
     assert {item["reason_code"] for item in quarantine} == {"INVALID_AMOUNT"}
-    assert {item["side"] for item in items} <= {"buy", "sell"}
-    # 股东账号只落 MD5 摘要（32 位 hex），不落明文；非交易行账号为空时 account_masked 为 None。
-    for item in items:
-        if item["account_masked"] is not None:
-            assert len(item["account_masked"]) == 32
-            assert item["account_masked"] != "A00000000"
+    # 方向由 Category 派生：buy/new_stock→buy、sell→sell，其余（transfer/dividend/interest/fee）→unknown。
+    assert {item["side"] for item in items} <= {"buy", "sell", "unknown"}
+    # 股东账号不是资金账号：不落 account_masked（明细里不应出现明文或摘要）。
+    assert all(item["account_masked"] is None for item in items)
 
 
-async def test_import_runs_reconciliation_and_revoke_removes_fills(
+async def test_import_quarantines_break_without_autofill_and_revoke_removes_rows(
     client, api_prefix, user, settings
 ) -> None:
-    """导入收尾自动对账：断链 → 生成 side=missing 补差 + 警告；撤销批次要把补差一起删除。"""
+    """导入链路停用自动补差：断链行进隔离区（RECONCILIATION_BREAK），不写 side=missing。"""
     header = "成交日期,证券代码,证券名称,买卖标志,成交数量,成交价格,发生金额,资金余额,摘要"
     rows = [
         # 2026-06-01 首行只做锚点（区间首行不参与链式核对）
         "2026-06-01,600519,贵州茅台,买入,100,1500.00,-150000.00,100000.00,证券买入",
-        # 期望余额 = 100000 - 2000 = 98000，实际 95000 → 欠 3000，导入对账应补 side=missing
+        # 期望余额 = 100000 - 2000 = 98000，实际 95000 → 断链，隔离该行、继续向后
         "2026-06-02,000001,平安银行,买入,200,10.00,-2000.00,95000.00,证券买入",
     ]
     data = ("\n".join([header, *rows]) + "\n").encode("utf-8")
@@ -461,10 +476,12 @@ async def test_import_runs_reconciliation_and_revoke_removes_fills(
     )
     assert preview.status_code == 200, preview.text
     assert preview.json()["estimated"] == {
-        "parsed": 2,
-        "inserted": 2,
+        "parsed": 1,
+        "inserted": 1,
         "skipped": 0,
-        "quarantined": 0,
+        "quarantined": 1,
+        "discarded": 0,
+        "estimated_available": True,
     }
 
     accepted = await _commit_import(client, api_prefix, user, preview.json()["preview_id"])
@@ -474,46 +491,40 @@ async def test_import_runs_reconciliation_and_revoke_removes_fills(
     batch = await client.get(f"{api_prefix}/imports/{batch_id}", headers=user.headers)
     body = batch.json()
     assert body["status"] == "succeeded"
-    assert body["counts"] == {"parsed": 2, "inserted": 2, "skipped": 0, "quarantined": 0}
-    assert body["filled_count"] == 1
-    assert "RECONCILIATION_AUTOFILLED" in body["warnings"]
-    fill = body["fills"][0]
-    assert fill["trade_date"] == "2026-06-02"
-    assert fill["line_no"] == 3
-    assert fill["amount"] == "-3000.00"
-    assert fill["cash_balance"] == "97000.00"
-    assert fill["summary"] == "对账自动补差"
+    assert body["counts"] == {
+        "parsed": 1,
+        "inserted": 1,
+        "skipped": 0,
+        "quarantined": 1,
+        "discarded": 0,
+    }
+    # 不再自动补差：无补差行、无补差警告。
+    assert body["filled_count"] == 0
+    assert "RECONCILIATION_AUTOFILLED" not in body["warnings"]
+    assert body["fills"] == []
 
-    # 补差行归属本批次：可按 side/batch 过滤，且 source=system。
+    # 断链行落隔离区，原因与 INVALID_ROW 区分。
+    quarantine = await client.get(
+        f"{api_prefix}/imports/{batch_id}/quarantine", headers=user.headers
+    )
+    items = quarantine.json()["items"]
+    assert len(items) == 1
+    assert items[0]["reason_code"] == "RECONCILIATION_BREAK"
+    assert items[0]["line_no"] == 3
+    assert items[0]["suggested_rule_id"] is None
+
     missing = await client.get(
         f"{api_prefix}/trades?side=missing&batch_id={batch_id}", headers=user.headers
     )
-    items = missing.json()["items"]
-    assert len(items) == 1
-    assert items[0]["trade_id"] == fill["trade_id"]
-    assert items[0]["source"] == "system"
-    assert items[0]["batch_id"] == batch_id
+    assert missing.json()["items"] == []
 
-    # 批次列表也带 filled_count，便于前端在导入历史里提示。
     listed = (await client.get(f"{api_prefix}/imports", headers=user.headers)).json()["items"]
-    assert listed[0]["filled_count"] == 1
+    assert listed[0]["filled_count"] == 0
 
-    # 撤销导入：补差行随批次一起软删（reverted.inserted = 2 行明细 + 1 行补差）。
+    # 撤销只回退本批写入的 1 行明细。
     revoke = await client.post(f"{api_prefix}/imports/{batch_id}/revoke", headers=user.headers)
     assert revoke.status_code == 200, revoke.text
-    assert revoke.json()["reverted"]["inserted"] == 3
-
-    visible = await client.get(
-        f"{api_prefix}/trades?side=missing&batch_id={batch_id}", headers=user.headers
-    )
-    assert visible.json()["items"] == []
-    deleted = await client.get(
-        f"{api_prefix}/trades?side=missing&batch_id={batch_id}&include_deleted=true",
-        headers=user.headers,
-    )
-    deleted_items = deleted.json()["items"]
-    assert len(deleted_items) == 1
-    assert deleted_items[0]["deleted_at"] is not None
+    assert revoke.json()["reverted"]["inserted"] == 1
 
     after = await client.get(f"{api_prefix}/imports/{batch_id}", headers=user.headers)
     assert after.json()["status"] == "revoked"
@@ -578,7 +589,13 @@ async def test_api_011_replace_range_reinserts_without_data_loss(
     job = await client.get(f"{api_prefix}/jobs/{second['job_id']}", headers=user.headers)
     assert job.json()["status"] == "succeeded", job.text
     batch = await client.get(f"{api_prefix}/imports/{second['batch_id']}", headers=user.headers)
-    assert batch.json()["counts"] == {"parsed": 2, "inserted": 2, "skipped": 0, "quarantined": 0}
+    assert batch.json()["counts"] == {
+        "parsed": 2,
+        "inserted": 2,
+        "skipped": 0,
+        "quarantined": 0,
+        "discarded": 0,
+    }
 
     after = (await client.get(f"{api_prefix}/trades?limit=200", headers=user.headers)).json()[
         "items"
@@ -697,7 +714,13 @@ async def test_api_013_detail_counts(client, api_prefix, user, owner_engine) -> 
     resp = await client.get(f"{api_prefix}/imports/{batch_id}", headers=user.headers)
     assert resp.status_code == 200
     body = resp.json()
-    assert body["counts"] == {"parsed": 5, "inserted": 4, "skipped": 1, "quarantined": 2}
+    assert body["counts"] == {
+        "parsed": 5,
+        "inserted": 4,
+        "skipped": 1,
+        "quarantined": 2,
+        "discarded": 0,
+    }
     assert body["can_revoke"] is True
 
 
@@ -812,7 +835,13 @@ async def test_api_015_reimport_after_revoke_restores_rows(
     job = await client.get(f"{api_prefix}/jobs/{second['job_id']}", headers=user.headers)
     assert job.json()["status"] == "succeeded", job.text
     batch = await client.get(f"{api_prefix}/imports/{second['batch_id']}", headers=user.headers)
-    assert batch.json()["counts"] == {"parsed": 2, "inserted": 2, "skipped": 0, "quarantined": 0}
+    assert batch.json()["counts"] == {
+        "parsed": 2,
+        "inserted": 2,
+        "skipped": 0,
+        "quarantined": 0,
+        "discarded": 0,
+    }
     restored = await client.get(f"{api_prefix}/trades?limit=200", headers=user.headers)
     assert len(restored.json()["items"]) == 2
 
@@ -842,6 +871,16 @@ async def test_api_017_money_is_fixed_point_string(client, api_prefix, user, own
     assert item["quantity"] == "100"
     assert item["price"] == "1.000000"
     assert item["amount"] == "10000.00"
+
+
+async def test_api_017_category_label_is_backend_chinese_text(
+    client, api_prefix, user, owner_engine
+) -> None:
+    """明细类型中文文案由后端给出（前端零口径，只渲染该字符串）。"""
+    await _seed_trade(owner_engine, user_id=user.user_id, category="buy")
+    item = (await client.get(f"{api_prefix}/trades", headers=user.headers)).json()["items"][0]
+    assert item["category"] == "buy"
+    assert item["category_label"] == "买入"
 
 
 async def test_api_017_fractional_quantity_two_decimals(
@@ -935,29 +974,6 @@ async def test_api_018_patch_bumps_version(client, api_prefix, user, owner_engin
     body = resp.json()["trade"]
     assert body["version"] == 2
     assert body["note"] == "人工修正"
-
-
-async def test_api_018_patch_money_fund_balance_roundtrip(
-    client, api_prefix, user, owner_engine
-) -> None:
-    """货基余额可人工修正：非空即货基行，显式 null 清除标记。"""
-    trade_id = await _seed_trade(owner_engine, user_id=user.user_id)
-    resp = await client.patch(
-        f"{api_prefix}/trades/{trade_id}",
-        headers={**user.headers, "If-Match": "1"},
-        json={"money_fund_balance": "1234.56"},
-    )
-    assert resp.status_code == 200, resp.text
-    body = resp.json()["trade"]
-    assert body["money_fund_balance"] == "1234.56"
-
-    cleared = await client.patch(
-        f"{api_prefix}/trades/{trade_id}",
-        headers={**user.headers, "If-Match": str(body["version"])},
-        json={"money_fund_balance": None},
-    )
-    assert cleared.status_code == 200, cleared.text
-    assert cleared.json()["trade"]["money_fund_balance"] is None
 
 
 async def test_api_018_patch_stale_version_conflicts(
@@ -1248,7 +1264,9 @@ async def test_api_026_real_bill_reconciles_with_zero_breaks(
     """P0-1 回归：真实账单（「发生金额」带符号净额）导入后余额链必须 0 断链。
 
     177 行中 2 行五金额全 0（转存管转入/转出）→ INVALID_AMOUNT 隔离，剩 175 行；
-    175 行产生 174 次相邻转移，全方向已知 → checked_rows = 174，break_count = 0。
+    方向由 Category 派生：buy/new_stock→buy、sell→sell，其余 30 行（transfer/dividend/interest/fee）
+    → unknown，reconcile 不计入 checked_rows（金额并入 pending 由下一条交易行整体核对）；
+    故 checked_rows = 145（83 buy + 62 sell），break_count = 0。
     旧实现按 side 反号并再扣费用（真实账单已含费用），实测 156/175 假断链。
     """
     preview = await client.post(
@@ -1273,7 +1291,7 @@ async def test_api_026_real_bill_reconciles_with_zero_breaks(
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["status"] == "ok", body["breaks"][:3]
-    assert body["checked_rows"] == 174
+    assert body["checked_rows"] == 145
     assert body["break_count"] == 0
     assert body["filled_count"] == 0
 

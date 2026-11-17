@@ -41,7 +41,6 @@ from stock_platform.ids import new_id
 from stock_platform.ports import Bar, MarketDataSource
 from stock_platform.repositories.users import UserSettingRepository
 from stock_platform.symbols import classify_symbol, is_convertible_bond
-from stock_review.application.valuation import is_money_fund_row
 from stock_review.insights import reasons
 from stock_review.insights.reasons import REASON_LABELS, ReasonDTO
 from stock_review.metrics.context import Period, parse_period_label
@@ -442,29 +441,21 @@ def _to_view(result: ForwardResult) -> ForwardView:
     )
 
 
-# 货基申赎摘要码（分类规则见 stock_ledger.repositories.rules）：旧批次可能没有
-# `money_fund_balance_units` 标记，但这两类摘要恒为货基申赎；场内 ETF/LOF 走
-# `sys_buy_stock`/`sys_sell_stock`，不受影响。
-_MONEY_FUND_SUMMARY_CODES = frozenset({"sys_fund_buy", "sys_redeem"})
-
-
 def _trade_day_index(
     trades: Sequence[Trade],
 ) -> dict[date, list[tuple[str, str, int]]]:
     """交易日 → [(证券代码, 方向, 全局序号)]，供日内调仓按同日全部流水判定。
 
     只收**真实二级市场证券成交**（`classify.is_rebalance_counterparty`）：CASH 资金行
-    （转账/费用/利息/红利税补缴）、公司行动（分红/送转/配股）、新股申购与货基申赎都
-    不是「买入/卖出其它证券」，纳入会把「卖出后补缴红利税」「卖出后申购货基」误判成
-    日内调仓。全局序号仍是整条 FIFO 稳定序的下标，保证「先后」可判定。
+    （转账/费用/利息/红利税补缴）、公司行动（分红/送转/配股）与新股申购都不是
+    「买入/卖出其它证券」，纳入会把「卖出后补缴红利税」误判成日内调仓。全局序号仍是
+    整条 FIFO 稳定序的下标，保证「先后」可判定。
     """
     out: dict[date, list[tuple[str, str, int]]] = defaultdict(list)
     for index, trade in enumerate(trades):
         if not classify.is_rebalance_counterparty(
             security_code=trade.security_code,
             category=trade.category or "",
-            is_money_fund=is_money_fund_row(trade)
-            or (trade.summary_code or "") in _MONEY_FUND_SUMMARY_CODES,
         ):
             continue
         out[trade.trade_date].append((trade.security_code, trade.side, index))
@@ -1397,15 +1388,14 @@ def _matches_flag(item: InsightItem, flag: str) -> bool:
     return flag in item.flags
 
 
-def _security_type(code: str, name: str, money_fund_codes: set[str]) -> str:
+def _security_type(code: str, name: str) -> str:
     """证券类型（`security_type` 筛选口径）：stock / fund / convertible_bond / other。
 
     * 代码区段是单一真相（`stock_platform.symbols`）：A 股 → stock，场内基金 → fund，
       可转债 → convertible_bond，其余（国债/企业债/无法识别）→ other，保证四类互斥完备；
-    * 货币基金代码（如 940018）不在任何区段：由 `trade.money_fund_balance_units` 非空
-      或名称含「货币」识别，归入 fund（货币基金是基金的一种）。
+    * 货币基金名称含「货币」但代码不在任何区段时归入 fund（货币基金是基金的一种）。
     """
-    if code in money_fund_codes or "货币" in name:
+    if "货币" in name:
         return SECURITY_TYPE_FUND
     if is_convertible_bond(code):
         return SECURITY_TYPE_CONVERTIBLE_BOND
@@ -1508,16 +1498,11 @@ async def get_insights_page(
     if security_code:
         items = [item for item in items if item.security_code == security_code]
     if security_types:
-        # 货基代码没有稳定的代码区段，只能用流水上的货基标记兜底识别。
-        money_fund_codes = {
-            trade.security_code for trade in trades if trade.money_fund_balance_units is not None
-        }
         wanted_types = set(security_types)
         items = [
             item
             for item in items
-            if _security_type(item.security_code, item.security_name, money_fund_codes)
-            in wanted_types
+            if _security_type(item.security_code, item.security_name) in wanted_types
         ]
     if has_reason is not None:
         items = [

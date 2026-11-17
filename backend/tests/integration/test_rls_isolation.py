@@ -335,3 +335,115 @@ async def test_cross_tenant_review_write_rejected(
                     "close_date": date(2026, 1, 7),
                 },
             )
+
+
+# ── 导入映射 v2 三表 RLS（迁移 0015）─────────────────────────
+
+_IMPORT_MAPPING_TABLES = ("import_template", "import_bill_type", "import_column_rule")
+_IMPORT_MAPPING_INSERTS = {
+    "import_template": """
+insert into ledger.import_template (
+    id, user_id, broker, signature, header_count, items, ignored
+) values (:id, :uid, 'generic', :signature, 1, '[]'::jsonb, '[]'::jsonb)
+""",
+    "import_bill_type": """
+insert into ledger.import_bill_type (
+    id, user_id, type_key, type_label, category, discarded, broker
+) values (:id, :uid, :type_key, '证券买入', 'stock', false, 'generic')
+""",
+    "import_column_rule": """
+insert into ledger.import_column_rule (
+    id, user_id, broker, header_norm, target_field, is_system
+) values (:id, :uid, 'generic', :header_norm, 'note', :is_system)
+""",
+}
+
+
+def _import_mapping_params(table: str, user_id: uuid.UUID | None) -> dict[str, object]:
+    suffix = uuid.uuid4().hex
+    prefix = {"import_template": "imt", "import_bill_type": "ibt", "import_column_rule": "icr"}[
+        table
+    ]
+    return {
+        "id": f"{prefix}_{suffix}",
+        "uid": user_id,
+        "signature": suffix * 2,
+        "type_key": f"type:{suffix}",
+        "header_norm": f"自定义列:{suffix}",
+        "is_system": user_id is None,
+    }
+
+
+async def _seed_import_mapping_rows(
+    engine: AsyncEngine, user_id: uuid.UUID, *, include_global: bool = False
+) -> None:
+    async with engine.begin() as conn:
+        for table in _IMPORT_MAPPING_TABLES:
+            await conn.execute(
+                text(_IMPORT_MAPPING_INSERTS[table]), _import_mapping_params(table, user_id)
+            )
+        if include_global:
+            await conn.execute(
+                text(_IMPORT_MAPPING_INSERTS["import_column_rule"]),
+                _import_mapping_params("import_column_rule", None),
+            )
+
+
+@pytest.fixture
+async def import_mapping_seeded(
+    owner_engine: AsyncEngine, two_users: tuple[uuid.UUID, uuid.UUID]
+) -> tuple[uuid.UUID, uuid.UUID]:
+    user_a, user_b = two_users
+    await _seed_import_mapping_rows(owner_engine, user_a, include_global=True)
+    await _seed_import_mapping_rows(owner_engine, user_b)
+    return user_a, user_b
+
+
+async def _count_import_mapping_visible(
+    engine: AsyncEngine, user_id: uuid.UUID | None, table: str
+) -> int:
+    assert table in _IMPORT_MAPPING_TABLES
+    async with engine.begin() as conn:
+        if user_id is not None:
+            await conn.execute(
+                text("select set_config('app.user_id', :uid, true)"), {"uid": str(user_id)}
+            )
+        return int(
+            await conn.scalar(text(f"select count(*) from ledger.{table}"))  # type: ignore[arg-type]
+        )
+
+
+async def test_import_mapping_tables_are_tenant_isolated(
+    app_engine: AsyncEngine, import_mapping_seeded: tuple[uuid.UUID, uuid.UUID]
+) -> None:
+    user_a, user_b = import_mapping_seeded
+    for user_id in (user_a, user_b):
+        assert await _count_import_mapping_visible(app_engine, user_id, "import_template") == 1
+        assert await _count_import_mapping_visible(app_engine, user_id, "import_bill_type") == 1
+        # 每个租户只看到自己的规则与一条全局规则，看不到另一租户的用户规则。
+        assert await _count_import_mapping_visible(app_engine, user_id, "import_column_rule") == 2
+
+
+async def test_unset_tenant_reads_only_global_import_rules(
+    app_engine: AsyncEngine, import_mapping_seeded: tuple[uuid.UUID, uuid.UUID]
+) -> None:
+    assert await _count_import_mapping_visible(app_engine, None, "import_template") == 0
+    assert await _count_import_mapping_visible(app_engine, None, "import_bill_type") == 0
+    assert await _count_import_mapping_visible(app_engine, None, "import_column_rule") == 1
+
+
+@pytest.mark.parametrize("table", _IMPORT_MAPPING_TABLES)
+async def test_cross_tenant_import_mapping_insert_rejected(
+    app_engine: AsyncEngine,
+    import_mapping_seeded: tuple[uuid.UUID, uuid.UUID],
+    table: str,
+) -> None:
+    user_a, user_b = import_mapping_seeded
+    with pytest.raises(ProgrammingError, match="row-level security"):
+        async with app_engine.begin() as conn:
+            await conn.execute(
+                text("select set_config('app.user_id', :uid, true)"), {"uid": str(user_a)}
+            )
+            await conn.execute(
+                text(_IMPORT_MAPPING_INSERTS[table]), _import_mapping_params(table, user_b)
+            )

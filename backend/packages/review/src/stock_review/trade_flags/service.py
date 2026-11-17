@@ -422,7 +422,7 @@ class MonthlyReturn:
     渲染 0 高度并标注「无数据」，禁止用 0 冒充。
 
     `amount_units` = 当月每日 `daily_pnl_units` 的累加（**已剔除出入金**：资产日表的
-    daily_pnl 只剔除银证转账，分红/打新等投资损益仍计入）；无数据时同样为 None。
+    daily_pnl 只剔除资金划转，分红/打新等投资损益仍计入）；无数据时同样为 None。
     这与 `value_units` 同源同日行，partial 月只累加已覆盖日期，不会跨缺口放大。
     """
 
@@ -579,7 +579,7 @@ async def monthly_trade_flag_summary(
             month_key = trade_date.strftime("%Y-%m")
             daily_returns[month_key].append(int(return_units))
             if pnl_units is not None:
-                # 收益额 = 逐日 daily_pnl 累加；daily_pnl 已剔除银证转账出入金。
+                # 收益额 = 逐日 daily_pnl 累加；daily_pnl 已剔除资金划转出入金。
                 monthly_amount[month_key] += int(pnl_units)
 
     items: list[MonthlyFlagCount] = []

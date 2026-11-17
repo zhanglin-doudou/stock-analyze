@@ -12,7 +12,7 @@ export interface TrendSeriesPoint {
   display?: string;
   /** 后端 ISO 日期（tooltip / 数据表用） */
   date?: string;
-  /** 当日银证转账净额（后端定点字符串；正=净转入、负=净转出） */
+  /** 当日资金划转净额（后端定点字符串；正=净转入、负=净转出） */
   cashflow?: string;
   /** 转账方向由后端判定（in/out/none），前端不解析金额符号 */
   cashflowDirection?: TrendCashflowDirection;
@@ -44,12 +44,12 @@ function transferAmount(point: TrendSeriesPoint): string {
 function transferText(point: TrendSeriesPoint): string {
   if (point.cashflowDirection === "in") return `净转入 ${transferAmount(point)}`;
   if (point.cashflowDirection === "out") return `净转出 ${transferAmount(point)}`;
-  return "无银证转账";
+  return "无资金划转";
 }
 
 function markerLabel(point: TrendSeriesPoint): string {
   const date = point.date ?? point.label;
-  return `${date} 当日资产 ${point.display ?? point.value}，银证${transferText(point)}`;
+  return `${date} 当日资产 ${point.display ?? point.value}，资金划转${transferText(point)}`;
 }
 
 /**
@@ -118,13 +118,13 @@ export function TrendChart({
           <div className="dash-trend-legend">
             <span className="is-in">
               <i className="dash-trend-legend-dot" />
-              银证净转入
+              资金划转净转入
             </span>
             <span className="is-out">
               <i className="dash-trend-legend-dot" />
-              银证净转出
+              资金划转净转出
             </span>
-            <span className="dash-trend-legend-count">{markers.length} 天有转账</span>
+            <span className="dash-trend-legend-count">{markers.length} 天有划转</span>
           </div>
           <span className="dash-trend-hint">悬停或键盘聚焦圆环查看当日资产</span>
         </div>
@@ -137,7 +137,7 @@ export function TrendChart({
           preserveAspectRatio="none"
           role="img"
           aria-label={`${title}：${series.length} 个交易日，最新 ${last?.display ?? last?.value ?? "—"}${
-            markers.length > 0 ? `，${markers.length} 个银证转账日` : ""
+            markers.length > 0 ? `，${markers.length} 个资金划转日` : ""
           }`}
         >
           <defs>
@@ -211,7 +211,7 @@ export function TrendChart({
               当日资产 <strong>{active.source.display ?? active.source.value}</strong>
             </span>
             <span className={`dash-trend-tooltip-row is-${active.direction}`}>
-              银证{active.direction === "in" ? "净转入" : "净转出"}{" "}
+              资金划转{active.direction === "in" ? "净转入" : "净转出"}{" "}
               <strong>{transferAmount(active.source)}</strong>
             </span>
           </div>
@@ -232,7 +232,7 @@ export function TrendChart({
             <tr>
               <th scope="col">日期</th>
               <th scope="col">总资产</th>
-              <th scope="col">银证转账</th>
+              <th scope="col">资金划转</th>
             </tr>
           </thead>
           <tbody>

@@ -269,14 +269,15 @@ async def test_full_rebuild_matches_hand_computed_round(
     async with app_db.tenant_tx(user_id) as session:
         open_round = await session.get(Round, build_round_id(user_id, "600519", f"{buy_id}:open"))
     assert open_round is not None
-    # open round 聚合已消耗 lot 部分：sell 400 股分摊成本 4000.00，现金 4800.00 → pnl 800.00。
+    # open round 展示当前剩余持仓：buy 1000 股 / sell 400 股 → 剩余 600 股、剩余成本 6000.00；
+    # proceeds/pnl 为已实现部分（卖出 4800.00 − 配对成本 4000.00 = 800.00）。
     assert open_round.status == "open"
     assert open_round.close_trade_id is None
-    assert open_round.quantity_units == 4_000_000  # 已 FIFO 配对的股数
-    assert open_round.cost_units == 400_000  # 已消耗 lot 成本
+    assert open_round.quantity_units == 6_000_000  # 剩余持仓 600 股
+    assert open_round.cost_units == 600_000  # 剩余 lot 成本 6000.00
     assert open_round.proceeds_units == 480_000
     assert open_round.dividend_units == 0
-    assert open_round.pnl_units == 80_000  # proceeds - cost
+    assert open_round.pnl_units == 80_000  # 已实现盈亏
     assert open_round.return_rate_units == 20_000_000
     assert open_round.fills_count == 1
     assert open_round.data_error is False
@@ -782,6 +783,71 @@ async def test_bridge_paid_new_stock_is_cost_not_other(
     # 未平仓成本 = 原持仓 1000.00 + 打新缴款 200.00。
     assert result.open_cost_units == 1_020_000
     assert result.ending_value_units == 8_980_000 + 1_020_000
+
+
+async def test_bridge_broker_action_is_cashflow_not_other(
+    owner_engine: AsyncEngine, app_db: Database
+) -> None:
+    """券商行为（申购中签/申购还款）：0 金额不影响，非 0 金额按外部现金流剔除，不产生残差。"""
+    user_id = await _insert_user(owner_engine)
+    await _seed_trade(
+        owner_engine,
+        user_id,
+        trade_date=date(2026, 2, 20),
+        code="600519",
+        side="buy",
+        quantity_units=10_000_000,
+        price_units=10_000_000,
+        amount_units=-1_000_000,
+        cash_balance_units=9_000_000,
+        category="buy",
+        line_no=1,
+    )
+    # 申购中签是登记行：有份额、零金额、资金余额不变 → 不建仓、不进 other、不降级。
+    await _seed_trade(
+        owner_engine,
+        user_id,
+        trade_date=date(2026, 3, 5),
+        code="001237",
+        side="buy",
+        quantity_units=5_000_000,
+        price_units=4_000_000,
+        amount_units=0,
+        cash_balance_units=9_000_000,
+        category="broker_action",
+        summary="申购中签",
+        line_no=2,
+    )
+    # 申购还款若带真实回款：按外部现金流计入 cashflows，不计收益、不落 other。
+    await _seed_trade(
+        owner_engine,
+        user_id,
+        trade_date=date(2026, 3, 6),
+        code="001237",
+        side="sell",
+        quantity_units=0,
+        amount_units=20_000,
+        cash_balance_units=9_020_000,
+        category="broker_action",
+        summary="申购还款",
+        line_no=3,
+    )
+    async with app_db.tenant_tx(user_id) as session:
+        result = await bridge_for_period(
+            session,
+            user_id=user_id,
+            period_start=date(2026, 3, 1),
+            period_end=date(2026, 3, 31),
+            clock=CLOCK,
+        )
+    assert result.status == "ok"
+    assert result.balanced is True
+    assert result.residual_units == 0
+    assert result.other_units == 0
+    assert result.cashflows_units == 20_000
+    # 持仓不变：只有前一笔普通买入的未平仓成本。
+    assert result.open_cost_units == 1_000_000
+    assert result.ending_value_units == 9_020_000 + 1_000_000
 
 
 # ── worker job handler（入队 → claim → handler → finish）───────────────

@@ -15,7 +15,7 @@ from datetime import date
 import pytest
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from stock_contracts.errors import ErrorCode
-from stock_ledger.models import ImportBatch, Trade
+from stock_ledger.models import ImportBatch, ImportBillType, Trade
 from stock_worker.runner import WorkerRunner
 
 pytestmark = pytest.mark.api
@@ -69,6 +69,7 @@ async def _seed_trade(
     batch_id: str,
     summary: str,
     trade_date: date = date(2026, 6, 15),
+    category: str | None = None,
 ) -> str:
     trade_id = f"trd_{uuid.uuid4().hex[:12]}"
     async with AsyncSession(engine) as session:
@@ -93,6 +94,7 @@ async def _seed_trade(
                 source="import",
                 version=1,
                 summary=summary,
+                category=category,
                 dedupe_key=f"600519:{uuid.uuid4().hex[:10]}",
             )
         )
@@ -253,3 +255,58 @@ async def test_api_016_only_target_batch_is_reclassified(
     item_b = await client.get(f"{api_prefix}/trades/{trade_b}", headers=user.headers)
     assert item_a.json()["category"] == "transfer"
     assert item_b.json()["category"] is None, "批次范围过滤失效：B 批次被一起改了"
+
+
+async def test_api_016_type_memory_precedes_rules_and_discard_preserves_history(
+    client, api_prefix, user, owner_engine: AsyncEngine, settings
+) -> None:
+    batch_id = await _seed_batch(owner_engine, user_id=user.user_id)
+    remembered_id = await _seed_trade(
+        owner_engine, user_id=user.user_id, batch_id=batch_id, summary="类型记忆优先"
+    )
+    discarded_id = await _seed_trade(
+        owner_engine,
+        user_id=user.user_id,
+        batch_id=batch_id,
+        summary="类型记忆废弃",
+        category="transfer",
+    )
+    await _create_rule(client, api_prefix, user, "类型记忆", category="transfer")
+    async with AsyncSession(owner_engine) as session:
+        session.add_all(
+            [
+                ImportBillType(
+                    id=f"ibt_{uuid.uuid4().hex[:12]}",
+                    user_id=user.user_id,
+                    type_key="类型记忆优先",
+                    type_label="类型记忆优先",
+                    category="dividend",
+                    discarded=False,
+                    broker="huatai",
+                ),
+                ImportBillType(
+                    id=f"ibt_{uuid.uuid4().hex[:12]}",
+                    user_id=user.user_id,
+                    type_key="类型记忆废弃",
+                    type_label="类型记忆废弃",
+                    category=None,
+                    discarded=True,
+                    broker="huatai",
+                ),
+            ]
+        )
+        await session.commit()
+
+    resp = await client.post(
+        f"{api_prefix}/imports/{batch_id}/reclassify",
+        headers={**user.headers, "Idempotency-Key": _key()},
+        json={},
+    )
+    assert resp.status_code == 202, resp.text
+    await _drain_worker(settings)
+
+    remembered = await client.get(f"{api_prefix}/trades/{remembered_id}", headers=user.headers)
+    discarded = await client.get(f"{api_prefix}/trades/{discarded_id}", headers=user.headers)
+    assert remembered.json()["category"] == "dividend"
+    assert remembered.json()["summary_code"] is not None
+    assert discarded.json()["category"] == "transfer"

@@ -1,0 +1,49 @@
+/*
+ * `/import` 子域样式（H-1 限定范围例外）：
+ * - 只在 Import 页面 import，保证 Tailwind 产物进 lazy chunk，不占首屏；
+ * - `preflight:false`，这里用 scoped reset 补回必要的基础样式；
+ * - 禁止 `:root` / 全局元素选择器，避免影响其它页面。
+ */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  [data-import-ui],
+  [data-import-ui] *,
+  [data-import-ui] *::before,
+  [data-import-ui] *::after {
+    box-sizing: border-box;
+    border-style: solid;
+    border-width: 0;
+    border-color: var(--line);
+  }
+
+  [data-import-ui] {
+    font-family: var(--font-ui);
+    font-size: var(--fs-body);
+    line-height: var(--lh-body);
+    color: var(--text);
+  }
+
+  /* 用 :where() 把选择器压回 (0,1,0)，与 `tw-*` 工具类同级；
+   * 否则属性+类型选择器 (0,1,1) 会无条件压过 `tw-bg-*` / `tw-border`。
+   * 这里只补继承与文本元素 margin，背景/边框交给组件自己的工具类。 */
+  [data-import-ui] :where(h1, h2, h3, h4, p, ol, ul, label) {
+    margin: 0;
+  }
+
+  [data-import-ui] :where(button, input, select, textarea) {
+    font-family: inherit;
+    color: inherit;
+  }
+
+  [data-import-ui] :where(input, textarea) {
+    background: none;
+    border: 0;
+  }
+
+  [data-import-ui] table {
+    border-collapse: collapse;
+  }
+}

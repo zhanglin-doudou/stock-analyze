@@ -1,19 +1,37 @@
-import { useCallback, useEffect, useState, type ReactElement, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
 import { Link } from "react-router-dom";
 import {
   type AssetBuildState,
   type AssetPage,
   type AssetPoint,
+  type Round,
 } from "@sa/api-client";
 import { api } from "../client";
+import { periodToDateRange } from "../lib/date";
 import { useStaleAssetBuild } from "../lib/useStaleAssetBuild";
 import { Cursor } from "../ui/Cursor";
-import { FilterBar } from "../ui/FilterBar";
+import { FilterBar, FilterField } from "../ui/FilterBar";
 import { JobProgress } from "../ui/JobProgress";
+import { OversellRevisionDialog } from "../ui/OversellRevisionDialog";
+import { PeriodInput } from "../ui/PeriodInput";
 import { ProblemView } from "../ui/Problem";
 import { DataTable, type DataTableColumn } from "../ui/DataTable";
 
 const PAGE_LIMIT = 50;
+
+/** 资产表筛选：期间 token（`YYYY` / `YYYY-MM` / `YYYY-MM-DD..YYYY-MM-DD`）+ 行状态 + 排序。 */
+interface AssetFilters {
+  period: string;
+  status: string;
+  sort: "trade_date" | "-trade_date";
+}
+
+const EMPTY_FILTERS: AssetFilters = { period: "", status: "", sort: "trade_date" };
+
+const SORT_LABELS: Record<AssetFilters["sort"], string> = {
+  trade_date: "正序（旧 → 新）",
+  "-trade_date": "倒序（新 → 旧）",
+};
 
 const ROW_STATUS_LABELS: Record<string, string> = {
   ok: "正常",
@@ -134,9 +152,10 @@ function BuildSummary({ page }: BuildSummaryProps): ReactElement {
         </p>
       ) : null}
       {build.last_status === "degraded" ? (
-        <p className="notice-warn" data-testid="assets-degraded">
-          部分日期存在阻断/降级，修复数据后点「更新资产表」即可重算。
-        </p>
+        <div className="notice-warn" data-testid="assets-degraded">
+          <p>部分日期存在阻断/降级，修复数据后点「更新资产表」即可重算。</p>
+          {build.status_reason ? <p className="muted">{build.status_reason}</p> : null}
+        </div>
       ) : null}
       {build.state === "blocked" ? (
         <div className="notice-warn" data-testid="assets-blocked-banner">
@@ -150,32 +169,60 @@ function BuildSummary({ page }: BuildSummaryProps): ReactElement {
 
 /** 资产表（/assets）：每日资产快照列表 + 构建/更新（异步 job + SSE 进度 + 轮询兜底）。 */
 export function Assets() {
+  const [draft, setDraft] = useState<AssetFilters>(EMPTY_FILTERS);
+  const [filters, setFilters] = useState<AssetFilters>(EMPTY_FILTERS);
   const [page, setPage] = useState<AssetPage | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [notice, setNotice] = useState("");
+  // 超卖回合：资产行的「补录成本」入口按 close_date 对应到这一天，复用回合页的修订弹窗。
+  const [oversellRounds, setOversellRounds] = useState<Round[]>([]);
+  const [revisionTradeId, setRevisionTradeId] = useState<string | null>(null);
+  const [autoFiltered, setAutoFiltered] = useState(false);
+  const autoFilterApplied = useRef(false);
 
-  const load = useCallback(async (cursor?: string): Promise<AssetPage | null> => {
-    setLoading(true);
-    setError(null);
-    try {
-      const data = await api.assets.list({ limit: PAGE_LIMIT, cursor, sort: '-trade_date' });
-      if (cursor) {
-        setPage((previous) => {
-          if (!previous) return data;
-          const seen = new Set(previous.items.map((row) => row.date));
-          const appended = data.items.filter((row) => !seen.has(row.date));
-          return { ...data, items: [...previous.items, ...appended] };
+  const load = useCallback(
+    async (cursor?: string): Promise<AssetPage | null> => {
+      setLoading(true);
+      setError(null);
+      const range = periodToDateRange(filters.period);
+      try {
+        const data = await api.assets.list({
+          limit: PAGE_LIMIT,
+          cursor,
+          from: range.from || undefined,
+          to: range.to || undefined,
+          status: filters.status || undefined,
+          sort: filters.sort,
         });
-      } else {
-        setPage(data);
+        if (cursor) {
+          setPage((previous) => {
+            if (!previous) return data;
+            const seen = new Set(previous.items.map((row) => row.date));
+            const appended = data.items.filter((row) => !seen.has(row.date));
+            return { ...data, items: [...previous.items, ...appended] };
+          });
+        } else {
+          setPage(data);
+        }
+        return data;
+      } catch (err) {
+        setError(err);
+        return null;
+      } finally {
+        setLoading(false);
       }
-      return data;
-    } catch (err) {
-      setError(err);
-      return null;
-    } finally {
-      setLoading(false);
+    },
+    [filters],
+  );
+
+  const loadOversellRounds = useCallback(async (): Promise<void> => {
+    try {
+      const list = await api.rounds.list({ limit: 100, status: "oversell" });
+      setOversellRounds(list.items);
+    } catch {
+      // 修订入口是增强块：接口失败不影响资产表本身。
+      setOversellRounds([]);
     }
   }, []);
 
@@ -183,11 +230,29 @@ export function Assets() {
     void load();
   }, [load]);
 
+  useEffect(() => {
+    void loadOversellRounds();
+  }, [loadOversellRounds]);
+
+  // 首屏加载完成且整体状态非正常（degraded/blocked）时，用该状态回填筛选并触发一次过滤，
+  // 让异常数据直接可见；只自动应用一次，之后尊重用户的手动筛选。
+  useEffect(() => {
+    if (!page || autoFilterApplied.current) return;
+    autoFilterApplied.current = true;
+    const abnormal = page.build.last_status;
+    if (abnormal && abnormal !== "ok") {
+      setDraft((previous) => ({ ...previous, status: abnormal }));
+      setFilters((previous) => ({ ...previous, status: abnormal }));
+      setAutoFiltered(true);
+    }
+  }, [page]);
+
   /** 构建成功后重拉列表并给出完成提示（文案全部来自后端 build 摘要）。 */
   const refreshAfterBuild = useCallback(async (): Promise<void> => {
     const fresh = await load();
+    void loadOversellRounds();
     if (fresh) setNotice(buildNotice(fresh.build, fresh.data_as_of));
-  }, [load]);
+  }, [load, loadOversellRounds]);
 
   // 资产表 stale 自动构建：判定 / 触发 / 全局去重 / 轮询都在公共 hook 内（与看板同源）。
   const auto = useStaleAssetBuild({ build: page?.build, onRefresh: refreshAfterBuild });
@@ -202,6 +267,15 @@ export function Assets() {
     : missing
       ? "构建资产表"
       : "更新资产表";
+
+  /** 日期 → 当日超卖回合（用于「补录成本」入口；按 close_date 精确对应资产行）。 */
+  const oversellByDate = new Map<string, Round[]>();
+  for (const item of oversellRounds) {
+    if (!item.close_date || !item.close_trade_id) continue;
+    const list = oversellByDate.get(item.close_date) ?? [];
+    list.push(item);
+    oversellByDate.set(item.close_date, list);
+  }
 
   const columns: Array<DataTableColumn<AssetPoint>> = [
     { key: "date", header: "日期", priority: 1, render: (row) => row.date },
@@ -218,20 +292,6 @@ export function Assets() {
         ),
     },
     { key: "cash", header: "现金", priority: 3, align: "right", render: (row) => moneyCell(row.cash) },
-    {
-      key: "money_fund",
-      header: "货币基金",
-      priority: 3,
-      align: "right",
-      render: (row) => moneyCell(row.money_fund),
-    },
-    {
-      key: "balance",
-      header: "资产余额",
-      priority: 2,
-      align: "right",
-      render: (row) => moneyCell(row.balance),
-    },
     {
       key: "market_value",
       header: "持仓市值",
@@ -290,11 +350,27 @@ export function Assets() {
       key: "status",
       header: "状态",
       priority: 1,
-      render: (row) => (
-        <span className={`badge badge-${row.status}`} title={row.status_reason ?? undefined}>
-          {assetStatusLabel(row.status)}
-        </span>
-      ),
+      render: (row) => {
+        const oversells = oversellByDate.get(row.date) ?? [];
+        return (
+          <span className="assets-status">
+            <span className={`badge badge-${row.status}`} title={row.status_reason ?? undefined}>
+              {assetStatusLabel(row.status)}
+            </span>
+            {oversells.map((item) => (
+              <button
+                key={item.round_id}
+                type="button"
+                className="btn btn-text"
+                title={`超卖卖出 ${item.close_trade_id}，补录该笔卖出的成本`}
+                onClick={() => setRevisionTradeId(item.close_trade_id ?? null)}
+              >
+                补录成本{oversells.length > 1 ? `（${item.security_code}）` : ""}
+              </button>
+            ))}
+          </span>
+        );
+      },
     },
   ];
 
@@ -311,19 +387,27 @@ export function Assets() {
     <div>
       <h1>资产表</h1>
       <p className="muted">
-        每日资产快照（资产余额 = 现金 + 货币基金，另加持仓市值），用于资产变化与后续回撤；本页不做计算。
+        每日资产快照（总资产 = 现金 + 持仓市值），用于资产变化与后续回撤；本页不做计算。
       </p>
       <p className="muted" data-testid="market-data-notice">
         行情来自本地缓存（仅收盘后同步，盘中不拉取实时行情）；构建前请确认已执行收盘后同步。
       </p>
 
       <FilterBar
-        ariaLabel="资产表操作"
+        ariaLabel="资产表筛选与操作"
         count={build ? `共 ${build.rows_count} 条记录` : undefined}
         actions={
           <>
             <button
               className="btn"
+              type="button"
+              disabled={loading}
+              onClick={() => setFilters(draft)}
+            >
+              应用筛选
+            </button>
+            <button
+              className="btn btn-ghost"
               type="button"
               disabled={executing}
               aria-busy={executing}
@@ -339,12 +423,57 @@ export function Assets() {
             </button>
           </>
         }
+        onReset={() => {
+          setDraft(EMPTY_FILTERS);
+          setFilters(EMPTY_FILTERS);
+          setAutoFiltered(false);
+        }}
+        resetLabel="清空筛选"
         note={
           <p className="muted">
             构建/更新在后台执行（默认 mode=auto：增量优先，必要时全量重算）；完成后会自动刷新列表。
           </p>
         }
-      />
+      >
+        <FilterField label="时间范围">
+          <PeriodInput
+            value={draft.period}
+            aria-label="时间范围"
+            onChange={(value) => setDraft({ ...draft, period: value })}
+          />
+        </FilterField>
+        <FilterField label="状态">
+          <select
+            aria-label="状态"
+            value={draft.status}
+            onChange={(event) => setDraft({ ...draft, status: event.target.value })}
+          >
+            <option value="">全部</option>
+            <option value="ok">正常</option>
+            <option value="degraded">降级</option>
+            <option value="blocked">阻断</option>
+          </select>
+        </FilterField>
+        <FilterField label="排序">
+          <select
+            aria-label="排序"
+            value={draft.sort}
+            onChange={(event) =>
+              setDraft({ ...draft, sort: event.target.value as AssetFilters["sort"] })
+            }
+          >
+            <option value="trade_date">{SORT_LABELS.trade_date}</option>
+            <option value="-trade_date">{SORT_LABELS["-trade_date"]}</option>
+          </select>
+        </FilterField>
+      </FilterBar>
+
+      {autoFiltered ? (
+        <p className="notice-warn" data-testid="assets-auto-filter">
+          资产表当前整体状态为非正常（{assetStatusLabel(filters.status)}），已自动按该状态筛选；
+          修复数据或补录成本后点「更新资产表」即可重算。
+        </p>
+      ) : null}
 
       {notice ? (
         <div className="row-actions">
@@ -413,6 +542,18 @@ export function Assets() {
       ) : loading ? (
         <p className="muted">加载中…</p>
       ) : null}
+
+      <OversellRevisionDialog
+        tradeId={revisionTradeId}
+        onClose={() => setRevisionTradeId(null)}
+        onSettled={() => {
+          setRevisionTradeId(null);
+          // 只刷新超卖回合列表（已补录的回合会从列表消失）；不刷新资产表，
+          // 避免 build.state 变 stale 触发 useStaleAssetBuild 自动构建——
+          // 资产表等用户全部补录完成后手动点「更新资产表」统一重算。
+          void loadOversellRounds();
+        }}
+      />
     </div>
   );
 }

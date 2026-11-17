@@ -103,6 +103,7 @@ async def _seed_trade(
     batch_id: str | None = None,
     trade_id: str | None = None,
     line_no: int = 0,
+    category: str | None = None,
 ) -> str:
     trade_id = trade_id or f"trd_{uuid.uuid4().hex[:12]}"
     async with AsyncSession(engine) as session:
@@ -123,7 +124,7 @@ async def _seed_trade(
             other_fee_units=0,
             cash_balance_units=None,
             cash_balance_available=False,
-            category=side,
+            category=category or side,
             occurrence_idx=0,
             source="import",
             version=1,
@@ -372,11 +373,12 @@ async def test_api_029_rounds_visible_after_rebuild(
     round_ = items[0]
     assert round_["status"] == "open"
     assert round_["security_code"] == "600519"
-    # open round 聚合已消耗 lot 部分：sell 60 股 FIFO 消耗 buy1 的前 60 股
+    # open round 展示剩余持仓：sell 60 股 FIFO 消耗 buy1 的前 60 股
+    # 剩余持仓 = buy1(40) + buy2(50) + buy3(40) = 130 股，剩余成本 = 4000+4500+4400 = 12900
     assert abs(Decimal(round_["pnl"]) - Decimal("1200.00")) <= Decimal("0.01")
-    assert round_["cost"] == "6000.00"  # buy1 前 60 股成本
+    assert round_["cost"] == "12900.00"  # 剩余持仓成本
     assert round_["proceeds"] == "7200.00"
-    assert round_["quantity"] == "60"  # 已 FIFO 配对的股数（整数份额不带尾零）
+    assert round_["quantity"] == "130"  # 剩余持仓股数
     assert round_["return_rate"] == "0.20000000"
     assert _MONEY_RE.match(round_["pnl"])
     assert _MONEY_RE.match(round_["cost"])

@@ -48,7 +48,7 @@
 - ETag `W/"<version>"`（列表含查询指纹），写响应返新 ETag；`If-Match` 不匹配 → 409 `VERSION_CONFLICT`（遵循 PRD FR-L4，不采用 412）。
 - 格式：金额**定点字符串 2 位** `"1234.56"`；价格 6 位、数量 4 位；比率十进制小数；时间 ISO 8601 UTC；业务日 `YYYY-MM-DD`（Asia/Shanghai）；`blocked` 时 `value` **字段缺省**。软删默认过滤 `deleted_at NULL`，`include_deleted=true` 仅本人；注销物理级联删除，审计留事件元数据。
 
-## §1 端点总表（96 个；API-089 预留不计数，API-090~095 已实现（2026-11-05/09），API-055/096/097 已实现（2026-11-13）；Path 省略公共前缀 `/api/v1`，标注「根」者不在前缀下）
+## §1 端点总表（105 个；API-089 预留不计数，API-090~095 已实现（2026-11-05/09），API-055/096/097 已实现（2026-11-13），API-098~106 已实现（2026-11-13 导入映射重构）；Path 省略公共前缀 `/api/v1`，标注「根」者不在前缀下）
 | API-ID | Method | Path | 用途 | FR | 认证/scope | 幂等 | 同步/异步 | 优先级 | 主要成功码 |
 |---|---|---|---|---|---|---|---|---|---|
 | API-001 | POST | `/auth/register` | 注册账号 | L2 | 公开 | 支持 | 同步 | P0 | 201 |
@@ -137,7 +137,7 @@
 | API-082 | POST | `/assets/build` | 构建/增量更新资产表 | D1 | write | 必需 | 异步 | P0 | 202/200 |
 | API-083 | POST | `/jobs/rebuild-period` | 按月一键编排（rounds→assets→nav→metrics） | R2/D1 | write | 必需 | 异步 | P0 | 202 |
 | API-084 | GET | `/dashboard` | Dashboard 两板块聚合（资产概览 + 历史概览） | D1 | read | — | 同步 | P0 | 200 |
-| API-085 | GET | `/assets/chart` | 资产日线 chart-ready 视图（归一化序列+展示标签+每日银证净转账方向） | D1 | read | — | 同步 | P0 | 200 |
+| API-085 | GET | `/assets/chart` | 资产日线 chart-ready 视图（归一化序列+展示标签+每日资金划转净额方向） | D1 | read | — | 同步 | P0 | 200 |
 | API-086 | GET | `/metrics/catalog` | 18 个指标口径说明书（定义/方向/窗口/经验区间/版本） | D3/R8 | read | — | 同步 | P0 | 200 |
 | API-087 | GET | `/sectors/overview` | 板块概览（行业三级/概念暴露+集中度+偏好；概念可按偏好过滤） | D1 | read | — | 同步 | P0 | 200 |
 | API-088 | GET | `/sectors` | 板块目录树（行业多级/概念列表，供筛选与钻取） | D1 | read | — | 同步 | P1 | 200 |
@@ -147,6 +147,15 @@
 | API-093 | GET | `/rounds/{round_id}/insights` | 单回合洞察详情（逐笔理由/5/10/20 日四口径） | R8 | read | — | 同步 | P1 | 200 |
 | API-094 | POST | `/rounds/insights/refresh` | 补算/失效重算前瞻收益（手动/后续自动化同函数） | R8 | write | 必需 | 同步/异步 | P1 | 200/202 |
 | API-095 | GET | `/dashboard/trade-flags` | 账单旗标月度聚合（最近 6/12/24 个完整月 × 旗标码 + 买卖笔数 + 单月收益，看板图表数据源） | R1 | read | — | 同步 | P1 | 200 |
+| API-098 | PUT | `/imports/previews/{preview_id}/mapping` | 保存列对应并重跑类型分析（If-Match 乐观锁） | L3 | write | 支持 | 同步 | P0 | 200 |
+| API-099 | PUT | `/imports/previews/{preview_id}/types` | 保存账单类型分类（全部确认后进入 ready） | L3 | write | 支持 | 同步 | P0 | 200 |
+| API-100 | GET | `/imports/templates` | 本人字段模板列表（按表头签名） | L3 | read | — | 同步 | P1 | 200 |
+| API-101 | DELETE | `/imports/templates/{template_id}` | 删除本人字段模板 | L3 | write | 幂等 | 同步 | P1 | 204 |
+| API-102 | GET | `/admin/import-column-rules` | 管理员查看导入列规则（系统/用户覆盖） | L3 | admin | — | 同步 | P1 | 200 |
+| API-103 | POST | `/admin/import-column-rules` | 管理员新建全局列规则 | L3 | admin | 支持 | 同步 | P1 | 201 |
+| API-104 | PATCH | `/admin/import-column-rules/{rule_id}` | 管理员修改/禁用列规则（If-Match） | L3 | admin | 支持 | 同步 | P1 | 200 |
+| API-105 | DELETE | `/admin/import-column-rules/{rule_id}` | 管理员删除自定义列规则（系统行禁止） | L3 | admin | 幂等 | 同步 | P1 | 204 |
+| API-106 | GET | `/imports/previews/{preview_id}` | 刷新导入预览（映射/类型/就绪三阶段状态） | L3 | read | — | 同步 | P1 | 200 |
 
 
 
@@ -209,6 +218,49 @@
 - 响应 200：`batch_id` / `status:"revoked"` / `reverted{inserted,updated}` / `revoked_at` / `affected_metrics[]{metric_id,status:"stale"}`。
 - 错误码：NOT_FOUND(404)、IMPORT_ALREADY_REVOKED(409)、VALIDATION_ERROR(422)。
 - 验收断言：① 200 后 GET /trades 行数 == 导入前行数（含补差行一起回退）；② batch.status=="revoked"；③ 再次 revoke → 409 IMPORT_ALREADY_REVOKED；④ GET /trades?include_deleted=true 可见被软删行且 batch_id 匹配；⑤ 审计出现 action=="import.revoke"；⑥ 本批次补差行被一并软删（`GET /trades?side=missing&batch_id=…` 为空，`include_deleted=true` 可见），`reverted.inserted` 包含补差行数。
+#### API-098 PUT /imports/previews/{preview_id}/mapping（2026-11-13 导入映射 v2）
+- 用途：保存列映射并重跑类型分析（两阶段确认的第 1 步）；认证：write；同步；乐观锁 `If-Match: "<mapping_version>"`（缺省回退 body `mapping_version`）。
+- 请求：`items[]{column_key,target_field,options}`（`other_fee` 可多列合并 ≤8；`amount_signed` 仅 amount）/ `ignored[]` / `acknowledge_unmapped`（存在未确认列时必填 true）/ `date_format` / `broker`。
+- 响应 200：完整 PreviewOut（additive：`stage/broker/signature/mapping_version/mapping_fingerprint/mapping_items/ignored_columns/catalog/categories/types/verification/blocking/discarded_count/requires_reimport_ack`）；`mapping_version` 递增，`stage` 依结果为 `mapping|types|ready`。
+- 错误码：VERSION_CONFLICT(409)、IMPORT_PREVIEW_NOT_FOUND(404)、IMPORT_MAPPING_INVALID(422)、IMPORT_UNMAPPED_COLUMNS_UNCONFIRMED(422)、IMPORT_FEE_MERGE_INVALID(422)、IMPORT_STAGE_CONFLICT(409)、IMPORT_PROFILE_REQUIRED(422)、VALIDATION_ERROR(422)。
+- 验收断言：① 保存后 mapping_version+1 且 items 原样回显；② 过期 If-Match → 409 VERSION_CONFLICT；③ 未映射必需列 → 200 但 stage=="mapping" 且 blocking 非空；④ 未确认列且 acknowledge_unmapped=false → 422；⑤ 用户 B 的 preview → 404。
+#### API-099 PUT /imports/previews/{preview_id}/types
+- 用途：保存账单类型确认（Category / 废弃二选一）；认证：write；同步；`If-Match` 同 API-098。
+- 请求：`resolutions[]{type_key,category,discard}`。
+- 响应 200：PreviewOut；全部类型已确认 → `stage=="ready"`，否则停留 `types`。
+- 错误码：VERSION_CONFLICT(409)、IMPORT_PREVIEW_NOT_FOUND(404)、IMPORT_BILL_TYPES_UNRESOLVED(422)、IMPORT_CATEGORY_INVALID(422)、IMPORT_STAGE_CONFLICT(409)、VALIDATION_ERROR(422)。
+- 验收断言：① 全确认后 stage=="ready" 且 can_commit==true；② 存在未确认类型 → 422 IMPORT_BILL_TYPES_UNRESOLVED；③ 非法 category → 422 IMPORT_CATEGORY_INVALID；④ 过期版本 → 409。
+#### API-100 GET /imports/templates
+- 用途：本人列映射模板列表（表头指纹 → MappingPlan）；认证：read；同步；游标分页。
+- 响应 200：`items[]{template_id,broker,signature,header_count,date_format,items[],ignored[],origin_batch_id,last_batch_id,created_at,updated_at}` / `next_cursor` / `has_more`。
+- 错误码：VALIDATION_ERROR(422)、INVALID_CURSOR(400)。
+- 验收断言：① commit 后新增/更新一条模板且 header_count 等于文件列数；② 用户 B 列表为空（不串号）。
+#### API-101 DELETE /imports/templates/{template_id}
+- 用途：删除本人模板（下次同格式账单回到系统建议）；认证：write；幂等；同步。
+- 响应 204；错误码：IMPORT_TEMPLATE_NOT_FOUND(404)。
+- 验收断言：① 删除后同文件 preview 不再复用模板；② 用户 B 删 A 的模板 → 404。
+#### API-102 GET /admin/import-column-rules
+- 用途：管理员查看列规则（系统行 + 用户自定义行，RLS 允许 user_id IS NULL 全局行）；认证：admin；同步；游标分页。
+- 响应 200：`items[]{rule_id,broker,header_norm,match_type,is_fingerprint,priority,target_field,options,version,is_system}` / `next_cursor` / `has_more`。
+- 错误码：VALIDATION_ERROR(422)、INVALID_CURSOR(400)、INSUFFICIENT_SCOPE(403)。
+- 验收断言：① 非 admin → 403；② 返回包含 seed 的通用别名（priority 300）与华泰指纹（priority 100）。
+#### API-103 POST /admin/import-column-rules
+- 用途：新增列规则；认证：admin；同步。
+- 请求：`broker/header_norm/match_type/exact|prefix|regex/is_fingerprint/priority/target_field/options`；`target_field` 必须在字段目录内，`options` 仅 amount 允许 `amount_signed`。
+- 响应 201：ImportRuleOut；错误码：VALIDATION_ERROR(422)、IMPORT_RULE_CONFLICT(409)。
+- 验收断言：① 重复（broker,header_norm,match_type）→ 409；② 非法 target_field/options → 422；③ 审计留痕 `import_rule.create`。
+#### API-104 PATCH /admin/import-column-rules/{rule_id}
+- 用途：修改列规则（系统行禁改 target_field）；认证：admin；同步；`If-Match` 必填。
+- 响应 200：ImportRuleOut（version 递增）；错误码：VERSION_CONFLICT(409)、NOT_FOUND(404)、IMPORT_RULE_CONFLICT(409)、VALIDATION_ERROR(422)。
+- 验收断言：① 缺 If-Match → 422；② 过期版本 → 409；③ 系统行改 target_field → 422。
+#### API-105 DELETE /admin/import-column-rules/{rule_id}
+- 用途：删除自定义列规则（系统行 422）；认证：admin；幂等；同步。
+- 响应 204；错误码：NOT_FOUND(404)、VALIDATION_ERROR(422)。
+- 验收断言：① 系统行删除 → 422；② 删除后建议不再命中该别名。
+#### API-106 GET /imports/previews/{preview_id}
+- 用途：刷新预览（只读落库状态，不重算）；认证：read；同步。
+- 响应 200：PreviewOut（含 mapping_items/ignored_columns/blocking）；错误码：IMPORT_PREVIEW_NOT_FOUND(404)。
+- 验收断言：① 与保存后返回的 mapping_version/stage 一致；② 用户 B 访问 → 404。
 #### API-017 GET /trades
 - 用途：交易流水查询（完整 REST）；FR-L8/L4；认证：read；同步；游标分页。
 - 请求：query `limit`(1~200) / `cursor` / `sort`(白名单 trade_date,-trade_date,amount,-amount,created_at) / `trade_date_from`、`trade_date_to` / `security_code` / `side`(∈{buy,sell,unknown,missing}) / `batch_id` / `include_deleted`(默认 false) / `fields` / `include_total`。
@@ -247,7 +299,7 @@
              + dividends + interest - fees + other - ending_value
   ending_value = 期末现金 + open_cost（期末未平仓成本；P2-03 换为市值后同一恒等式仍成立）
   ```
-  `cashflows` 为净外部资金流（银证转账等 transfer 净额）；`fees` 为未分摊费用（fee 类行，正=费用）；`other` 为无法归类的现金流（打新/补差/未知），非零时 `status=degraded` 并自然体现在 `residual`。期初/期末现金取账单 `cash_balance` 锚点，锚点缺失时按现金流推导并降级；完全无 `cash_balance` 时 `status=blocked`。
+  `cashflows` 为净外部资金流（资金划转等 transfer 净额）；`fees` 为未分摊费用（fee 类行，正=费用）；`other` 为无法归类的现金流（打新/补差/未知），非零时 `status=degraded` 并自然体现在 `residual`。期初/期末现金取账单 `cash_balance` 锚点，锚点缺失时按现金流推导并降级；完全无 `cash_balance` 时 `status=blocked`。
 - 错误码：INVALID_PERIOD(422)、VALIDATION_ERROR(422)、ADMIN_CANNOT_READ_TRADES(403)。
 - 验收断言：① balanced==true；② |identity.residual|≤0.01；③ 断链 fixture（cash_balance 不连续）→ balanced==false 且 residual≠0；④ 相同输入重复调用 balanced/residual/inputs_hash 完全相同。
 #### API-028 POST /jobs/rebuild-rounds
@@ -307,14 +359,14 @@
 #### API-032 GET /nav
 - 用途：单位净值序列 + TWR/MWR 与基准指标；FR-R3；认证：read；同步。
 - 请求：query `from`/`to`(与 `period`=YYYY-MM 二选一) / `benchmark`(默认 hs300_tr) / `granularity`(本期仅 daily)。
-- 口径（Period2-03 实现）：`twr` 为区间累计份额法 TWR（小数），`annualized_twr` 按自然日年化；`mwr` 为 XIRR（ACT/365，CF 含期初投入负/期末市值正）；`mwr_minus_twr = mwr − annualized_twr`（两端均年化，方能对齐比较，PRD 附录 A6）。期初锚点取 `period_start − 1`（值 = 期初现金 + 货基余额 + 期初持仓按上一交易日收盘价），只参与 TWR 计算，不落 `nav_daily`、不出现在响应 `points` 中；`points` 首个可见点仍为区间首日（其 `prev_total_assets` 即该锚点值）；非交易日按「当日或之前最近收盘价」估值；持仓标的缺行情 → 该日 `blocked` 且不输出资产值（不整段报错）。期初现金锚点：`period_start` 前最后一条余额行直取（`assumption="statement"`）；否则取 `period_start` 当日或之后第一条余额行反推（`assumption="back_solved"`，PRD 附录 A1）；全历史无余额行 → 整段 `blocked`。本期不含基准对比，`beta/alpha_annual/t_value/tracking_error/ir` 返回 null。
-- 响应 200：`points[]{date,unit_nav,twr_daily,twr_daily_pct,cashflow,blocked,blocked_reason,total_assets,prev_total_assets,daily_pnl,holdings[]}` / `summary{mwr,twr,annualized_twr,mwr_minus_twr,beta,alpha_annual,t_value,tracking_error,ir,n_days,assumption}` / `status(ok|blocked|degraded)` / `blocked_ranges[]{from,to,reason}` / `benchmark_id` / `data_as_of` / `definition_version`。`summary.assumption ∈ statement|back_solved`，blocked 时为 null。`twr_daily_pct` 为两位小数的百分比字符串（如 `"0.62%"`）；`total_assets/prev_total_assets/daily_pnl` 为三位小数定点字符串，`daily_pnl = total_assets − cashflow − prev_total_assets`，首个净值点的 `prev_total_assets` 取「期初现金 + 期初持仓按上一交易日收盘价」估值（缺行情或前一点 blocked 时为 null，首点 `twr_daily_pct` 按该日盈亏/昨日资产计算）；`holdings[]` 的 `quantity/avg_cost/close_price/market_value` 为最多三位小数、去掉尾零的字符串（如 `"9.1"`）；`avg_cost` 为**含费买入均价**（累计成本 ÷ 持仓数量，成本取净现金流出，已含佣金/印花税/其他费）。
+- 口径（Period2-03 实现）：`twr` 为区间累计份额法 TWR（小数），`annualized_twr` 按自然日年化；`mwr` 为 XIRR（ACT/365，CF 含期初投入负/期末市值正）；`mwr_minus_twr = mwr − annualized_twr`（两端均年化，方能对齐比较，PRD 附录 A6）。期初锚点取 `period_start − 1`（值 = 期初现金 + 期初持仓按上一交易日收盘价），只参与 TWR 计算，不落 `nav_daily`、不出现在响应 `points` 中；`points` 首个可见点仍为区间首日（其 `prev_total_assets` 即该锚点值）；非交易日按「当日或之前最近收盘价」估值；只有 A 股/场内基金读取行情（`needs_quote`），债券与伪代码（如 `A40006`/`970172`/`119924`）不请求行情、不阻断，按含费成本估值（与资产表/指标/归因同口径）；行情品种缺行情 → 该日 `blocked` 且不输出资产值（不整段报错）。期初现金锚点：`period_start` 前最后一条余额行直取（`assumption="statement"`）；否则取 `period_start` 当日或之后第一条余额行反推（`assumption="back_solved"`，PRD 附录 A1）；全历史无余额行 → 整段 `blocked`。本期不含基准对比，`beta/alpha_annual/t_value/tracking_error/ir` 返回 null。
+- 响应 200：`points[]{date,unit_nav,twr_daily,twr_daily_pct,cashflow,blocked,blocked_reason,total_assets,prev_total_assets,daily_pnl,holdings[]}` / `summary{mwr,twr,annualized_twr,mwr_minus_twr,beta,alpha_annual,t_value,tracking_error,ir,n_days,assumption}` / `status(ok|blocked|degraded)` / `blocked_ranges[]{from,to,reason}` / `benchmark_id` / `data_as_of` / `definition_version`。`summary.assumption ∈ statement|back_solved`，blocked 时为 null。`twr_daily_pct` 为两位小数的百分比字符串（如 `"0.62%"`）；`total_assets/prev_total_assets/daily_pnl` 为三位小数定点字符串，`daily_pnl = total_assets − cashflow − prev_total_assets`（超卖回合的未配对卖款已进总资产，但既不算收益也不计 `cashflow`，计算时在收益侧另行剔除）；首个净值点的 `prev_total_assets` 取「期初现金 + 期初持仓按上一交易日收盘价」估值（缺行情或前一点 blocked 时为 null，首点 `twr_daily_pct` 按该日盈亏/昨日资产计算）；`holdings[]` 的 `quantity/avg_cost/close_price/market_value` 为最多三位小数、去掉尾零的字符串（如 `"9.1"`）；`avg_cost` 为**含费买入均价**（累计成本 ÷ 持仓数量，成本取净现金流出，已含佣金/印花税/其他费）。
 - 错误码：INVALID_PERIOD(422)、UNKNOWN_BENCHMARK(422)、VALIDATION_ERROR(422)。
 - 验收断言：① points 按 date 严格升序、twr_daily 为十进制小数；② 与独立 oracle 逐日收益差 ≤1bp；③ 被阻断区间 status=="blocked" 且 summary 中资产类字段缺省；④ 未传 benchmark 时 benchmark_id=="hs300_tr" 并出现在 assumptions；⑤ 首行非余额行、区间内含余额行的月份 → 构建成功且 `summary.assumption=="back_solved"`，期初现金 = 余额行余额 − 该行发生额 − 区间内该行之前流水发生额之和。
 #### API-081 GET /assets
 - 用途：每日资产快照列表（“资产变化”展示 + 后续回撤族数据源）；FR-D1；认证：read；同步；游标分页。
 - 请求：query `limit`(1~200，默认 50) / `cursor` / `from`/`to`(业务日**闭区间** `[from,to]`) / `status`(∈`ok|blocked|degraded`) / `sort`(白名单 `trade_date`、`-trade_date`，默认 `-trade_date`)。
-- 响应 200：`items[]{date,cash,money_fund,balance,market_value,total_assets,holding_cost,unrealized_pnl,holding_count,cashflow,prev_total_assets,daily_pnl,daily_return,daily_return_pct,status,status_reason}` / `next_cursor` / `has_more` / `build{state,last_status,last_built_at,last_built_through,last_mode,last_rebuild_from,last_rows_written,rows_count,assumption,status_reason,has_new_market_data,definition_version,session_notice}` / `definition_version` / `data_as_of`。金额为 2 位定点字符串；`balance = cash + money_fund`（资产余额口径）；`daily_return` 为 8 位比率串、`daily_return_pct` 为两位百分比串（后端算，前端零口径）；**blocked 行数值字段一律显式 `null`**（非 `"0.00"`、非省略键）、`holding_count=0`、`status_reason` 非空。`build.state ∈ missing|current|stale|blocked`：无 state → `missing`（`rows_count=0`、`last_mode=null`）；全局无现金锚点 → `blocked`（`last_status="blocked"`、`last_built_through=null`、`status_reason` 非空）；指纹/行情 as_of/自然日前进 → `stale`。行只返回与 `state.definition_version` 同版本的口径（版本 bump 后不混排）。**收盘口径（2026-11-02，additive）**：资产表只在已收盘的工作日写行——工作日 15:00（Asia/Shanghai）前构建终点为前一工作日、stale 判定同样不含未收盘当日；`build.session_notice ∈ market_open|sync_pending|null`（只读提示，不参与 stale 判定）：`market_open`=工作日未收盘（资产表不含当日数据），`sync_pending`=工作日已收盘但行情未同步到当日（前端提示 `make sync-market`），非工作日或无需提示为 `null`。
+- 响应 200：`items[]{date,cash,market_value,total_assets,holding_cost,unrealized_pnl,holding_count,cashflow,prev_total_assets,daily_pnl,daily_return,daily_return_pct,status,status_reason,remark}` / `next_cursor` / `has_more` / `build{state,last_status,last_built_at,last_built_through,last_mode,last_rebuild_from,last_rows_written,rows_count,assumption,status_reason,has_new_market_data,definition_version,session_notice}` / `definition_version` / `data_as_of`。金额为 2 位定点字符串；`total_assets = cash + market_value`（资产口径 2.1：只有 A 股/场内基金读取行情，债券与伪代码按含费成本估值、不 blocked/degraded，仅用 `remark` 留痕「按买入价估值：…」）；`daily_return` 为 8 位比率串、`daily_return_pct` 为两位百分比串（后端算，前端零口径）；**blocked 行数值字段一律显式 `null`**（非 `"0.00"`、非省略键）、`holding_count=0`、`status_reason` 非空。`build.state ∈ missing|current|stale|blocked`：无 state → `missing`（`rows_count=0`、`last_mode=null`）；全局无现金锚点 → `blocked`（`last_status="blocked"`、`last_built_through=null`、`status_reason` 非空）；指纹/行情 as_of/自然日前进 → `stale`。行只返回与 `state.definition_version` 同版本的口径（版本 bump 后不混排）。**收盘口径（2026-11-02，additive）**：资产表只在已收盘的工作日写行——工作日 15:00（Asia/Shanghai）前构建终点为前一工作日、stale 判定同样不含未收盘当日；`build.session_notice ∈ market_open|sync_pending|null`（只读提示，不参与 stale 判定）：`market_open`=工作日未收盘（资产表不含当日数据），`sync_pending`=工作日已收盘但行情未同步到当日（前端提示 `make sync-market`），非工作日或无需提示为 `null`。
 - 错误码：INVALID_CURSOR(400)、INVALID_SORT_FIELD(400)、UNKNOWN_QUERY_PARAM(400)、INVALID_PERIOD(422)、VALIDATION_ERROR(422)、ADMIN_CANNOT_READ_TRADES(403)。
 - 验收断言：① 200 且 `items` 按 date 倒序、06-30 行与手算 oracle 一致（`cash="-70000.00"`、`market_value="170620.00"`、`total_assets="100620.00"`、`daily_pnl="620.00"`、`daily_return="0.00620000"`、`daily_return_pct="0.62%"`）、`build.state=="current"`、`definition_version=="1.1"`；② 未构建 → `items==[]`、`build.state=="missing"`、owner 直查两表无新增行；③ 跨用户 0 条泄露、admin → 403 `ADMIN_CANNOT_READ_TRADES`、无 token → 401；④ blocked 行数值字段全 `null` 且 `status_reason` 非空；⑤ 游标翻全集无重无漏、篡改 cursor → 400 INVALID_CURSOR；⑥ `limit=1/200` 可用、`limit=0/201` → 422、`from>to` → 422 INVALID_PERIOD、`status=foo` → 422、`sort=foo` → 400、未知 query → 400；⑦ `from/to` 闭区间含端点、`status` 过滤与 `sort=trade_date` 升序（与默认倒序互逆）；⑧ 构建后插流水/推进行情/时钟跨日 → `build.state=="stale"`，重建后回到 `current`。
 #### API-082 POST /assets/build
@@ -474,7 +526,7 @@
 - 响应 200：`period`、`period_basis`、`definition_version`、`bucket_basis="round"`、`data_as_of`、`ranking_as_of`、`benchmark_id`、`basis="benchmark_excess_20d"`、`item_total`、`summary{swing,fill_swing,holding_by_pnl,addon,sell_fly,reason_coverage,ranking,flag_round_counts,pending}`、`items[]`、`next_cursor`、`has_more`、`missing[]`、`assumptions`、`disclaimer`、`flag_glossary[]`、`flag_config{window_trading_days,near_equal_tolerance_pct,chase_margin_pct,stop_loss_margin_pct,short_term_margin_pct,flags_hash,is_default,stale}`（additive，2026-11-13：用户生效阈值；列表页与 `items[]` 各带一份，`stale` 恒 false，重算提示见 API-093）。
 - 旗标词表（2026-11-12，breaking）：`flag_glossary[]` 由 `stock_core.insights.flags` 单点维护，覆盖 `items[].flags` 的 8 个回合旗标（`bottom_buy`/`stop_loss_sold_early`/`profit_sold_early`/`drawdown`/`intraday_t`/`swing_t`/`intraday_rebalance_out`/`intraday_rebalance_in`）与 `?flag=` 的 4 个查询别名（`sold_too_early`/`reason_missing`/`horizon_pending`/`corporate_action`），每项含 `code/label_zh/label_en/description_zh/description_en/kind`（`kind=item_flag|filter_alias`）。列表与详情同源返回，前端零口径直接渲染。旧码 `addon`/`dip_sequence`/`below_avg`/`continued_decline`/`profit_taking`/`profit_take_fly`/`stop_loss_rebound`/`rising_sell_sequence`/`full_exit`/`partial_exit`/`same_day` 与别名 `addon_decline` 不再输出。
 - 加仓口径（2026-11-08；2026-11-12 收缩）：加仓 = **买入前该标的已有持仓**（按 FIFO 稳定序 `(trade_date, line_no, summary, quantity, price, id)` 推演，同日多笔以流水文件行号为准）。回合从 0 股开启，因此开仓笔永远不是加仓。加仓/加仓后下跌仅保留在 `summary.addon`（`count`/`declined_after_addon`/`declined_pct`）的内部口径，**不再输出为 `items[].flags`**。
-- 证券类型筛选（2026-11-08）：类型由代码区段判定（`stock_platform.symbols`），货币基金（如 940018，无代码区段）由流水 `money_fund_balance_units` 非空识别并归入 `fund`；国债/企业债及无法识别的标的统一归入 `other`。四类互斥且**完备**（四类计数之和恒等于全量回合，单测/API 测试双重断言），任何标的都不会因分类不出来而从筛选项中消失。筛选作用于 `items`，`summary`/`item_total`/`fill_swing` 全部基于过滤后的集合计算。
+- 证券类型筛选（2026-11-08，2026-11-15 修订）：类型由代码区段判定（`stock_platform.symbols`），名称含「货币」的标的归入 `fund`（不再依赖已删除的 `money_fund_balance_units`）；国债/企业债及无法识别的标的统一归入 `other`。四类互斥且**完备**（四类计数之和恒等于全量回合，单测/API 测试双重断言），任何标的都不会因分类不出来而从筛选项中消失。筛选作用于 `items`，`summary`/`item_total`/`fill_swing` 全部基于过滤后的集合计算。
 - 卖飞金额（2026-11-12 移除）：带符号原值、绝对值串与少赚/多赚标签等反事实金额字段因统计意义不足，已从 `summary.sell_fly` 与 `items[]` 一并删除；卖飞只保留计数（`profit_take_fly`/`stop_loss_rebound`）与占比（`fly_pct`）。
 - 统计单位（AC-S3）：`bucket_basis="round"` 表示 `summary.swing` 的 `closed/scalp/short/position/long` 以**回合**为单位；`summary.fill_swing` 是**fill 级**波段配对（`bucket_basis="fill"`），字段 `pairs/win_rate_pct/avg_holding_trading_days/avg_pnl_display/total_pnl_display`，两种单位**不可相加**（页面必须标注）。
 - 旗标回合计数（2026-11-12，additive）：`summary.flag_round_counts[]` 覆盖词表全部 8 个回合旗标 `{flag,count}`，顺序沿用 `ITEM_FLAG_CODES`（`bottom_buy`、`stop_loss_sold_early`、`profit_sold_early`、`drawdown`、`intraday_t`、`swing_t`、`intraday_rebalance_out`、`intraday_rebalance_in`），`count` 是筛选后**全量回合**中 `items[].flags` 含该旗标的回合数，同一回合只计一次、不累加次数，0 也返回。数据质量/缺口三态（`reason_missing`/`horizon_pending`/`corporate_action`）是查询别名而非行为旗标，不进入该数组，仍由 `quality`/`pending` 与筛选参数承载。列表接口是游标分页（默认 `limit=50`），前端只能看到当前页 `items`，累加会少计，因此必须由后端在 `_summary`（分页切片之前）聚合；`summary` 本身不随 `cursor` 变化。
@@ -485,7 +537,7 @@
   - `drawdown`（收益回撤，布尔）：回合内按数量加权的平均卖出价 < 区间最高收盘 × 95%（**严格**）；区间为「首笔买入日（含）至末笔卖出日（不含）」，即排除卖出当日。
   - `intraday_t`（日内做T，布尔）：同一交易日内先部分卖出（卖出数量严格小于卖出前持仓）再买入同一证券。
   - `swing_t`（波段做T，布尔）：回合内部分卖出后在更晚交易日再买入；同一笔卖出当日已被买入配对的（日内做T）不重复计入。
-  - `intraday_rebalance_out` / `intraday_rebalance_in`（日内调仓卖出/买入，布尔）：回合内先卖出当前证券、同日再买入其它证券 / 先卖出其它证券、同日再买入当前证券。判定范围为**当前用户同日全部流水、不按账户切分**（退化口径：所有账户合并为一条时间线），但对手方只认**真实二级市场证券成交**（2026-11-12 收紧）：`CASH` 资金行（转账/费用/利息/红利税补缴）、公司行动（分红/送转/配股）、新股申购与货基申赎（`money_fund_balance_units` 非空，如 940018）都不算「买入/卖出其它证券」；只判方向与全局行序，不要求金额匹配（清仓换股仍计为调仓卖出）。
+  - `intraday_rebalance_out` / `intraday_rebalance_in`（日内调仓卖出/买入，布尔）：回合内先卖出当前证券、同日再买入其它证券 / 先卖出其它证券、同日再买入当前证券。判定范围为**当前用户同日全部流水、不按账户切分**（退化口径：所有账户合并为一条时间线），但对手方只认**真实二级市场证券成交**（2026-11-12 收紧）：`CASH` 资金行（转账/费用/利息/红利税补缴）、公司行动（分红/送转/配股）、新股申购都不算「买入/卖出其它证券」（2026-11-15 起货基已按普通持仓处理，其申赎计入对手方）；只判方向与全局行序，不要求金额匹配（清仓换股仍计为调仓卖出）。
   - `sold_too_early`（别名）= `stop_loss_sold_early > 0 或 profit_sold_early > 0`；`reason_missing`/`horizon_pending`/`corporate_action` 三个别名口径不变。
   - 账单级旗标（即时抄底/短期抄底/短期卖飞）在洞察读路径内联重算，行情回看比账单最早交易日多取 45 天，与账单旗标月度构建同口径。
 - 盈亏 × 持有期（2026-11-10，additive）：`summary.holding_by_pnl{flat_tolerance_display, classes[]}` 为「持有期分布」图表数据源。`classes[]` **恒定三条**、顺序 `loss → flat → win`，每项 `code`(`loss|flat|win`)/`label`(亏损/保本/盈利)/`count`/`avg_holding_trading_days`(一位小数串或 null)/`avg_holding_trading_days_x10`(交易日 × 10 的定点整数，供图表直接用；与展示串同源)。**盈亏判定与「保本」容差在后端**：`|pnl| ≤ flat_tolerance_display`（常量 `stock_core.insights.aggregate.PNL_FLAT_TOLERANCE_UNITS`，默认 100.00 元，边界含在内）即保本；前端不得重算分类或容差。无样本的类别仍返回（`count=0`、均值为 `null`，不输出 0）；`Σcount` 恒等于 `summary.swing.closed`。
@@ -520,7 +572,7 @@
   - **短期事后旗标判据**：`short_term_underwater` = 买入后连续 5 个行情日（不含当日）**每个**交易日收盘价都低于含费净买价（任一日收盘价不低于净买价即不命中，持平不算负收益）；`short_term_sold_early` = 含费净卖价低于卖出后第 5 个行情日收盘价的 5% 以上（严格大于 5%，恰低 5% 不命中）；两者均使用未来行情，窗口未走完时状态为 `pending`。
   - **残余口径**：两侧叠放合计理论上严格等于该侧笔数，唯一已知残余是「已有持仓但成本不可得」的买入（`addon_*=no_cost_basis`，既非首次建仓也非加仓三态）与「无持仓卖出」（`reduce_*=not_applicable/no_position`）；接口如实按原状态计数，禁止并入任一状态类别。
   - `has_data` = 区间内有任何买卖笔数；`has_flag_data` = 任一月任一趋势旗标 count > 0；`has_state_data` = 任一月任一互斥状态 count > 0；图表按各自数据判空，不得画空白坐标轴。
-  - **单月收益（additive，2026-11-10）**：`items[].monthly_return = {month,value_bp,pct,display,sign,available,days,partial,note,amount,amount_display}`。口径 = 当前资产口径版本（`asset_build_state.definition_version`）的 `asset_daily.daily_return_units` 在自然月内复利（TWR，已剔除出入金）；`value_bp` 为基点整数（2.35% → 235，供图表柱高）；`pct`/`display` 为后端定点串（`2.35%`/`+2.35%`）；`sign ∈ pos|neg|flat|none`。**无可用日收益的月份显式 `value_bp=0`（图上 0 高度）且 `available=false`、`pct/display=null`、`sign=none`、`amount/amount_display=null`，禁止用 0 冒充 0% 收益或 0 金额**；`partial=true` 表示资产表未覆盖整月（按已覆盖区间复利），`note` 为后端说明文案。**金额（additive，2026-11-10）**：`amount` = 当月每日 `asset_daily.daily_pnl_units` 的累加（**已剔除出入金**：daily_pnl 只剔除银证转账，分红/打新等投资损益仍计入），两位小数定点串；`amount_display` 为千分位展示串；与收益率同源同日行，blocked 行与非当前口径版本行不参与累加。顶层 `has_return_data`、`return_basis`（口径说明，前端展示在图表上方：两者均已剔除出入金）、`return_labels`（`pos/neg/none` 图例文案）、`return_metric_labels`（tooltip 指标名：`return`=收益率、`amount`=金额）均由后端给出。
+  - **单月收益（additive，2026-11-10）**：`items[].monthly_return = {month,value_bp,pct,display,sign,available,days,partial,note,amount,amount_display}`。口径 = 当前资产口径版本（`asset_build_state.definition_version`）的 `asset_daily.daily_return_units` 在自然月内复利（TWR，已剔除出入金）；`value_bp` 为基点整数（2.35% → 235，供图表柱高）；`pct`/`display` 为后端定点串（`2.35%`/`+2.35%`）；`sign ∈ pos|neg|flat|none`。**无可用日收益的月份显式 `value_bp=0`（图上 0 高度）且 `available=false`、`pct/display=null`、`sign=none`、`amount/amount_display=null`，禁止用 0 冒充 0% 收益或 0 金额**；`partial=true` 表示资产表未覆盖整月（按已覆盖区间复利），`note` 为后端说明文案。**金额（additive，2026-11-10）**：`amount` = 当月每日 `asset_daily.daily_pnl_units` 的累加（**已剔除出入金**：daily_pnl 只剔除资金划转，分红/打新等投资损益仍计入），两位小数定点串；`amount_display` 为千分位展示串；与收益率同源同日行，blocked 行与非当前口径版本行不参与累加。顶层 `has_return_data`、`return_basis`（口径说明，前端展示在图表上方：两者均已剔除出入金）、`return_labels`（`pos/neg/none` 图例文案）、`return_metric_labels`（tooltip 指标名：`return`=收益率、`amount`=金额）均由后端给出。
   - **为什么不复用 `/nav` 月度 TWR**：`nav_daily` 是 `GET /nav` 的派生缓存——只覆盖被请求过的日期（按月稀疏），每次请求都会按本次区间重建点集、并在同事务内清理区间内不属于本次点集的陈旧行，点集随请求区间变化，因此不能作为稳定的月度收益序列数据源（该理由取决于派生缓存的写入方式，不依赖 `/nav` 的收益口径是否正确，口径修复后仍成立）；指标目录（18 项）不含月度收益率指标。资产日表逐日收益是看板回撤族已使用的 TWR 数据源，按月复利结果唯一。
 - 错误码：VALIDATION_ERROR(422，`months` 非 6/12/24)、ADMIN_CANNOT_READ_TRADES(403)。
 - 验收：`months=6/12/24` 月边界正确（跨年）；只返回本人数据；未构建月份显式 0 且列入 `months_without_data`；旧指纹月份旗标计数为 0 且列入 `stale_months`、笔数不受影响；`flag_config` 回显生效阈值与 `flags_hash`；`states[]` 每侧状态互斥（买侧首次建仓与加仓互斥、卖侧清仓与减仓互斥）；只读（调用前后表行数不变）；单月收益按日收益复利且符号/展示串由后端给出，无资产行月份 `available=false`+`value_bp=0`+`amount=null`，blocked/旧口径版本行不参与复利与金额累加，覆盖不足标 `partial`；金额为 `daily_pnl` 当月累加（已剔出入金，含分红/打新损益）。
@@ -596,6 +648,21 @@
 | LLM_UNAVAILABLE | 503 | LLM 故障且无兜底 | 智能问答暂时不可用。 | 稍后重试；金额类问题可用模板回答。 | 是 |
 | SAMPLE_INSUFFICIENT | 200 | n<10（降级码） | 样本太少，先给你原始值。 | 继续记录交易，样本≥10 后给结论。 | 否 |
 | NAV_UNRELIABLE | 200 | 期初反推失败（降级码） | 这段时间的数据不敢给你算收益。 | 补全资金余额列或修正首行后重算。 | 是（修正后） |
+| JOB_LEASE_EXPIRED | 500 | worker 租约过期 | 任务执行中断了。 | 系统会自动重试；持续失败联系支持。 | 是 |
+| IMPORT_PREVIEW_NOT_FOUND | 404 | 预览不存在/跨用户 | 找不到这次预览。 | 重新上传并预览。 | 否 |
+| IMPORT_TEMPLATE_NOT_FOUND | 404 | 模板不存在/跨用户 | 找不到这个对应关系。 | 刷新列表。 | 否 |
+| IMPORT_REIMPORT_CONFLICT | 409 | 同文件不同映射重导未确认 | 同一文件已用不同映射导入过。 | 用区间替换重导或显式确认。 | 否 |
+| IMPORT_STAGE_CONFLICT | 409 | 阶段不允许该操作 | 当前导入阶段不允许该操作。 | 先完成列对应/类型确认。 | 否 |
+| IMPORT_RULE_CONFLICT | 409 | 管理员规则重复 | 规则已存在。 | 修改已有规则或换表头/字段。 | 否 |
+| IMPORT_MAPPING_INVALID | 422 | 列对应重复/未知字段/多列非费用 | 列对应不合法。 | 检查重复字段与多列合并规则。 | 否 |
+| IMPORT_UNMAPPED_COLUMNS_UNCONFIRMED | 422 | 有列未映射且未确认忽略 | 还有表格列没有对应。 | 忽略或指定字段。 | 否 |
+| IMPORT_FEE_MERGE_INVALID | 422 | 其他费多列含非金额 | 其他费多列合并失败。 | 检查费用列是否都是金额。 | 否 |
+| IMPORT_FEE_MERGE_VERIFY_FAILED | 422 | 费用合并后余额对不上 | 费用合并后与资金余额对不上。 | 改为只映射一列费用。 | 否 |
+| IMPORT_BILL_TYPES_UNRESOLVED | 422 | 类型未确认/缺分类 | 还有账单类型没有分类。 | 为每个类型选择分类或废弃。 | 否 |
+| IMPORT_CATEGORY_INVALID | 422 | 分类不在 10 值枚举 | 账单分类不合法。 | 从系统分类中选择。 | 否 |
+| IMPORT_CLASSIFICATION_SOURCE_MISSING | 422 | 缺买卖标志与摘要 | 无法判断买卖方向或账单类型。 | 映射买卖标志或摘要列。 | 否 |
+| IMPORT_PROFILE_REQUIRED | 422 | 画像要求映射缺失（省心投等券商能力） | 这张账单需要券商能力才能处理。 | 选择正确的券商 profile。 | 否 |
+| IMPORT_LAYOUT_UNSUPPORTED | 422 | 多层表头布局不支持 | 这个表格布局暂不支持。 | 导出单行表头 CSV 后重试。 | 否 |
 | IMPORT_MISSING_CASH_BALANCE | 200 | 缺资金余额列（警告码） | 账单缺少资金余额，暂时无法对账。 | 上传含资金余额列的账单。 | 是（补数据） |
 
 ## §4 关键资源 Schema（16 个；完整字段见 OpenAPI `components.schemas`）
@@ -630,7 +697,7 @@
 | AssetPoint | date / total_assets / status | date / decimal-string / enum | 是 | 每日资产快照行（金额 2 位定点串）；blocked 行数值显式 `null`、`holding_count=0` | `2026-06-30` / `"100620.00"` / `ok` |
 | AssetPoint | cash / market_value / holding_cost / unrealized_pnl / daily_pnl / daily_return | decimal-string\|null | 否 | 现金/持仓市值/含费成本/浮动盈亏/日盈亏/日收益率；blocked 行全为 `null` | `"-70000.00"` / `"0.00620000"` |
 | AssetBuildState | state / last_status / last_mode / rows_count | enum / integer | 是 | `missing/current/stale/blocked`；`ok/degraded/blocked`；`full/incremental/noop`；当前保留行数 | `current` / `ok` / `incremental` / `125` |
-| AssetPage | items[] / build / definition_version / data_as_of | object / string / date | 是 | 分页 + 构建摘要 + 口径血缘；`AssetBuildAccepted` 为 202 专用体 `{job_id,type:"build_assets",status:"pending",links{self,events}}` | `{"has_more":false}` / `"1.0"` |
+| AssetPage | items[] / build / definition_version / data_as_of | object / string / date | 是 | 分页 + 构建摘要 + 口径血缘；`AssetBuildAccepted` 为 202 专用体 `{job_id,type:"build_assets",status:"pending",links{self,events}}` | `{"has_more":false}` / `"2.1"` |
 
 ## §5 异步任务与 SSE 契约
 ### 5.1 状态机（`platform.job`）
@@ -688,6 +755,15 @@ data: {"job_id":"job_01J9Z6","status":"succeeded","result_ref":"/api/v1/reports/
 | API-014 | imports_quarantine_rows | 行号精确、raw 原样；跨用户 404 | fx_quarantine | P0 |
 | API-015 | imports_revoke_restore_count | 200 后 trades 行数回退（含 side=missing 补差一并软删）；再撤销 409 | fx_base/fx_broken | P0 |
 | API-016 | imports_reclassify | 202；新规则后隔离区条目减少；跨用户 batch 404 | fx_quarantine | P1 |
+| API-098 | imports_save_mapping | 200 且 mapping_version+1；If-Match 不符 409 VERSION_CONFLICT；未确认未映射列 422 IMPORT_UNMAPPED_COLUMNS_UNCONFIRMED；跨用户 404 | fx_base | P0 |
+| API-099 | imports_save_types | 200 且全部类型确认后 stage=ready；未知 type_key/category 422 IMPORT_BILL_TYPES_UNRESOLVED/IMPORT_CATEGORY_INVALID | fx_base | P0 |
+| API-100 | imports_templates_list | 200 仅本人模板；签名/映射项完整 | fx_base | P1 |
+| API-101 | imports_template_delete | 204 后列表为空；跨用户/不存在 404 IMPORT_TEMPLATE_NOT_FOUND | fx_base | P1 |
+| API-102 | admin_import_rules_list | 200 含系统规则；非 admin 403 FORBIDDEN | fx_base | P1 |
+| API-103 | admin_import_rules_create | 201 version=1；重复规则 409 IMPORT_RULE_CONFLICT；非法 target_field/options 422 | fx_base | P1 |
+| API-104 | admin_import_rules_update | 200 version+1；If-Match 缺失/过期 422/409；系统行改 target_field 422 | fx_base | P1 |
+| API-105 | admin_import_rules_delete | 自定义规则 204；系统行 422；跨用户不影响 | fx_base | P1 |
+| API-106 | imports_preview_get | 200 回填 stage/mapping_version/types；过期 410；跨用户 404 IMPORT_PREVIEW_NOT_FOUND | fx_base | P1 |
 | API-017 | trades_cursor_sort_fields | 游标无重无漏；非法 sort 400；fields 裁剪；304 | fx_round30 | P0 |
 | API-018 | trades_patch_version | version+1；旧 version 409；跨用户 404 | fx_base | P0 |
 | API-019 | trades_soft_delete | 204；默认不可见；include_deleted=true 可见 | fx_base | P1 |

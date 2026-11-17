@@ -33,6 +33,7 @@ from stock_platform.jobs import JobQueue
 from stock_platform.obs import get_logger
 
 from stock_review.application.bond_alias import build_bond_alias, canonical_code
+from stock_review.application.money_fund import money_fund_codes
 from stock_review.metrics.context import parse_period_label
 from stock_review.models import Round, RoundBuildState
 from stock_review.repositories.rounds import FillInput, RoundInput, RoundRepository
@@ -56,6 +57,8 @@ _KIND_BY_CATEGORY: dict[str, EventKind] = {
     "fee": EventKind.FEE,
     "transfer": EventKind.TRANSFER,
     "new_stock": EventKind.NEW_STOCK,
+    # 券商行为（申购中签/新股入账/证券清理/托管等登记动作）：引擎无分支，显式忽略。
+    "broker_action": EventKind.BROKER_ACTION,
     "other": EventKind.OTHER,
 }
 
@@ -88,8 +91,12 @@ def _is_bonus(trade: Trade) -> bool:
     return any(keyword in summary for keyword in _BONUS_KEYWORDS)
 
 
-def _kind_for(trade: Trade) -> EventKind:
-    """ledger trade → FIFO EventKind（映射规则见 INTERFACE §3.3）。"""
+def kind_for_trade(trade: Trade) -> EventKind:
+    """ledger trade → FIFO EventKind（映射规则见 INTERFACE §3.3）。
+
+    这是「一条流水在引擎里算买还是卖」的唯一口径：导入行可能只有 `category` 没有方向
+    （`side=unknown`），按 `side` 判买卖会与引擎不一致，跨模块判方向请复用本函数。
+    """
     # 对账自动补差行（side=missing）没有买卖方向语义，按 OTHER 处理（bridge 计入 other）。
     if trade.side == Side.MISSING.value:
         return EventKind.OTHER
@@ -112,23 +119,27 @@ def trades_to_events(
       DIVIDEND 的 `amount_units` 已是税后净额，不重复扣税；
     - 送转：`quantity_units` = 新增股数、`ratio_units` = 0（引擎按数量直接加股，成本不变）；
     - `line_no` 空值按 0 处理（稳定序需要 int）；
+    - 人工修订注入行（`revision_of` 非空）`sort_rank=0`，保证同日先于被修订的卖出配对；
+    - 货币基金（现金等价物）整只跳过：不进 FIFO、不产生回合、不参与 bridge 的
+      持仓成本（现金流仍按原样计入现金）；
     - 可转债发债代码按 `bond_alias` 归一到上市代码（未传时从本批 trades 派生），
       申购缴款与上市卖出进入同一 FIFO 组（设计 D3）。
-    - 货基行（`money_fund_balance_units` 非空）打 `allow_oversell`：红利发放行隔离未入账，
-      赎回略多于申购的部分按利息零成本计收益，不报超卖（引擎口径）。
     """
     alias = (
         bond_alias
         if bond_alias is not None
         else build_bond_alias((t.security_code, t.security_name) for t in trades)[0]
     )
+    money_fund = money_fund_codes(trades)
     events: list[FifoEvent] = []
     for trade in trades:
+        if trade.security_code in money_fund:
+            continue
         events.append(
             FifoEvent(
                 trade_id=trade.id,
                 trade_date=trade.trade_date,
-                kind=_kind_for(trade),
+                kind=kind_for_trade(trade),
                 security_code=canonical_code(alias, trade.security_code),
                 security_name=trade.security_name,
                 quantity_units=trade.quantity_units,
@@ -141,7 +152,8 @@ def trades_to_events(
                 ratio_units=0,
                 line_no=trade.line_no or 0,
                 summary=trade.summary or "",
-                allow_oversell=trade.money_fund_balance_units is not None,
+                # 人工修订注入行必须排在原账单行之前（同交易日、同行号时先建 lot）。
+                sort_rank=0 if trade.revision_of else 1,
             )
         )
     return events

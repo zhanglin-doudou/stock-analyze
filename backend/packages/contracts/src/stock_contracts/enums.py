@@ -110,9 +110,79 @@ class QuarantineReason(StrEnum):
     DUPLICATE_IN_FILE = "DUPLICATE_IN_FILE"
     # 金额字段全为 0（佣金/印花税/其他费/发生金额/资金余额）：无资金流的噪音行。
     INVALID_AMOUNT = "INVALID_AMOUNT"
-    # 申购中签/新股入账/托管转出、[省心投]红利发放（省心投账户内部份额通知，与主账户
-    # 资金无关）等纯通知行：无资金意义，不进明细（可审计可恢复）。
+    # 申购中签/新股入账/托管转出等纯通知行：无资金意义，不进明细（可审计可恢复）。
     ZERO_AMOUNT_INFO = "ZERO_AMOUNT_INFO"
+    # 用户把该账单类型标记为「废弃」（噪音）：整类行落隔离区，单独计 `discarded_count`，
+    # 不并入 `quarantined`（设计 D-12 / §4.3）。
+    BILL_TYPE_DISCARDED = "BILL_TYPE_DISCARDED"
+    # 与上一行余额接不上（资金余额链断裂）：先隔离该行、继续向后尝试接上。
+    # 与 INVALID_ROW（字段本身解析失败）区分，便于前端提示与恢复策略不同。
+    RECONCILIATION_BREAK = "RECONCILIATION_BREAK"
+
+
+#: 隔离原因的中文说明（预览隔离弹窗直接展示，前端不再维护第二份文案）。
+QUARANTINE_REASON_LABELS: dict[str, str] = {
+    QuarantineReason.UNKNOWN_SUMMARY.value: "摘要无法识别，缺少业务分类",
+    QuarantineReason.UNMAPPED_COLUMN.value: "依赖的列未映射",
+    QuarantineReason.INVALID_ROW.value: "字段无法解析（日期/数量/价格等）",
+    QuarantineReason.DUPLICATE_IN_FILE.value: "文件内重复行",
+    QuarantineReason.INVALID_AMOUNT.value: "金额字段无效或全为 0",
+    QuarantineReason.ZERO_AMOUNT_INFO.value: "零金额通知行，无资金意义",
+    QuarantineReason.BILL_TYPE_DISCARDED.value: "账单类型被标记为废弃",
+    QuarantineReason.RECONCILIATION_BREAK.value: "资金余额链断裂，与上一行接不上",
+}
+
+
+class BillCategory(StrEnum):
+    """账单业务分类（11 值，设计 D-15）。DB 仍以 text 存储，新增值免迁移。"""
+
+    BUY = "buy"
+    SELL = "sell"
+    BONUS = "bonus"
+    DIVIDEND = "dividend"
+    RIGHTS = "rights"
+    INTEREST = "interest"
+    FEE = "fee"
+    TRANSFER = "transfer"
+    #: 新股/可转债**中签**（特殊买入）：只有中签缴款行建仓，上市后卖出归 `sell`。
+    NEW_STOCK = "new_stock"
+    #: 券商行为（登记类）：申购中签/申购还款/新股入账/证券清理/托管等份额锁定与登记动作，
+    #: 不扣款、不影响持仓、不计成本、不产生回合与收益。
+    BROKER_ACTION = "broker_action"
+    OTHER = "other"
+
+
+#: 中文标签由 contracts 提供，前端/文档不再硬编码（设计 D-15）。
+BILL_CATEGORY_LABELS: dict[str, str] = {
+    BillCategory.BUY.value: "买入",
+    BillCategory.SELL.value: "卖出",
+    BillCategory.BONUS.value: "送转",  # 只有股权变更，不扣费
+    BillCategory.DIVIDEND.value: "分红",
+    BillCategory.RIGHTS.value: "配股",  # 股票变更和扣费
+    BillCategory.INTEREST.value: "利息",
+    BillCategory.FEE.value: "费用",
+    BillCategory.TRANSFER.value: "资金划转",
+    BillCategory.NEW_STOCK.value: "新股/可转债中签",
+    BillCategory.BROKER_ACTION.value: "券商行为",
+    BillCategory.OTHER.value: "其他",
+}
+
+
+class ImportStage(StrEnum):
+    """v2 导入草稿阶段；`legacy` 供迁移前的旧预览使用（设计 D-19）。"""
+
+    MAPPING = "mapping"
+    TYPES = "types"
+    READY = "ready"
+    LEGACY = "legacy"
+
+
+class ImportMappingSource(StrEnum):
+    """批次映射来源（`import_batch.mapping_source`）。"""
+
+    TEMPLATE = "template"
+    MANUAL = "manual"
+    LEGACY = "legacy"
 
 
 class WarningCode(StrEnum):
@@ -126,6 +196,23 @@ class WarningCode(StrEnum):
     RECONCILIATION_AUTOFILLED = "RECONCILIATION_AUTOFILLED"
     # 可转债「数量(手) × 10 × 单张价」与发生金额偏差超容差：口径异常留痕（不阻断）。
     CBOND_AMOUNT_INCONSISTENT = "CBOND_AMOUNT_INCONSISTENT"
+    # ── v2 导入映射（2026-11-13 设计）──────────────────────────
+    # 未映射 summary 列时由方向/金额符号派生的账单类型键。
+    BILL_TYPE_DERIVED = "BILL_TYPE_DERIVED"
+    # `other_fee` 多列合并已生效（求和）。
+    FEE_MERGE_APPLIED = "FEE_MERGE_APPLIED"
+    # 合并费用但未映射 `cash_balance`：跳过余额链校验（不阻断）。
+    FEE_MERGE_UNVERIFIED = "FEE_MERGE_UNVERIFIED"
+    # 本批次使用了合并费用且收尾对账补了差：费用映射可能不对，建议重新对应。
+    FEE_MERGE_SUSPECT = "FEE_MERGE_SUSPECT"
+    # 本次预览命中了用户模板并直接套用。
+    TEMPLATE_REUSED = "TEMPLATE_REUSED"
+    # 模板签名命中但日期格式解析失败：回退到映射步骤重新确认。
+    TEMPLATE_DATE_FORMAT_MISMATCH = "TEMPLATE_DATE_FORMAT_MISMATCH"
+    # 仍有未映射列，提交时需 `acknowledge_unmapped=true`。
+    MAPPING_UNMAPPED_COLUMNS = "MAPPING_UNMAPPED_COLUMNS"
+    # 同一文件曾用不同映射导入过：重导需 `replace_range` 或显式确认。
+    MAPPING_CHANGED_REIMPORT = "MAPPING_CHANGED_REIMPORT"
 
 
 # ── 回合洞察（Period2-09，设计 2026-11-04）────────────────────────

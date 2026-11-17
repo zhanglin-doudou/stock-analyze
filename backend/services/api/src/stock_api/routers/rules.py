@@ -43,6 +43,7 @@ ALLOWED_CATEGORIES: frozenset[str] = frozenset(
         "fee",
         "transfer",
         "new_stock",
+        "broker_action",
         "other",
     }
 )

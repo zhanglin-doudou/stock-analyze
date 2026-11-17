@@ -51,7 +51,7 @@ from stock_ledger.models import Trade
 from stock_ledger.repositories.trades import TradeRepository
 from stock_platform.ports import MarketDataSource, SectorDataSource
 from stock_platform.repositories.sectors import SectorRepository
-from stock_platform.symbols import is_bond
+from stock_platform.symbols import needs_quote
 
 from stock_review.application.assets import (
     ASSET_DEFINITION_VERSION,
@@ -63,19 +63,16 @@ from stock_review.application.assets import (
 from stock_review.application.bond_alias import build_bond_alias, canonical_code
 from stock_review.application.bridge import bridge_for_period
 from stock_review.application.metrics import KNOWN_BENCHMARKS
+from stock_review.application.money_fund import money_fund_codes
 from stock_review.application.rebuild import trades_to_events
 from stock_review.application.valuation import (
     PRICE_LOOKBACK,
-    QTY_PRICE_SCALE,
-    bond_face_divisors,
-    bond_value_units,
     category,
     close_on_or_before,
     holding_delta,
-    initial_money_fund_balances,
-    is_money_fund_row,
     load_prices,
     new_stock_pending_codes,
+    valued_position_units,
 )
 from stock_review.attribution.context import MissingEntry, resolve_asset_window
 from stock_review.attribution.corporate import corporate_action_symbols
@@ -276,19 +273,18 @@ class _Mirror:
     - `holdings`：{code: (begin_qty, end_qty)}（split_residual 的 `holdings_at`）；
     - `bucket_mv`：{code: (begin_mv, end_mv)}——仅收**两端都可估值**的标的
       （市值或成本兜底）；任一端不可估值 → 不进桶，由 valuation_gap 吸收；
-    - `money_funds`：{code: (begin_bal, end_bal)}——begin 为首条窗口货基行之前的
-      余额（`initial_money_fund_balances` 口径），end 为 end_date 前最后余额；
-    - `anchors`：{code: 期初锚}（有价按市值、无价按净成本；coverage 资本分母）；
-    - `cost_fallback`：期初按成本兜底估值的标的（coverage.base_basis="mixed"）。
+    - `anchors`：{code: 期初锚}（行情品种按市值、非行情品种与待上市新股按含费成本；
+      coverage 资本分母）；
+    - `cost_fallback`：期初「缺行情按认购成本兜底」的待上市新股
+      （coverage.base_basis="mixed"）；债券/伪代码按成本是常态估值，不算兜底。
     """
 
     holdings: dict[str, tuple[int, int]]
     bucket_mv: dict[str, tuple[int, int]]
-    money_funds: dict[str, tuple[int, int]]
     anchors: dict[str, int]
     cost_fallback: frozenset[str]
     # 资产口径（比例成本）区间已实现损益：卖出净额 − 结转成本。与 `assets._build` 同原语，
-    # 供 §3.2.1 对账使用；货基行不结转成本（余额变化在 total_pnl 中自行抵消）。
+    # 供 §3.2.1 对账使用；超卖部分视同资金划转，不计入已实现损益。
     realized_units: int
 
 
@@ -299,24 +295,24 @@ def _mirror_view(
     end_date: date,
     ladder: dict[str, list[tuple[date, int]]],
     canonical: Callable[[str], str],
-    bond_divisors: Mapping[str, int],
     new_stocks: set[str],
-    begin_balances: Mapping[str, int],
 ) -> _Mirror:
     """单遍扫描 trades，在 `begin_date`/`end_date` 两个时点快照（资产表同口径）。
 
-    持仓/成本推演与 `assets._build` 循环一致：货基行只覆盖余额、可转债发债代码
-    归一、卖出按数量比例结转成本、新股中签通知行不建仓。
+    持仓/成本推演与 `assets._build` 循环一致：可转债发债代码归一、卖出按数量比例结转
+    成本、超卖按 0 截断、新股中签通知行不建仓。估值走共用原语 `valued_position_units`：
+    债券/伪代码不读行情、按含费成本计入；待上市新股缺行情按认购成本兜底。
     """
     holdings: dict[str, int] = {}
     costs: dict[str, int] = {}
-    mf_bal: dict[str, int] = {}
-    begin_snap: tuple[dict[str, int], dict[str, int], dict[str, int]] | None = None
-    end_snap: tuple[dict[str, int], dict[str, int], dict[str, int]] | None = None
+    begin_snap: tuple[dict[str, int], dict[str, int]] | None = None
+    end_snap: tuple[dict[str, int], dict[str, int]] | None = None
     realized = 0
+    # 货币基金是现金等价物：不进持仓/成本/已实现损益（资产表并入现金列）。
+    fund_codes = money_fund_codes(trades)
 
-    def capture() -> tuple[dict[str, int], dict[str, int], dict[str, int]]:
-        return (dict(holdings), dict(costs), dict(mf_bal))
+    def capture() -> tuple[dict[str, int], dict[str, int]]:
+        return (dict(holdings), dict(costs))
 
     for trade in trades:
         if begin_snap is None and trade.trade_date > begin_date:
@@ -324,19 +320,19 @@ def _mirror_view(
         if end_snap is None and trade.trade_date > end_date:
             end_snap = capture()
             break
-        if is_money_fund_row(trade):
-            code = (trade.security_code or "").strip()
-            if code:
-                mf_bal[code] = max(0, int(trade.money_fund_balance_units or 0))
-            continue
         raw = (trade.security_code or "").strip()
         if not raw:
+            continue
+        if raw in fund_codes:
             continue
         code = canonical(raw)
         trade_category = category(trade)
         delta = holding_delta(trade_category, trade.quantity_units, amount_units=trade.amount_units)
         if delta:
-            holdings[code] = holdings.get(code, 0) + delta
+            old_qty = holdings.get(code, 0)
+            new_qty = max(0, old_qty + delta)
+            delta = new_qty - old_qty
+            holdings[code] = new_qty
         if trade_category in {"buy", "rights", "new_stock"} and trade.amount_units != 0:
             costs[code] = costs.get(code, 0) + (-trade.amount_units)
         elif trade_category == "sell":
@@ -348,35 +344,50 @@ def _mirror_view(
                 costs[code] = new_cost
                 released = old_cost - new_cost
             if begin_date < trade.trade_date <= end_date:
-                # 资产表比例成本口径的已实现损益：卖出净额 − 结转成本。
-                realized += trade.amount_units - released
+                # 资产表比例成本口径的已实现损益：配对部分卖出净额 − 结转成本；
+                # 超卖（未配对）部分按数量比例从卖款中剔除，视同资金划转不计收益。
+                matched = -delta
+                qty = abs(trade.quantity_units)
+                matched_amount = (
+                    trade.amount_units
+                    if qty == 0 or matched >= qty
+                    else trade.amount_units * matched // qty
+                )
+                realized += matched_amount - released
     if begin_snap is None:
         begin_snap = capture()
     if end_snap is None:
         end_snap = capture()
-    held_b, cost_b, _mf_b = begin_snap
-    held_e, cost_e, mf_e = end_snap
+    held_b, cost_b = begin_snap
+    held_e, cost_e = end_snap
 
     def value_at(
         held: Mapping[str, int], cost_snap: Mapping[str, int], on: date
     ) -> tuple[dict[str, int], set[str]]:
-        """持仓 → {code: 市值}；缺价债券/待上市新股按成本兜底；其余缺价省略。"""
+        """持仓 → {code: 市值}；非行情标的（债券/伪代码）按含费成本、待上市新股按认购成本，
+        两类都进市值；其余缺价省略（由 valuation_gap 吸收）。
+
+        `fallback` 只收「缺行情的待上市新股」（coverage.base_basis 的混合口径）；
+        非行情标的按成本是常态估值，不算兜底、不产生未归因原因。
+        """
         values: dict[str, int] = {}
         fallback: set[str] = set()
         for code, qty in held.items():
             if qty == 0:
                 continue
-            close = close_on_or_before(ladder, code, on)
-            if close is None:
-                cost = max(0, cost_snap.get(code, 0))
-                if cost and (is_bond(code) or code in new_stocks):
-                    values[code] = cost
-                    fallback.add(code)
+            close = close_on_or_before(ladder, code, on) if needs_quote(code) else None
+            value, source = valued_position_units(
+                code,
+                qty,
+                close,
+                max(0, cost_snap.get(code, 0)),
+                new_stock_codes=new_stocks,
+            )
+            if value is None:
                 continue
-            if is_bond(code):
-                values[code] = bond_value_units(code, qty, close, bond_divisors)
-            else:
-                values[code] = qty * close // QTY_PRICE_SCALE
+            values[code] = value
+            if source == "new_stock_cost":
+                fallback.add(code)
         return values, fallback
 
     mv_b, fb_b = value_at(held_b, cost_b, begin_date)
@@ -404,17 +415,10 @@ def _mirror_view(
         if anchor:
             anchors[code] = anchor
 
-    # 货基余额（begin = 首条窗口行之前；end = end_date 前最后余额）。
-    mf_codes = (set(begin_balances) | set(mf_e)) - {""}
-    money_funds = {
-        code: (begin_balances.get(code, 0), mf_e.get(code, 0))
-        for code in sorted(mf_codes)
-        if begin_balances.get(code, 0) != 0 or mf_e.get(code, 0) != 0
-    }
+    # 期末持仓快照已含全部标的，无需额外的货基余额桶。
     return _Mirror(
         holdings=holdings_map,
         bucket_mv=bucket_mv,
-        money_funds=money_funds,
         anchors=anchors,
         cost_fallback=frozenset(fb_b),
         realized_units=realized,
@@ -1098,12 +1102,14 @@ async def build_attribution(
 
     # ── 7. 行情（只读缓存；P0 参考日可早于 T0）────────────────────
     universe = {
-        canonical(trade.security_code)
-        for trade in trades
-        if (trade.security_code or "").strip() and not is_money_fund_row(trade)
+        canonical(trade.security_code) for trade in trades if (trade.security_code or "").strip()
     }
     universe.discard("CASH")
     universe.discard("")
+    # 货币基金是现金等价物：不进持仓/行情/归因（余额在资产表现金列里）。
+    universe -= {canonical(code) for code in money_fund_codes(trades)}
+    # 只有 A 股/场内基金读行情；债券与伪代码按含费成本估值，不发起行情请求。
+    universe = {code for code in universe if needs_quote(code)}
     price_start = min(resolved.start, window.begin_date) - PRICE_LOOKBACK
     ladder, _market_causes = await load_prices(
         market_data, sorted(universe), price_start, resolved.end, cached_only=True
@@ -1136,19 +1142,17 @@ async def build_attribution(
         end_date=window.end_date,
         ladder=ladder,
         canonical=canonical,
-        bond_divisors=bond_face_divisors(trades),
         new_stocks={canonical(code) for code in new_stock_pending_codes(trades)},
-        begin_balances={
-            canonical(code): balance
-            for code, balance in initial_money_fund_balances(trades, resolved.start).items()
-        },
     )
     dividends: dict[str, int] = {}
+    fund_codes = money_fund_codes(trades)
     for trade in trades:
         if not (resolved.start <= trade.trade_date <= resolved.end):
             continue
-        if category(trade) != "dividend" or is_money_fund_row(trade):
+        if category(trade) != "dividend":
             continue
+        if (trade.security_code or "") in fund_codes:
+            continue  # 货基红利属于现金收益，不归因到证券
         code = canonical(trade.security_code)
         if not code or code == "CASH":
             continue
@@ -1168,15 +1172,6 @@ async def build_attribution(
             - bridge.fees_units
             + bridge.other_units
         )
-        # 货基按余额覆盖（资产口径）：Σ行金额 + Δ余额 即现金流与持仓之间的口径修正项
-        # （余额由份额×净值回推，与行金额存在尾差，验收 P0-A 的 40.76 元即此项）。
-        mf_amounts = sum(
-            trade.amount_units
-            for trade in trades
-            if is_money_fund_row(trade) and window.begin_date < trade.trade_date <= window.end_date
-        )
-        mf_delta = sum(end - start for start, end in mirror.money_funds.values())
-        asset_profit += mf_amounts + mf_delta
         delta_unreal = window.unrealized_end_units - window.unrealized_begin_units
         if abs(window.total_pnl_units - (asset_profit + delta_unreal)) > _BRIDGE_TOLERANCE_UNITS:
             missing.append(
@@ -1213,7 +1208,6 @@ async def build_attribution(
         begin_date=window.begin_date,
         end_date=window.end_date,
         bucket_mv=mirror.bucket_mv,
-        money_fund_balances=mirror.money_funds,
         holdings_at=mirror.holdings,
         corporate=corporate,
         canonical=canonical,

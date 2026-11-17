@@ -42,6 +42,21 @@ class ErrorCode(StrEnum):
     IMPORT_FILE_TOO_LARGE = "IMPORT_FILE_TOO_LARGE"
     IMPORT_PREVIEW_EXPIRED = "IMPORT_PREVIEW_EXPIRED"
     IMPORT_PREVIEW_NOT_FOUND = "IMPORT_PREVIEW_NOT_FOUND"
+    # ── 导入映射 v2（2026-11-13 设计 §6.8）──────────────────
+    IMPORT_MAPPING_INVALID = "IMPORT_MAPPING_INVALID"
+    IMPORT_UNMAPPED_COLUMNS_UNCONFIRMED = "IMPORT_UNMAPPED_COLUMNS_UNCONFIRMED"
+    IMPORT_FEE_MERGE_INVALID = "IMPORT_FEE_MERGE_INVALID"
+    IMPORT_FEE_MERGE_VERIFY_FAILED = "IMPORT_FEE_MERGE_VERIFY_FAILED"
+    IMPORT_BILL_TYPES_UNRESOLVED = "IMPORT_BILL_TYPES_UNRESOLVED"
+    IMPORT_CATEGORY_INVALID = "IMPORT_CATEGORY_INVALID"
+    IMPORT_CLASSIFICATION_SOURCE_MISSING = "IMPORT_CLASSIFICATION_SOURCE_MISSING"
+    IMPORT_PROFILE_REQUIRED = "IMPORT_PROFILE_REQUIRED"
+    IMPORT_REIMPORT_CONFLICT = "IMPORT_REIMPORT_CONFLICT"
+    IMPORT_STAGE_CONFLICT = "IMPORT_STAGE_CONFLICT"
+    IMPORT_LAYOUT_UNSUPPORTED = "IMPORT_LAYOUT_UNSUPPORTED"
+    IMPORT_TEMPLATE_NOT_FOUND = "IMPORT_TEMPLATE_NOT_FOUND"
+    IMPORT_RULE_CONFLICT = "IMPORT_RULE_CONFLICT"
+    IMPORT_CHAIN_DISCONTINUOUS = "IMPORT_CHAIN_DISCONTINUOUS"
     # ── 报告 / 导出 / 分享 ────────────────────────────────
     REPORT_NOT_READY = "REPORT_NOT_READY"
     EXPORT_EMPTY = "EXPORT_EMPTY"
@@ -298,6 +313,105 @@ CATALOG: dict[ErrorCode, Problem] = dict(
             "上传含资金余额列的账单。",
             True,
         ),
+        # ── 导入映射 v2（2026-11-13 设计 §6.8）──────────────────
+        _p(
+            ErrorCode.IMPORT_MAPPING_INVALID,
+            422,
+            "列对应不合法。",
+            "检查是否有重复字段或未知字段；只有其他费可以多列。",
+            False,
+        ),
+        _p(
+            ErrorCode.IMPORT_UNMAPPED_COLUMNS_UNCONFIRMED,
+            422,
+            "还有表格列没有对应。",
+            "确认忽略这些列，或为它们指定字段。",
+            False,
+        ),
+        _p(
+            ErrorCode.IMPORT_FEE_MERGE_INVALID,
+            422,
+            "其他费多列合并失败。",
+            "检查费用列是否都是金额；修正后重新对应。",
+            False,
+        ),
+        _p(
+            ErrorCode.IMPORT_FEE_MERGE_VERIFY_FAILED,
+            422,
+            "费用合并后与资金余额对不上。",
+            "改为只映射一列费用，或检查是否把非费用列当成了费用。",
+            False,
+        ),
+        _p(
+            ErrorCode.IMPORT_BILL_TYPES_UNRESOLVED,
+            422,
+            "还有账单类型没有分类。",
+            "为每个类型选择 Category，或标记为废弃。",
+            False,
+        ),
+        _p(
+            ErrorCode.IMPORT_CATEGORY_INVALID,
+            422,
+            "账单分类不合法。",
+            "从系统提供的 11 个分类中选择。",
+            False,
+        ),
+        _p(
+            ErrorCode.IMPORT_CLASSIFICATION_SOURCE_MISSING,
+            422,
+            "无法判断买卖方向或账单类型。",
+            "映射「买卖标志」或「摘要/业务名称」列。",
+            False,
+        ),
+        _p(
+            ErrorCode.IMPORT_PROFILE_REQUIRED,
+            422,
+            "这张账单需要对应券商的能力才能正确处理。",
+            "选择正确的券商 profile。",
+            False,
+        ),
+        _p(
+            ErrorCode.IMPORT_REIMPORT_CONFLICT,
+            409,
+            "同一文件已用不同的对应关系导入过。",
+            "用区间替换重导，或确认「重新导入」后再提交。",
+            False,
+        ),
+        _p(
+            ErrorCode.IMPORT_STAGE_CONFLICT,
+            409,
+            "当前导入阶段不允许该操作。",
+            "先完成列对应/类型确认。",
+            False,
+        ),
+        _p(
+            ErrorCode.IMPORT_LAYOUT_UNSUPPORTED,
+            422,
+            "这个表格布局暂不支持。",
+            "导出为单行表头的 CSV 后重试。",
+            False,
+        ),
+        _p(
+            ErrorCode.IMPORT_TEMPLATE_NOT_FOUND,
+            404,
+            "找不到这个对应关系。",
+            "刷新列表。",
+            False,
+        ),
+        _p(
+            ErrorCode.IMPORT_RULE_CONFLICT,
+            409,
+            "规则已存在。",
+            "编辑已有规则或换一个表头。",
+            False,
+        ),
+        _p(
+            ErrorCode.IMPORT_CHAIN_DISCONTINUOUS,
+            422,
+            "账单资金余额接不上，无法并入现有账单链。",
+            "核对报错行号前后的资金余额；向前补历史时请导出与库内首条账单衔接更早的区间。",
+            False,
+        ),
     ]
 )
 
@@ -310,7 +424,7 @@ DEGRADED_CODES: frozenset[ErrorCode] = frozenset(
     }
 )
 
-SEED_ERROR_COUNT = 47
+SEED_ERROR_COUNT = 61
 
 
 def problem_catalog() -> list[Problem]:

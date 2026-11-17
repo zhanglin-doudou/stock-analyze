@@ -10,6 +10,12 @@
 > 缺失区间；东八区 16:30 前自动截到昨天，留出收盘数据发布窗口）。`MARKET_LIVE_CACHE_READ_ONLY=false` 保留旧
 > read-through（缺口/尾部即时拉取）仅用于调试。
 > 实施状态：**已实现**（2026-10-23），记录见 [Period2-live-market-data-source-Implementation-Log.md](../reviews/Period2-live-market-data-source-Implementation-Log.md)。
+>
+> **2026-11-15 修订（构建侧单次补拉）**：资产表构建（`build_assets`，写路径）在推演出
+> blocked 行时，会按「缺失标的 + 缺失日期区间」调用一次 `sync_daily_bars` 再重算一次
+> （`SyncableMarketSource` 能力探测；replay/纯透传端口跳过）。这是读路径之外**唯一**的自动
+> 补拉点，每个标的至多一次、不重试不递归；`GET /assets`、`/nav`、看板等读端点仍然只读
+> `market.daily_bar`。补拉区间与边界见 [2026-10-25-asset-daily-table.md](2026-10-25-asset-daily-table.md) §6.5。
 
 ## Context
 

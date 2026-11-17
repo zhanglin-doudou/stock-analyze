@@ -48,6 +48,11 @@ CLASS_STOCK = "stock"
 CLASS_FUND = "fund"
 CLASS_BOND = "bond"
 
+# 需要读取行情的品种：A 股 + 场内基金。sync-market 的拉取集合与资产表的估值口径共用此定义，
+# 避免「同步了但估值不认」或「估不了却一直补拉」两处漂移。债券与伪代码（如 A40006/970172/
+# 119924）没有可用行情，按买入价估值。
+QUOTE_CLASSES: frozenset[str] = frozenset({CLASS_STOCK, CLASS_FUND})
+
 
 def classify_symbol(symbol: str) -> str | None:
     """6 位代码 → `"stock" | "fund" | "bond" | None`（不支持的品种返回 None）。"""
@@ -59,6 +64,15 @@ def classify_symbol(symbol: str) -> str | None:
     if prefix in _BOND_PREFIXES:
         return CLASS_BOND
     return None
+
+
+def needs_quote(symbol: str) -> bool:
+    """该标的是否需要读取行情（A 股主板/科创/创业 + 场内基金）。
+
+    债券与伪代码（如 `A40006`/`970172`/`119924`）返回 False：`sync-market` 不拉取，
+    资产表也不请求行情、不阻断，直接按含费成本（买入价）估值。
+    """
+    return classify_symbol(symbol) in QUOTE_CLASSES
 
 
 def is_bond(symbol: str) -> bool:

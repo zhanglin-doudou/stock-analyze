@@ -199,12 +199,19 @@ def assert_oracle_agrees(events: list[FifoEvent]) -> None:
         assert abs(Decimal(round_.dividend_units) - oracle_round.dividend * 100) <= ONE_CENT
         # 核心验收：pnl 差 ≤ 1 分
         assert abs(Decimal(round_.pnl_units) - oracle_round.pnl * 100) <= ONE_CENT
-        # 回合内不变量（open 回合可能 fills 为空）
-        if round_.fills:
-            assert sum(fill.quantity_units for fill in round_.fills) == round_.quantity_units
-        assert round_.pnl_units == (
-            round_.proceeds_units - round_.cost_units + round_.dividend_units
-        )
+        # 回合内不变量：
+        # - closed/oversell：fills 数量 == quantity，pnl = proceeds - cost + dividend；
+        # - open：fills 数量 == 已配对卖出数（≠ 剩余持仓 quantity），
+        #   pnl = proceeds - 已消耗成本 + 已消耗股息（≠ proceeds - 剩余成本 + 股息）。
+        if round_.status in ("closed", "oversell"):
+            if round_.fills:
+                assert sum(fill.quantity_units for fill in round_.fills) == round_.quantity_units
+            if round_.status == "oversell" and not round_.fills:
+                assert round_.pnl_units == 0
+            else:
+                assert round_.pnl_units == (
+                    round_.proceeds_units - round_.cost_units + round_.dividend_units
+                )
 
     produced_lots = {lot.buy_trade_id: lot for lot in result.open_lots}
     expected_lots = {lot.buy_trade_id: lot for lot in expected.open_lots}

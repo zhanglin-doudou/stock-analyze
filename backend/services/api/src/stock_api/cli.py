@@ -46,7 +46,7 @@ from stock_platform.repositories.users import UserRepository
 from stock_platform.sector_fixture import generate_sector_fixture
 from stock_platform.sector_source import create_live_sector_source
 from stock_platform.security import hasher_for
-from stock_platform.symbols import classify_symbol
+from stock_platform.symbols import needs_quote
 from stock_review.metrics.context import parse_period_label
 from stock_review.trade_flags import build_trade_flags_for_user, load_flag_config
 
@@ -943,7 +943,8 @@ async def _sync_market(
     """收盘后把持仓/基准日线的缺口同步进本地 ``market.daily_bar``。
 
     读路径（API/worker 的 metrics/assets）默认只读本地缓存，盘中不拉第三方；
-    本命令是唯一的第三方入口，且盘中不会拉当天。
+    本命令是**批量**同步入口，盘中不会拉当天。资产表构建在缺行情时会按缺失标的与缺失
+    区间补拉一次（资产表设计 §6.5），同样走 ``sync_daily_bars``、同样受盘中截断约束。
     """
     settings = get_settings()
     clock = SystemClock()
@@ -961,13 +962,7 @@ async def _sync_market(
                 )
             ).all()
             min_trade_date = await session.scalar(select(func.min(Trade.trade_date)))
-        codes = sorted(
-            {
-                str(row[0])
-                for row in rows
-                if row[0] and classify_symbol(str(row[0])) in {"stock", "fund"}
-            }
-        )
+        codes = sorted({str(row[0]) for row in rows if row[0] and needs_quote(str(row[0]))})
         wanted = symbols or tuple(validate_symbols((*codes, *BENCHMARK_PROXY_SYMBOLS)))
         sync_start = start or min_trade_date or (clock.today() - timedelta(days=365))
         if dry_run:

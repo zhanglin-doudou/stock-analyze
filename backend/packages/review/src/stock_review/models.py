@@ -40,8 +40,9 @@ from stock_platform.db import Base
 SCHEMA = "review"
 USER_FK = "platform.user.id"
 
-# 回合状态：closed（已平仓） / open（期末仍持有） / data_error（超卖等数据错误，按 closed 落库）
-ROUND_STATUSES: tuple[str, ...] = ("closed", "open", "data_error")
+# 回合状态：closed（已平仓） / open（期末仍持有） / oversell（超卖，待人工修订） /
+# data_error（其它 FIFO 异常，按 closed 落库）
+ROUND_STATUSES: tuple[str, ...] = ("closed", "open", "oversell", "data_error")
 
 # 净值状态：ok（正常） / blocked（阻断，无资产值） / degraded（降级，有数据但不可靠）
 NAV_STATUSES: tuple[str, ...] = ("ok", "blocked", "degraded")
@@ -212,9 +213,8 @@ class AssetDaily(Base):
     `nav_daily` 按月稀疏且由 GET /nav 隐式写入，不适合做该数据源。
 
     硬约束（应用层断言 + DB CHECK）：
-    - `total_assets_units = cash_units + money_fund_units + market_value_units`；
-    - `holding_count >= 0`；**不设** `market_value >= 0`（超卖日允许负市值，标 degraded）；
-    - `money_fund_units` 为货币基金余额合计（单位净值恒 1.0000，持仓不请求行情）；
+    - `total_assets_units = cash_units + market_value_units`；
+    - `holding_count >= 0`；不设 `market_value >= 0`（超卖部分视同资金划转，持仓按 0 截断）；
     - blocked 行数值列全 0、`prev_total/daily_pnl/daily_return` 为 NULL、`status_reason` 非空
       （API 层把 blocked 数值列输出为 null）。
     主键确定性：`ast_` + sha256(user_id|trade_date)[:32]，重复构建幂等。
@@ -224,7 +224,7 @@ class AssetDaily(Base):
     __table_args__ = (
         UniqueConstraint("user_id", "trade_date", name="uq_asset_daily_user_date"),
         CheckConstraint(
-            "total_assets_units = cash_units + money_fund_units + market_value_units",
+            "total_assets_units = cash_units + market_value_units",
             name="ck_asset_daily_total",
         ),
         CheckConstraint("holding_count >= 0", name="ck_asset_daily_holding_count"),
@@ -237,7 +237,6 @@ class AssetDaily(Base):
     )
     trade_date: Mapped[date] = mapped_column(Date, nullable=False)
     cash_units: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
-    money_fund_units: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     market_value_units: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     total_assets_units: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)
     holding_cost_units: Mapped[int] = mapped_column(BigInteger, nullable=False, default=0)

@@ -24,6 +24,8 @@ class EventKind(StrEnum):
     FEE = "fee"
     TRANSFER = "transfer"
     NEW_STOCK = "new_stock"
+    #: 券商行为（申购中签/新股入账/证券清理等登记动作）：引擎无对应分支，显式忽略。
+    BROKER_ACTION = "broker_action"
     OTHER = "other"
 
 
@@ -51,16 +53,17 @@ class FifoEvent:
     ratio_units: int = 0
     line_no: int = 0
     summary: str = ""
-    # 货基标记：允许超卖且超卖不计 data_error。货基红利发放行按口径隔离、不进流水，
-    # 赎回时份额会略多于已入账申购——超出部分即累计利息（零成本），卖款全额计收益。
-    allow_oversell: bool = False
+    # 同 `(trade_date, line_no)` 内的先后次序：人工修订注入行（0）必须排在原账单行（1）之前，
+    # 使同日补录的买入 lot 先于卖出被消耗。真实账单行一律为默认 1。
+    sort_rank: int = 1
 
     @property
-    def stable_key(self) -> tuple[date, int, str, int, int, str]:
-        """稳定序：`(交易日, 文件行号, 摘要, 数量, 均价, trade_id)`（PRD 附录 A7）。"""
+    def stable_key(self) -> tuple[date, int, int, str, int, int, str]:
+        """稳定序：`(交易日, 文件行号, 次序, 摘要, 数量, 均价, trade_id)`（PRD 附录 A7）。"""
         return (
             self.trade_date,
             self.line_no,
+            self.sort_rank,
             self.summary,
             self.quantity_units,
             self.price_units,
@@ -87,7 +90,7 @@ class Fill:
 
 @dataclass(frozen=True, slots=True)
 class Round:
-    """FIFO 回合：closed（正常配对）/ open（期末未平仓）/ data_error（超卖等）。"""
+    """FIFO 回合：closed（正常配对）/ open（期末未平仓）/ oversell（超卖，视同资金划转）。"""
 
     key: str
     security_code: str
@@ -131,11 +134,14 @@ class DataError:
     kind: str
     quantity_units: int
     detail: str
+    #: 超卖未配对份额分摊到的净卖款（分，`amount_units` 已含费）。
+    #: 该部分不构成交易损益，按口径并入期初资产（见 review.bridge）。
+    proceeds_units: int = 0
 
 
 @dataclass(frozen=True, slots=True)
 class FifoResult:
-    """FIFO 引擎输出。rounds = closed（含 data_error）+ open，按稳定序排列。"""
+    """FIFO 引擎输出。rounds = closed（含 oversell）+ open，按稳定序排列。"""
 
     rounds: tuple[Round, ...]
     fills: tuple[Fill, ...]
@@ -144,7 +150,7 @@ class FifoResult:
 
     @property
     def closed_rounds(self) -> tuple[Round, ...]:
-        """正常平仓回合（status == "closed"；data_error 不计入）。"""
+        """正常平仓回合（status == "closed"；oversell 不计入）。"""
         return tuple(round_ for round_ in self.rounds if round_.status == "closed")
 
     @property
@@ -169,6 +175,11 @@ class FifoResult:
             for round_ in self.rounds
             if round_.status in _DIVIDEND_COUNTED_STATUSES
         )
+
+    @property
+    def oversell_proceeds_units(self) -> int:
+        """超卖未配对份额分摊到的净卖款（分）；不构成交易损益。"""
+        return sum(error.proceeds_units for error in self.data_errors if error.kind == "oversell")
 
 
 _DIVIDEND_COUNTED_STATUSES: Final[frozenset[str]] = frozenset({"closed", "open"})

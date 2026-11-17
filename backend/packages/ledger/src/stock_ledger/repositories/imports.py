@@ -46,6 +46,15 @@ class ImportBatchRepository:
         warnings: Sequence[Any],
         status: ImportBatchStatus = ImportBatchStatus.RUNNING,
         replaced_batch_id: str | None = None,
+        template_id: str | None = None,
+        signature: str | None = None,
+        header_row_index: int | None = None,
+        mapping_fingerprint: str | None = None,
+        mapping_items: Sequence[Any] = (),
+        type_resolutions: Sequence[Any] = (),
+        mapping_source: str = "legacy",
+        discarded_count: int = 0,
+        remap_required: bool = False,
     ) -> ImportBatch:
         batch = ImportBatch(
             id=new_batch_id(),
@@ -63,6 +72,15 @@ class ImportBatchRepository:
             warnings=list(warnings),
             ranges={},
             replaced_batch_id=replaced_batch_id,
+            template_id=template_id,
+            signature=signature,
+            header_row_index=header_row_index,
+            mapping_fingerprint=mapping_fingerprint,
+            mapping_items=list(mapping_items),
+            type_resolutions=list(type_resolutions),
+            mapping_source=mapping_source,
+            discarded_count=discarded_count,
+            remap_required=remap_required,
         )
         self._session.add(batch)
         await self._session.flush()
@@ -126,6 +144,41 @@ class ImportBatchRepository:
             select(ImportBatch)
             .where(ImportBatch.user_id == user_id, ImportBatch.preview_id == preview_id)
             .order_by(ImportBatch.created_at.asc())
+        )
+
+    async def has_mapping_conflict(
+        self, user_id: uuid.UUID, file_sha256: str, mapping_fingerprint: str
+    ) -> bool:
+        """同文件（sha256）曾用不同映射成功导入且未撤销 → 重导冲突提示。"""
+        found = await self._session.scalar(
+            select(ImportBatch.id)
+            .where(
+                ImportBatch.user_id == user_id,
+                ImportBatch.file_sha256 == file_sha256,
+                ImportBatch.status == ImportBatchStatus.SUCCEEDED.value,
+                ImportBatch.revoked_at.is_(None),
+                ImportBatch.mapping_fingerprint.is_not(None),
+                ImportBatch.mapping_fingerprint != mapping_fingerprint,
+            )
+            .limit(1)
+        )
+        return found is not None
+
+    async def latest_active_by_signature(
+        self, user_id: uuid.UUID, signature: str, *, exclude_batch_id: str
+    ) -> ImportBatch | None:
+        """撤销增量批次后回退模板 `last_batch_id`：最近一个未撤销的同签名批次。"""
+        return await self._session.scalar(
+            select(ImportBatch)
+            .where(
+                ImportBatch.user_id == user_id,
+                ImportBatch.signature == signature,
+                ImportBatch.id != exclude_batch_id,
+                ImportBatch.revoked_at.is_(None),
+                ImportBatch.status != ImportBatchStatus.REVOKED.value,
+            )
+            .order_by(ImportBatch.created_at.desc(), ImportBatch.id.desc())
+            .limit(1)
         )
 
     async def list_with_cursor(
@@ -199,6 +252,19 @@ class ImportPreviewRepository:
         quarantined_count: int,
         unresolved_columns: Sequence[str],
         expires_at: datetime,
+        broker: str = "generic",
+        signature: str | None = None,
+        header_row_index: int | None = None,
+        mapping_fingerprint: str | None = None,
+        stage: str = "mapping",
+        mapping_items: Sequence[Any] = (),
+        ignored_columns: Sequence[str] = (),
+        mapping_version: int = 0,
+        template_id: str | None = None,
+        verification: dict[str, Any] | None = None,
+        discarded_count: int = 0,
+        type_resolutions: Sequence[Any] = (),
+        quarantine_rows: Sequence[Any] = (),
     ) -> ImportPreview:
         preview = ImportPreview(
             id=new_preview_id(),
@@ -217,6 +283,19 @@ class ImportPreviewRepository:
             quarantined_count=quarantined_count,
             unresolved_columns=list(unresolved_columns),
             expires_at=expires_at,
+            broker=broker,
+            signature=signature,
+            header_row_index=header_row_index,
+            mapping_fingerprint=mapping_fingerprint,
+            stage=stage,
+            mapping_items=list(mapping_items),
+            ignored_columns=list(ignored_columns),
+            mapping_version=mapping_version,
+            template_id=template_id,
+            verification=verification or {},
+            discarded_count=discarded_count,
+            type_resolutions=list(type_resolutions),
+            quarantine_rows=list(quarantine_rows),
         )
         self._session.add(preview)
         await self._session.flush()
@@ -230,6 +309,21 @@ class ImportPreviewRepository:
             select(ImportPreview).where(
                 ImportPreview.user_id == user_id, ImportPreview.id == preview_id
             )
+        )
+        if preview is None:
+            raise ApiError(ErrorCode.IMPORT_PREVIEW_NOT_FOUND, detail=f"预览 {preview_id} 不存在")
+        if preview.expires_at <= (now or datetime.now(tz=UTC)):
+            raise ApiError(ErrorCode.IMPORT_PREVIEW_EXPIRED, detail="预览已过期")
+        return preview
+
+    async def lock_by_id(
+        self, user_id: uuid.UUID, preview_id: str, *, now: datetime | None = None
+    ) -> ImportPreview:
+        """事务内 `SELECT ... FOR UPDATE`：两步编辑的并发写只允许一个赢。"""
+        preview = await self._session.scalar(
+            select(ImportPreview)
+            .where(ImportPreview.user_id == user_id, ImportPreview.id == preview_id)
+            .with_for_update()
         )
         if preview is None:
             raise ApiError(ErrorCode.IMPORT_PREVIEW_NOT_FOUND, detail=f"预览 {preview_id} 不存在")

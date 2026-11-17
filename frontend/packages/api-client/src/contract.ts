@@ -70,6 +70,11 @@ export type TradeHistoryItem = ApiSchemas["TradeHistoryItem"];
 export type TradeHistoryOut = ApiSchemas["TradeHistoryOut"];
 export type TradePatchIn = ApiSchemas["TradePatchIn"];
 export type AffectedMetric = ApiSchemas["AffectedMetric"];
+// 2026-11-15：超卖卖出人工修订（API-107~109）
+export type OversellRevisionOut = ApiSchemas["OversellRevisionOut"];
+export type OversellRevisionIn = ApiSchemas["OversellRevisionIn"];
+export type OversellRevisionMutationOut = ApiSchemas["OversellRevisionMutationOut"];
+export type OversellRevisionSellOut = ApiSchemas["OversellRevisionSellOut"];
 
 export type PreviewOut = ApiSchemas["PreviewOut"];
 export type PreviewColumnOut = ApiSchemas["PreviewColumn"];
@@ -79,6 +84,13 @@ export type PreviewFileOut = ApiSchemas["PreviewFile"];
 
 export type ImportCommitIn = ApiSchemas["ImportCommitIn"];
 export type ImportRange = ApiSchemas["ImportRange"];
+// 2026-11-13：导入映射重构 v2（API-098~101/106）
+export type ImportMappingIn = ApiSchemas["ImportMappingIn"];
+export type ImportMappingItemIn = ApiSchemas["ImportMappingItemIn"];
+export type ImportTypesIn = ApiSchemas["ImportTypesIn"];
+export type ImportTypeResolutionIn = ApiSchemas["ImportTypeResolutionIn"];
+export type ImportTemplateOut = ApiSchemas["PreviewTemplateOut"];
+export type ImportTemplatePage = ApiSchemas["ImportTemplatePage"];
 export type BatchOut = ApiSchemas["BatchOut"];
 export type BatchDetailOut = ApiSchemas["BatchDetailOut"];
 export type BatchFillOut = ApiSchemas["BatchFill"];
@@ -191,8 +203,13 @@ export type TradeSide = Trade["side"];
 export type CommitImportBody = ImportCommitIn;
 /** API-007 创建 PAT 请求体（`PatIn`）。 */
 export type CreateTokenBody = PatIn;
-/** API-010 预览时除文件外的 multipart 字段（`Body_previewImport` 去掉 `file`）。 */
-export type PreviewOptions = Omit<ApiSchemas["Body_previewImport"], "file">;
+/** API-010 预览时除文件外的 multipart 字段（`Body_previewImport` 去掉 `file`）。
+ * 契约里 `broker` 带默认值但被生成器标为必填，客户端按"可选"使用；`flow` 非契约字段，
+ * 仅用于追加 `X-Import-Flow: v2` 头（不传则保持 legacy 严格 422 行为）。
+ */
+export type PreviewOptions = Partial<Omit<ApiSchemas["Body_previewImport"], "file">> & {
+  flow?: "v2";
+};
 
 /** 流水列表（客户端增强）：契约 `TradePage` + HTTP 头里的 ETag + 响应 meta。
  * 契约部分由 `AssertTradePageBase` 钉死，附加字段只在客户端使用。
@@ -393,7 +410,6 @@ export type AssertTradeFields = Assert<
     | "other_fee"
     | "cash_balance"
     | "cash_balance_available"
-    | "money_fund_balance"
     | "dedupe_key"
     | "version"
     | "deleted_at"
@@ -471,8 +487,6 @@ export type AssertAssetPointFields = Assert<
     AssetPoint,
     | "date"
     | "cash"
-    | "money_fund"
-    | "balance"
     | "market_value"
     | "total_assets"
     | "holding_cost"

@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import type {
+  OversellRevisionOut,
   Round,
   RoundFillPage,
   RoundInsightDetail,
@@ -21,6 +22,9 @@ vi.mock("../client", () => ({
     trades: {
       putReason: vi.fn(),
       deleteReason: vi.fn(),
+      oversellRevision: vi.fn(),
+      putOversellRevision: vi.fn(),
+      deleteOversellRevision: vi.fn(),
     },
   },
 }));
@@ -29,6 +33,9 @@ const getRound = vi.mocked(api.rounds.get);
 const getFills = vi.mocked(api.rounds.fills);
 const getInsight = vi.mocked(api.rounds.insight);
 const putReason = vi.mocked(api.trades.putReason);
+const getRevision = vi.mocked(api.trades.oversellRevision);
+const putRevision = vi.mocked(api.trades.putOversellRevision);
+const deleteRevision = vi.mocked(api.trades.deleteOversellRevision);
 
 function makeRound(overrides: Partial<Round> = {}): Round {
   return {
@@ -651,4 +658,129 @@ it("flag_config.stale=false：不显示旗标过期横幅", async () => {
 
   await screen.findByRole("table", { name: "买入流水与事后表现" });
   expect(screen.queryByTestId("flag-stale-notice")).toBeNull();
+});
+
+// ── 超卖成本补录（API-107~109，2026-11-15）──────────────────
+function makeRevision(overrides: Partial<OversellRevisionOut> = {}): OversellRevisionOut {
+  return {
+    sell: {
+      trade_id: "trd_sell_1",
+      trade_date: "2026-06-20",
+      security_code: "600519",
+      security_name: "贵州茅台",
+      quantity: "150",
+      amount: "2250.00",
+      oversell_quantity: "150",
+      note: null,
+    },
+    status: "none",
+    cost: null,
+    cash_trade: null,
+    buy_trade: null,
+    round_id: null,
+    ...overrides,
+  };
+}
+
+function renderOversellDetail(): void {
+  render(
+    <MemoryRouter initialEntries={["/rounds/rnd_1"]}>
+      <Routes>
+        <Route path="/rounds/:roundId" element={<RoundDetail />} />
+        <Route path="/rounds/rnd_new" element={<div>修订后的回合</div>} />
+      </Routes>
+    </MemoryRouter>,
+  );
+}
+
+describe("RoundDetail 超卖成本补录", () => {
+  beforeEach(() => {
+    // jsdom 不实现 <dialog> 的模态方法，测试里补一个最小实现。
+    Object.defineProperty(HTMLDialogElement.prototype, "showModal", {
+      configurable: true,
+      value: function (this: HTMLDialogElement) {
+        this.open = true;
+      },
+    });
+    getRound.mockResolvedValue(
+      makeRound({
+        status: "oversell",
+        quantity: "150",
+        cost: "0.00",
+        proceeds: "2250.00",
+        pnl: "0.00",
+        return_rate: "0.00000000",
+        holding_days: 0,
+        fills_count: 0,
+        oversell_quantity: "150",
+        open_trade_id: "trd_sell_1",
+        close_trade_id: "trd_sell_1",
+      }),
+    );
+    getFills.mockResolvedValue({ items: [], total: 0 });
+  });
+
+  it("提交成本后调用 PUT 修订并跳转到重算后的回合", async () => {
+    // 页面卡片与弹窗各自读取一次修订信息，重算完成后再次查询。
+    getRevision.mockResolvedValueOnce(makeRevision());
+    getRevision.mockResolvedValueOnce(makeRevision());
+    putRevision.mockResolvedValueOnce({
+      revision: makeRevision({
+        status: "revised",
+        cost: "1000.00",
+        sell: { ...makeRevision().sell, oversell_quantity: "0" },
+      }),
+      rebuild_job_id: null,
+      assets_job_id: null,
+    });
+    // finishRevision 重新查询：返回新回合 id，驱动跳转
+    getRevision.mockResolvedValueOnce(
+      makeRevision({
+        status: "revised",
+        cost: "1000.00",
+        sell: { ...makeRevision().sell, oversell_quantity: "0" },
+        round_id: "rnd_new",
+      }),
+    );
+
+    renderOversellDetail();
+
+    fireEvent.click(await screen.findByRole("button", { name: "补录 / 查看修订" }));
+    const input = await screen.findByLabelText("未配对部分的总成本（元）");
+    fireEvent.change(input, { target: { value: "1000.00" } });
+    fireEvent.click(screen.getByRole("button", { name: "提交修订" }));
+
+    await waitFor(() => {
+      expect(putRevision).toHaveBeenCalledWith("trd_sell_1", { cost: "1000.00" });
+    });
+    expect(await screen.findByText("修订后的回合")).toBeTruthy();
+  });
+
+  it("真实账单已覆盖时禁止提交修订，但允许撤回", async () => {
+    getRevision.mockResolvedValueOnce(
+      makeRevision({ status: "superseded", cost: "1000.00", round_id: "rnd_new" }),
+    );
+    getRevision.mockResolvedValueOnce(
+      makeRevision({ status: "superseded", cost: "1000.00", round_id: "rnd_new" }),
+    );
+    deleteRevision.mockResolvedValueOnce({
+      revision: makeRevision({ status: "not_oversell" }),
+      rebuild_job_id: null,
+      assets_job_id: null,
+    });
+    getRevision.mockResolvedValueOnce(makeRevision({ status: "not_oversell" }));
+
+    renderOversellDetail();
+
+    fireEvent.click(await screen.findByRole("button", { name: "补录 / 查看修订" }));
+    expect((await screen.findAllByText("真实账单已覆盖（待确认）")).length).toBeGreaterThan(0);
+
+    const submit = screen.getByRole("button", { name: "提交修订" });
+    expect((submit as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.click(screen.getByRole("button", { name: "撤回修订" }));
+    await waitFor(() => {
+      expect(deleteRevision).toHaveBeenCalledWith("trd_sell_1");
+    });
+  });
 });

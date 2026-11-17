@@ -19,6 +19,7 @@ import { DataTable, type DataTableColumn } from "../ui/DataTable";
 const STATUS_LABELS: Record<RoundStatus, string> = {
   closed: "已平仓",
   open: "持仓中",
+  oversell: "超卖",
   data_error: "数据异常",
 };
 
@@ -50,6 +51,7 @@ export function Rounds() {
   const [draft, setDraft] = useState<RoundFilters>(EMPTY_FILTERS);
   const [filters, setFilters] = useState<RoundFilters>(EMPTY_FILTERS);
   const [page, setPage] = useState<RoundPage | null>(null);
+  const [oversellRows, setOversellRows] = useState<Round[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [notice, setNotice] = useState("");
@@ -64,8 +66,9 @@ export function Rounds() {
       setError(null);
       const range = periodToDateRange(filters.period);
       try {
-        setPage(
-          await api.rounds.list({
+        // 超卖回合单独取一份（不受上方状态筛选影响），在列表之上单独展示。
+        const [list, oversell] = await Promise.all([
+          api.rounds.list({
             limit: 50,
             cursor,
             security_code: filters.security_code || undefined,
@@ -73,7 +76,10 @@ export function Rounds() {
             from: range.from || undefined,
             to: range.to || undefined,
           }),
-        );
+          api.rounds.list({ limit: 100, status: "oversell" }),
+        ]);
+        setPage(list);
+        setOversellRows(oversell.items);
       } catch (err) {
         setError(err);
       } finally {
@@ -199,6 +205,36 @@ export function Rounds() {
     },
   ];
 
+  const oversellColumns: Array<DataTableColumn<Round>> = [
+    {
+      key: "security",
+      header: "代码 / 名称",
+      priority: 1,
+      render: (row) => `${row.security_code} ${row.security_name}`.trim(),
+    },
+    { key: "close", header: "平仓日", priority: 2, render: (row) => row.close_date ?? "—" },
+    { key: "quantity", header: "数量", priority: 2, align: "right", render: (row) => row.quantity },
+    { key: "proceeds", header: "卖出金额", priority: 2, align: "right", render: (row) => row.proceeds },
+    {
+      key: "pnl",
+      header: "盈亏",
+      priority: 1,
+      align: "right",
+      render: (row) => <span className={signedClass(row.pnl)}>{row.pnl}</span>,
+    },
+    {
+      key: "actions",
+      header: "操作",
+      priority: 1,
+      align: "right",
+      render: (row) => (
+        <Link className="btn btn-ghost" to={`/rounds/${row.round_id}`}>
+          详情
+        </Link>
+      ),
+    },
+  ];
+
   const building = activeJobId !== null;
   const emptyText = loading
     ? "加载中…"
@@ -208,6 +244,26 @@ export function Rounds() {
 
   return (
     <div>
+      {oversellRows.length > 0 ? (
+        <section className="oversell-section" aria-label="超卖回合">
+          <h1 className="danger-text">超卖回合（重要！需手工订正）</h1>
+          <p className="muted">
+            账单记录的卖出数量超过买入记录（多为历史持仓未导入）。超卖部分的卖款已计入现金与总资产，
+            但不算收益；这些回合不计入正常回合列表，也不会影响已平仓统计。
+          </p>
+          <p className="muted">
+            需要补录缺失的买入成本时，点「详情」进入回合页使用「超卖成本补录」。
+          </p>
+          <DataTable
+            caption="超卖回合列表"
+            columns={oversellColumns}
+            rows={oversellRows}
+            rowKey={(row) => row.round_id}
+            emptyText="暂无超卖回合"
+            loading={loading && page == null}
+          />
+        </section>
+      ) : null}
       <h1>回合</h1>
       <p className="muted">
         导入账单成功后，后台会自动按 FIFO 配对建立回合（可分批减仓、计入股息/送转/配股）。
@@ -259,6 +315,7 @@ export function Rounds() {
             <option value="">全部</option>
             <option value="closed">已平仓</option>
             <option value="open">持仓中</option>
+            <option value="oversell">超卖</option>
             <option value="data_error">数据异常</option>
           </select>
         </FilterField>

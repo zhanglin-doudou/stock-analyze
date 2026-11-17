@@ -21,9 +21,9 @@
 
 | # | 决策点 | 推荐方案 | 备选 | 影响 |
 |---|---|---|---|---|
-| **D-01** | **"总投入最大成本"** 的定义（**2026-10-31 修订**） | **银证转账峰值转入成本**：`max(Σ 银证转账 amount_units)`（转入 + / 转出 −，累计净转入的历史峰值；≤0 → 缺失）；字段名 `max_invested_cost` 保留兼容，文案"银证转账峰值转入成本"；原「历史峰值持仓成本」口径已弃用 | ① 当前持仓成本合计；② 累计买入成本（Σ 所有买入成本，含已卖出）；③ 历史峰值总资产 | 直接决定"峰值成本收益率"分母；选错会给出无意义百分比 |
+| **D-01** | **"总投入最大成本"** 的定义（**2026-10-31 修订**） | **资金划转峰值转入成本**：`max(Σ 资金划转 amount_units)`（转入 + / 转出 −，累计净转入的历史峰值；≤0 → 缺失）；字段名 `max_invested_cost` 保留兼容，文案"资金划转峰值转入成本"；原「历史峰值持仓成本」口径已弃用 | ① 当前持仓成本合计；② 累计买入成本（Σ 所有买入成本，含已卖出）；③ 历史峰值总资产 | 直接决定"峰值成本收益率"分母；选错会给出无意义百分比 |
 | **D-02** | **"总收益额"** 的口径 | **全历史累计总收益**（含已实现+浮动+股息+利息−费用，含当前持仓市值）：`total_profit = latest_total_assets − initial_cash − initial_open_cost − cashflows − other`；`bridge` 的 `period_end = A`（最新资产日）、`period_start = 首笔流水日`；`|residual_units| > B.tolerance_units` 或 `B.status != ok` → `degraded/missing`（不硬算） | ① 仅已实现回合 pnl；② 仅当月/当年收益；③ TWR 折算金额 | 与"总投入最大成本"共同决定收益率；`other`（无份额打新/补差）语义需人工确认；有份额打新缴款已进 lot 成本，不进 `other` |
-| **D-03** | **"最大收益额与最大成本的比率"** | **最大单笔已平仓收益额 ÷ 银证转账峰值转入成本**（与 D-01 一致），字段 `max_profit_cost_pct`；另在 tooltip 给 `max_profit_round_return_pct`（该笔收益率）作辅助，不混用 | ① 最大单笔收益 ÷ 该笔自身成本（=最大单笔收益率）；② 最大单笔收益 ÷ 当前持仓成本；③ 最大单笔收益 ÷ 累计买入成本 | 用户原句"最大成本"未说明是"该笔成本"还是"总投入峰值"；需人工确认 |
+| **D-03** | **"最大收益额与最大成本的比率"** | **最大单笔已平仓收益额 ÷ 资金划转峰值转入成本**（与 D-01 一致），字段 `max_profit_cost_pct`；另在 tooltip 给 `max_profit_round_return_pct`（该笔收益率）作辅助，不混用 | ① 最大单笔收益 ÷ 该笔自身成本（=最大单笔收益率）；② 最大单笔收益 ÷ 当前持仓成本；③ 最大单笔收益 ÷ 累计买入成本 | 用户原句"最大成本"未说明是"该笔成本"还是"总投入峰值"；需人工确认 |
 | **D-04** | **"已平仓股票数量"** | **distinct security_code（已平仓且非 data_error）** 为 headline；同时返回 `closed_round_count`（平仓笔数）供副标题，避免"股票数/笔数"混淆 | 只按平仓笔数计（更接近 win_rate 的 n） | 影响文案与验收断言；两个口径同时展示最稳 |
 | **D-05** | **最大回撤的数据范围与异常行** | 用全历史 `asset_daily` **有效日收益**（`status=ok/degraded`）复利链；仅 blocked/NULL 行断链，degraded（新股按成本、债券缺行情）日收益有效不断链、不进 missing；有效观测 `<60` 个工作日（资产表自 2026-10-31 起周末不写行，故观测数按工作日计）→ `insufficient`（不冒充"历史回撤"）；完全无有效段 → `blocked`。全历史无回撤 → `mdd=0` + 起止 null | ① 任一 blocked 整块不出值（会让有单日断链的用户永久看不到历史）；② 跳过 blocked 继续算（失真）；③ 仅用当前月 `timing.drawdown`（不是"历史"） | 影响历史概览可用性；演示数据若历史有断链会降级而非整块消失；需人工确认 60 日门槛 |
 | **D-06** | **旧"五卡"验收如何合并到两板块** | **保留旧内容为两板块内的子块**：净值 summary + 费用 + **对账横幅**并入"资产概览"；四数字（胜率/盈亏比/持仓天数/集中度，带 n/CI/可信度）+ 行为 + 最赚最亏 + **下钻入口**并入"历史概览"；页面仍只有 2 个大板块 | ① 直接删旧五卡（PRD/验收缺项）；② 保留旧五卡再加两板块（页面过载，违背2板块） | 下钻用 `/metrics/{id}/explain` 详情页替代"抽屉"，需同步修订验收；对账/可信度标签保留 |
@@ -89,7 +89,7 @@
 | A3 | 资产余额 | `asset_overview.balance` | 资产余额（现金+货币基金） | `kpi-balance` | 最新资产日 |
 | A4 | 仓位百分比 | `asset_overview.position_pct` | 仓位 | `kpi-position` | `market_value/total_assets` |
 | A5 | 总收益额 | `asset_overview.total_profit` | 总收益 | `kpi-total-profit` | 全历史（D-02） |
-| A6 | 总投入最大成本 | `asset_overview.max_invested_cost` | 银证转账峰值转入成本 | `kpi-max-invested-cost` | 全历史（D-01） |
+| A6 | 总投入最大成本 | `asset_overview.max_invested_cost` | 资金划转峰值转入成本 | `kpi-max-invested-cost` | 全历史（D-01） |
 | A7 | 最大成本收益率 | `asset_overview.max_cost_return_pct` | 峰值成本收益率 | `kpi-max-cost-return` | A5/A6 |
 | H1 | 已平仓股票数量 | `history_overview.closed_security_count` | 已平仓股票数 | `kpi-closed-securities` | 全历史 closed rounds distinct code |
 | H2 | 盈利数量 | `history_overview.win_count` | 盈利笔数 | `kpi-win-count` | 全历史 closed rounds |
@@ -152,7 +152,7 @@
 | `total_assets` | `A.total_assets_units` | CNY 2 位 | null |
 | `position_pct` | `market_value / total_assets`（8 位比率、2 位百分比展示） | `"76.19%"` | `total_assets<=0` → null + reason |
 | `total_profit` | `A.total_assets − B.initial_cash − B.initial_open_cost − B.cashflows − B.other`；`B.period_end=A`；`abs(B.residual_units) > B.tolerance_units` 或 `B.status != "ok"` → `degraded/missing`，不硬算 | CNY 2 位 | B blocked、stale、A blocked → null |
-| `max_invested_cost` | **银证转账峰值转入成本**：`max(Σ 银证转账 amount_units)`（`category=transfer`，转入 + / 转出 −，累计净转入的历史峰值；≤0 → null + missing） | CNY 2 位 | 无转账流水/峰值 ≤0 → null（`DASHBOARD_MAX_INVESTED_COST_MISSING`） |
+| `max_invested_cost` | **资金划转峰值转入成本**：`max(Σ 资金划转 amount_units)`（`category=transfer`，转入 + / 转出 −，累计净转入的历史峰值；≤0 → null + missing） | CNY 2 位 | 无转账流水/峰值 ≤0 → null（`DASHBOARD_MAX_INVESTED_COST_MISSING`） |
 | `max_cost_return_pct` | `total_profit / max_invested_cost`（峰值转入成本） | `"6.86%"` | 分母 0/null → null |
 | `total_fees` | 全历史 `fee_breakdown(trades_until_A)` 的 `fee_amount`（佣金+印花税+其他费+独立费用行） | CNY 2 位 | 无流水 → `"0.00"`；**不存在"费用列缺失"状态**（三列 NOT NULL default 0），若解析警告缺列则 `degraded` |
 | `bill_start_date` / `bill_end_date` | 全历史流水的首/末 `trade_date`（D-20；流水一次加载至 `today`） | date | 无流水 → null（`DASHBOARD_BILL_RANGE_MISSING`） |
@@ -166,7 +166,7 @@
 - `initial_open_cost` 仅在数据从持仓中途开始时非零；全历史起点=首笔流水时通常为 0，但保留字段不删，避免假设错误。
 - **stale 与 total_profit**：若 `asset_build_state` 显示流水指纹已变化（stale），`total_profit` 可能"旧资产 − 新流水"，必须置 `null` + `degraded`，不能显示可能误导的数。
 - 持仓市值之和必须与 `A.market_value` 在同一价格阶梯/同一估值日对账；差异 > 1 分 → `degraded` 并说明，不静默取一个。为保证同价，看板持仓**只读行情缓存**（不触发尾部补拉），直接复用资产构建时落库的价格；`build_state=stale` 时快照落后于当前流水/行情，二者本就不可比，只提示 `DASHBOARD_STALE`，不再叠加伪 `HOLDINGS_MISMATCH`。
-- `max_invested_cost` 的口径见 D-01（银证转账峰值转入成本）；峰值 ≤0 时置 null 并加入 `missing[]`，不使用持仓成本/累计买入成本等备选分母。
+- `max_invested_cost` 的口径见 D-01（资金划转峰值转入成本）；峰值 ≤0 时置 null 并加入 `missing[]`，不使用持仓成本/累计买入成本等备选分母。
 
 ### 3.2 历史概览
 
@@ -181,7 +181,7 @@
 | `win_bar_pct`... | 与 `*_pct` 同值（CSS 宽度） | 同上 | 与 pct 同空；可只保留 bar 一套 |
 | `max_profit` | `max(pnl of R)`（含股息，FIFO 回合 pnl） | CNY 2 位 | R 空 → null |
 | `max_profit_round` | `{round_id, security_code, security_name, close_date, pnl, return_rate}`；并列取 `close_date,id` 最早 | 对象 | null |
-| `max_profit_cost_pct` | `max_profit / max_invested_cost`（D-03；分母为银证转账峰值转入成本） | `"13.89%"` | 分母 0/null → null |
+| `max_profit_cost_pct` | `max_profit / max_invested_cost`（D-03；分母为资金划转峰值转入成本） | `"13.89%"` | 分母 0/null → null |
 | `top_holding_rounds` | R 按 `holding_days DESC, close_date, id` 取 3；含 `round_id/security_code/security_name/close_date/pnl/return_rate_pct/holding_days` | 数组 | 不足 3 条返回现有条目；R 空 → `[]` |
 | `top_trade_counts` | 全历史流水按 `security_code`（可转债归并上市代码）聚合：`buy` 行 + `sell` 行分别计一次交易（`trade_count=buy_count+sell_count`），排除货币基金与现金类（`CASHFLOW_CATEGORIES`）；按 `trade_count DESC, code` 取 3。每行含 `security_code/security_name/buy_count/sell_count/trade_count/pnl/total_fees`：`pnl` = 全部回合（含 open 回合已实现卖出部分，`data_error` 剔除）该代码 `pnl_units` 之和；`total_fees` = 该代码流水 `commission+stamp_tax+other_fee` 之和（独立 `fee` 行三列全 0 时取 `abs(amount)`）。**不展示费率**（用户改为展示总费用金额，D-20） | 数组 | 无流水 → `[]`；个股无回合 → `pnl=null` |
 | `top_rounds` / `bottom_rounds` | R 按 `pnl DESC/ASC, close_date, id` 取 3+3；含 `round_id/security_code` 供跳转；`flat` 可入 top/bottom 但标 0 | 数组 | 不足 3 条则返回现有条目，不补空对象 |
@@ -393,7 +393,7 @@ def max_drawdown_window(...) -> DrawdownWindow:
   <div data-board="asset-overview"> 资产概览（板块级容器）
     <BuildBanner> build_state/data_status / 数据截止 / 去构建 CTA（跳 /assets，不自动 job）
     <ReconciliationBanner> 对账断链/补差（/reconciliation?period=legacy_period）
-    <KpiGrid> 现金 / 持仓市值 / 仓位 / 总收益 / 银证转账峰值转入成本 / 峰值成本收益率 / 总费用
+    <KpiGrid> 现金 / 持仓市值 / 仓位 / 总收益 / 资金划转峰值转入成本 / 峰值成本收益率 / 总费用
     <HoldingsTable> 代码 名称 数量 成本 市值 权重（weight=mv/Σmv，sum≈100%）
     <SectorBlock data-board-member="asset-overview" lazy> 板块配置（/sectors/overview industry+concept，4 KPI + 偏好 Top3 + 概念 caveat + link-sectors）
     <AssetSubBlocks lazy> 净值与收益（/nav?period=legacy_period，标签：本月）· 费用（/metrics?period=legacy_period&ids=perf.fee,perf.fee_breakeven，标签：本月）
@@ -595,7 +595,7 @@ printf 'SKIP: %s\n' "${SKIPS[@]}"
 | 层 | 文件 | 用例 |
 |---|---|---|
 | 纯函数 | `backend/tests/unit/core/test_drawdown_window.py` | 无回撤/V 形/单调下跌/未恢复/blocked/异常收益 |
-| 应用 | `backend/tests/unit/review/test_dashboard_application.py` | 15 字段、总收益公式、桥接期初资金（A9）、账单起止（A8）、年化 TWR（A10）、银证转账峰值转入成本、盈亏占比、Top3（持仓时长；交易次数按流水 buy/sell + 个股累计收益/总费用）、缺失状态、禁写库 |
+| 应用 | `backend/tests/unit/review/test_dashboard_application.py` | 15 字段、总收益公式、桥接期初资金（A9）、账单起止（A8）、年化 TWR（A10）、资金划转峰值转入成本、盈亏占比、Top3（持仓时长；交易次数按流水 buy/sell + 个股累计收益/总费用）、缺失状态、禁写库 |
 | API | `backend/tests/api/test_dashboard.py` | 200/字段格式（含账单起止/初始资金、交易次数买卖拆分+个股收益/费用）、空数据 200 missing、blocked 200、**无 token 401、admin 403、B 列表型 200 且无 A 数据**（不是跨租户 404）、无敏感字段、op coverage ≥3 |
 | 隔离 | `backend/tests/isolation/test_isolation_matrix.py` | `LIST_ISOLATION_MATRIX`（B 200 无 A）、`ADMIN_FORBIDDEN`（403）、`UNAUTHENTICATED_MATRIX`（401）；gate-tenant |
 | 契约 | `make api-snapshot/api-check/sdk` + `backend/tests/contract/test_openapi_contract.py` | API-084 在 `OPERATION_META`、422/401/403 错误码、example；契约 operation 数 50→51（或同步集合）；`gate_endpoint_coverage` 84/30 |
@@ -667,7 +667,7 @@ printf 'SKIP: %s\n' "${SKIPS[@]}"
 ## 12. 验收 checklist（本任务完成时）
 
 - [ ] API-084 契约登记、OpenAPI/SDK 同步、`api-check` 全绿。
-- [ ] `/dashboard` 两板块，§1.3 的 A1~A7/A8/A9/A10/H1~H8 齐全；A6 展示银证转账峰值转入成本；「总资产」下方展示账单起止 + 初始资金，「总费用消耗」后展示年化收益率；数字与 API 逐字符一致。
+- [ ] `/dashboard` 两板块，§1.3 的 A1~A7/A8/A9/A10/H1~H8 齐全；A6 展示资金划转峰值转入成本；「总资产」下方展示账单起止 + 初始资金，「总费用消耗」后展示年化收益率；数字与 API 逐字符一致。
 - [ ] 历史概览「持仓时长 Top3」「交易次数 Top3」两列布局，来自 `top_holding_rounds`/`top_trade_counts`，交易次数按流水 buy/sell 分别计数并展示个股累计收益/总费用，前端零计算。
 - [ ] 旧五卡子块按 §2 合并，验收剧本更新；legacy_period=最近数据月。
 - [ ] **blocked/missing 不显示数字；stale 可显示并提示**；无 token 401、admin 403、B 列表 200 无 A 数据。
@@ -683,9 +683,9 @@ printf 'SKIP: %s\n' "${SKIPS[@]}"
 
 | # | 问题 | 推荐 | 备选 | 影响/必须确认 |
 |---|---|---|---|---|
-| D-01 | "总投入最大成本" | **银证转账峰值转入成本**（累计净转入峰值；≤0 缺失） | 当前成本/累计买入/峰值总资产 | 收益率分母；2026-10-31 已按用户口径修订 |
+| D-01 | "总投入最大成本" | **资金划转峰值转入成本**（累计净转入峰值；≤0 缺失） | 当前成本/累计买入/峰值总资产 | 收益率分母；2026-10-31 已按用户口径修订 |
 | D-02 | "总收益额" | 全历史（含浮盈+股息+利息−费用）；`other` 作为外部流；stale 时 null | 已实现/当月/TWR 金额 | `other`（打新/补差）语义；是否含已收股息 |
-| D-03 | 最大收益额/最大成本比率 | 最大单笔 FIFO pnl ÷ 银证转账峰值转入成本 | ÷ 该笔成本（=最大单笔收益率）/峰值总资产 | 与 D-01 同分母；建议另给该笔收益率 |
+| D-03 | 最大收益额/最大成本比率 | 最大单笔 FIFO pnl ÷ 资金划转峰值转入成本 | ÷ 该笔成本（=最大单笔收益率）/峰值总资产 | 与 D-01 同分母；建议另给该笔收益率 |
 | D-04 | "已平仓股票数量" | distinct code；另给 round count | 仅 round count | 文案/验收 |
 | D-05 | 最大回撤异常行/样本 | 有效连续段 + 60 个工作日门槛；blocked/degraded 分段披露，不整块抹掉 | 任一 blocked 整块/跳过不管 | 历史可用性；需与 FR-R8 一致 |
 | D-06 | 旧五卡合并/PRD 5 卡 | 两板块内子块保留 + 对账/可信度/下钻；正式修订 PRD/Testing | 删旧卡/另加板块/不修订 PRD | 页面结构/验收/文档偏离 |

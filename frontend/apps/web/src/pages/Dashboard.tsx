@@ -10,6 +10,7 @@ import type {
   MetricItem,
 } from "@sa/api-client";
 import { api } from "../client";
+import { useJobCompletion } from "../lib/useJobCompletion";
 import { useStaleAssetBuild } from "../lib/useStaleAssetBuild";
 import { TrendChart } from "../charts/TrendChart";
 import { SectorBlock } from "./dashboard/SectorBlock";
@@ -252,15 +253,31 @@ export function Dashboard(): ReactElement {
     staleTime: 10 * 60_000,
   });
 
+  // 超卖降级：资产表降级时自动拉取超卖回合列表（与资产页同源 API，不重复口径）。
+  // 非降级不发请求；自动构建完成后由 onRefresh 显式补拉，绕过 staleTime。
+  const degraded = data?.build.last_status === "degraded";
+  const oversellQuery = useQuery({
+    queryKey: ["rounds", "oversell", "dashboard"],
+    queryFn: () => api.rounds.list({ limit: 100, status: "oversell" }),
+    enabled: degraded,
+    staleTime: 30_000,
+  });
+  const oversellRounds = oversellQuery.data?.items ?? [];
+
   // 资产表 stale 自动构建：与资产页共用同一 hook / 同一跨页去重真源。
   // 判定只用后端 `build` 只读字段；构建完成后重拉看板与日线，文案全部来自后端。
   const auto = useStaleAssetBuild({
     build: data?.build,
     onRefresh: async (): Promise<void> => {
-      await dashboardQuery.refetch();
-      await chartQuery.refetch();
+      const [fresh] = await Promise.all([dashboardQuery.refetch(), chartQuery.refetch()]);
+      // 构建结果仍是降级（含新出现的超卖）→ 立即补拉超卖回合列表。
+      if (fresh.data?.build.last_status === "degraded") await oversellQuery.refetch();
     },
   });
+
+  // 看板不渲染进度条，但终态订阅必须挂在页面级：收尾（SSE 为主、失效后兜底轮询）
+  // 与资产页共用同一实现，避免这里再写一套轮询。
+  useJobCompletion(auto.jobId, auto.handleJobDone);
 
   if (dashboardQuery.error != null) {
     return (
@@ -339,6 +356,38 @@ export function Dashboard(): ReactElement {
         </p>
       ) : null}
 
+      {data.build.last_status === "degraded" ? (
+        <div className="dash-notice" data-testid="dashboard-degraded">
+          <p>
+            资产表部分日期为降级状态，修复数据后请到{" "}
+            <Link to={data.links.assets}>资产页</Link> 重新构建。
+          </p>
+          {data.build.status_reason ? (
+            <p className="dash-muted" data-testid="dashboard-degraded-reason">
+              {data.build.status_reason}
+            </p>
+          ) : null}
+          {oversellRounds.length > 0 ? (
+            <div data-testid="dashboard-oversell">
+              <p>
+                检测到 {oversellRounds.length} 个超卖回合（卖出数量超过当时持仓），请补录对应成本：
+              </p>
+              <ul className="dash-missing">
+                {oversellRounds.map((round) => (
+                  <li key={round.round_id} data-testid="dashboard-oversell-item">
+                    <code>{round.security_code}</code> <span>{round.security_name}</span>{" "}
+                    <span className="dash-muted">{round.close_date ?? round.open_date}</span>{" "}
+                    <span className="dash-muted">
+                      卖出 {round.oversell_quantity ?? round.quantity}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
+
       {data.missing.length > 0 ? (
         <section className="dash-panel" data-testid="missing-list">
           <div className="dash-panel-head">
@@ -391,7 +440,7 @@ export function Dashboard(): ReactElement {
             value={shown(asset.market_value_display, asset.market_value)}
             testId="kpi-market-value"
           />
-          <Kpi label="资产余额" value={shown(asset.balance_display, asset.balance)} testId="kpi-balance" />
+          <Kpi label="现金余额" value={shown(asset.cash_display, asset.cash)} testId="kpi-cash" />
           <div className="dash-kpi" data-testid="kpi-position">
             <span className="dash-kpi-label">仓位</span>
             <strong className="num">{displayValue(asset.position_pct)}</strong>
@@ -400,7 +449,7 @@ export function Dashboard(): ReactElement {
             </span>
           </div>
           <Kpi
-            label="银证转账峰值转入成本"
+            label="资金划转峰值转入成本"
             value={shown(asset.max_invested_cost_display, asset.max_invested_cost)}
             testId="kpi-max-invested-cost"
           />

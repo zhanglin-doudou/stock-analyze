@@ -1,7 +1,14 @@
-import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
-import { Link, useParams } from "react-router-dom";
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactElement,
+} from "react";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import type {
   ForwardReturnOut,
+  OversellRevisionOut,
   Round,
   RoundFill,
   RoundFillPage,
@@ -13,6 +20,7 @@ import { api } from "../client";
 import { signedClass } from "../lib/signed";
 import { ProblemView } from "../ui/Problem";
 import { DataTable, type DataTableColumn, type DataTableExpansion } from "../ui/DataTable";
+import { OversellRevisionDialog, REVISION_STATUS_LABELS } from "../ui/OversellRevisionDialog";
 import { TradeReasonForm } from "../ui/TradeReasonForm";
 import { Icon } from "../ui/icons";
 import { FlagGlossary } from "../ui/FlagGlossary";
@@ -304,6 +312,48 @@ export function RoundDetail() {
     void load();
   }, [load]);
 
+  // ── 超卖卖出人工修订（API-107~109）───────────────────────
+  // 回合维度的超卖卖出 = 该回合最后一笔卖出（引擎在持仓吃完时即以它为 close_trade_id）。
+  const navigate = useNavigate();
+  const sellTradeId = round?.status === "oversell" ? (round.close_trade_id ?? null) : null;
+  const [revision, setRevision] = useState<OversellRevisionOut | null>(null);
+  const [revisionOpen, setRevisionOpen] = useState(false);
+
+  useEffect(() => {
+    if (!sellTradeId) {
+      setRevision(null);
+      setRevisionOpen(false);
+      return;
+    }
+    let cancelled = false;
+    api.trades
+      .oversellRevision(sellTradeId)
+      .then((data) => {
+        if (!cancelled) setRevision(data);
+      })
+      .catch(() => {
+        // 修订信息是增强块：接口失败不影响回合详情/配对明细的展示。
+        if (!cancelled) setRevision(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [sellTradeId]);
+
+  /** 重算完成后：旧回合 key 已变（`{sell}:oversell` → `{buy}:{sell}`），跳转到新回合。 */
+  const handleRevisionSettled = useCallback(
+    (next: OversellRevisionOut): void => {
+      setRevision(next);
+      setRevisionOpen(false);
+      if (next.round_id && next.round_id !== roundId) {
+        navigate(`/rounds/${next.round_id}`);
+      } else {
+        void load();
+      }
+    },
+    [roundId, navigate, load],
+  );
+
   const ranking = (insight?.ranking ?? {}) as RankingDetail;
 
   const columns: Array<DataTableColumn<RoundFill>> = [
@@ -459,10 +509,33 @@ export function RoundDetail() {
             <span>数量 {round.quantity}</span>
           </p>
 
-          {round.data_error ? (
+          {round.status === "oversell" || round.data_error ? (
             <div className="notice-warn" role="alert">
-              该回合涉及超卖等数据异常：超出可用持仓
-              {round.oversell_quantity} 未配对。请核对账单是否存在缺失买入记录。
+              该回合涉及超卖：超出可用持仓 {round.oversell_quantity} 未配对。请核对账单是否存在缺失买入记录，
+              或使用下方的「超卖成本补录」补录该笔卖出的成本。
+            </div>
+          ) : null}
+
+          {round.status === "oversell" && sellTradeId ? (
+            <div className="detail-card">
+              <h2 className="danger-text">超卖成本补录（重要！）</h2>
+              <p className="muted">
+                补录不会改动原账单：系统会在该卖出当日、排在卖出之前插入「资金划转 + 无费用买入」两条流水
+                （备注「人工修订，非真实成交账单」），再按 FIFO 重算配对与资产。
+              </p>
+              <p>
+                超卖卖出 <code>{sellTradeId}</code>
+                {revision ? (
+                  <>
+                    {" "}
+                    · 未配对 <strong>{revision.sell.oversell_quantity}</strong> · 修订状态{" "}
+                    <span className="chip">{REVISION_STATUS_LABELS[revision.status]}</span>
+                  </>
+                ) : null}
+              </p>
+              <button type="button" className="btn" onClick={() => setRevisionOpen(true)}>
+                补录 / 查看修订
+              </button>
             </div>
           ) : null}
 
@@ -622,6 +695,14 @@ export function RoundDetail() {
               <p className="detail-note">{insight.disclaimer}</p>
               <FlagGlossary entries={insight.flag_glossary} />
             </>
+          ) : null}
+
+          {sellTradeId ? (
+            <OversellRevisionDialog
+              tradeId={revisionOpen ? sellTradeId : null}
+              onClose={() => setRevisionOpen(false)}
+              onSettled={handleRevisionSettled}
+            />
           ) : null}
         </>
       ) : null}

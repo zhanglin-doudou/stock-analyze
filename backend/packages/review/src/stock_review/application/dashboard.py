@@ -23,7 +23,9 @@ from typing import TYPE_CHECKING, cast
 from sqlalchemy.ext.asyncio import AsyncSession
 from stock_contracts.clock import Clock
 from stock_core.stats.drawdown import DrawdownFamily, drawdown_family
+from stock_core.values import Money
 from stock_ledger.models import Trade
+from stock_ledger.repositories.quarantine import QuarantineRepository
 from stock_ledger.repositories.trades import TradeRepository
 from stock_platform.obs import get_logger
 
@@ -36,11 +38,16 @@ from stock_review.application.assets import (
 )
 from stock_review.application.bond_alias import build_bond_alias, canonical_code
 from stock_review.application.bridge import bridge_for_period
-from stock_review.application.portfolio import HOLDINGS_MAX, Holding, holdings_at, ratio_units
+from stock_review.application.portfolio import (
+    HOLDINGS_MAX,
+    Holding,
+    holdings_at,
+    holdings_from_rounds,
+    ratio_units,
+)
 from stock_review.application.valuation import (
     CASHFLOW_CATEGORIES,
     category,
-    is_money_fund_row,
 )
 from stock_review.metrics.defs._common import fee_breakdown
 from stock_review.metrics.views import TradeView
@@ -153,7 +160,6 @@ class DashboardAssetOverview:
     holdings: list[DashboardHolding]
     market_value_units: int | None
     cash_units: int | None
-    money_fund_units: int | None
     total_assets_units: int | None
     position_ratio_units: int | None
     total_profit_units: int | None
@@ -214,7 +220,7 @@ class DashboardResult:
 
 
 def _peak_transfer_cost(trades: list[Trade]) -> int | None:
-    """银证转账峰值转入成本：累计净转入（转入 + / 转出 -）的历史峰值。
+    """资金划转峰值转入成本：累计净转入（转入 + / 转出 -）的历史峰值。
 
     峰值 <= 0（从未净转入）→ None，不伪造 0；收益率分母统一用它。
     """
@@ -229,6 +235,39 @@ def _peak_transfer_cost(trades: list[Trade]) -> int | None:
 
 def _overall_status(*statuses: str) -> str:
     return min(statuses, key=lambda item: _STATUS_PRIORITY.get(item, 99))
+
+
+def _first_cash_gap(series: list[AssetDaily], trades: list[Trade]) -> tuple[date, date, int] | None:
+    """资产表现金与已入账流水的第一个缺口：``(缺口日, 缺口前最后流水日, 缺口金额)``。
+
+    现金优先取账单余额（``balance_override``），否则累加上日现金；因此「本行现金 −
+    （上一条可用行现金 + 期间流水合计）」不为零，说明有一批流水既没入账、又被余额
+    「接回」了——这正是桥接残差的来源。blocked 行现金不可用，跳过且不重置基准。
+    """
+    day_deltas: dict[date, int] = {}
+    for trade in trades:
+        day_deltas[trade.trade_date] = day_deltas.get(trade.trade_date, 0) + trade.amount_units
+    ordered = sorted(day_deltas.items())
+    index = 0
+    pending = 0
+    last_flow_day: date | None = None
+    anchor_flow_day: date | None = None
+    previous_cash: int | None = None
+    for row in series:
+        while index < len(ordered) and ordered[index][0] <= row.trade_date:
+            last_flow_day, delta = ordered[index]
+            pending += delta
+            index += 1
+        if row.status == "blocked":
+            continue
+        if previous_cash is not None and anchor_flow_day is not None:
+            gap = int(row.cash_units or 0) - (previous_cash + pending)
+            if abs(gap) > 1:
+                return row.trade_date, anchor_flow_day, gap
+        previous_cash = int(row.cash_units or 0)
+        anchor_flow_day = last_flow_day
+        pending = 0
+    return None
 
 
 def _legacy_period(trades: list[Trade], rounds: list[Round], clock: Clock) -> str:
@@ -536,6 +575,12 @@ async def build_dashboard(
     trades = list(await TradeRepository(session).balances_ordered(user_id, period_end=today))
     rounds = await RoundRepository(session).closed_rounds(user_id)
     all_rounds = await RoundRepository(session).all_rounds(user_id)
+    # 可转债发债/上市代码映射（持仓聚合与 TopN 共用）。
+    bond_alias, _unresolved = build_bond_alias(
+        (trade.security_code, trade.security_name) for trade in trades
+    )
+    # 当前持仓从 FIFO open 回合聚合（与回合页面数量+成本口径完全一致）。
+    open_rounds = [round_ for round_ in all_rounds if round_.status == "open"]
 
     fallback_as_of = build_view.data_as_of if isinstance(build_view.data_as_of, date) else today
     as_of = latest.trade_date if latest is not None else fallback_as_of
@@ -575,7 +620,7 @@ async def build_dashboard(
             )
         )
 
-    # 峰值转入成本 = 银证转账累计净转入的历史峰值（原「历史峰值持仓成本」口径已弃用）；
+    # 峰值转入成本 = 资金划转累计净转入的历史峰值（原「历史峰值持仓成本」口径已弃用）；
     # 峰值成本收益率 = 当前收益额 / 峰值转入成本。
     max_invested = _peak_transfer_cost(trades)
     if max_invested is None:
@@ -583,8 +628,8 @@ async def build_dashboard(
             DashboardMissing(
                 field="asset_overview.max_invested_cost",
                 code=MISSING_MAX_INVESTED,
-                reason="没有银证转账转入记录，无法计算峰值转入成本。",
-                what_to_do="导入含银证转账流水的账单后重新构建资产表。",
+                reason="没有资金划转转入记录，无法计算峰值转入成本。",
+                what_to_do="导入含资金划转流水的账单后重新构建资产表。",
             )
         )
 
@@ -592,16 +637,18 @@ async def build_dashboard(
         holdings: list[DashboardHolding] = []
         market_value_units = None
         cash_units = None
-        money_fund_units = None
         total_assets_units = None
         position_ratio_units = None
     else:
-        holdings, missing_prices, cost_fallback, truncated = await _holdings_at(
-            trades, as_of=latest.trade_date, market_data=market_data
+        holdings, missing_prices, cost_fallback, truncated = await holdings_from_rounds(
+            open_rounds,
+            trades=trades,
+            bond_alias=bond_alias,
+            as_of=latest.trade_date,
+            market_data=market_data,
         )
         market_value_units = latest.market_value_units
         cash_units = latest.cash_units
-        money_fund_units = latest.money_fund_units
         total_assets_units = latest.total_assets_units
         position_ratio_units = ratio_units(market_value_units, total_assets_units)
         if truncated:
@@ -623,7 +670,7 @@ async def build_dashboard(
                 )
             )
         # 监控点：看板持仓降级时输出原因（缺行情 / 成本兜底 + 资产行自身原因），
-        # 便于不回库直接定位（如货基误进持仓、发债代码未归并、待上市新股）。
+        # 便于不回库直接定位（如发债代码未归并、待上市新股）。
         if missing_prices or cost_fallback:
             log.warning(
                 "dashboard.holdings_degraded",
@@ -658,6 +705,7 @@ async def build_dashboard(
 
     total_profit_units: int | None = None
     initial_capital_units: int | None = None
+    bridge = None
     if not asset_blocked and latest is not None and trades:
         bridge = await bridge_for_period(
             session,
@@ -683,12 +731,48 @@ async def build_dashboard(
                 - bridge.other_units
             )
     if total_profit_units is None:
+        reason = "全历史桥接不平或资产表过期，不硬算总收益。"
+        what_to_do = "到资产页更新资产表；若仍不平，到导入记录页检查隔离行。"
+        # 桥接确实有残差时把「差多少 + 哪天断」直接写进提示：用户不必再翻
+        # /reconciliation/bridge 与隔离区接口就能定位。金额在应用层格式化成定点字符串
+        # （标度整数不出后端），零残差不报金额、不伪造 0。
+        if (
+            bridge is not None
+            and build_view.state != STATE_STALE
+            and abs(bridge.residual_units) > bridge.tolerance_units
+        ):
+            amount = f"{Money(bridge.residual_units)} 元"
+            gap = _first_cash_gap(series, trades)
+            break_date = None
+            gap_text: str | None = None
+            if gap is not None:
+                gap_day, last_flow_day, _gap_units = gap
+                gap_text = gap_day.isoformat()
+                break_date = await QuarantineRepository(session).earliest_unresolved_break_date(
+                    user_id, after=last_flow_day, on_or_before=gap_day
+                )
+            if gap_text is not None and break_date is not None:
+                break_text = break_date.isoformat()
+                reason = (
+                    f"全历史桥接残差 {amount}：{break_text} 起有流水未入账，"
+                    f"{gap_text} 现金余额跳变把缺口留在账上。"
+                )
+                what_to_do = (
+                    f"到导入记录页查看 {break_text} 起的隔离行（断链/无效行），"
+                    "处理后重新导入并构建资产表。"
+                )
+            elif gap_text is not None:
+                reason = f"全历史桥接残差 {amount}：{gap_text} 现金余额与已入账流水对不上。"
+                what_to_do = "到导入记录页检查该日前后的隔离行，重新导入后构建资产表。"
+            else:
+                reason = f"全历史桥接残差 {amount}，未定位到具体日期。"
+                what_to_do = "到导入记录页检查隔离行后重新导入并构建资产表。"
         missing.append(
             DashboardMissing(
                 field="asset_overview.total_profit",
                 code=MISSING_TOTAL_PROFIT,
-                reason="全历史桥接不平或资产表过期，不硬算总收益。",
-                what_to_do="到资产页更新资产表；若仍不平，到对账页检查断链。",
+                reason=reason,
+                what_to_do=what_to_do,
             )
         )
 
@@ -710,7 +794,7 @@ async def build_dashboard(
                 field="asset_overview.initial_capital",
                 code=MISSING_INITIAL_CAPITAL,
                 reason="没有可用的期初现金/持仓锚点，无法确定期初资金。",
-                what_to_do="导入含期初余额或银证转账的账单后重新构建资产表。",
+                what_to_do="导入含期初余额或资金划转的账单后重新构建资产表。",
             )
         )
 
@@ -804,17 +888,14 @@ async def build_dashboard(
 
     # 交易次数 Top3：按证券代码（可转债归并上市代码）统计流水 buy/sell 行数
     # （买入/卖出分别计一次交易）；同时聚合个股累计收益（全部回合 pnl）与个股总费用。
-    # 现金类/货基不计。
-    bond_alias, _unresolved = build_bond_alias(
-        (trade.security_code, trade.security_name) for trade in trades
-    )
+    # 现金类不计。
     buy_counts: dict[str, int] = {}
     sell_counts: dict[str, int] = {}
     fee_by_code: dict[str, int] = {}
     trade_names: dict[str, str] = {}
     for trade in trades:
         code = canonical_code(bond_alias, trade.security_code)
-        if not code or is_money_fund_row(trade) or category(trade) in CASHFLOW_CATEGORIES:
+        if not code or category(trade) in CASHFLOW_CATEGORIES:
             continue
         if code not in trade_names and trade.security_name:
             trade_names[code] = trade.security_name
@@ -897,7 +978,6 @@ async def build_dashboard(
             holdings=holdings,
             market_value_units=market_value_units,
             cash_units=cash_units,
-            money_fund_units=money_fund_units,
             total_assets_units=total_assets_units,
             position_ratio_units=position_ratio_units,
             total_profit_units=total_profit_units,

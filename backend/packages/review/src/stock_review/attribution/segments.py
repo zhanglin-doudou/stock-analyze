@@ -38,7 +38,6 @@ from stock_platform.symbols import classify_symbol
 from stock_review.application.valuation import (
     QTY_PRICE_SCALE,
     category,
-    is_money_fund_row,
     new_stock_codes_in_window,
 )
 
@@ -173,9 +172,7 @@ def _fee_basis_unknown(trade: Trade) -> bool:
 
 
 def _symbol_class(code: str, trades_sym: Sequence[Trade], new_stocks: set[str]) -> str:
-    """`symbol_class`：stock/fund/bond/money_fund/new_stock/pseudo（§4.4）。"""
-    if any(is_money_fund_row(t) for t in trades_sym):
-        return "money_fund"
+    """`symbol_class`：stock/fund/bond/new_stock/pseudo（§4.4）。"""
     if code in new_stocks:
         return "new_stock"
     kind = classify_symbol(code)
@@ -229,7 +226,7 @@ def build_symbol_plans(
         open_by_code[lot.security_code].append(lot)
     rows_by_code: dict[str, list[Trade]] = defaultdict(list)
     for trade in trades:
-        if t0 <= trade.trade_date <= t1 and not is_money_fund_row(trade):
+        if t0 <= trade.trade_date <= t1:
             code = canonical(trade.security_code)
             if code:
                 rows_by_code[code].append(trade)
