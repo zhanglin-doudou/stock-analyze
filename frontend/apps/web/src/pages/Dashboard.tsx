@@ -515,7 +515,7 @@ export function Dashboard(): ReactElement {
             </Link>
           </div>
           {asset.holdings.length === 0 ? (
-            <p className="dash-muted">没有持仓（或资产表未构建）。</p>
+            <p className="dash-muted">当前没有持仓。</p>
           ) : (
             <table className="dash-table dash-holdings">
               <thead>

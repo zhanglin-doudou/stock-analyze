@@ -110,6 +110,101 @@ function readTypes(preview: Preview): Record<string, unknown>[] {
   return (preview.types ?? []) as unknown as Record<string, unknown>[];
 }
 
+// 第 3 步的 Category 速查说明（纯文案，不参与任何计算）。
+// `code` 与后端 BillCategory 一致；中文名优先取接口返回的 categories，缺失时用这里的兜底。
+const CATEGORY_GUIDE: readonly {
+  code: string;
+  name: string;
+  book: string;
+  risk: string;
+}[] = [
+  {
+    code: "buy",
+    name: "买入",
+    book: "按成交金额（含佣金等费用）建仓，进入先进先出队列，等卖出时才结算盈亏。",
+    risk: "当成卖出会反向减仓、误报超卖；当成资金划转只动现金不建仓，资产表会少一块市值。",
+  },
+  {
+    code: "sell",
+    name: "卖出",
+    book: "按成交净额（已扣佣金、印花税）平仓，与买入批次配对成回合，计入已实现盈亏。",
+    risk: "当成买入会凭空增加持仓、成本翻倍；当成资金划转会卖了也不减仓，持仓永远对不上。",
+  },
+  {
+    code: "bonus",
+    name: "送转",
+    book: "送股/转增：只增加股数、不花钱，成本总额不变，每股成本自然摊薄。",
+    risk: "当成买入会凭空建仓并虚增成本；当成卖出会误报超卖。",
+  },
+  {
+    code: "dividend",
+    name: "分红",
+    book: "现金红利计入收益与现金；红利税如果是单独一行，请归「费用」单独扣减。",
+    risk: "当成买入会拿红利金额凭空建仓；当成资金划转会让收益少算一块。",
+  },
+  {
+    code: "rights",
+    name: "配股",
+    book: "按缴款金额增加股数与成本；若该证券此前没有持仓且金额为 0，系统会自动按「券商行为」处理。",
+    risk: "当成买入或新股会绕过配股校验，成本与回合一起偏；当成卖出会误报超卖。",
+  },
+  {
+    code: "interest",
+    name: "利息",
+    book: "利息归本：增加现金并计入收益。",
+    risk: "当成资金划转会把利息当成外部入金，收益率被稀释。",
+  },
+  {
+    code: "fee",
+    name: "费用",
+    book: "只减少现金、单独计为费用，不进入持仓成本。",
+    risk: "当成买入会拿费用金额建仓；当成卖出会误报超卖；当成资金划转会漏掉这笔成本。",
+  },
+  {
+    code: "transfer",
+    name: "资金划转",
+    book: "银证转入/转出等外部资金流：只改现金，不建仓、不进盈亏。",
+    risk: "当成买入或卖出会凭空建仓/减仓，回合与成本全乱。",
+  },
+  {
+    code: "new_stock",
+    name: "新股/可转债中签",
+    book: "只认真正扣款的缴款行，按认购成本建仓；上市后卖出请归「卖出」。",
+    risk: "把「申购中签」这类零金额登记行归进来会凭空建仓、虚增成本；把「市值认购资金扣收」归进来会给 CASH 伪代码记成本。",
+  },
+  {
+    code: "broker_action",
+    name: "券商行为",
+    book: "券商侧的登记/份额锁定动作（申购中签、申购还款、新股入账、证券清理、转托管等）：不建仓、不计成本；金额非 0 时按外部现金流处理。",
+    risk: "当成买入或新股会凭空建仓、虚增成本；当成卖出会误报超卖。",
+  },
+  {
+    code: "other",
+    name: "其他",
+    book: "兜底分类：不影响持仓，金额只进现金。",
+    risk: "真实买卖被归到这里会漏建仓/漏平仓，资产表与账单从此对不上。",
+  },
+];
+
+// 真实账单摘要举例（华泰常见行），帮助用户对号入座。
+const CATEGORY_CASES: readonly { summary: string; right: string; wrong: string }[] = [
+  {
+    summary: "「市值认购资金扣收」",
+    right: "应归「资金划转」：只有资金流出、没有证券代码。",
+    wrong: "若归「新股/可转债中签」，系统会给 CASH 伪代码建仓并记成本，市值凭空多一块。",
+  },
+  {
+    summary: "「申购中签」",
+    right: "应归「券商行为」：不扣款的登记动作。",
+    wrong: "若归「新股/可转债中签」，会凭空建仓、虚增持仓成本（系统对零金额登记行有自动改判兜底）。",
+  },
+  {
+    summary: "「配股缴款」",
+    right: "应归「配股」：数量与成本同步增加。",
+    wrong: "若归「买入」，配股校验与成本口径失效，无持仓的配股也无法被识别为券商行为。",
+  },
+];
+
 function rowsFromPreview(preview: Preview): MappingRow[] {
   const existing = new Map<string, string>();
   for (const item of (preview.mapping_items ?? []) as unknown as {
@@ -193,6 +288,7 @@ export function Import() {
   const [confirmUnmapped, setConfirmUnmapped] = useState(false);
   const [ackReimport, setAckReimport] = useState(false);
   const [allowEditHistorical, setAllowEditHistorical] = useState(false);
+  const [showCategoryGuide, setShowCategoryGuide] = useState(false);
   const [job, setJob] = useState<JobAccepted | null>(null);
   const [batchId, setBatchId] = useState<string | null>(null);
   const [batch, setBatch] = useState<ImportBatch | null>(null);
@@ -679,6 +775,58 @@ export function Import() {
               </div>
             </CardHeader>
             <CardContent className="tw-flex tw-flex-col tw-gap-3">
+              <div className="tw-rounded-md tw-border tw-border-border">
+                <button
+                  type="button"
+                  aria-expanded={showCategoryGuide}
+                  aria-controls="category-guide"
+                  onClick={() => setShowCategoryGuide((current) => !current)}
+                  className="tw-flex tw-w-full tw-cursor-pointer tw-items-center tw-justify-between tw-gap-3 tw-px-3 tw-py-2 tw-text-left tw-text-sm hover:tw-bg-muted/50"
+                >
+                  <span>
+                    Category 说明：11 类分别怎么记账、归错会怎样
+                    <span className="tw-ml-1 tw-text-muted-foreground">（点开查看）</span>
+                  </span>
+                  <span aria-hidden="true">{showCategoryGuide ? "▾" : "▸"}</span>
+                </button>
+                {showCategoryGuide ? (
+                  <div
+                    id="category-guide"
+                    className="tw-flex tw-flex-col tw-gap-4 tw-border-t tw-border-border tw-px-3 tw-py-3"
+                  >
+                    <p className="tw-text-xs tw-text-muted-foreground">
+                      这里只解释分类含义，不参与任何计算；系统建议只做预填，仍需你在本步整步确认。
+                    </p>
+                    <dl className="tw-grid tw-gap-3">
+                      {CATEGORY_GUIDE.map((item) => {
+                        const label =
+                          categoryOptions.find((option) => option.code === item.code)?.label ?? item.name;
+                        return (
+                          <div key={item.code} className="tw-rounded-sm tw-bg-muted/40 tw-px-3 tw-py-2">
+                            <dt className="tw-flex tw-flex-wrap tw-items-baseline tw-gap-2 tw-text-sm tw-font-medium">
+                              <span>{label}</span>
+                              <code className="tw-text-xs tw-text-muted-foreground">{item.code}</code>
+                            </dt>
+                            <dd className="tw-mt-1 tw-text-sm">记账：{item.book}</dd>
+                            <dd className="tw-mt-1 tw-text-sm tw-text-destructive/90">归错类：{item.risk}</dd>
+                          </div>
+                        );
+                      })}
+                    </dl>
+                    <div className="tw-rounded-sm tw-border tw-border-border tw-px-3 tw-py-2">
+                      <p className="tw-text-sm tw-font-medium">几个常见例子</p>
+                      <ul className="tw-mt-1 tw-flex tw-flex-col tw-gap-2 tw-text-sm">
+                        {CATEGORY_CASES.map((item) => (
+                          <li key={item.summary}>
+                            <span className="tw-font-medium">{item.summary}</span>
+                            {item.right} {item.wrong}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
               <Table aria-label="账单类型">
                 <TableHeader>
                   <TableRow>
@@ -698,7 +846,7 @@ export function Import() {
                       <TableCell>
                         {row.label}
                         {row.isNew ? (
-                          <Badge variant="secondary" className="tw-ml-2">
+                          <Badge variant="secondary" className="tw-ml-2 tw-bg-destructive tw-text-destructive-foreground">
                             新类型
                           </Badge>
                         ) : (

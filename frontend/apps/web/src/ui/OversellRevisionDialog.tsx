@@ -154,14 +154,14 @@ export function OversellRevisionDialog({
                 <td>
                   {revision.sell.security_code} {revision.sell.security_name}
                 </td>
-                <th>卖出数量 / 金额</th>
-                <td>
-                  {revision.sell.quantity} / {revision.sell.amount}
+                <th><b>卖出数量 / 金额</b></th>
+                <td className="danger-text">
+                  <b>{revision.sell.quantity} / {revision.sell.amount}</b>
                 </td>
               </tr>
               <tr>
-                <th>未配对数量</th>
-                <td>{revision.sell.oversell_quantity}</td>
+                <th><b>未配对数量</b></th>
+                <td className="danger-text"><b>{revision.sell.oversell_quantity}</b></td>
                 <th>修订状态</th>
                 <td>{REVISION_STATUS_LABELS[revision.status]}</td>
               </tr>

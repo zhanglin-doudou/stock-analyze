@@ -144,10 +144,6 @@
   font-size: var(--fs-xs);
 }
 
-.detail-stats td {
-  color: var(--text);
-}
-
 .detail-stats tr:last-child th,
 .detail-stats tr:last-child td {
   border-bottom: 0;

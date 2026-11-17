@@ -61,6 +61,7 @@ def side_from_category(category: str | None) -> str:
 # 后期加新规则只需在这里追加一行，规则表 pattern 保持纯语义。
 _CATEGORY_ZERO_AMOUNT_FALLBACK: dict[str, str] = {
     BillCategory.NEW_STOCK.value: BillCategory.BROKER_ACTION.value,
+    BillCategory.RIGHTS.value: BillCategory.BROKER_ACTION.value,
 }
 
 

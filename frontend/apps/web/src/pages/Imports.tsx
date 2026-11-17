@@ -117,7 +117,11 @@ export function Imports() {
       align: "right",
       render: (row) => countSummary(row),
     },
-    { key: "created", header: "创建时间", priority: 2, render: (row) => row.created_at },
+    { key: "created", header: "创建时间", priority: 2, render: (row) => {
+      const date = new Date(row.created_at);
+      return date.toLocaleDateString() + ' ' + date.toLocaleTimeString()
+      } 
+    },
     {
       key: "actions",
       header: "操作",

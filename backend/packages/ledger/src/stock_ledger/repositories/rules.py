@@ -35,8 +35,8 @@ SUMMARY_CODE_MAX_LENGTH = 16
 # 买卖类规则统一 `side="both"`：分类由摘要决定（方向另有 Trade.side 字段承载），
 # 避免账单侧记录不一致（如合成夹具摘要与买卖标志随机组合）把本可分类的行误隔离。
 _BASE_SYSTEM_RULES: tuple[tuple[str, str, str, str, str, str, int], ...] = (
-    ("sys_buy_stock", "证券买入→买入", "buy", "both", "exact", "证券买入", 10),
-    ("sys_sell_stock", "证券卖出→卖出", "sell", "both", "exact", "证券卖出", 10),
+    ("sys_buy_stock", "证券买入→买入", "buy", "both", "contains", "证券买入", 10),
+    ("sys_sell_stock", "证券卖出→卖出", "sell", "both", "contains", "证券卖出", 10),
     ("sys_buy_plain", "买入→买入", "buy", "both", "exact", "买入", 20),
     ("sys_sell_plain", "卖出→卖出", "sell", "both", "exact", "卖出", 20),
     # 省心投申购确认（华泰基金投顾）：主账户资金转出到省心投投顾账户，转出动作不在
@@ -71,18 +71,23 @@ _BASE_SYSTEM_RULES: tuple[tuple[str, str, str, str, str, str, int], ...] = (
     # 零金额降级（classify._CATEGORY_ZERO_AMOUNT_FALLBACK）：规则表本身只负责 pattern 匹配，
     # 发生金额=0 的登记动作（如中签登记、获配登记）在分类应用层自动降级为 broker_action，
     # 避免把不扣款的登记行误判为建仓并虚增持仓成本。
-    ("sys_new_stock", "新股→新股申购", "new_stock", "both", "contains", "新股", 14),
-    ("sys_new_sub", "认购→新股申购", "new_stock", "both", "contains", "认购", 14),
+    ("sys_new_stock", "新股申购确认缴款→新股申购", "new_stock", "both", "contains", "新股申购确认缴款", 14),
+    ("sys_new_apply", "新股申购→新股申购", "new_stock", "both", "contains", "新股申购", 14),
+    ("sys_new_sub", "新股认购→新股申购", "new_stock", "both", "contains", "新股认购", 14),
+    ("sys_new_pay", "认购清算→新股申购", "new_stock", "both", "contains", "认购清算", 14),
     # 上市后卖出统一走 sell：新股口径收窄后含「新股」的规则只认建仓，这里给「新股卖出」
     # 这类非标准卖出摘要一个明确落点（不能只靠 exact「卖出」，否则会整行隔离）。
     ("sys_new_sell", "新股卖出→卖出", "sell", "both", "contains", "新股卖出", 13),
-    ("sys_new_apply", "申购→新股申购", "new_stock", "both", "contains", "申购", 16),
     # 未中签/未成交/退回的资金腿：申购冻结/解冻、退款只有现金进出，没有持仓与成本，
     # 归资金划转（外部现金流，不进收益）。早于「申购」(16)，避免被当成打新建仓。
     ("sys_sub_freeze", "申购冻结→资金划转", "transfer", "both", "contains", "申购冻结", 12),
     ("sys_sub_unfreeze", "申购解冻→资金划转", "transfer", "both", "contains", "申购解冻", 12),
     ("sys_sub_refund", "申购退款→资金划转", "transfer", "both", "contains", "申购退款", 12),
     ("sys_win_refund", "中签退款→资金划转", "transfer", "both", "contains", "中签退款", 12),
+    ("sys_transfer_in_1", "跨行转入→资金划转", "transfer", "both", "contains", "跨行转入", 12),
+    ("sys_transfer_out_1", "跨行转出→资金划转", "transfer", "both", "contains", "跨行转出", 12),
+    ("sys_transfer_in_2", "银证转入→资金划转", "transfer", "both", "contains", "银证转入", 12),
+    ("sys_transfer_out_2", "银证转出→资金划转", "transfer", "both", "contains", "银证转出", 12),
     # 市值认购资金扣收：按市值认购可转债/新股的缴款腿（解析器已转成 CASH 资金行），
     # 只有资金流出、没有证券代码，属于广义资金划转而不是打新建仓。exact + priority 12
     # 必须早于「认购」(14)，否则会被 sys_new_sub 抢成 new_stock 并给 CASH 伪代码记成本。
@@ -102,9 +107,10 @@ _BASE_SYSTEM_RULES: tuple[tuple[str, str, str, str, str, str, int], ...] = (
     ("sys_fund_buy", "申购确认→买入", "buy", "both", "contains", "申购确认", 15),
     ("sys_redeem", "赎回确认→卖出", "sell", "both", "contains", "赎回确认", 15),
     # 股息红利税（含「股息红利税\n补缴」）优先于通用「股息」规则：它是资金流出/费用，不是分红收入。
-    ("sys_div_tax", "股息红利税→费用", "fee", "both", "contains", "红利税", 25),
+    ("sys_div_tax", "股息红利税→分红", "dividend", "both", "contains", "红利税", 25),
     ("sys_dividend", "红利入账→分红", "dividend", "both", "exact", "红利入账", 30),
-    ("sys_div_bonus", "股息→分红", "dividend", "both", "contains", "股息", 40),
+    ("sys_div_bonus_1", "股息→分红", "dividend", "both", "contains", "股息", 40),
+    ("sys_div_bonus_2", "派息→分红", "dividend", "both", "contains", "派息", 40),
     # 基金分红发放（红利再投/现金分红）：与「红利入账」同口径，不能被宽泛「费」规则吞掉。
     ("sys_div_paid", "红利发放→分红", "dividend", "both", "contains", "红利发放", 30),
     ("sys_interest", "利息归本→利息", "interest", "both", "contains", "利息", 50),

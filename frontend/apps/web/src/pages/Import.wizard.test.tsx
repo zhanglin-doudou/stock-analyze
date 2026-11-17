@@ -267,6 +267,46 @@ describe("Import 向导（v2 两阶段确认）", () => {
     expect(await screen.findByText("3 · 账单类型")).toBeTruthy();
   });
 
+  it("账单类型步骤提供默认收起的 Category 说明，展开后可读全部 11 类与真实摘要案例", async () => {
+    renderPage();
+    await upload();
+
+    await screen.findByText("2 · 列对应");
+    fireEvent.click(screen.getByRole("button", { name: "全部接受系统建议" }));
+    const next = screen.getByRole("button", { name: "继续" }) as HTMLButtonElement;
+    await waitFor(() => expect(next.disabled).toBe(false));
+    fireEvent.click(next);
+    await screen.findByText("3 · 账单类型");
+
+    const toggle = screen.getByRole("button", { name: /Category 说明/ });
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByText("几个常见例子")).toBeNull();
+
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("true");
+    expect(screen.getByText("几个常见例子")).toBeTruthy();
+    expect(screen.getByText("「市值认购资金扣收」")).toBeTruthy();
+    for (const name of [
+      "买入",
+      "卖出",
+      "送转",
+      "分红",
+      "配股",
+      "利息",
+      "费用",
+      "资金划转",
+      "新股/可转债中签",
+      "券商行为",
+      "其他",
+    ]) {
+      expect(screen.getAllByText(name).length).toBeGreaterThan(0);
+    }
+
+    fireEvent.click(toggle);
+    expect(toggle.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByText("几个常见例子")).toBeNull();
+  });
+
   it("存在未确认列时先弹确认框，确认后带 acknowledge_unmapped=true 保存", async () => {
     preview.mockResolvedValue(mappingPreview(true));
     renderPage();

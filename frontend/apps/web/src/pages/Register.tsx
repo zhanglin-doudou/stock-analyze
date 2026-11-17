@@ -42,7 +42,7 @@ export function Register() {
         accept_tos: acceptTos,
       });
       saveTokens(result);
-      navigate("/dashboard", { replace: true });
+      navigate("/", { replace: true });
     } catch (err) {
       setError(err);
     } finally {
