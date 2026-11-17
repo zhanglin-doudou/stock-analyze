@@ -10,6 +10,7 @@ import type {
   MetricItem,
 } from "@sa/api-client";
 import { api } from "../client";
+import { useJobCompletion } from "../lib/useJobCompletion";
 import { useStaleAssetBuild } from "../lib/useStaleAssetBuild";
 import { TrendChart } from "../charts/TrendChart";
 import { SectorBlock } from "./dashboard/SectorBlock";
@@ -273,6 +274,10 @@ export function Dashboard(): ReactElement {
       if (fresh.data?.build.last_status === "degraded") await oversellQuery.refetch();
     },
   });
+
+  // 看板不渲染进度条，但终态订阅必须挂在页面级：收尾（SSE 为主、失效后兜底轮询）
+  // 与资产页共用同一实现，避免这里再写一套轮询。
+  useJobCompletion(auto.jobId, auto.handleJobDone);
 
   if (dashboardQuery.error != null) {
     return (

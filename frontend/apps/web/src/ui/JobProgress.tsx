@@ -1,71 +1,15 @@
-import { useEffect, useState } from "react";
-import type { JobDoneData, JobErrorData, JobProgressData, JobStatus, JobEvent } from "@sa/api-client";
-import { api } from "../client";
+import { useJobCompletion, type JobDoneHandler } from "../lib/useJobCompletion";
 import { ProblemView } from "./Problem";
 
 export interface JobProgressProps {
   jobId: string;
-  onDone?: (status: JobStatus, resultRef: string | null) => void;
+  /** 终态回调：`error` 为 SSE error 事件或任务详情里的真实错误体（可能缺失）。 */
+  onDone?: JobDoneHandler;
 }
 
-/** 订阅 `/jobs/{id}/events`，带 Last-Event-ID 断线续传，展示 progress/stage。 */
+/** 任务进度条：订阅逻辑见 `useJobCompletion`，本组件只负责展示。 */
 export function JobProgress({ jobId, onDone }: JobProgressProps) {
-  const [progress, setProgress] = useState(0);
-  const [stage, setStage] = useState("");
-  const [message, setMessage] = useState("");
-  const [status, setStatus] = useState<JobStatus | null>(null);
-  const [error, setError] = useState<unknown>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    const controller = new AbortController();
-    let lastEventId: string | undefined;
-
-    function handle(event: JobEvent): boolean {
-      if (event.id) lastEventId = event.id;
-      if (event.event === "progress") {
-        const data = event.data as JobProgressData;
-        setProgress(data.progress);
-        setStage(data.stage);
-        setMessage(data.message ?? "");
-      } else if (event.event === "done") {
-        const data = event.data as JobDoneData;
-        setStatus(data.status);
-        setProgress(100);
-        onDone?.(data.status, data.result_ref ?? null);
-        return true;
-      } else if (event.event === "error") {
-        const data = event.data as JobErrorData;
-        setError(data.error);
-        setStatus("failed");
-        return true;
-      }
-      return false;
-    }
-
-    async function run(): Promise<void> {
-      for (let attempt = 0; attempt < 5 && !cancelled; attempt += 1) {
-        setError(null);
-        try {
-          for await (const event of api.jobs.events(jobId, { lastEventId, signal: controller.signal })) {
-            if (cancelled) return;
-            if (handle(event)) return;
-          }
-          return;
-        } catch (err) {
-          if (cancelled) return;
-          setError(err);
-          await new Promise((resolve) => setTimeout(resolve, 500 * (attempt + 1)));
-        }
-      }
-    }
-
-    void run();
-    return () => {
-      cancelled = true;
-      controller.abort();
-    };
-  }, [jobId, onDone]);
+  const { progress, stage, message, status, error } = useJobCompletion(jobId, onDone);
 
   return (
     <div className="job-progress">

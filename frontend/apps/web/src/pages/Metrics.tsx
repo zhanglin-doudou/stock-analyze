@@ -186,9 +186,9 @@ export function Metrics() {
   }, [activeJobId, finishJob]);
 
   const handleSseDone = useCallback(
-    (status: JobStatus) => {
+    (status: JobStatus, _resultRef: string | null, jobError?: unknown) => {
       if (!activeJobId) return;
-      void finishJob(activeJobId, status);
+      void finishJob(activeJobId, status, jobError);
     },
     [activeJobId, finishJob],
   );
