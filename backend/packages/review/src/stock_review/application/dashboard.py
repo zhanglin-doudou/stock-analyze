@@ -38,7 +38,11 @@ from stock_review.application.assets import (
 )
 from stock_review.application.bond_alias import build_bond_alias, canonical_code
 from stock_review.application.bridge import bridge_for_period
-from stock_review.application.money_fund import money_fund_codes, money_fund_value_units
+from stock_review.application.money_fund import (
+    money_fund_codes,
+    money_fund_oversells,
+    money_fund_value_units,
+)
 from stock_review.application.portfolio import (
     HOLDINGS_MAX,
     Holding,
@@ -247,14 +251,17 @@ def _first_cash_gap(series: list[AssetDaily], trades: list[Trade]) -> tuple[date
 
     资产表现金含货基余额，而货基红利/再投行金额为 0、以份额增加现金；不把份额变动
     折算成金额补进当日流水，这些天会被误判成缺口（真实案例：2025-04-30 的 0.85 元
-    其实是三只货基的红利份额，不是漏记流水）。
+    其实是三只货基的红利份额，不是漏记流水）。货基超卖同理：赎回超过余额的部分由
+    券商补记份额、计入当日收益，必须按资产构建同一套份额正推补回缺口金额。
     """
     fund_codes = money_fund_codes(trades)
+    oversell_value = {item.trade_id: item.value_units for item in money_fund_oversells(trades)}
     day_deltas: dict[date, int] = {}
     for trade in trades:
         delta = trade.amount_units
         if trade.security_code and trade.security_code in fund_codes:
             delta += money_fund_value_units(trade)
+            delta += oversell_value.get(trade.id, 0)
         day_deltas[trade.trade_date] = day_deltas.get(trade.trade_date, 0) + delta
     ordered = sorted(day_deltas.items())
     index = 0

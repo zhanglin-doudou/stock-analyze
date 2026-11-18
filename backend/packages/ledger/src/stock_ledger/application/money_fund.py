@@ -110,6 +110,11 @@ class MoneyFundOversell:
     # 超出当时余额的份额（scale=4，正数）；货基单位价格恒 1.000000，即超卖金额 ×100。
     quantity_units: int
 
+    @property
+    def value_units(self) -> int:
+        """超卖份额折算的金额（scale=2），用于把缺口计入选当日收益。"""
+        return _shares_to_value_units(self.quantity_units)
+
 
 def _share_delta(row: Trade) -> int:
     """带方向份额增量（scale=4）：赎回为负，申购/红利再投为正，登记类为 0。"""
