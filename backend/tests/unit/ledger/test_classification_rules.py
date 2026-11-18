@@ -63,7 +63,7 @@ def _rules() -> list[SummaryRule]:
         ("银行转取", "buy", "transfer", "sys_transfer_out"),
         ("转存管转入", "unknown", "transfer", "sys_custody_in"),
         ("转存管转出", "unknown", "transfer", "sys_custody_out"),
-        ("资管转让资\n金上账", "sell", "transfer", "sys_asset_in"),
+        ("资管转让资\n金上账", "sell", "sell", "sys_asset_in"),
     ],
 )
 def test_real_bill_summaries_all_match(summary: str, side: str, category: str, code: str) -> None:
@@ -339,12 +339,12 @@ def test_real_statement_excerpt_parse_and_classify() -> None:
         assert rule is not None, row.summary
         categories.setdefault(row.summary or "", set()).add(rule.category)
     assert categories == {
-        # [省心投]申购确认视同银行转出（设计 D14）→ 资金划转。
-        "[省心投]申\n购确认": {"transfer"},
+        # [省心投]申购确认视同银行转出（设计 D14）→ 资金划转。摘要已在解析边界归一。
+        "[省心投]申购确认": {"transfer"},
         # 零金额份额行按账单分类正常入账。
-        "[省心投]红\n利发放": {"dividend"},
+        "[省心投]红利发放": {"dividend"},
         "托管转出": {"broker_action"},
-        "新股申购确\n认缴款": {"new_stock"},
+        "新股申购确认缴款": {"new_stock"},
         "新股入帐": {"broker_action"},
         "赎回确认": {"sell"},
     }

@@ -141,6 +141,21 @@ def test_value_units_sign_and_dividend_reinvest() -> None:
     )
 
 
+def test_broker_action_does_not_change_balance_or_holdings() -> None:
+    """登记/过户类份额行不影响货基余额（避免与同日资金腿重复计入）。"""
+    assert (
+        money_fund_value_units(
+            _trade(category="broker_action", quantity_units=10_000_000, amount_units=0)
+        )
+        == 0
+    )
+    rows = [
+        _trade(category="buy", quantity_units=10_000_000, amount_units=-1_000_00),
+        _trade(category="broker_action", quantity_units=10_000_000, amount_units=0),
+    ]
+    assert money_fund_balances(rows) == {"119924": 1_000_00}
+
+
 def test_balances_fold_and_backsolve_first_redemption() -> None:
     rows = [
         _trade(

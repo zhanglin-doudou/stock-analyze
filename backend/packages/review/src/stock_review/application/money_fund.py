@@ -9,8 +9,9 @@
   2. 兜底证据（同时满足）：非行情品种（`needs_quote` 为 False）、名称不含
      ETF/LOF/REIT、至少一笔数量非 0 的申赎、且该标的所有数量非 0 的行单位价格
      恰为 1.000000、三费全 0。
-* 申赎方向看 `category`（导入行可能 `side=unknown`）：`sell` 减少余额，其余增加
-  （红利发放/红利再投以份额形式增加余额）。
+* 申赎方向看 `category`（导入行可能 `side=unknown`）：`sell` 减少余额，`buy`/
+  `dividend` 等增加（红利发放/红利再投以份额形式增加余额）；`broker_action`
+  （零金额登记/份额过户）一律不影响余额，避免与资金腿重复计入。
 * 余额 = Σ 份额增减 × 单位价格；历史首笔就是赎回时按前缀最小负值反推期初余额
   （等价于「期初已持有至少这么多」），并对任何负余额按 0 兜底（账单缺流水场景）。
 """
@@ -77,7 +78,13 @@ def money_fund_codes(rows: Iterable[Trade]) -> frozenset[str]:
 
 
 def money_fund_value_units(row: Trade) -> int:
-    """单笔货基流水对余额的金额影响（scale=2；申购买入为正、赎回卖出为负）。"""
+    """单笔货基流水对余额的金额影响（scale=2；申购买入为正、赎回卖出为负）。
+
+    `broker_action` 是登记/过户类动作（如「非交易过户确认」），份额变动只用于
+    核对，不代表余额增减；若同时存在资金腿，加回来会重复计入，故一律返回 0。
+    """
+    if (row.category or "").strip().lower() == "broker_action":
+        return 0
     quantity = row.quantity_units
     if quantity == 0:
         return 0

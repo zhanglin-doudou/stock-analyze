@@ -110,6 +110,28 @@ def _requested_range(params: dict[str, Any]) -> tuple[date | None, date | None]:
     return start, end
 
 
+# 卖出缺数量/单价兜底：华泰资管转让的货基赎回只落资金腿（有金额、无数量、无单价）。
+# 货基单位净值恒 1.000000；金额 scale=2、数量 scale=4，反推数量 = |金额| × 100。
+SELL_FILL_PRICE_UNITS = 1_000_000
+SELL_FILL_QTY_MULTIPLIER = 100
+
+
+def fill_sell_quantity_units(row: TradeRow) -> None:
+    """落库前归一：卖出只有资金变更、没有数量/单价时，按货基 1 元净值补数量。
+
+    仅在 `category=sell`、`amount_units != 0`、`quantity_units == 0` 且
+    `price_units == 0` 时生效；补完后 FIFO、资产表、货基余额看到同一份数量与价格。
+    """
+    if (
+        (row.category or "").strip().lower() == "sell"
+        and row.amount_units != 0
+        and row.quantity_units == 0
+        and row.price_units == 0
+    ):
+        row.quantity_units = abs(row.amount_units) * SELL_FILL_QTY_MULTIPLIER
+        row.price_units = SELL_FILL_PRICE_UNITS
+
+
 def _parsed_to_trade_row(parsed: ParsedRow, batch_id: str) -> TradeRow:
     """解析行 → 待插入流水行（分类字段由调用方按规则写入）。"""
     return TradeRow(
@@ -402,6 +424,7 @@ async def commit_batch(
                 trade_row.category = final_category
                 trade_row.side = side_from_category(final_category)
                 trade_row.summary_code = rule_summary_code(rule)
+                fill_sell_quantity_units(trade_row)
                 to_insert.append(trade_row)
                 continue
             type_key, _ = row_type_key(parsed)
@@ -426,6 +449,7 @@ async def commit_batch(
             rule_id = resolution.get("suggested_rule_id")
             matched_rule = rules_by_id.get(str(rule_id)) if rule_id else None
             trade_row.summary_code = rule_summary_code(matched_rule) if matched_rule else None
+            fill_sell_quantity_units(trade_row)
             to_insert.append(trade_row)
         inserted = await trade_repo.insert_many(user_id, to_insert)
 

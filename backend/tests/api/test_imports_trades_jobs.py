@@ -907,6 +907,24 @@ async def test_api_017_fractional_quantity_two_decimals(
     assert Decimal(item["quantity"]) * Decimal(item["price"]) == Decimal(item["amount"])
 
 
+async def test_api_017_sell_without_units_fills_money_fund_units(
+    client, api_prefix, user, settings
+) -> None:
+    """货基赎回只落资金腿（有金额、无数量/单价）→ 落库前按 1 元净值补数量与价格。"""
+    rows = ["2026-10-26,,,卖出,0,0.000,179999.00,0.00,0.00,0.00,180100.05,资管转让资金上账"]
+    preview_id = await _preview_with_rows(client, api_prefix, user, rows)
+    await _commit_import(client, api_prefix, user, preview_id)
+    await _drain_worker(settings)
+
+    resp = await client.get(f"{api_prefix}/trades", headers=user.headers)
+    item = resp.json()["items"][0]
+    assert item["category"] == "sell"
+    assert item["side"] == "sell"
+    assert item["quantity"] == "179999"
+    assert item["price"] == "1.000000"
+    assert item["amount"] == "179999.00"
+
+
 async def test_api_017_etag_and_if_none_match(client, api_prefix, user, owner_engine) -> None:
     await _seed_trade(owner_engine, user_id=user.user_id)
     first = await client.get(f"{api_prefix}/trades", headers=user.headers)

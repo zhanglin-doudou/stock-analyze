@@ -363,7 +363,9 @@ def _build_candidate_from_values(
     ):
         raise _RowError(QuarantineReason.INVALID_AMOUNT)
 
-    summary = value("summary") or None
+    # 摘要在这里（解析边界）统一归一：删除折行/空格/零宽字符后再落 ParsedRow。
+    # 落库摘要、类型 key、规则匹配、模板比对因此共用同一文本，避免各自再归一分叉。
+    summary = normalize_summary(value("summary")) or None
     # 账号明文已在 parse_bill 入口统一抹成 MD5（空账号留空串 → 这里转 None）。
     # 此值同时作为 ParsedRow.account_masked（落库列）与下游去重键的业务要素。
     account_masked = value("account") or None

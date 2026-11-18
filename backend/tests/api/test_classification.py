@@ -171,7 +171,7 @@ async def test_real_bill_all_rows_classified_and_zero_unknown(
     assert {item["summary_code"] for item in trades if item["summary"] == "银行转存"} == {
         "sys_transfer_in"
     }
-    assert {item["summary_code"] for item in trades if item["summary"] == "股息红利税\n补缴"} == {
+    assert {item["summary_code"] for item in trades if item["summary"] == "股息红利税补缴"} == {
         "sys_div_tax"
     }
 
@@ -303,15 +303,16 @@ async def test_real_statement_excerpt_quarantine_only_zero_amount(
     assert all(item["category"] for item in trades)
     by_summary = {item["summary"]: item for item in trades}
     # [省心投]申购确认视同银行转出（设计 D14）：category=transfer，CASH 占位、方向由 Category 派生（transfer→unknown）。
-    assert by_summary["[省心投]申\n购确认"]["category"] == "transfer"
-    assert by_summary["[省心投]申\n购确认"]["security_code"] == "CASH"
-    assert by_summary["新股申购确\n认缴款"]["category"] == "new_stock"
-    assert by_summary["[省心投]申\n购确认"]["side"] == "unknown"
+    # 折行摘要已在解析边界归一并落库（如「[省心投]申\n购确认」→「[省心投]申购确认」）。
+    assert by_summary["[省心投]申购确认"]["category"] == "transfer"
+    assert by_summary["[省心投]申购确认"]["security_code"] == "CASH"
+    assert by_summary["新股申购确认缴款"]["category"] == "new_stock"
+    assert by_summary["[省心投]申购确认"]["side"] == "unknown"
     # 券商登记动作（托管转出/新股入帐/证券清理…）归 broker_action：不影响持仓与成本（资产口径 1.9）。
     assert by_summary["托管转出"]["category"] == "broker_action"
     assert by_summary["新股入帐"]["category"] == "broker_action"
-    assert by_summary["[省心投]红\n利发放"]["category"] == "dividend"
-    assert by_summary["[省心投]红\n利发放"]["amount"] == "0.00"
+    assert by_summary["[省心投]红利发放"]["category"] == "dividend"
+    assert by_summary["[省心投]红利发放"]["amount"] == "0.00"
     assert {item["category"] for item in trades} == {
         "sell",
         "transfer",

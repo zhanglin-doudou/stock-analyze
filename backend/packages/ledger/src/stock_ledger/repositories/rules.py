@@ -173,17 +173,34 @@ _TRANSFER_RULE_NAMES: tuple[str, ...] = (
     "银行转取→资金划转",
     "转存管转入→资金划转",
     "转存管转出→资金划转",
-    "资管转让上账→资金划转",
+    "资管转让资金上账→赎回",
     "银证转入→资金划转",
     "银证转出→资金划转",
+)
+# 「资管转让资金上账」是华泰资管转让的货基赎回资金腿（如 940018），
+# 必须落 sell 才能与份额腿配对、避免现金与货基余额双计；其余仍是资金划转。
+_TRANSFER_RULE_CATEGORIES: tuple[str, ...] = (
+    "transfer",
+    "transfer",
+    "transfer",
+    "transfer",
+    "transfer",
+    "transfer",
+    "sell",
+    "transfer",
+    "transfer",
 )
 
 SYSTEM_RULES: tuple[tuple[str, str, str, str, str, str, int], ...] = (
     *_BASE_SYSTEM_RULES,
     *(
-        (code, name, "transfer", "both", "contains", keyword, 30)
-        for code, name, keyword in zip(
-            _TRANSFER_RULE_CODES, _TRANSFER_RULE_NAMES, TRANSFER_SUMMARY_KEYWORDS, strict=True
+        (code, name, category, "both", "contains", keyword, 30)
+        for code, name, category, keyword in zip(
+            _TRANSFER_RULE_CODES,
+            _TRANSFER_RULE_NAMES,
+            _TRANSFER_RULE_CATEGORIES,
+            TRANSFER_SUMMARY_KEYWORDS,
+            strict=True,
         )
     ),
 )

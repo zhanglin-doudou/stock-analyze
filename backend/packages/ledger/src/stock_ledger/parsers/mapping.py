@@ -30,6 +30,7 @@ from stock_ledger.parsers.columns import (
     ColumnMapping,
     map_columns,
     normalize_header,
+    strip_all_whitespace,
 )
 
 #: 账单类型键前缀：摘要缺失/为空时用方向 + 金额符号派生（设计 D-13）。
@@ -216,15 +217,14 @@ def merge_fee_units(units: list[int]) -> int:
 
 
 def normalize_type_key(summary: str | None) -> str:
-    """账单类型键：NFKC + 去零宽/空白 + ASCII 小写，截断 64（D-13）。"""
+    """账单类型键：NFKC + 去零宽/空白 + ASCII 小写，截断 64（D-13）。
+
+    空白处理复用 `strip_all_whitespace`，与摘要归一（规则匹配/模板比对）同一口径。
+    """
     if not summary:
         return ""
     text = unicodedata.normalize("NFKC", summary)
-    cleaned = "".join(
-        char
-        for char in text
-        if char not in {"\u200b", "\u200c", "\u200d", "\ufeff"} and not char.isspace()
-    )
+    cleaned = strip_all_whitespace(text)
     ascii_lower = "".join(char.lower() if "A" <= char <= "Z" else char for char in cleaned)
     return ascii_lower[:TYPE_KEY_MAX_LEN]
 

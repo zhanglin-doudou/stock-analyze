@@ -79,18 +79,18 @@ _HUATAI_BILL_TYPES: tuple[PresetBillType, ...] = (
     PresetBillType("新股入帐", "broker_action"),
     PresetBillType("新股申购确认缴款", "new_stock"),
     PresetBillType("申购确认", "buy"),
-    PresetBillType("红利发放", "dividend"),
+    PresetBillType("红利发放", "interest"),
     PresetBillType("股息入帐", "dividend"),
     PresetBillType("股息红利税补缴", "dividend"),
     PresetBillType("证券买入", "buy"),
     PresetBillType("证券卖出", "sell"),
-    PresetBillType("资管转让资金上账", "transfer"),
+    PresetBillType("资管转让资金上账", "sell"),
     PresetBillType("赎回确认", "sell"),
     PresetBillType("银行转取", "transfer"),
     PresetBillType("银行转存", "transfer"),
     PresetBillType("非交易过户确认", "broker_action"),
     PresetBillType("[省心投]申购确认", "transfer"),
-    PresetBillType("[省心投]红利发放", "dividend"),
+    PresetBillType("[省心投]红利发放", "interest"),
 )
 
 SYSTEM_TEMPLATES: tuple[SystemTemplate, ...] = (

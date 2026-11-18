@@ -399,9 +399,9 @@ def test_non_trade_interest() -> None:
 
 
 def test_non_trade_dividend_tax_with_newline() -> None:
-    """股息红利税补缴（含换行符）：无证券代码 → CASH 占位；方向由 Category 决定。"""
+    """股息红利税补缴（含换行/空格）：解析边界归一后落库摘要无空白，CASH 占位。"""
     row = _buy_row(
-        证券代码="", 证券名称="", 买卖标志="", 摘要="股息红利税\n补缴", 成交金额="-60.00"
+        证券代码="", 证券名称="", 买卖标志="", 摘要=" 股息红利税\n补缴 ", 成交金额="-60.00"
     )
     bill = _parse(_xlsx(_HEADERS, [row]))
     assert len(bill.rows) == 1
@@ -410,6 +410,16 @@ def test_non_trade_dividend_tax_with_newline() -> None:
     assert r.security_code == "CASH"
     assert r.side == "unknown"
     assert r.amount_units == -60_00
+    # 归一：删除换行与首尾/中间空白（含 NBSP），纯中文语义不变。
+    assert r.summary == "股息红利税补缴"
+    assert r.security_name == "股息红利税补缴"
+
+
+def test_summary_without_whitespace_unchanged() -> None:
+    """不含空白的摘要归一后必须逐字不变（不误伤既有口径）。"""
+    row = _buy_row(摘要="证券买入")
+    bill = _parse(_xlsx(_HEADERS, [row]))
+    assert bill.rows[0].summary == "证券买入"
 
 
 def test_non_trade_market_value_subscription_is_cash_row() -> None:
@@ -546,7 +556,7 @@ def test_wrapped_summary_newline_normalized_for_side_and_parse() -> None:
     bill = _parse(_STATEMENT_BILL.read_bytes(), file_name=_STATEMENT_BILL.name)
     by_line = {row.line_no: row for row in bill.rows}
     subscribe = by_line[21]
-    assert subscribe.summary == "[省心投]申\n购确认"
+    assert subscribe.summary == "[省心投]申购确认"
     assert subscribe.side == "unknown"
     # 「[省心投]申购确认」视同银行转出（设计 D14）：CASH 占位、无份额语义；
     # 发生金额（负值流出）与资金余额原样保留，分类走 transfer。
@@ -557,7 +567,7 @@ def test_wrapped_summary_newline_normalized_for_side_and_parse() -> None:
     assert subscribe.cash_balance_units == 27196_66
     # 打新缴款摘要同样含「申购确认」，方向由分类 new_stock 规则兜底。
     ipo_payment = by_line[23]
-    assert ipo_payment.summary == "新股申购确\n认缴款"
+    assert ipo_payment.summary == "新股申购确认缴款"
     assert ipo_payment.side == "unknown"
     assert ipo_payment.amount_units == -26630_00
     # 托管转出发生金额 0 但资金余额非 0 → 保留为 unknown 方向；证券清理全零 → 隔离。

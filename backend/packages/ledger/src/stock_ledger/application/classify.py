@@ -74,7 +74,7 @@ def category_after_amount_fallback(category: str, amount_units: int) -> str:
 
 def _matches(rule: SummaryRule, summary: str) -> bool:
     if rule.match_type == "regex":
-        # 正则按原文匹配（用户可能显式依赖换行/空格）；其余匹配类型统一去折行。
+        # 摘要已在解析边界归一（无空白），正则的 pattern 原样使用、不再二次归一。
         try:
             return re.search(rule.pattern, summary) is not None
         except re.error:
