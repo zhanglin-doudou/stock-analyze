@@ -60,6 +60,7 @@ from stock_review.application.valuation import (
     PRICE_LOOKBACK,
     blocked_price_reason,
     holding_delta,
+    is_cash_anchor,
     is_cash_balance,
     load_prices,
     new_stock_pending_codes,
@@ -371,7 +372,7 @@ def compute_daily_valuations(
                     0, fund_balances.get(code, 0) + money_fund_value_units(trade)
                 )
                 day_cash_delta += trade.amount_units
-                if is_cash_balance(trade):
+                if is_cash_anchor(trade):
                     balance_override = int(trade.cash_balance_units or 0)
                 continue
             if code:
@@ -400,7 +401,7 @@ def compute_daily_valuations(
             if trade.id in oversell_proceeds_by_trade:
                 day_oversell = True
                 oversell_adjust += oversell_proceeds_by_trade[trade.id]
-            if is_cash_balance(trade):
+            if is_cash_anchor(trade):
                 balance_override = int(trade.cash_balance_units or 0)
 
         if balance_override is not None:

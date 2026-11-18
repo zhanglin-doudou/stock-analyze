@@ -38,6 +38,7 @@ from stock_review.application.assets import (
 )
 from stock_review.application.bond_alias import build_bond_alias, canonical_code
 from stock_review.application.bridge import bridge_for_period
+from stock_review.application.money_fund import money_fund_codes, money_fund_value_units
 from stock_review.application.portfolio import (
     HOLDINGS_MAX,
     Holding,
@@ -243,10 +244,18 @@ def _first_cash_gap(series: list[AssetDaily], trades: list[Trade]) -> tuple[date
     现金优先取账单余额（``balance_override``），否则累加上日现金；因此「本行现金 −
     （上一条可用行现金 + 期间流水合计）」不为零，说明有一批流水既没入账、又被余额
     「接回」了——这正是桥接残差的来源。blocked 行现金不可用，跳过且不重置基准。
+
+    资产表现金含货基余额，而货基红利/再投行金额为 0、以份额增加现金；不把份额变动
+    折算成金额补进当日流水，这些天会被误判成缺口（真实案例：2025-04-30 的 0.85 元
+    其实是三只货基的红利份额，不是漏记流水）。
     """
+    fund_codes = money_fund_codes(trades)
     day_deltas: dict[date, int] = {}
     for trade in trades:
-        day_deltas[trade.trade_date] = day_deltas.get(trade.trade_date, 0) + trade.amount_units
+        delta = trade.amount_units
+        if trade.security_code and trade.security_code in fund_codes:
+            delta += money_fund_value_units(trade)
+        day_deltas[trade.trade_date] = day_deltas.get(trade.trade_date, 0) + delta
     ordered = sorted(day_deltas.items())
     index = 0
     pending = 0

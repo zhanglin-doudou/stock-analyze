@@ -24,6 +24,7 @@ from stock_review.application.valuation import (
     close_on_or_before,
     closing_price_ladder,
     holding_delta,
+    is_cash_anchor,
     is_cash_balance,
     load_prices,
     market_failure_cause,
@@ -112,6 +113,45 @@ def test_is_cash_balance_treats_zero_as_balance() -> None:
         _trade(trade_date=date(2026, 1, 1), category_="other", cash_balance_units=0)
     )
     assert not is_cash_balance(_trade(trade_date=date(2026, 1, 1), category_="buy"))
+
+
+def test_is_cash_anchor_skips_zero_amount_share_rows() -> None:
+    """零金额但有份额的行（货基红利发放/再投、送转）不改变券商现金，不能当余额锚点。
+
+    真实案例：2026-10-27 最后一笔是货基红利发放（金额 0、余额列 0），上一笔申购确认
+    的真实余额是 101.15 元；把 0 当锚点会让全历史桥接正好差 101.15 元。
+    """
+    dividend = _trade(
+        trade_date=date(2026, 10, 27),
+        category_="interest",
+        security_code="940018",
+        quantity_units=shares("407600"),
+        price_units=price("1.00"),
+        amount_units=0,
+        cash_balance_units=0,
+    )
+    assert is_cash_balance(dividend)  # 仍是余额行（对账口径不变）
+    assert not is_cash_anchor(dividend)  # 但不是锚点
+
+    purchase = _trade(
+        trade_date=date(2026, 10, 27),
+        category_="buy",
+        security_code="940018",
+        quantity_units=shares("1414"),
+        price_units=price("1.00"),
+        amount_units=-cents("1414.19"),
+        cash_balance_units=cents("101.15"),
+    )
+    assert is_cash_anchor(purchase)
+
+    # 纯余额行（金额 0、无份额）仍是合法锚点，保持既有「单条余额行」口径。
+    assert is_cash_anchor(
+        _trade(trade_date=date(2026, 1, 1), category_="other", cash_balance_units=cents("1000"))
+    )
+    # 没有任何余额的行永远不是锚点。
+    assert not is_cash_anchor(
+        _trade(trade_date=date(2026, 1, 1), category_="buy", amount_units=-cents("100"))
+    )
 
 
 @pytest.mark.parametrize(

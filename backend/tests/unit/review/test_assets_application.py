@@ -310,6 +310,38 @@ def test_pure_cash_days_have_zero_market_and_zero_pnl() -> None:
     assert all(row["daily_pnl_units"] == 0 for row in result.rows)
 
 
+def test_zero_amount_share_row_does_not_override_broker_cash() -> None:
+    """零金额份额行（货基红利发放）不改变券商现金，余额列的 0 不得覆盖当日现金。
+
+    真实案例：2026-10-27 收盘前最后一笔是货基红利发放（金额 0、余额列 0），
+    若把它当余额覆盖，当日券商现金 101.15 元会被抹成 0，资产表与桥接同时少 101.15 元。
+    """
+    trades = [
+        _trade(
+            trade_date=date(2026, 10, 27),
+            category="transfer",
+            security_code="CASH",
+            amount_units=cents("101.15"),
+            cash_balance_units=cents("101.15"),
+            line_no=1,
+        ),
+        _trade(
+            trade_date=date(2026, 10, 27),
+            category="interest",
+            security_code="001526",
+            quantity_units=shares("900"),
+            price_units=price("1.00"),
+            amount_units=0,
+            cash_balance_units=0,
+            line_no=2,
+        ),
+    ]
+    result = _run(trades, date(2026, 10, 27), date(2026, 10, 27))
+    row = _row(result, date(2026, 10, 27))
+    assert row["cash_units"] == cents("101.15")
+    assert row["total_assets_units"] == cents("101.15")
+
+
 def test_money_fund_merged_into_cash_and_never_held() -> None:
     """2.3：货基是现金等价物 —— 余额并入现金列，不进持仓/成本/市值/行情，总资产不变。"""
     trades = [

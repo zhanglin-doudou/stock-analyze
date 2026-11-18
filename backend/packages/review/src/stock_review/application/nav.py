@@ -58,7 +58,7 @@ from stock_review.application.valuation import (
     holding_delta as _holding_delta,
 )
 from stock_review.application.valuation import (
-    is_cash_balance as _is_cash_balance,
+    is_cash_anchor as _is_cash_anchor,
 )
 from stock_review.application.valuation import (
     load_prices as _load_prices,
@@ -375,7 +375,7 @@ async def compute_nav_points(
                 day_cash_delta += trade.amount_units
                 if category in _CASHFLOW_CATEGORIES:
                     cashflow += trade.amount_units
-                if _is_cash_balance(trade):
+                if _is_cash_anchor(trade):
                     balance_override = int(trade.cash_balance_units or 0)
                 continue
             if code:
@@ -409,7 +409,7 @@ async def compute_nav_points(
             # 超卖净卖款：卖款已在现金/总资产里，不计收益，也不标成外部现金流。
             oversell_today += oversell_proceeds.get(trade.id, 0)
             # 余额行覆盖
-            if _is_cash_balance(trade):
+            if _is_cash_anchor(trade):
                 balance_override = int(trade.cash_balance_units or 0)
 
         state.cashflow_units = cashflow

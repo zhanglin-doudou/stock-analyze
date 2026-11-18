@@ -94,6 +94,19 @@ def is_cash_balance(trade: Trade) -> bool:
     return trade.cash_balance_units is not None
 
 
+def is_cash_anchor(trade: Trade) -> bool:
+    """该行的现金余额能否代表「券商现金」并被用作锚点/覆盖值。
+
+    零金额但有份额的行（货基红利发放/红利再投、送转、非交易过户等）不改变券商现金，
+    账单在这些行的「资金余额」列常写 0 或按另一账户口径记账；若拿它覆盖累计现金，
+    会把当日真实余额抹掉（真实案例：2026-10-27 货基红利行 0 元，桥接残差 101.15 元）。
+    这类行的正确口径是「上一笔余额顺延」，因此不作为锚点。
+    """
+    return trade.cash_balance_units is not None and not (
+        trade.amount_units == 0 and trade.quantity_units != 0
+    )
+
+
 def holding_delta(category: str, quantity_units: int, *, amount_units: int = 0) -> int:
     """单笔 trade 对持仓数量的增量（buy/bonus/rights/new_stock 加，sell 减）。
 
@@ -283,6 +296,7 @@ __all__ = [
     "close_on_or_before",
     "closing_price_ladder",
     "holding_delta",
+    "is_cash_anchor",
     "is_cash_balance",
     "load_prices",
     "market_failure_cause",
