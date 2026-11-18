@@ -95,6 +95,16 @@ def normalize_summary(raw: str) -> str:
     return strip_all_whitespace(normalize_header(raw))
 
 
+def normalize_name(raw: str) -> str:
+    """证券名称归一：与摘要同口径删除换行/制表/空格/全角空格/零宽字符。
+
+    券商对长名称会折行（如「华泰紫金天\\n天发货币」），也会在中间插对齐用的
+    全角空格/NBSP。名称是展示与配对（可转债别名、同标的归一）的业务标识，
+    必须和摘要共用「删除而不压成单个空格」的口径，否则同一只证券会出现两个名字。
+    """
+    return normalize_summary(raw)
+
+
 def is_signed_amount_header(raw: str | None) -> bool:
     """金额列是否原生带符号（「发生金额/发生额」）。
 
@@ -337,6 +347,7 @@ __all__ = [
     "map_columns",
     "normalize_cell",
     "normalize_header",
+    "normalize_name",
     "normalize_summary",
     "parse_date_text",
     "resolve_side",

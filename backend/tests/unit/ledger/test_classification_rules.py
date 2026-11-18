@@ -287,8 +287,8 @@ def test_synthetic_fixture_rows_classified_except_intentional_unknown() -> None:
     assert all(row.summary == "未知业务XYZ" for row in unknown)
 
 
-def test_fund_fixture_parse_and_classify_zero_quarantine() -> None:
-    """货基账单全链路（解析→分类）：7 行入账（含零金额红利发放），零隔离。"""
+def test_fund_fixture_parse_and_classify_zero_amount_quarantined() -> None:
+    """货基账单全链路（解析→分类）：6 行入账，零金额红利发放按 INVALID_AMOUNT 隔离。"""
     fixture = Path(__file__).parents[2] / "api" / "华泰账单_货基_mock.xlsx"
     bill = parse_bill(
         fixture.read_bytes(),
@@ -297,8 +297,10 @@ def test_fund_fixture_parse_and_classify_zero_quarantine() -> None:
         date_format=None,
         clock=FrozenClock(datetime(2026, 7, 1, 9, 0, tzinfo=UTC)),
     )
-    assert len(bill.rows) == 7
-    assert bill.quarantined == []
+    assert len(bill.rows) == 6
+    assert [(item.line_no, item.reason_code) for item in bill.quarantined] == [
+        (19, "INVALID_AMOUNT")
+    ]
 
     rules = _rules()
     categories: dict[str, set[str]] = {}
@@ -311,12 +313,11 @@ def test_fund_fixture_parse_and_classify_zero_quarantine() -> None:
         "申购确认": {"buy"},
         "证券买入": {"buy"},
         "银行转存": {"transfer"},
-        "红利发放": {"dividend"},
     }
 
 
 def test_real_statement_excerpt_parse_and_classify() -> None:
-    """真实对账单节选：折行摘要全部命中，持仓/声明区块被忽略；红利发放正常入账。"""
+    """真实对账单节选：折行摘要全部命中，持仓/声明区块被忽略；全零行统一隔离。"""
     fixture = Path(__file__).parents[2] / "api" / "华泰账单_真实节选_mock.xlsx"
     bill = parse_bill(
         fixture.read_bytes(),
@@ -325,12 +326,9 @@ def test_real_statement_excerpt_parse_and_classify() -> None:
         date_format=None,
         clock=FrozenClock(datetime(2026, 7, 1, 9, 0, tzinfo=UTC)),
     )
-    assert len(bill.rows) == 6
-    assert sorted(item.line_no for item in bill.quarantined) == [18, 19, 20, 25]
-    assert {item.reason_code for item in bill.quarantined} == {
-        "DUPLICATE_IN_FILE",
-        "INVALID_AMOUNT",
-    }
+    assert len(bill.rows) == 5
+    assert sorted(item.line_no for item in bill.quarantined) == [17, 18, 19, 20, 25]
+    assert {item.reason_code for item in bill.quarantined} == {"INVALID_AMOUNT"}
 
     rules = _rules()
     categories: dict[str, set[str]] = {}
@@ -341,8 +339,6 @@ def test_real_statement_excerpt_parse_and_classify() -> None:
     assert categories == {
         # [省心投]申购确认视同银行转出（设计 D14）→ 资金划转。摘要已在解析边界归一。
         "[省心投]申购确认": {"transfer"},
-        # 零金额份额行按账单分类正常入账。
-        "[省心投]红利发放": {"dividend"},
         "托管转出": {"broker_action"},
         "新股申购确认缴款": {"new_stock"},
         "新股入帐": {"broker_action"},
