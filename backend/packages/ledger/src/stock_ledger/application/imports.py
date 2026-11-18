@@ -29,6 +29,10 @@ from stock_platform.jobs import JobQueue
 from stock_platform.obs import get_logger
 from stock_platform.outbox import publish
 
+from stock_ledger.application.cash_leg import (
+    attribute_cash_legs_from_db,
+    is_real_security,
+)
 from stock_ledger.application.chain import (
     ChainMode,
     apply_multi_chain_plan,
@@ -117,16 +121,18 @@ SELL_FILL_QTY_MULTIPLIER = 100
 
 
 def fill_sell_quantity_units(row: TradeRow) -> None:
-    """落库前归一：卖出只有资金变更、没有数量/单价时，按货基 1 元净值补数量。
+    """落库前归一：真实证券的卖出只有资金变更、没有数量/单价时，按货基 1 元净值补数量。
 
-    仅在 `category=sell`、`amount_units != 0`、`quantity_units == 0` 且
-    `price_units == 0` 时生效；补完后 FIFO、资产表、货基余额看到同一份数量与价格。
+    仅在 `category=sell`、`amount_units != 0`、`quantity_units == 0`、
+    `price_units == 0` 且证券代码是真实 6 位代码时生效；伪代码（`CASH`/空）的资金腿
+    走 `cash_leg` 的份额腿配对与货基兜底，不再事后补成 CASH 货基。
     """
     if (
         (row.category or "").strip().lower() == "sell"
         and row.amount_units != 0
         and row.quantity_units == 0
         and row.price_units == 0
+        and is_real_security(row.security_code)
     ):
         row.quantity_units = abs(row.amount_units) * SELL_FILL_QTY_MULTIPLIER
         row.price_units = SELL_FILL_PRICE_UNITS
@@ -424,7 +430,6 @@ async def commit_batch(
                 trade_row.category = final_category
                 trade_row.side = side_from_category(final_category)
                 trade_row.summary_code = rule_summary_code(rule)
-                fill_sell_quantity_units(trade_row)
                 to_insert.append(trade_row)
                 continue
             type_key, _ = row_type_key(parsed)
@@ -449,8 +454,11 @@ async def commit_batch(
             rule_id = resolution.get("suggested_rule_id")
             matched_rule = rules_by_id.get(str(rule_id)) if rule_id else None
             trade_row.summary_code = rule_summary_code(matched_rule) if matched_rule else None
-            fill_sell_quantity_units(trade_row)
             to_insert.append(trade_row)
+        # 落库前归一：只有金额的资金腿先配对同日份额腿，再按货基持仓/现金兜底。
+        to_insert = await attribute_cash_legs_from_db(session, user_id, to_insert)
+        for trade_row in to_insert:
+            fill_sell_quantity_units(trade_row)
         inserted = await trade_repo.insert_many(user_id, to_insert)
 
         # 批次警告/假设与 preview 对齐：未知摘要也要打 UNKNOWN_SUMMARY 并留行号明细。
