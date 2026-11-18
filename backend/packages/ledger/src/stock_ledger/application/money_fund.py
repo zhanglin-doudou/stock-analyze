@@ -212,9 +212,11 @@ def money_fund_oversells(rows: Iterable[Trade]) -> tuple[MoneyFundOversell, ...]
 def money_fund_balances(rows: Iterable[Trade], *, before: date | None = None) -> dict[str, int]:
     """各货基在 `before`（不含）时点的余额（scale=2），无货基返回 `{}`。
 
-    期初反推只吸收「此前无任何增持」的赎回缺口（首笔即赎回、账单缺申购流水）；
-    申购/红利再投之后出现的缺口是超卖，按当日收益处理，不抬升期初，保证时点
-    余额与申购以前的历史不受未来超卖影响。任何时点的余额仍按 0 兜底（不出现负余额）。
+    用全历史 `_forward_shares` 的 offset 作起点（含 peer 扣减后的期初反推），
+    再按 `before` 截断逐行累加 delta。**中间不做 max(0) clamp**——clamp 会把
+    peer 扣减产生的负 offset（借出份额）在中间"豁免"掉，导致期末余额虚高。
+    最终返回时才 clamp 到 0：余额口径不允许负值，负中间值表示"该基金当时
+    欠 pool 内其它基金 N 份"，会在后续被 buy 或 peer 扣减抵消。
     """
     ordered = list(rows)
     codes = money_fund_codes(ordered)
@@ -223,16 +225,16 @@ def money_fund_balances(rows: Iterable[Trade], *, before: date | None = None) ->
     offset, _oversells = _forward_shares(ordered, codes)
     shares = dict(offset)
     for row in ordered:
+        if before is not None and row.trade_date >= before:
+            continue
         code = _name(row.security_code)
         if code not in codes:
-            continue
-        if before is not None and row.trade_date >= before:
             continue
         delta = _share_delta(row)
         if delta == 0:
             continue
-        shares[code] = max(0, shares[code] + delta)
-    return {code: _shares_to_value_units(value) for code, value in shares.items()}
+        shares[code] += delta
+    return {code: _shares_to_value_units(max(0, value)) for code, value in shares.items()}
 
 
 def money_fund_total_units(rows: Iterable[Trade], *, before: date | None = None) -> int:
