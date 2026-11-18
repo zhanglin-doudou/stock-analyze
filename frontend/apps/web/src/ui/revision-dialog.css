@@ -39,3 +39,11 @@
   gap: var(--s3);
   margin-top: var(--s4);
 }
+
+.revision-dialog-switch {
+  display: flex;
+  align-items: center;
+  gap: var(--s2);
+  margin-top: var(--s3);
+  cursor: pointer;
+}

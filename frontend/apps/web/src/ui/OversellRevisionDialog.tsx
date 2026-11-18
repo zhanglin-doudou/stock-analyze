@@ -35,6 +35,7 @@ export function OversellRevisionDialog({
   const dialogRef = useRef<HTMLDialogElement | null>(null);
   const [revision, setRevision] = useState<OversellRevisionOut | null>(null);
   const [cost, setCost] = useState("");
+  const [isNewStock, setIsNewStock] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [jobId, setJobId] = useState<string | null>(null);
@@ -58,6 +59,7 @@ export function OversellRevisionDialog({
     if (!tradeId) {
       setRevision(null);
       setCost("");
+      setIsNewStock(false);
       return;
     }
     let cancelled = false;
@@ -67,6 +69,7 @@ export function OversellRevisionDialog({
         if (cancelled) return;
         setRevision(data);
         setCost(data.cost ?? "");
+        setIsNewStock(data.is_new_stock ?? false);
       })
       .catch((err) => {
         if (!cancelled) {
@@ -97,7 +100,10 @@ export function OversellRevisionDialog({
     setBusy(true);
     setError(null);
     try {
-      const result = await api.trades.putOversellRevision(tradeId, { cost: cost.trim() });
+      const result = await api.trades.putOversellRevision(tradeId, {
+        cost: cost.trim(),
+        is_new_stock: isNewStock,
+      });
       setRevision(result.revision);
       if (result.rebuild_job_id) {
         setJobId(result.rebuild_job_id);
@@ -194,6 +200,15 @@ export function OversellRevisionDialog({
               placeholder="例如 1000.00"
               autoComplete="off"
             />
+            <label className="revision-dialog-switch" htmlFor="revision-is-new-stock">
+              <input
+                id="revision-is-new-stock"
+                type="checkbox"
+                checked={isNewStock}
+                onChange={(event) => setIsNewStock(event.target.checked)}
+              />
+              是否属于打新收益
+            </label>
             <div className="revision-dialog-actions">
               <button
                 type="submit"

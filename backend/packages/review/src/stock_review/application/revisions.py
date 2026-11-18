@@ -285,13 +285,17 @@ async def upsert_revision(
     clock: Clock,
     actor_id: uuid.UUID | None = None,
     request_id: str | None = None,
+    is_new_stock: bool = False,
 ) -> OversellRevision:
     """补录/覆盖修订成本；同一卖出幂等（重复提交只会更新注入行，不叠加）。
 
+    ``is_new_stock=True`` 时注入的买入腿 ``category=new_stock``（打新中签），
+    否则为普通 ``buy``；重复提交带不同开关会同步改写已有注入行。
     拒绝两类输入：非超卖卖出（包括真实账单已覆盖、无需修订的）与成本 ≤ 0。
     """
     if cost_units <= 0:
         raise ApiError(ErrorCode.VALIDATION_ERROR, detail="修订成本必须大于 0")
+    buy_category = "new_stock" if is_new_stock else "buy"
     sell = await _load_sell(session, user_id, sell_trade_id, lock=True)
     trades, alias = await _load_security_group(session, user_id, sell.security_code)
     # 注入数量 = 真实账单下仍未配对的数量（纯超卖时等于卖出数量）。必须剔除已有注入行
@@ -313,16 +317,20 @@ async def upsert_revision(
             continue
         _apply_cost(trade, cost_units=cost_units, quantity_units=quantity_units, leg=leg)
         trade.version += 1
+        changed: dict[str, object] = {
+            "amount_units": trade.amount_units,
+            "quantity_units": trade.quantity_units,
+        }
+        if leg == "buy" and trade.category != buy_category:
+            trade.category = buy_category
+            changed["category"] = buy_category
         await repo.add_history(
             user_id,
             trade.id,
             version=trade.version,
             op="update",
             snapshot=trade_snapshot(trade),
-            changed_fields={
-                "amount_units": trade.amount_units,
-                "quantity_units": trade.quantity_units,
-            },
+            changed_fields=changed,
             actor_id=actor_id,
             at=at,
         )
@@ -351,7 +359,7 @@ async def upsert_revision(
             security_code=sell.security_code,
             security_name=sell.security_name,
             summary=_BUY_SUMMARY,
-            category="buy",
+            category=buy_category,
             amount_units=-cost_units,
             price_units=(cost_units * _PRICE_SCALE + quantity_units // 2) // quantity_units,
             leg="buy",
@@ -381,6 +389,7 @@ async def upsert_revision(
         meta={
             "cost_units": cost_units,
             "quantity_units": quantity_units,
+            "is_new_stock": is_new_stock,
             "cash_trade_id": cash.id,
             "buy_trade_id": buy.id,
         },

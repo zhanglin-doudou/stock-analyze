@@ -588,6 +588,8 @@ class OversellRevisionIn(StrictModel):
     """PUT 入参：该卖出未配对部分的总成本（正数，定点字符串）。"""
 
     cost: str
+    # 是否属于打新收益：True → 注入买入流水 category=new_stock，否则 buy。
+    is_new_stock: bool = False
 
 
 class OversellRevisionSellOut(BaseModel):
@@ -607,6 +609,8 @@ class OversellRevisionOut(BaseModel):
     # none=可修订 / revised=已修订 / superseded=真实账单已覆盖（待确认）/ not_oversell=无需修订
     status: Literal["none", "revised", "superseded", "not_oversell"]
     cost: str | None = None
+    # 注入买入流水是否按打新（new_stock）处理，页面开关回显。
+    is_new_stock: bool = False
     # 注入的两条流水（未修订为 null），页面据此展示「非真实成交账单」标记。
     cash_trade: TradeOut | None = None
     buy_trade: TradeOut | None = None

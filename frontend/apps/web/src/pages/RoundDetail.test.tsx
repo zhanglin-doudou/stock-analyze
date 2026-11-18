@@ -675,6 +675,7 @@ function makeRevision(overrides: Partial<OversellRevisionOut> = {}): OversellRev
     },
     status: "none",
     cost: null,
+    is_new_stock: false,
     cash_trade: null,
     buy_trade: null,
     round_id: null,
@@ -748,10 +749,15 @@ describe("RoundDetail 超卖成本补录", () => {
     fireEvent.click(await screen.findByRole("button", { name: "补录 / 查看修订" }));
     const input = await screen.findByLabelText("未配对部分的总成本（元）");
     fireEvent.change(input, { target: { value: "1000.00" } });
+    // 打新开关：勾选后提交的注入买入腿按 new_stock 处理。
+    fireEvent.click(screen.getByLabelText("是否属于打新收益"));
     fireEvent.click(screen.getByRole("button", { name: "提交修订" }));
 
     await waitFor(() => {
-      expect(putRevision).toHaveBeenCalledWith("trd_sell_1", { cost: "1000.00" });
+      expect(putRevision).toHaveBeenCalledWith("trd_sell_1", {
+        cost: "1000.00",
+        is_new_stock: true,
+      });
     });
     expect(await screen.findByText("修订后的回合")).toBeTruthy();
   });

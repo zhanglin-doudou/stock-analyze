@@ -6495,6 +6495,11 @@
           "cost": {
             "title": "Cost",
             "type": "string"
+          },
+          "is_new_stock": {
+            "default": false,
+            "title": "Is New Stock",
+            "type": "boolean"
           }
         },
         "required": [
@@ -6569,6 +6574,11 @@
               }
             ],
             "title": "Cost"
+          },
+          "is_new_stock": {
+            "default": false,
+            "title": "Is New Stock",
+            "type": "boolean"
           },
           "round_id": {
             "anyOf": [

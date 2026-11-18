@@ -3760,6 +3760,11 @@ export interface components {
         OversellRevisionIn: {
             /** Cost */
             cost: string;
+            /**
+             * Is New Stock
+             * @default false
+             */
+            is_new_stock: boolean;
         };
         /** OversellRevisionMutationOut */
         OversellRevisionMutationOut: {
@@ -3775,6 +3780,11 @@ export interface components {
             cash_trade?: components["schemas"]["TradeOut"] | null;
             /** Cost */
             cost?: string | null;
+            /**
+             * Is New Stock
+             * @default false
+             */
+            is_new_stock: boolean;
             /** Round Id */
             round_id?: string | null;
             sell: components["schemas"]["OversellRevisionSellOut"];

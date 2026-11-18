@@ -806,6 +806,7 @@ function makeRevision(overrides: Partial<OversellRevisionOut> = {}): OversellRev
     },
     status: "none",
     cost: null,
+    is_new_stock: false,
     cash_trade: null,
     buy_trade: null,
     round_id: null,
