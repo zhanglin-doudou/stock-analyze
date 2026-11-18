@@ -112,10 +112,10 @@ db-version-guard:
 	db_port="$${STOCK_DB_PORT:-$$(sed -n 's/^STOCK_DB_PORT=//p' $(ENV_FILE) 2>/dev/null | tail -n1)}"; \
 	db_name="$${STOCK_DB_NAME:-$$(sed -n 's/^STOCK_DB_NAME=//p' $(ENV_FILE) 2>/dev/null | tail -n1)}"; \
 	db_host="$${db_host:-127.0.0.1}"; db_port="$${db_port:-5432}"; db_name="$${db_name:-stock_analyze}"; \
-	log=$$(mktemp); \
-	if $(MAKE) -s migrate-check >"$$log" 2>&1; then \
+	log=$$(mktemp); chk=$$(mktemp); \
+	if $(MAKE) -s migrate-check >"$$chk" 2>&1; then \
 		cur=$$($(ALEMBIC) current 2>/dev/null | awk 'NR==1{print $$1}'); \
-		rm -f "$$log"; \
+		rm -f "$$log" "$$chk"; \
 		echo "✅ 数据库版本检查通过：$${cur:-head}（$${db_host}:$${db_port}/$${db_name}）"; \
 		exit 0; \
 	fi; \
@@ -124,12 +124,19 @@ db-version-guard:
 		echo "   底层错误：$$(tail -n 1 "$$log")"; \
 		echo "   处理：确认 PostgreSQL 已启动（make db-up）且端口/账号正确，改好后重试 make dev。"; \
 		echo "   若只想起前端或 API（不校验库版本）：SKIP_MIGRATE_CHECK=1 make dev"; \
-		rm -f "$$log"; \
+		rm -f "$$log" "$$chk"; \
 		exit 2; \
 	fi; \
 	cur=$$(awk '!/^INFO/{print $$1; exit}' "$$log"); \
 	head=$$($(ALEMBIC) heads 2>/dev/null | awk 'NR==1{print $$1}'); \
-	rm -f "$$log"; \
+	if [ -n "$$cur" ] && [ "$$cur" = "$$head" ]; then \
+		echo "❌ 数据库 schema 与模型不一致（版本同为 $$cur，$${db_host}:$${db_port}/$${db_name}）"; \
+		echo "   alembic check：$$(grep -E '^(ERROR|FAILED)' "$$chk" | tail -n 1 | cut -c1-240)"; \
+		echo "   处理：确认差异是手工对象还是漏写迁移；仅想启动可 SKIP_MIGRATE_CHECK=1 make dev。"; \
+		rm -f "$$log" "$$chk"; \
+		exit 2; \
+	fi; \
+	rm -f "$$log" "$$chk"; \
 	echo "❌ 数据库版本落后：库 $${cur:-未初始化} / 代码 $${head:-未知}（$${db_host}:$${db_port}/$${db_name}）"; \
 	echo "   请执行 make migrate 后重试 make dev。"; \
 	exit 2
