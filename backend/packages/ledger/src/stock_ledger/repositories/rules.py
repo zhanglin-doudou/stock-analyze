@@ -78,7 +78,7 @@ _BASE_SYSTEM_RULES: tuple[tuple[str, str, str, str, str, str, int], ...] = (
     ),
     ("sys_brk_new_list", "新股上市→券商行为", "broker_action", "both", "contains", "新股上市", 11),
     ("sys_brk_sub", "认购→券商行为", "broker_action", "both", "exact", "认购", 11),
-    ("sys_brk_regis", "登记→券商行为", "broker_action", "both", "exact", "登记", 11),
+    ("sys_brk_regis", "登记→券商行为", "broker_action", "both", "contains", "登记", 11),
     ("sys_brk_list", "上市→券商行为", "broker_action", "both", "exact", "上市", 11),
     # 新股/可转债申购（新口径）：只认真正扣款的缴款形态——「新股申购确认缴款」
     # 「新股申购」「新股认购」「认购清算」。「中签」「上市」等登记/行情事件不再单独归入

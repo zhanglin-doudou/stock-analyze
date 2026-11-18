@@ -561,7 +561,6 @@ export function Assets() {
           // 资产表等用户全部补录完成后手动点「更新资产表」统一重算。
           loadOversellRounds().then((ors) => {
             if (ors.every(item => !item.close_date || !item.close_trade_id)) {
-              console.log('---debug---ors', ors)
               auto.submit('auto');
               setDraft({ ...draft, status: '' });
               filters.status = '';
