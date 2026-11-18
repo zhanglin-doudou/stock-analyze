@@ -661,6 +661,9 @@ async def revoke_batch_now(
     removed = await trade_repo.soft_delete_by_batch(
         user_id, batch_id, at=clock.now(), only_version_1=True
     )
+    revisions_removed = await trade_repo.soft_delete_revisions_for_batch(
+        user_id, batch_id, at=clock.now()
+    )
     batch = await batch_repo.revoke(user_id, batch_id, reason=reason, at=clock.now())
 
     # 类型记忆：只删本批次新增/修改的（复用的旧类型保留，保护其他批次）。
@@ -693,6 +696,7 @@ async def revoke_batch_now(
         payload={
             "batch_id": batch.id,
             "removed_trades": removed,
+            "revisions_removed": revisions_removed,
             "reason": reason,
             "mapping_deleted": mapping_deleted,
             "types_deleted": types_deleted,
@@ -704,7 +708,11 @@ async def revoke_batch_now(
         actor_id=actor_id or user_id,
         target_type="import_batch",
         target_id=batch.id,
-        meta={"removed_trades": removed, "reason": reason},
+        meta={
+            "removed_trades": removed,
+            "revisions_removed": revisions_removed,
+            "reason": reason,
+        },
         request_id=request_id,
         source="api",
     )
@@ -727,6 +735,7 @@ async def revoke_batch_now(
         "status": batch.status,
         "revoked": True,
         "removed_trades": removed,
+        "revisions_removed": revisions_removed,
         "revoked_at": batch.revoked_at,
         "mapping_revoked": {
             "mapping_deleted": mapping_deleted,

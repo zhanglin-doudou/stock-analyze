@@ -847,6 +847,79 @@ async def test_api_015_reimport_after_revoke_restores_rows(
     assert len(restored.json()["items"]) == 2
 
 
+async def test_api_015_revoke_revisions_cleanup(
+    client, api_prefix, user, settings, owner_engine
+) -> None:
+    """撤销批次必须顺带清理 revision_of 指向该批次的人工修订注入行。
+
+    复刻 1234@test.com 的转债修订 bug：批次导入 sell → 人工修订生成 buy（batch_id=NULL,
+    revision_of=<sell id>）→ 撤销批次后，sell 被软删但 buy 作为脏数据残留。
+    """
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import async_sessionmaker
+    from stock_ledger.models import Trade
+
+    first = await _commit_import(client, api_prefix, user, await _preview(client, api_prefix, user))
+    await _drain_worker(settings)
+    batch_id = first["batch_id"]
+
+    # 直接查 DB 拿本批次第一条 trade id，人工造一条 revision_of 指向它的脏数据
+    factory = async_sessionmaker(owner_engine, expire_on_commit=False)
+
+    async with factory() as s:
+        result = await s.execute(
+            select(Trade).where(Trade.user_id == user.user_id, Trade.batch_id == batch_id)
+        )
+        row = result.scalars().first()
+        assert row is not None
+        imported_id = row.id
+
+        revision_row = Trade(
+            id=f"rev_{uuid.uuid4().hex[:12]}",
+            user_id=user.user_id,
+            trade_date=row.trade_date,
+            category="buy",
+            side="buy",
+            summary="人工修订买入（撤销后应被清理）",
+            security_code=row.security_code,
+            security_name=row.security_name,
+            quantity_units=row.quantity_units,
+            price_units=row.price_units,
+            amount_units=-row.amount_units,
+            commission_units=0,
+            stamp_tax_units=0,
+            other_fee_units=0,
+            cash_balance_units=None,
+            cash_balance_available=False,
+            dedupe_key=f"manual-rev-{imported_id}",
+            occurrence_idx=0,
+            account_masked=row.account_masked,
+            source="manual",
+            version=1,
+            revision_of=imported_id,
+        )
+        s.add(revision_row)
+        await s.commit()
+        revision_row_id = revision_row.id
+
+    revoked = await client.post(
+        f"{api_prefix}/imports/{batch_id}/revoke", headers=user.headers
+    )
+    assert revoked.status_code == 200, revoked.text
+
+    async with factory() as s:
+        rows = (await s.execute(
+            select(Trade.deleted_at).where(Trade.id.in_([imported_id, revision_row_id]))
+        )).all()
+        assert len(rows) == 2
+        assert all(r[0] is not None for r in rows), f"仍有活跃行: {rows}"
+
+        alive = (await s.execute(
+            select(Trade.id).where(Trade.user_id == user.user_id, Trade.deleted_at.is_(None))
+        )).all()
+        assert alive == [], f"撤销后应无任何活跃行: {alive}"
+
+
 # ══ API-017 流水列表 ═══════════════════════════════════════
 
 

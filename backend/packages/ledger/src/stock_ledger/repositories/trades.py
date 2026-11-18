@@ -289,7 +289,11 @@ class TradeRepository:
         at: datetime,
         only_version_1: bool = True,
     ) -> int:
-        """撤销导入：只软删该批次写入、且未被人工改过（version=1）的行。"""
+        """撤销导入：只软删该批次写入、且未被人工改过（version=1）的行。
+
+        返回值只计入直接被本批次写入的行，不包括后续额外软删的人工修订注入行（见
+        `soft_delete_revisions_for_batch`），以便调用方把两类脏数据分开计数和报告。
+        """
         trades = await self._session.scalars(
             select(Trade).where(
                 Trade.user_id == user_id,
@@ -301,6 +305,42 @@ class TradeRepository:
         for trade in trades:
             if only_version_1 and trade.version != 1:
                 continue
+            trade.deleted_at = at
+            trade.version += 1
+            count += 1
+        await self._session.flush()
+        return count
+
+    async def soft_delete_revisions_for_batch(
+        self, user_id: uuid.UUID, batch_id: str, *, at: datetime
+    ) -> int:
+        """撤销导入时顺带清理脏数据：revision_of 指向本批次交易的人工修订注入行。
+
+        修订注入行 `batch_id=NULL`（不参与批次归属），但一旦被修订的导入行撤销，
+        注入行就失去存在前提——如果不清理，后续任何资产/收益重算都会以"手工买入"
+        的形式凭空计入这两条现金腿。
+
+        覆盖范围：本批次所有导入行的 trade_id 都纳入（包括已被人工改过 v>1 或
+        已软删的），避免漏掉任何 revision_of 关联。
+        """
+        all_batch_ids = set(
+            await self._session.scalars(
+                select(Trade.id).where(
+                    Trade.user_id == user_id, Trade.batch_id == batch_id
+                )
+            )
+        )
+        if not all_batch_ids:
+            return 0
+        revision_rows = await self._session.scalars(
+            select(Trade).where(
+                Trade.user_id == user_id,
+                Trade.revision_of.in_(all_batch_ids),
+                Trade.deleted_at.is_(None),
+            )
+        )
+        count = 0
+        for trade in revision_rows:
             trade.deleted_at = at
             trade.version += 1
             count += 1
