@@ -112,10 +112,12 @@ async def _preview(
     data: bytes | None = None,
     filename: str = "huatai.csv",
     content_type: str = "text/csv",
+    extra: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     resp = await client.post(
         f"{api_prefix}/imports/preview",
         headers={**user.headers, **V2},
+        data=extra or {},
         files={"file": (filename, data or _bill(), content_type)},
     )
     assert resp.status_code == 200, resp.text
@@ -271,6 +273,8 @@ async def test_api_010_huatai_cbond_bill_type_table_is_complete(client, api_pref
         data=_CBOND_FIXTURE.read_bytes(),
         filename=_CBOND_FIXTURE.name,
         content_type=_XLS_CONTENT_TYPE,
+        # 该 22 列表头与平安预设同签名；本用例验证「无模板时全部类型必须人工确认」。
+        extra={"reuse_template": "false"},
     )
     assert body["broker"] == "huatai"
     assert body["estimated"]["parsed"] == sum(_CBOND_TYPE_ROW_COUNTS.values())
@@ -658,8 +662,12 @@ async def test_import_template_system_preset_and_writeback(
     assert saved["has_user_overrides"] is False
     assert len(saved["bill_type_ids"]) == 1
     assert [item["type_key"] for item in saved["bill_types"]] == ["证券买入"]
-    # 系统预设只读，不写库；列表里的 system 项固定来自代码。
-    assert listed.json()["system"][0]["template_id"] == "sys:huatai"
+    # 系统预设只读，不写库；列表里的 system 项固定来自代码（华泰 + 平安）。
+    system = {item["template_id"]: item for item in listed.json()["system"]}
+    assert list(system) == ["sys:huatai", "sys:pingan"]
+    assert system["sys:pingan"]["broker"] == "pingan"
+    assert system["sys:pingan"]["signature"] == "93142b97ae9e1045"
+    assert len(system["sys:pingan"]["bill_types"]) == 12
 
     # 再传同文件：命中自己的模板。
     again = await _preview(client, api_prefix, user, data=_huatai_preset_bill(2))

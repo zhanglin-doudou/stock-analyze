@@ -112,6 +112,17 @@ function readTypes(preview: Preview): Record<string, unknown>[] {
   return (preview.types ?? []) as unknown as Record<string, unknown>[];
 }
 
+const BROKER_LABELS: Record<string, string> = {
+  auto: "自动识别",
+  huatai: "华泰证券",
+  pingan: "平安证券",
+  generic: "通用",
+};
+
+function brokerLabel(code: string): string {
+  return BROKER_LABELS[code] ?? code;
+}
+
 // 第 3 步的 Category 速查说明（纯文案，不参与任何计算）。
 // `code` 与后端 BillCategory 一致；中文名优先取接口返回的 categories，缺失时用这里的兜底。
 const CATEGORY_GUIDE: readonly {
@@ -609,6 +620,7 @@ export function Import() {
                 <SelectContent>
                   <SelectItem value="auto">自动识别</SelectItem>
                   <SelectItem value="huatai">华泰证券</SelectItem>
+                  <SelectItem value="pingan">平安证券</SelectItem>
                   <SelectItem value="generic">通用</SelectItem>
                 </SelectContent>
               </Select>
@@ -625,7 +637,7 @@ export function Import() {
                       <SelectLabel>系统预设</SelectLabel>
                       {templateOptions.system.map((item) => (
                         <SelectItem key={item.template_id} value={item.template_id}>
-                          {item.broker === "huatai" ? "华泰证券" : item.broker}
+                          {brokerLabel(item.broker)}
                           {item.preset_version ? ` · v${item.preset_version}` : ""}
                         </SelectItem>
                       ))}
@@ -636,7 +648,7 @@ export function Import() {
                       <SelectLabel>我的模板</SelectLabel>
                       {templateOptions.mine.map((item) => (
                         <SelectItem key={item.template_id} value={item.template_id}>
-                          {item.broker === "huatai" ? "华泰证券" : item.broker}
+                          {brokerLabel(item.broker)}
                           {` · ${item.signature}`}
                           {item.has_user_overrides ? " · 已自定义" : ""}
                         </SelectItem>

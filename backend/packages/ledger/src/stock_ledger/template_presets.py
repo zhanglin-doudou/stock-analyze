@@ -7,9 +7,13 @@
 预设里的 `bill_types` 只带 `type_key → category/discarded`，不引用任何数据库 id：
 落库时按当前用户的 `import_bill_type` upsert 后再写 id，因此跨用户安全。
 
-数据来源：1234@dev.com 在 5432 实际确认过的华泰模板（11 条列对应 + 18 个类型）。
-`signature` 与空白列修复后的 13 列表头一致（修复前模板记录的 `header_count=24`
-只是计数陈旧，签名本身未变）。
+数据来源：
+- `huatai`：1234@dev.com 在 5432 实际确认过的华泰模板（11 条列对应 + 18 个类型）。
+  `signature` 与空白列修复后的 13 列表头一致（修复前模板记录的 `header_count=24`
+  只是计数陈旧，签名本身未变）。
+- `pingan`：用户 5621ef58-792e-40e7-86b4-9cae7173c476 在 5432 实际确认过的平安证券模板
+  （14 条列对应 + 12 个类型 + 8 个显式忽略列；2026-11-18 从该用户的
+  `import_template` / `import_bill_type` 导出，`header_count=22`）。
 """
 
 from __future__ import annotations
@@ -93,6 +97,38 @@ _HUATAI_BILL_TYPES: tuple[PresetBillType, ...] = (
     PresetBillType("[省心投]红利发放", "interest"),
 )
 
+_PINGAN_ITEMS: tuple[dict[str, Any], ...] = (
+    {"field": "trade_date", "options": {}, "column_key": "1ca2dd0ae3b00b49"},
+    {"field": "summary", "options": {}, "column_key": "546e4a33e3c0fb2d"},
+    {"field": "security_code", "options": {}, "column_key": "70e5179c3767f431"},
+    {"field": "security_name", "options": {}, "column_key": "15415c08e7fe4afd"},
+    {"field": "price", "options": {}, "column_key": "e82fc6d14d555c5e"},
+    {"field": "quantity", "options": {}, "column_key": "5bffd9af3eedffae"},
+    {"field": "commission", "options": {}, "column_key": "a8c470dbab5b73b1"},
+    {"field": "stamp_tax", "options": {}, "column_key": "45d556d5233a2b23"},
+    {"field": "other_fee", "options": {}, "column_key": "6c6ce0ad91c7ea57"},
+    {"field": "amount", "options": {"amount_signed": True}, "column_key": "d518bf4fa35b4acb"},
+    {"field": "cash_balance", "options": {}, "column_key": "75988ede86796cd4"},
+    {"field": "account", "options": {}, "column_key": "63dd99547641277a"},
+    {"field": "note", "options": {}, "column_key": "daede9881787abe7"},
+    {"field": "other_fee", "options": {}, "column_key": "499ef7339a41126b"},
+)
+
+_PINGAN_BILL_TYPES: tuple[PresetBillType, ...] = (
+    PresetBillType("银证转入", "transfer"),
+    PresetBillType("证券买入清算", "buy"),
+    PresetBillType("利息归本", "interest"),
+    PresetBillType("证券卖出清算", "sell"),
+    PresetBillType("红股派息", "dividend"),
+    PresetBillType("深圳市场股息红利个人所得税扣款", "dividend"),
+    PresetBillType("上海市场股息红利个人所得税扣款", "dividend"),
+    PresetBillType("银证转出", "transfer"),
+    PresetBillType("基金申购", "buy"),
+    PresetBillType("基金赎回", "sell"),
+    PresetBillType("现金产品快速取现客户方", "sell"),
+    PresetBillType("红利发放", "interest"),
+)
+
 SYSTEM_TEMPLATES: tuple[SystemTemplate, ...] = (
     SystemTemplate(
         key="huatai",
@@ -103,6 +139,25 @@ SYSTEM_TEMPLATES: tuple[SystemTemplate, ...] = (
         items=_HUATAI_ITEMS,
         ignored=("9677f386bdcdd9c4", "56c13d96421589a4"),
         bill_types=_HUATAI_BILL_TYPES,
+    ),
+    SystemTemplate(
+        key="pingan",
+        broker="pingan",
+        signature="93142b97ae9e1045",
+        header_count=22,
+        date_format="YYYY-MM-DD",
+        items=_PINGAN_ITEMS,
+        ignored=(
+            "4f3a6a8667e668e8",
+            "06af1368e92bf32a",
+            "7094e25a183b3e4c",
+            "5d83423c9fa15e2a",
+            "888b1c7eaab413f8",
+            "19a69d1e719bc230",
+            "2b6bbf9b1d699f0e",
+            "9677f386bdcdd9c4",
+        ),
+        bill_types=_PINGAN_BILL_TYPES,
     ),
 )
 
