@@ -41,6 +41,7 @@ from stock_ledger.application.money_fund import (
     UNIT_PRICE_UNITS,
     money_fund_balances,
     money_fund_codes,
+    money_fund_identity,
 )
 from stock_ledger.repositories.trades import TradeRepository, TradeRow
 
@@ -92,18 +93,27 @@ def _implied_amount_units(row: Any) -> int:
 
 
 class _FundIndex:
-    """按日期缓存货基余额（`before` = 当日开始，同日流水不参与）。"""
+    """按日期缓存货基余额（`before` = 当日开始，同日流水不参与）。
 
-    __slots__ = ("_cache", "_codes", "_rows")
+    余额键是**归并身份键**（同名不同代码合并成一只）；`key()` 把交易行代码映射到
+    身份键，配对校验和兜底分派都与估值侧共享同一套口径。
+    """
+
+    __slots__ = ("_cache", "_codes", "_identity", "_rows")
 
     def __init__(self, rows: Sequence[Any]) -> None:
         self._rows = rows
         self._codes = money_fund_codes(rows)
+        self._identity = money_fund_identity(rows)
         self._cache: dict[date, dict[str, int]] = {}
 
     @property
     def codes(self) -> frozenset[str]:
         return self._codes
+
+    def key(self, code: str | None) -> str | None:
+        """交易行代码 → 归并身份键；非货基返回 `None`。"""
+        return self._identity.get((code or "").strip())
 
     def balances(self, day: date) -> dict[str, int]:
         cached = self._cache.get(day)
@@ -137,7 +147,8 @@ def _can_pair(leg: Any, share: Any, funds: _FundIndex, rows: Sequence[Any]) -> b
         return True
     value = _implied_amount_units(share)
     if share.security_code in funds.codes:
-        return funds.balances(leg.trade_date).get(share.security_code, 0) >= value
+        key = funds.key(share.security_code) or share.security_code
+        return funds.balances(leg.trade_date).get(key, 0) >= value
     return _share_quantity_before(rows, share.security_code, leg.trade_date) >= abs(
         share.quantity_units
     )

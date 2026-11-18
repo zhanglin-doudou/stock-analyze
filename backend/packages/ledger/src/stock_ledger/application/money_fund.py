@@ -84,6 +84,62 @@ def money_fund_codes(rows: Iterable[Trade]) -> frozenset[str]:
     return frozenset(matched)
 
 
+def money_fund_identity(rows: Iterable[Trade]) -> dict[str, str]:
+    """货基代码 → 归并身份键（同名不同代码共享同一份持仓）。
+
+    同一只货基在券商/登记口径上可能以不同代码出现（例如场内代码与登记/理财账号
+    代码并存），名称相同即视为同一只产品：份额、超卖与余额都按合并后的身份键推演。
+    归并只在货基集合内部进行，身份键优先取**6 位数字真实代码**（可回填到导入流水、
+    可做行情/展示），其次取组内最近有流水的代码，同一日期再按字典序保证稳定；
+    名称缺失的代码不参与归并，身份键即自身。
+    """
+    items = list(rows)
+    codes = money_fund_codes(items)
+    if not codes:
+        return {}
+    parent = {code: code for code in codes}
+
+    def _find(code: str) -> str:
+        root = code
+        while parent[root] != root:
+            root = parent[root]
+        while parent[code] != root:  # 路径压缩
+            parent[code], code = root, parent[code]
+        return root
+
+    latest: dict[str, date] = {}
+    name_owner: dict[str, str] = {}
+    for row in items:
+        code = _name(row.security_code)
+        if code not in codes:
+            continue
+        latest[code] = max(latest.get(code, date.min), row.trade_date)
+        name = _name(row.security_name)
+        if not name:
+            continue
+        owner = name_owner.setdefault(name, code)
+        if owner != code:  # 同名不同代码 → 并入同一组（可传递）
+            parent[_find(code)] = _find(owner)
+    components: dict[str, set[str]] = {}
+    for code in codes:
+        components.setdefault(_find(code), set()).add(code)
+    identity = {code: code for code in codes}
+    for members in components.values():
+        if len(members) < 2:
+            continue
+        canonical = max(
+            members, key=lambda code: (_is_real_code(code), latest.get(code, date.min), code)
+        )
+        for code in members:
+            identity[code] = canonical
+    return identity
+
+
+def _is_real_code(code: str) -> bool:
+    """6 位数字证券代码；理财账号/伪代码（如 `A40006`）不是真实证券代码。"""
+    return len(code) == 6 and code.isdigit()
+
+
 def money_fund_value_units(row: Trade) -> int:
     """单笔货基流水对余额的金额影响（scale=2；申购买入为正、赎回卖出为负）。
 
@@ -133,11 +189,11 @@ def _shares_to_value_units(quantity_units: int) -> int:
 
 
 def _forward_shares(
-    rows: list[Trade], codes: frozenset[str]
+    rows: list[Trade], keys: frozenset[str], identity: dict[str, str]
 ) -> tuple[dict[str, int], tuple[MoneyFundOversell, ...]]:
-    """全历史份额正推：返回 (期初反推份额, 超卖记录)。
+    """全历史份额正推：返回 (期初反推份额, 超卖记录)，均按归并身份键。
 
-    不变量：**running[code] == offset[code] + Σdelta** 始终成立。
+    不变量：**running[key] == offset[key] + Σdelta** 始终成立。
 
     缺口处理优先级（货基份额可跨基金 1:1 抵消）：
 
@@ -147,12 +203,12 @@ def _forward_shares(
     3. 剩余未覆盖的缺口，按 increased 状态分流：有增持 → 超卖（券商补记份额、
        当日计入收益）；从未增持 → 反推进期初。
     """
-    running: dict[str, int] = dict.fromkeys(codes, 0)
-    offset: dict[str, int] = dict.fromkeys(codes, 0)
-    increased: dict[str, bool] = dict.fromkeys(codes, False)
+    running: dict[str, int] = dict.fromkeys(keys, 0)
+    offset: dict[str, int] = dict.fromkeys(keys, 0)
+    increased: dict[str, bool] = dict.fromkeys(keys, False)
     oversells: list[MoneyFundOversell] = []
 
-    def _cover_from_peers(code: str, deficit: int) -> int:
+    def _cover_from_peers(key: str, deficit: int) -> int:
         """从 peers 的 running 盈余里扣减 deficit 份额，返回剩余未覆盖缺口。
 
         同时同步调整 peer 的 offset，保持 running[peer] == offset[peer] + Σdelta
@@ -160,7 +216,7 @@ def _forward_shares(
         """
         remaining = deficit
         for peer, bal in running.items():
-            if peer == code or bal <= 0 or remaining <= 0:
+            if peer == key or bal <= 0 or remaining <= 0:
                 continue
             take = min(bal, remaining)
             running[peer] = bal - take
@@ -169,70 +225,73 @@ def _forward_shares(
         return remaining
 
     for row in rows:
-        code = _name(row.security_code)
-        if code not in codes:
+        key = identity.get(_name(row.security_code))
+        if key is None:
             continue
         delta = _share_delta(row)
         if delta == 0:
             continue
         if delta > 0:
-            increased[code] = True
-            running[code] += delta
+            increased[key] = True
+            running[key] += delta
             continue
-        running[code] += delta
-        if running[code] >= 0:
+        running[key] += delta
+        if running[key] >= 0:
             continue
-        deficit = -running[code]
-        still = _cover_from_peers(code, deficit)
+        deficit = -running[key]
+        still = _cover_from_peers(key, deficit)
         if still > 0:
-            if increased[code]:
+            if increased[key]:
                 oversells.append(
                     MoneyFundOversell(
                         trade_id=row.id,
                         trade_date=row.trade_date,
-                        security_code=code,
+                        security_code=key,
                         quantity_units=still,
                     )
                 )
             else:
-                offset[code] += still
-        running[code] += deficit
+                offset[key] += still
+        running[key] += deficit
     return offset, tuple(oversells)
 
 
 def money_fund_oversells(rows: Iterable[Trade]) -> tuple[MoneyFundOversell, ...]:
-    """全历史份额正推得到的货基超卖记录（日期 / 证券代码 / 超出份额）。"""
+    """全历史份额正推得到的货基超卖记录（日期 / 归并身份键 / 超出份额）。"""
     ordered = list(rows)
-    codes = money_fund_codes(ordered)
-    if not codes:
+    identity = money_fund_identity(ordered)
+    if not identity:
         return ()
-    return _forward_shares(ordered, codes)[1]
+    return _forward_shares(ordered, frozenset(identity.values()), identity)[1]
 
 
 def money_fund_balances(rows: Iterable[Trade], *, before: date | None = None) -> dict[str, int]:
     """各货基在 `before`（不含）时点的余额（scale=2），无货基返回 `{}`。
+
+    键是**归并身份键**（同名不同代码合并成一只），与 `money_fund_identity` 对齐；
+    调用方按交易行的 `security_code` 取身份键后再累加。
 
     期初反推只吸收「此前无任何增持」的赎回缺口（首笔即赎回、账单缺申购流水）；
     申购/红利再投之后出现的缺口是超卖，按当日收益处理，不抬升期初，保证时点
     余额与申购以前的历史不受未来超卖影响。任何时点的余额仍按 0 兜底（不出现负余额）。
     """
     ordered = list(rows)
-    codes = money_fund_codes(ordered)
-    if not codes:
+    identity = money_fund_identity(ordered)
+    if not identity:
         return {}
-    offset, _oversells = _forward_shares(ordered, codes)
+    offset, _oversells = _forward_shares(ordered, frozenset(identity.values()), identity)
     shares = dict(offset)
     for row in ordered:
-        code = _name(row.security_code)
-        if code not in codes:
+        key = identity.get(_name(row.security_code))
+        if key is None:
             continue
         if before is not None and row.trade_date >= before:
             continue
         delta = _share_delta(row)
         if delta == 0:
             continue
-        shares[code] = max(0, shares[code] + delta)
-    return {code: _shares_to_value_units(value) for code, value in shares.items()}
+        shares[key] = max(0, shares[key] + delta)
+    return {key: _shares_to_value_units(value) for key, value in shares.items()}
 
 
 def money_fund_total_units(rows: Iterable[Trade], *, before: date | None = None) -> int:
@@ -248,6 +307,7 @@ __all__ = [
     "MoneyFundOversell",
     "money_fund_balances",
     "money_fund_codes",
+    "money_fund_identity",
     "money_fund_oversells",
     "money_fund_total_units",
     "money_fund_value_units",

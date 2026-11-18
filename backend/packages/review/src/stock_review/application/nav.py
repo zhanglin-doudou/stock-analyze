@@ -36,6 +36,7 @@ from stock_review.application.bridge import _initial_cash
 from stock_review.application.money_fund import (
     money_fund_balances,
     money_fund_codes,
+    money_fund_identity,
     money_fund_value_units,
 )
 from stock_review.application.rebuild import rights_resolution, trades_to_events
@@ -192,6 +193,8 @@ async def compute_nav_points(
     initial_cash, assumption = initial
     # 货币基金 = 现金等价物（2.3 口径）：余额并入现金，不进持仓/行情/成本。
     fund_codes = money_fund_codes(trades)
+    # 同名不同代码的货基合并成同一身份键共享持仓（与余额/超卖口径一致）。
+    fund_identity = money_fund_identity(trades)
     fund_balances: dict[str, int] = dict(money_fund_balances(trades, before=period_start))
 
     # 可转债发债→上市代码别名（设计 D3）：从全量明细派生，期初持仓/区间交易/行情统一
@@ -369,8 +372,10 @@ async def compute_nav_points(
             code = trade.security_code
             if code and code in fund_codes:
                 # 货基申赎：金额照常进出券商现金，余额单独累计后并入现金。
-                fund_balances[code] = max(
-                    0, fund_balances.get(code, 0) + money_fund_value_units(trade)
+                # 余额按归并身份键累计：同名不同代码视为同一只货基共享持仓。
+                fund_key = fund_identity.get(code, code)
+                fund_balances[fund_key] = max(
+                    0, fund_balances.get(fund_key, 0) + money_fund_value_units(trade)
                 )
                 day_cash_delta += trade.amount_units
                 if category in _CASHFLOW_CATEGORIES:

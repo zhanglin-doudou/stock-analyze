@@ -51,6 +51,7 @@ from stock_review.application.bridge import _initial_cash
 from stock_review.application.money_fund import (
     money_fund_balances,
     money_fund_codes,
+    money_fund_identity,
     money_fund_oversells,
     money_fund_value_units,
 )
@@ -103,7 +104,10 @@ log = get_logger("stock_review.assets")
 #      running 盈余份额里 1:1 覆盖，耗尽后再按 increased 状态进入 oversell 或期初反推。
 #      避免"有过增持的基金 running 耗尽后直接全进 oversell，而 peers 的盈余闲置"。
 #      口径变化，bump 触发全量重建。
-ASSET_DEFINITION_VERSION = "2.6"
+# 2.7：货基按证券名称兜底归并——代码不同但名称相同视为同一只产品，份额/超卖/余额
+#      按归并身份键统一推演（身份键优先取 6 位数字真实代码），避免同一只货基因
+#      场内代码与登记账号代码并存而被拆成两份、互相误判超卖。口径变化，bump 触发全量重建。
+ASSET_DEFINITION_VERSION = "2.7"
 # 安全窗：每次有新数据/脏流水/行情 as_of 变化时重算最近 45 天。
 SAFETY_DAYS = 45
 # 水位线重叠窗：PG `now()` = 事务开始时间，覆盖「长事务晚提交」竞态。
@@ -340,6 +344,8 @@ def compute_daily_valuations(
     oversell_proceeds_by_trade = oversell_proceeds or {}
     # 货币基金 = 现金等价物：不进持仓/成本/市值/行情，余额并入现金列（2.3 口径）。
     fund_codes = money_fund_codes(trades)
+    # 同名不同代码的货基合并成同一身份键共享持仓（与余额/超卖口径一致）。
+    fund_identity = money_fund_identity(trades)
     fund_balances: dict[str, int] = dict(money_fund_balances(trades, before=start))
     initial_total = initial_cash + sum(fund_balances.values())
 
@@ -375,8 +381,10 @@ def compute_daily_valuations(
             if code and code in fund_codes:
                 # 申赎金额照常进出券商现金，货基余额单独累计；两者之和即「现金余额」。
                 # 红利发放/再投行金额为 0、以份额增加余额 → 计入收益（不进外部现金流）。
-                fund_balances[code] = max(
-                    0, fund_balances.get(code, 0) + money_fund_value_units(trade)
+                # 余额按归并身份键累计：同名不同代码视为同一只货基共享持仓。
+                fund_key = fund_identity.get(code, code)
+                fund_balances[fund_key] = max(
+                    0, fund_balances.get(fund_key, 0) + money_fund_value_units(trade)
                 )
                 day_cash_delta += trade.amount_units
                 if is_cash_anchor(trade):
