@@ -35,6 +35,7 @@ from stock_core.fifo import FifoResult, Fill, OpenLot
 from stock_ledger.models import Trade
 from stock_platform.symbols import classify_symbol
 
+from stock_review.application.money_fund import money_fund_codes
 from stock_review.application.rebuild import rights_resolution
 from stock_review.application.rights import RightsResolution
 from stock_review.application.valuation import (
@@ -213,6 +214,8 @@ def build_symbol_plans(
     # 配股前置校验：零金额且此前无持仓的配股按券商行为处理（与 FIFO/资产表同源），
     # 因此既不算持仓类流水、也不进候选标的。
     rights = rights_resolution(trades)
+    # 货币基金是现金等价物：不参与归因（FIFO 同样不产生其回合与持仓）。
+    fund_codes = money_fund_codes(trades)
     # 新股排除按**本期窗口**判定（§4.4）：只在窗口 [t0, t1] 内出现新股缴款行的标的
     # 才按 `new_stock` 排除；历史中签、本期无新股行的标的本期按普通 `stock` 参与归因。
     # 估值兜底（缺价按认购成本）仍用全历史的 `new_stock_pending_codes`（D11）。
@@ -231,14 +234,21 @@ def build_symbol_plans(
         open_by_code[lot.security_code].append(lot)
     rows_by_code: dict[str, list[Trade]] = defaultdict(list)
     for trade in trades:
+        if trade.security_code in fund_codes:
+            continue
         if t0 <= trade.trade_date <= t1:
             code = canonical(trade.security_code)
             if code:
                 rows_by_code[code].append(trade)
 
     # 候选标的：FIFO 涉及标的 ∪ 窗口内有持仓类行（buy/sell/bonus/rights/new_stock）的标的。
-    codes: set[str] = set(fills_by_code) | set(open_by_code)
+    # 货基在应用层 FIFO 已被跳过；此处再挡一层，避免非标准调用把货基带进归因。
+    codes: set[str] = {
+        code for code in set(fills_by_code) | set(open_by_code) if code not in fund_codes
+    }
     for trade in trades:
+        if trade.security_code in fund_codes:
+            continue
         if t0 <= trade.trade_date <= t1 and rights.category(trade) in _COST_ADD | {
             "sell",
             "bonus",

@@ -317,10 +317,10 @@ export function Dashboard(): ReactElement {
     <div className="dash">
       <header className="dash-head">
         <div className="dash-eyebrow" data-testid="market-data-notice">
-          全历史 · 数据截至 <i>{data.data_as_of ?? "—"}</i> · 行情来自系统缓存（仅收盘后同步，盘中不拉取实时行情）· 口径：{data.definition_version}
+          全历史 · 数据截至 <i className="danger-text">{data.data_as_of ?? "—"}</i> · 行情来自系统缓存（仅收盘后同步，盘中不拉取实时行情）· 口径：{data.definition_version}
         </div>
         <h1 className="dash-title">看板</h1>
-        <p className="dash-sub">先看清自己，再看清市场。所有数值均为后端口径，本页只做呈现与下钻。</p>
+        <p className="dash-sub"><h3>先看清自己，再看清市场。</h3>所有数值均为后端口径，本页只做呈现与下钻。各类分析已剔除货币基金等固定收益相关交易。</p>
         <div className="dash-head-meta" data-testid="dashboard-meta">
           <span>
             构建状态 <StatusBadge status={data.build_state} kind="build" />

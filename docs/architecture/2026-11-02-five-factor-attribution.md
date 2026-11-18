@@ -84,7 +84,7 @@
 
 - Brinson-Fachler / Carino 多期链接（P3-08；`model=brinson_industry` 本期 422）。
 - 区间内送转/配股的数量调整归因（M1 整标的剔除，D-12；P2 实现）。
-- 债券/ETF/基金/货基的全资产类别归因（→残差，P2 扩展）。
+- 债券/ETF/基金的全资产类别归因（→残差，P2 扩展）；货基按现金等价物剔除（2026-11-18）。
 - 风格因子（FF3/FF5/Barra）与同类对比；归因结果的物化/缓存/趋势页（P3-02 独立任务）。
 - 归因 CI/显著性（金额是确定性分解；样本门槛只用于"是否下结论"）。
 - 改变既有指标口径、回合 pnl 口径、资产表估值口径。
@@ -365,7 +365,7 @@ else:
 
 **候选集 vs「参与本期」（2026-11-04 修订）**：
 
-- **候选集来自全历史 FIFO**：`fills_by_code ∪ open_by_code ∪ 区间内持仓类行`，因此长期持有、早已清仓、已退市的标的都会生成 `SymbolPlan`；`coverage.symbols_total` 统计的正是该候选集（**不是**本期参与数，字段名保持不变）。
+- **候选集来自全历史 FIFO**：`fills_by_code ∪ open_by_code ∪ 区间内持仓类行`，因此长期持有、早已清仓、已退市的标的都会生成 `SymbolPlan`；`coverage.symbols_total` 统计的正是该候选集（**不是**本期参与数，字段名保持不变）。**货币基金（`money_fund_codes`）按现金等价物剔除（2026-11-18）**：不生成 `SymbolPlan`，其申购/赎回行也不进残差桶与 `unattributed[]`。
 - **"参与本期"** = 期末仍有未平仓 lot、`close_date ∈ [T0,T1]` 的 closed fill、或区间内有持仓类流水（`buy`/`rights`/`new_stock`/`sell`/`bonus`）。
 - **不参与本期的标的**：**不产生 `missing[]` 条目**（其缺映射/缺价/缺指数/公司行动与本期的归因口径无关），`SymbolPlan.in_universe=False`，整标的金额仍进 `unattributed_price_pnl` 残差桶；仅统计在 `symbols_total` 内。**同样不进入 `coverage.unattributed[]` 明细**（明细与 missing 复用同一 `participating` 判据，只披露本期相关标的，2026-11-04 修订）。
 - **参与本期**的 A 股缺行业映射 → `warning`（数据质量缺口）；持有但停牌（期末仍有未平仓 lot）同样参与、同样 `warning`。
@@ -640,7 +640,7 @@ Authorization: Bearer <jwt|pat>
 | `fx_attr_single_buy` | 价格路径 0（同日收盘买/卖）、买价显著低于建仓日收盘 | `rank==1` 的 code=`buy_timing` |
 | `fx_attr_single_sell` | 同上、卖价显著高于卖出日收盘 | `rank==1` 的 code=`sell_timing` |
 | `fx_attr_single_fee` | 价格几乎不动、佣金/印花税显著 | `rank==1` 的 code=`fee`（负） |
-| `fx_attr_mixed` | §3.8 手算向量 + 区间前 lot + 部分卖出 + T+0 + 股息 + 不可归因债券/货基 + 停牌缺价 | `residual==0`；五因子逐项等于手算；`residual_breakdown` 各桶之和 = residual（`valuation_gap` 为 plug）；`coverage`/`missing[]` |
+| `fx_attr_mixed` | §3.8 手算向量 + 区间前 lot + 部分卖出 + T+0 + 股息 + 不可归因债券 + 停牌缺价 | `residual==0`；五因子逐项等于手算；`residual_breakdown` 各桶之和 = residual（`valuation_gap` 为 plug）；`coverage`/`missing[]` |
 | `fx_attr_corporate_action` | 区间内 10 送 3 + 10 配 3 | 标的剔除；`corporate_action_pnl` 桶=手算；`missing[]=CORPORATE_ACTION_ADJUSTMENT_MISSING`；不产生幻影因子 |
 | `fx_attr_blocked` | 资产区间行 blocked / 缺失 / `V_begin` 行 blocked | 200 `status="blocked"`、金额键缺省、`missing[]` |
 | `fx_attr_no_sector` | 行业指数全缺 / 未映射 | 零可归因段 → `blocked`；部分缺 → `degraded` + 标的剔除 |
@@ -835,7 +835,7 @@ MODELS: dict[str, Callable[[], AttributionModel]] = {
 
 ### 10.7 资产类别、账户维度与导出
 
-- **资产类别**（P2）：债券/ETF/LOF/货基/未映射股票目前进残差；扩展为 `model=by_asset_class`（独立模型，输出各类别贡献 + 内部选股/费用），或把 `residual_breakdown.unattributed_price_pnl` 细分到类别（additive 字段，不改五因子）。**不**把这部分硬塞进"选股"。
+- **资产类别**（P2）：债券/ETF/LOF/未映射股票目前进残差（货基已按现金等价物剔除，2026-11-18）；扩展为 `model=by_asset_class`（独立模型，输出各类别贡献 + 内部选股/费用），或把 `residual_breakdown.unattributed_price_pnl` 细分到类别（additive 字段，不改五因子）。**不**把这部分硬塞进"选股"。
 - **多账户**（PRD FR-R2.4 `merged_view`）：additive `by_account[]{account_id, factors{}}`；合并口径与单账户口径都披露。
 - **导出/月报/分享**：只读快照（`report.snapshot.attribution`）+ 分享链接（P3-04）；归因不进 LLM 自由生成（`EgressGuard`/`ToolGateway` 只回后端字段）。
 
@@ -895,6 +895,7 @@ MODELS: dict[str, Callable[[], AttributionModel]] = {
 
 - **08a~08g 已按本设计交付并验收（2026-11-02）**：`fx_attr_*` fixture、`core/attribution/`、`GET /attribution`（API-036）、08a 板块指数同步与 replay 日线、`/attribution` 页均已落地。
 - **已交付口径（2026-11-04）**：`new_stock` 按本期窗口判定；其损益进账户级 `ipo_pnl`（不落 `per_symbol`/`unattributed[]`）；降级只由「未归因标的损益」超容差（期末总资产 0.2%）触发；`VALUATION_GAP_ABOVE_TOLERANCE`/`SECTOR_BAR_FALLBACK`/`SECTOR_CLASSIFICATION_LOOKAHEAD` 为 `info`；lookahead 需 `SECTOR_LOOKAHEAD_ENABLED=true` + 请求 `allow`。
+- **货基口径（2026-11-18）**：货币基金是现金等价物，归因候选集/`symbols_total`/残差桶/`unattributed[]` 均剔除；货基收益仍以 `interest` 行落账户级桶。
 - **已知边界**：不做历史回填（SCD2 仅自首次同步）；2025 年及更早区间受行情/板块覆盖限制不可用；`coverage.symbols_total` 为全历史候选、`symbols_participating` 为本期参与数；`unattributed[]` 明细展示前 `display_limit`（5）条 + 「其余 N 只」（`others_count`/`others_total` 由后端派生）。
 - **未交付**：月报 09b 同源接入（Period2-09）。
 - **A-01~A-11 已于 2026-11-02 人工批准（按推荐方向；§11/评审记录 §10）**；公司行动 M1 整标的剔除（D-12）是**已批准的范围裁决**而非技术终态（P2 复权调整）；历史 PIT 默认 blocked（老账单归因不可用），经批准可用 look-ahead 例外（degraded + 披露）。

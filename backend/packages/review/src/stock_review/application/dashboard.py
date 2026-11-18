@@ -588,8 +588,18 @@ async def build_dashboard(
     )
     series = await asset_repo.series(user_id, definition_version=definition_version)
     trades = list(await TradeRepository(session).balances_ordered(user_id, period_end=today))
-    rounds = await RoundRepository(session).closed_rounds(user_id)
-    all_rounds = await RoundRepository(session).all_rounds(user_id)
+    # 货币基金按现金等价物处理：不参与历史概览/交易次数等「证券」口径统计。
+    fund_codes = money_fund_codes(trades)
+    rounds = [
+        round_
+        for round_ in await RoundRepository(session).closed_rounds(user_id)
+        if round_.security_code not in fund_codes
+    ]
+    all_rounds = [
+        round_
+        for round_ in await RoundRepository(session).all_rounds(user_id)
+        if round_.security_code not in fund_codes
+    ]
     # 可转债发债/上市代码映射（持仓聚合与 TopN 共用）。
     bond_alias, _unresolved = build_bond_alias(
         (trade.security_code, trade.security_name) for trade in trades
@@ -713,7 +723,11 @@ async def build_dashboard(
 
     total_fees_units: int | None = None
     if not asset_blocked:
-        trade_slice = [trade for trade in trades if trade.trade_date <= as_of]
+        trade_slice = [
+            trade
+            for trade in trades
+            if trade.trade_date <= as_of and trade.security_code not in fund_codes
+        ]
         total_fees_units = fee_breakdown(cast("list[TradeView]", trade_slice)).fee_amount
 
     total_profit_units: int | None = None
@@ -901,14 +915,14 @@ async def build_dashboard(
 
     # 交易次数 Top3：按证券代码（可转债归并上市代码）统计流水 buy/sell 行数
     # （买入/卖出分别计一次交易）；同时聚合个股累计收益（全部回合 pnl）与个股总费用。
-    # 现金类不计。
+    # 现金类/货币基金不计。
     buy_counts: dict[str, int] = {}
     sell_counts: dict[str, int] = {}
     fee_by_code: dict[str, int] = {}
     trade_names: dict[str, str] = {}
     for trade in trades:
         code = canonical_code(bond_alias, trade.security_code)
-        if not code or category(trade) in CASHFLOW_CATEGORIES:
+        if not code or trade.security_code in fund_codes or category(trade) in CASHFLOW_CATEGORIES:
             continue
         if code not in trade_names and trade.security_name:
             trade_names[code] = trade.security_name

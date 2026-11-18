@@ -154,7 +154,7 @@
 | `total_profit` | `A.total_assets − B.initial_cash − B.initial_open_cost − B.cashflows − B.other`；`B.period_end=A`；`abs(B.residual_units) > B.tolerance_units` 或 `B.status != "ok"` → `degraded/missing`，不硬算 | CNY 2 位 | B blocked、stale、A blocked → null |
 | `max_invested_cost` | **资金划转峰值转入成本**：`max(Σ 资金划转 amount_units)`（`category=transfer`，转入 + / 转出 −，累计净转入的历史峰值；≤0 → null + missing） | CNY 2 位 | 无转账流水/峰值 ≤0 → null（`DASHBOARD_MAX_INVESTED_COST_MISSING`） |
 | `max_cost_return_pct` | `total_profit / max_invested_cost`（峰值转入成本） | `"6.86%"` | 分母 0/null → null |
-| `total_fees` | 全历史 `fee_breakdown(trades_until_A)` 的 `fee_amount`（佣金+印花税+其他费+独立费用行） | CNY 2 位 | 无流水 → `"0.00"`；**不存在"费用列缺失"状态**（三列 NOT NULL default 0），若解析警告缺列则 `degraded` |
+| `total_fees` | 全历史 `fee_breakdown(trades_until_A)` 的 `fee_amount`（佣金+印花税+其他费+独立费用行；货基按现金等价物剔除） | CNY 2 位 | 无流水 → `"0.00"`；**不存在"费用列缺失"状态**（三列 NOT NULL default 0），若解析警告缺列则 `degraded` |
 | `bill_start_date` / `bill_end_date` | 全历史流水的首/末 `trade_date`（D-20；流水一次加载至 `today`） | date | 无流水 → null（`DASHBOARD_BILL_RANGE_MISSING`） |
 | `initial_capital` | `B.initial_cash + B.initial_open_cost`（桥接期初资金，D-20；与 `total_profit` 同源） | CNY 2 位 | B blocked → null（`DASHBOARD_INITIAL_CAPITAL_MISSING`）；A 缺失/blocked → null |
 | `annualized_return_pct` | **全历史年化 TWR**（D-21）：取最长连续有效段 `asset_daily` 日收益，复利累计后按自然日年化（`(1+TWR)^(365/自然日)-1`；无断链时用整条序列含首日锚点） | `"12.34%"`（raw `annualized_return` scale=8） | 有效观测 < 2 或跨度 ≤0 → null（`DASHBOARD_ANNUALIZED_RETURN_UNAVAILABLE`）；A 缺失/blocked → null |

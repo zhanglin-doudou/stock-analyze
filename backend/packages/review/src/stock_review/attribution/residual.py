@@ -33,6 +33,7 @@ from datetime import date
 
 from stock_ledger.models import Trade
 
+from stock_review.application.money_fund import money_fund_codes
 from stock_review.application.rebuild import rights_resolution
 from stock_review.application.valuation import category
 from stock_review.attribution.segments import SymbolPlan
@@ -101,6 +102,8 @@ def split_residual(
     # 配股前置校验：零金额且此前无持仓的配股按券商行为处理（金额为 0，不影响金额桶，
     # 但不应把它当作「持仓类流水」把一个无持仓标的拉进 bucketed 分支）。
     rights = rights_resolution(trades)
+    # 货币基金是现金等价物：其申购/赎回净额不是标的损益，不能落进残差桶/未归因列表。
+    fund_codes = money_fund_codes(trades)
     attributed_codes = {plan.security_code for plan in plans if plan.attributed}
     # `new_stock` 分类排除的标的单列「打新收益」桶（账户级，与 interest 同级）；
     # 其余非归因标的仍进 `unattributed_price_pnl`。
@@ -111,6 +114,8 @@ def split_residual(
 
     rows_by_code: dict[str, list[Trade]] = defaultdict(list)
     for trade in trades:
+        if trade.security_code in fund_codes:
+            continue
         if not (t0 <= trade.trade_date <= t1):
             continue
         if category(trade) == "transfer":
