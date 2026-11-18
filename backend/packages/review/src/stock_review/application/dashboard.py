@@ -47,7 +47,6 @@ from stock_review.application.portfolio import (
     HOLDINGS_MAX,
     Holding,
     holdings_at,
-    holdings_from_rounds,
     ratio_units,
 )
 from stock_review.application.valuation import (
@@ -595,8 +594,6 @@ async def build_dashboard(
     bond_alias, _unresolved = build_bond_alias(
         (trade.security_code, trade.security_name) for trade in trades
     )
-    # 当前持仓从 FIFO open 回合聚合（与回合页面数量+成本口径完全一致）。
-    open_rounds = [round_ for round_ in all_rounds if round_.status == "open"]
 
     fallback_as_of = build_view.data_as_of if isinstance(build_view.data_as_of, date) else today
     as_of = latest.trade_date if latest is not None else fallback_as_of
@@ -656,10 +653,10 @@ async def build_dashboard(
         total_assets_units = None
         position_ratio_units = None
     else:
-        holdings, missing_prices, cost_fallback, truncated = await holdings_from_rounds(
-            open_rounds,
-            trades=trades,
-            bond_alias=bond_alias,
+        # 成本口径：移动加权平均，与资产表 holding_cost 同源（避免 Dashboard 持仓概览
+        # 与资产表汇总浮盈因 FIFO/移动加权不同而对不上）。
+        holdings, missing_prices, cost_fallback, truncated = await holdings_at(
+            trades,
             as_of=latest.trade_date,
             market_data=market_data,
         )
