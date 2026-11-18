@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, cast
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from stock_contracts.clock import Clock
+from stock_core.nav import CashflowPoint, compute_xirr
 from stock_core.stats.drawdown import DrawdownFamily, drawdown_family
 from stock_core.values import Money
 from stock_ledger.models import Trade
@@ -548,25 +549,30 @@ def _max_drawdown(
     )
 
 
-def _annualized_twr(series: list[AssetDaily]) -> int | None:
-    """全历史年化 TWR（时间加权，正确处理资金进出）。
+def _annualized_xirr(series: list[AssetDaily]) -> int | None:
+    """全历史年化 XIRR（资金加权，与 ``total_profit`` 同向）。
 
-    取最长连续有效段（与回撤同口径：ok/degraded 且日收益非 NULL），把逐日收益
-    复利累计后按自然日年化。无断链时用整条序列起止（含首日锚点），有断链时用
-    最长有效段起止。有效观测 < 2 或跨度 <= 0 → None（不伪造 0）。
+    与 `/nav` 的 ``mwr`` 同口径：期初按首行 ``prev_total_assets_units``（锚点）计投入，
+    区间内外部现金流按投资人方向取负，期末总资产作为终值。blocked 行没有有效估值，
+    跳过。有效观测 < 2 或无现金流 → None（不伪造 0）。
+
+    不用 TWR：TWR 是时间加权、与资金规模无关，小资金期的正收益会覆盖大资金期的
+    亏损，出现「总收益为负、年化为正」的误导。
     """
-    segments, has_gaps, _valid = _drawdown_segments(series)
-    if not segments:
+    rows = [row for row in series if row.status in {"ok", "degraded"}]
+    if len(rows) < 2:
         return None
-    dates, returns = max(segments, key=lambda item: len(item[1]))
-    if len(returns) < 2:
+    flows: list[CashflowPoint] = []
+    for idx, row in enumerate(rows):
+        amount = -(row.cashflow_units or 0)
+        if idx == 0:
+            amount -= row.prev_total_assets_units or 0
+        flows.append(CashflowPoint(row.trade_date, amount))
+    last = rows[-1]
+    flows[-1] = CashflowPoint(last.trade_date, flows[-1].amount_units + last.total_assets_units)
+    if not any(point.amount_units for point in flows):
         return None
-    start = series[0].trade_date if (not has_gaps and len(segments) == 1) else dates[0]
-    natural_days = (dates[-1] - start).days
-    if natural_days <= 0:
-        return None
-    family = drawdown_family(returns, natural_days=natural_days)
-    return family.twr_annual_units
+    return compute_xirr(flows)
 
 
 async def build_dashboard(
@@ -826,7 +832,7 @@ async def build_dashboard(
         )
 
     # 全历史年化 TWR：资产表有效日收益复利累计后按自然日年化（正确处理出入金）。
-    annualized_return_units = None if asset_blocked else _annualized_twr(series)
+    annualized_return_units = None if asset_blocked else _annualized_xirr(series)
     if annualized_return_units is None:
         missing.append(
             DashboardMissing(
