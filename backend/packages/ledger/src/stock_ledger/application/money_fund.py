@@ -12,8 +12,10 @@
 * 申赎方向看 `category`（导入行可能 `side=unknown`）：`sell` 减少余额，`buy`/
   `dividend` 等增加（红利发放/红利再投以份额形式增加余额）；`broker_action`
   （零金额登记/份额过户）一律不影响余额，避免与资金腿重复计入。
-* 余额 = Σ 份额增减 × 单位价格；历史首笔就是赎回时按前缀最小负值反推期初余额
-  （等价于「期初已持有至少这么多」），并对任何负余额按 0 兜底（账单缺流水场景）。
+* 份额正推识别超卖：赎回份额超过当时余额时，区分两种缺口——
+  - 此前**没有任何增持**（历史首笔即赎回）→ 期初已持有，计入反推期初余额；
+  - 此前出现过申购/红利再投 → 超卖，券商以补记份额处理，当日按收益计入，
+    **不进期初**（否则缺口会被摊进初始资产，申购前后的历史被一并改写）。
 
 本模块放在 ledger 层：导入提交的「资金腿归一」需要在落库前复用同一份识别/余额口径，
 review 侧通过 `stock_review.application.money_fund` 兼容转发。
@@ -22,6 +24,7 @@ review 侧通过 `stock_review.application.money_fund` 兼容转发。
 from __future__ import annotations
 
 from collections.abc import Iterable
+from dataclasses import dataclass
 from datetime import date
 
 from stock_platform.symbols import needs_quote
@@ -97,35 +100,108 @@ def money_fund_value_units(row: Trade) -> int:
     return -value if (row.category or "").strip().lower() == "sell" else value
 
 
+@dataclass(frozen=True, slots=True)
+class MoneyFundOversell:
+    """份额正推发现的货基超卖（赎回份额超过当时余额，券商以补记份额处理）。"""
+
+    trade_id: str
+    trade_date: date
+    security_code: str
+    # 超出当时余额的份额（scale=4，正数）；货基单位价格恒 1.000000，即超卖金额 ×100。
+    quantity_units: int
+
+
+def _share_delta(row: Trade) -> int:
+    """带方向份额增量（scale=4）：赎回为负，申购/红利再投为正，登记类为 0。"""
+    quantity = row.quantity_units
+    if quantity == 0:
+        return 0
+    category = (row.category or "").strip().lower()
+    if category == "broker_action":
+        return 0
+    return -quantity if category == "sell" else quantity
+
+
+def _shares_to_value_units(quantity_units: int) -> int:
+    """份额（scale=4）→ 金额（scale=2）：货基单位价格恒 1.000000。"""
+    return abs(quantity_units) * UNIT_PRICE_UNITS // QTY_PRICE_SCALE
+
+
+def _forward_shares(
+    rows: list[Trade], codes: frozenset[str]
+) -> tuple[dict[str, int], tuple[MoneyFundOversell, ...]]:
+    """全历史份额正推：返回 (期初反推份额, 超卖记录)。
+
+    - 出现过增持（申购/红利再投）之前的赎回缺口 → 期初已持有，计入反推期初；
+    - 出现过增持之后的赎回缺口 → 超卖，券商补记份额、当日计入收益，不进期初。
+    """
+    running: dict[str, int] = dict.fromkeys(codes, 0)
+    offset: dict[str, int] = dict.fromkeys(codes, 0)
+    increased: dict[str, bool] = dict.fromkeys(codes, False)
+    oversells: list[MoneyFundOversell] = []
+    for row in rows:
+        code = _name(row.security_code)
+        if code not in codes:
+            continue
+        delta = _share_delta(row)
+        if delta == 0:
+            continue
+        if delta > 0:
+            increased[code] = True
+            running[code] += delta
+            continue
+        running[code] += delta
+        if running[code] >= 0:
+            continue
+        deficit = -running[code]
+        if increased[code]:
+            oversells.append(
+                MoneyFundOversell(
+                    trade_id=row.id,
+                    trade_date=row.trade_date,
+                    security_code=code,
+                    quantity_units=deficit,
+                )
+            )
+        else:
+            offset[code] += deficit
+        running[code] += deficit
+    return offset, tuple(oversells)
+
+
+def money_fund_oversells(rows: Iterable[Trade]) -> tuple[MoneyFundOversell, ...]:
+    """全历史份额正推得到的货基超卖记录（日期 / 证券代码 / 超出份额）。"""
+    ordered = list(rows)
+    codes = money_fund_codes(ordered)
+    if not codes:
+        return ()
+    return _forward_shares(ordered, codes)[1]
+
+
 def money_fund_balances(rows: Iterable[Trade], *, before: date | None = None) -> dict[str, int]:
     """各货基在 `before`（不含）时点的余额（scale=2），无货基返回 `{}`。
 
-    `before=None` 表示推演到全部流水之后。期初反推：若历史前缀出现负余额（首笔即
-    赎回、账单缺申购流水），把该标的期初余额抬高到「前缀最小负值的绝对值」，保证
-    区间内余额不为负、且赎回不会凭空变成收益。
+    期初反推只吸收「此前无任何增持」的赎回缺口（首笔即赎回、账单缺申购流水）；
+    申购/红利再投之后出现的缺口是超卖，按当日收益处理，不抬升期初，保证时点
+    余额与申购以前的历史不受未来超卖影响。任何时点的余额仍按 0 兜底（不出现负余额）。
     """
     ordered = list(rows)
     codes = money_fund_codes(ordered)
     if not codes:
         return {}
-    running = dict.fromkeys(codes, 0)
-    offset = dict.fromkeys(codes, 0)
-    for row in ordered:
-        code = _name(row.security_code)
-        if code not in codes:
-            continue
-        running[code] += money_fund_value_units(row)
-        if running[code] < 0:
-            offset[code] = max(offset[code], -running[code])
-    balances = dict(offset)
+    offset, _oversells = _forward_shares(ordered, codes)
+    shares = dict(offset)
     for row in ordered:
         code = _name(row.security_code)
         if code not in codes:
             continue
         if before is not None and row.trade_date >= before:
             continue
-        balances[code] = max(0, balances[code] + money_fund_value_units(row))
-    return balances
+        delta = _share_delta(row)
+        if delta == 0:
+            continue
+        shares[code] = max(0, shares[code] + delta)
+    return {code: _shares_to_value_units(value) for code, value in shares.items()}
 
 
 def money_fund_total_units(rows: Iterable[Trade], *, before: date | None = None) -> int:
@@ -138,8 +214,10 @@ __all__ = [
     "NON_CASH_NAME_KEYWORDS",
     "QTY_PRICE_SCALE",
     "UNIT_PRICE_UNITS",
+    "MoneyFundOversell",
     "money_fund_balances",
     "money_fund_codes",
+    "money_fund_oversells",
     "money_fund_total_units",
     "money_fund_value_units",
 ]

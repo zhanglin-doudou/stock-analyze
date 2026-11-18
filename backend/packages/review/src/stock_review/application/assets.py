@@ -51,6 +51,7 @@ from stock_review.application.bridge import _initial_cash
 from stock_review.application.money_fund import (
     money_fund_balances,
     money_fund_codes,
+    money_fund_oversells,
     money_fund_value_units,
 )
 from stock_review.application.rebuild import rights_resolution, trades_to_events
@@ -96,7 +97,9 @@ log = get_logger("stock_review.assets")
 #      识别见 `application.money_fund`。口径变化，bump 触发全量重建。
 # 2.4：配股前置校验——零金额且该证券此前无持仓的 `rights` 流水按 `broker_action` 处理
 #      （不计持仓/成本/FIFO/回合）；有持仓的配股与金额非 0 的配股不变。口径变化，bump 触发全量重建。
-ASSET_DEFINITION_VERSION = "2.4"
+# 2.5：货基超卖（赎回份额超过余额）按「券商补记份额」计入当日收益，不再反推进期初；
+#      期初反推只吸收此前无任何增持的赎回缺口。口径变化，bump 触发全量重建。
+ASSET_DEFINITION_VERSION = "2.5"
 # 安全窗：每次有新数据/脏流水/行情 as_of 变化时重算最近 45 天。
 SAFETY_DAYS = 45
 # 水位线重叠窗：PG `now()` = 事务开始时间，覆盖「长事务晚提交」竞态。
@@ -1144,6 +1147,25 @@ async def build_assets(
 
     # 7) 内存逐日推演（无 I/O）；仅窗口行待写。
     valuations = _valuate()
+
+    # 7a) 货基超卖留痕：份额正推发现赎回超过余额（券商补记份额，计入当日收益）。
+    fund_oversells = money_fund_oversells(live)
+    if fund_oversells:
+        fund_names = {
+            trade.security_code: trade.security_name
+            for trade in live
+            if trade.security_code and trade.security_name
+        }
+        for item in fund_oversells:
+            whole, frac = divmod(item.quantity_units, 10_000)
+            log.info(
+                "货基超卖（券商补记份额，计入当日收益）：日期=%s 代码=%s 名称=%s 超卖份额=%d.%04d",
+                item.trade_date.isoformat(),
+                item.security_code,
+                fund_names.get(item.security_code) or "",
+                whole,
+                frac,
+            )
 
     # 7b) 缺行情自愈（设计 §6.5）：先按 blocked 行定位「缺的标的 + 缺失日期区间」，向
     #     可补拉的行情源（live + 本地缓存）**补拉一次**，再用补拉后的行情重算一次。

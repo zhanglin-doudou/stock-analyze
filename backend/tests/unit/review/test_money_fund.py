@@ -14,6 +14,7 @@ from stock_ledger.models import Trade
 from stock_review.application.money_fund import (
     money_fund_balances,
     money_fund_codes,
+    money_fund_oversells,
     money_fund_total_units,
     money_fund_value_units,
 )
@@ -175,6 +176,36 @@ def test_balances_fold_and_backsolve_first_redemption() -> None:
     assert money_fund_balances(rows, before=date(2026, 6, 3)) == {"119924": 0}
     assert money_fund_balances(rows) == {"119924": 400_00}
     assert money_fund_total_units(rows, before=date(2026, 6, 2)) == 1_000_00
+
+
+def test_oversell_after_purchase_is_income_not_initial_balance() -> None:
+    """申购后的赎回缺口是超卖（券商补记份额）：计入当日收益，不进期初资产。"""
+    rows = [
+        _trade(trade_date=date(2026, 9, 23), quantity_units=1_162_953_800, amount_units=-11_629_538),
+        _trade(
+            trade_date=date(2026, 9, 29),
+            category="sell",
+            quantity_units=1_162_953_800,
+            amount_units=11_629_538,
+        ),
+        _trade(trade_date=date(2026, 9, 29), quantity_units=1_067_085_300, amount_units=-10_670_853),
+        # 赎回 106,720.80 份 > 持有 106,708.53 份：超卖 12.27 份。
+        _trade(
+            trade_date=date(2026, 9, 30),
+            category="sell",
+            quantity_units=1_067_208_000,
+            amount_units=10_672_080,
+        ),
+    ]
+    # 期初不再被未来的超卖抬高；超卖前后的时点余额保持真实。
+    assert money_fund_balances(rows, before=date(2026, 9, 1)) == {"119924": 0}
+    assert money_fund_balances(rows, before=date(2026, 9, 30)) == {"119924": 106_708_53}
+    assert money_fund_balances(rows) == {"119924": 0}
+    # 份额正推记录超卖：日期 / 证券代码 / 超出份额。
+    oversells = money_fund_oversells(rows)
+    assert [(item.trade_date, item.security_code, item.quantity_units) for item in oversells] == [
+        (date(2026, 9, 30), "119924", 122_700)
+    ]
 
 
 # ── 不进 FIFO / 回合 ──────────────────────────────────────
