@@ -12,7 +12,8 @@ from datetime import date
 from decimal import Decimal
 
 from stock_ledger.models import Trade
-from stock_review.application.bridge import _ending_cash, _initial_cash
+from stock_review.application.bridge import _ending_cash, _fund_cash_net, _initial_cash
+from stock_review.application.money_fund import money_fund_oversells
 
 _USER = uuid.uuid4()
 _DAY = date(2026, 10, 27)
@@ -61,6 +62,35 @@ def _trade(
         version=1,
         summary=category,
     )
+
+
+def test_oversell_shortfall_counts_as_income_not_residual() -> None:
+    """货基超卖缺口（券商补记份额）按分红再投计入收益：现金净额 +12.27 而不是 0。"""
+    trades = [
+        _trade(
+            trade_date=date(2026, 9, 29),
+            category="buy",
+            amount_units=-cents("106708.53"),
+            quantity_units=shares("106708.53"),
+            price_units=1_000_000,
+            line_no=1,
+        ),
+        _trade(
+            trade_date=date(2026, 9, 30),
+            category="sell",
+            amount_units=cents("106720.80"),
+            quantity_units=shares("106720.80"),
+            price_units=1_000_000,
+            line_no=2,
+        ),
+    ]
+    oversells = money_fund_oversells(trades)
+    assert [(item.trade_date, item.security_code, item.value_units) for item in oversells] == [
+        (date(2026, 9, 30), "940018", cents("12.27"))
+    ]
+    sell = trades[1]
+    assert _fund_cash_net(sell, 0) == 0
+    assert _fund_cash_net(sell, oversells[0].value_units) == cents("12.27")
 
 
 def test_ending_cash_ignores_trailing_zero_amount_share_row() -> None:

@@ -51,6 +51,7 @@ from stock_ledger.repositories.trades import TradeRepository
 from stock_review.application.bond_alias import build_bond_alias
 from stock_review.application.money_fund import (
     money_fund_codes,
+    money_fund_oversells,
     money_fund_total_units,
     money_fund_value_units,
 )
@@ -168,6 +169,11 @@ def _initial_cash(trades: list[Trade], period_start: date) -> tuple[int, str] | 
     return cash, "back_solved"
 
 
+def _fund_cash_net(trade: Trade, oversold_units: int) -> int:
+    """货基行对现金合计的净额：券商资金变动 + 货基余额变动 + 超卖补记份额。"""
+    return trade.amount_units + money_fund_value_units(trade) + oversold_units
+
+
 def _ending_cash(
     trades: list[Trade], period_start: date, period_end: date, *, initial_cash: int
 ) -> tuple[int, str]:
@@ -220,6 +226,8 @@ async def bridge_for_period(
     # 货币基金 = 现金等价物（2.3 口径）：期初/期末现金都含货基余额；申赎是现金内部
     # 转换（不产生现金流），只有红利/利息（现金发放或再投份额）才计入收益。
     fund_codes = money_fund_codes(trades)
+    # 货基超卖（赎回超余额、券商补记份额）经济实质是分红再投：计入收益，不留桥接残差。
+    oversell_value = {item.trade_id: item.value_units for item in money_fund_oversells(trades)}
     initial_cash = initial_cash_broker + money_fund_total_units(trades, before=period_start)
     result_start = build_rounds(
         trades_to_events([t for t in trades if t.trade_date < period_start], bond_alias=bond_alias)
@@ -259,10 +267,12 @@ async def bridge_for_period(
         category = _category(trade)
         if trade.security_code and trade.security_code in fund_codes:
             # 货基：申赎是现金内部转换（amount 与余额变动相互抵消，净额为 0）；
-            # 红利/利息（现金发放或再投份额）按净额计入收益，不产生桥接残差。
-            extra = trade.amount_units + money_fund_value_units(trade)
+            # 红利/利息（现金发放或再投份额）按净额计入收益，不产生桥接残差；
+            # 超卖缺口由券商补记份额，等价于红利再投，同样计入收益。
+            oversold = oversell_value.get(trade.id, 0)
+            extra = _fund_cash_net(trade, oversold)
             if extra:
-                if category == "dividend":
+                if oversold or category == "dividend":
                     dividends += extra
                 elif category == "interest":
                     interest += extra
