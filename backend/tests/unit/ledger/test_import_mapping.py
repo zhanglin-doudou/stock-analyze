@@ -19,6 +19,7 @@ from stock_ledger.application.import_analysis import (
     TypeGroup,
     apply_type_resolutions,
     completeness_issues,
+    resolve_broker_with_preset,
     verify_fee_merge,
 )
 from stock_ledger.parsers.columns import COLUMN_ALIASES, normalize_summary
@@ -174,6 +175,15 @@ def test_detect_broker_huatai_high_and_generic_low() -> None:
     generic = detect_broker(["日期", "金额", "说明"])
     assert generic.code == "generic"
     assert generic.confidence == "low"
+
+
+def test_resolve_broker_with_preset_for_auto_detection() -> None:
+    # 自动识别未覆盖平安：签名命中预设时以预设券商为准，不再显示 generic。
+    assert resolve_broker_with_preset("auto", "generic", "pingan") == "pingan"
+    assert resolve_broker_with_preset(None, "generic", "pingan") == "pingan"
+    # 显式选择优先；没有预设时沿用检测结果。
+    assert resolve_broker_with_preset("huatai", "generic", "pingan") == "huatai"
+    assert resolve_broker_with_preset("auto", "huatai", None) == "huatai"
 
 
 def test_detect_broker_ambiguous_when_two_brokers_tie() -> None:

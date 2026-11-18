@@ -39,6 +39,7 @@ from stock_ledger.application.import_analysis import (
     public_categories,
     resolutions_from_types,
     resolve_broker,
+    resolve_broker_with_preset,
     stage_for,
     suggestions_for_headers,
     unresolved_types,
@@ -468,6 +469,12 @@ async def create_preview(
         )
         resolved_template_id = preset.template_id
         template_payload = system_template_payload(preset)
+    # 自动识别只覆盖部分券商画像：命中系统预设或本人模板时，以模板记录的券商为准，
+    # 避免增量导入的确认页显示 generic / 与首次创建模板不一致。
+    matched_broker = (
+        preset.broker if preset is not None else (template.broker if template is not None else None)
+    )
+    resolved_broker = resolve_broker_with_preset(broker, detection.code, matched_broker)
     if plan is None:
         from stock_ledger.parsers.mapping import suggest_items
 

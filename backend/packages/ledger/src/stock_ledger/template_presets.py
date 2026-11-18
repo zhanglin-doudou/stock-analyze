@@ -116,19 +116,28 @@ _PINGAN_ITEMS: tuple[dict[str, Any], ...] = (
 
 _PINGAN_BILL_TYPES: tuple[PresetBillType, ...] = (
     PresetBillType("银证转入", "transfer"),
+    PresetBillType("银证转出", "transfer"),
+    # 跨行转账与银证同属外部资金流；用户模板里未出现，但同券商对账单会用到，
+    # 缺了它们会落到规则预填、在类型步骤显示为待确认。
+    PresetBillType("跨行转入", "transfer"),
+    PresetBillType("跨行转出", "transfer"),
     PresetBillType("证券买入清算", "buy"),
-    PresetBillType("利息归本", "interest"),
     PresetBillType("证券卖出清算", "sell"),
+    PresetBillType("利息归本", "interest"),
     PresetBillType("红股派息", "dividend"),
     PresetBillType("深圳市场股息红利个人所得税扣款", "dividend"),
     PresetBillType("上海市场股息红利个人所得税扣款", "dividend"),
-    PresetBillType("银证转出", "transfer"),
     PresetBillType("基金申购", "buy"),
     PresetBillType("基金赎回", "sell"),
+    PresetBillType("强行赎回", "sell"),
     PresetBillType("现金产品快速取现客户方", "sell"),
     PresetBillType("红利发放", "interest"),
     PresetBillType("基金认购清算", "buy"),
     PresetBillType("申购中签", "broker_action"),
+    PresetBillType("申购还款", "broker_action"),
+    PresetBillType("新股登记", "broker_action"),
+    PresetBillType("国债新股上市和配股到账", "broker_action"),
+    PresetBillType("市值认购资金扣收", "transfer"),
 )
 
 SYSTEM_TEMPLATES: tuple[SystemTemplate, ...] = (

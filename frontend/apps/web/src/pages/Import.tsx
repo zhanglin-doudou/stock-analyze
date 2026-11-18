@@ -123,6 +123,19 @@ function brokerLabel(code: string): string {
   return BROKER_LABELS[code] ?? code;
 }
 
+/**
+ * 券商模板 → 列对应模板选择：auto 走自动匹配、generic 不复用，其余取同名的系统预设。
+ * 预设列表尚未加载时退回 auto（预览仍可按表头签名自动匹配）。
+ */
+export function templateChoiceForBroker(
+  broker: string,
+  system: ImportTemplateOut[],
+): string {
+  if (broker === "auto") return "auto";
+  if (broker === "generic") return "none";
+  return system.find((item) => item.broker === broker)?.template_id ?? "auto";
+}
+
 // 第 3 步的 Category 速查说明（纯文案，不参与任何计算）。
 // `code` 与后端 BillCategory 一致；中文名优先取接口返回的 categories，缺失时用这里的兜底。
 const CATEGORY_GUIDE: readonly {
@@ -303,6 +316,9 @@ export function Import() {
     system: ImportTemplateOut[];
     mine: ImportTemplateOut[];
   }>({ system: [], mine: [] });
+  // 切换券商/模板需要重新解析：保留原始文件，并丢弃过期请求的返回。
+  const lastFile = useRef<File | null>(null);
+  const previewSeq = useRef(0);
   const [confirmUnmapped, setConfirmUnmapped] = useState(false);
   const [ackReimport, setAckReimport] = useState(false);
   const [allowEditHistorical, setAllowEditHistorical] = useState(false);
@@ -323,6 +339,8 @@ export function Import() {
     previewId: "",
     choices: new Map(),
   });
+  // 一个账号只允许一家券商：已有本人模板后，券商模板锁定为首次创建模板的券商。
+  const lockedBroker = templateOptions.mine.find((item) => item.broker)?.broker ?? null;
 
   // Portal 容器必须带 data-import-ui，弹层才吃到 scoped reset。
   useEffect(() => {
@@ -356,6 +374,12 @@ export function Import() {
       alive = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!lockedBroker || broker === lockedBroker) return;
+    setBroker(lockedBroker);
+    setTemplateChoice("auto");
+  }, [broker, lockedBroker]);
 
   useEffect(() => {
     if (!preview) return;
@@ -399,29 +423,53 @@ export function Import() {
     [],
   );
 
-  async function onFile(file: File): Promise<void> {
+  async function loadPreview(
+    file: File,
+    nextBroker: string,
+    nextTemplate: string,
+  ): Promise<void> {
+    const seq = ++previewSeq.current;
     setBusy(true);
     setError(null);
+    try {
+      const dto = await api.imports.preview(file, {
+        flow: "v2",
+        broker: nextBroker,
+        reuse_template: nextTemplate === "auto",
+        template_id:
+          nextTemplate !== "auto" && nextTemplate !== "none" ? nextTemplate : undefined,
+      });
+      if (seq === previewSeq.current) applyPreview(dto);
+    } catch (err) {
+      if (seq === previewSeq.current) setError(err);
+    } finally {
+      if (seq === previewSeq.current) setBusy(false);
+    }
+  }
+
+  async function onFile(file: File): Promise<void> {
+    lastFile.current = file;
     setBatch(null);
     setBatchError(null);
     setRevokeNotice("");
     setDone("");
     setJob(null);
     setBatchId(null);
-    try {
-      const dto = await api.imports.preview(file, {
-        flow: "v2",
-        broker,
-        reuse_template: templateChoice === "auto",
-        template_id:
-          templateChoice !== "auto" && templateChoice !== "none" ? templateChoice : undefined,
-      });
-      applyPreview(dto);
-    } catch (err) {
-      setError(err);
-    } finally {
-      setBusy(false);
-    }
+    await loadPreview(file, broker, templateChoice);
+  }
+
+  /** 切换券商模板：自动选中对应系统预设并重新预览，列/类型映射随预览刷新。 */
+  function onBrokerChange(next: string): void {
+    setBroker(next);
+    const nextTemplate = templateChoiceForBroker(next, templateOptions.system);
+    setTemplateChoice(nextTemplate);
+    if (lastFile.current) void loadPreview(lastFile.current, next, nextTemplate);
+  }
+
+  /** 手动切换列对应模板同样重新预览（无新文件时只更新选择）。 */
+  function onTemplateChange(next: string): void {
+    setTemplateChoice(next);
+    if (lastFile.current) void loadPreview(lastFile.current, broker, next);
   }
 
   const issues = useMemo(() => completeness(rows), [rows]);
@@ -608,12 +656,25 @@ export function Import() {
         <Card className="tw-mb-4">
           <CardHeader>
             <CardTitle>1 · 上传</CardTitle>
-            <CardDescription>支持 .xls / .xlsx / .csv，≤20MB；<b>主动选择对应券商模板</b>可以降低账单解析的复杂度，更快得到结果！</CardDescription>
+            <CardDescription>
+              支持 .xls / .xlsx / .csv，≤20MB；
+              {lockedBroker ? (
+                <>一个账号仅支持一家券商，券商模板已锁定为 <b>{brokerLabel(lockedBroker)}</b>。</>
+              ) : (
+                <>
+                  <b>主动选择对应券商模板</b>可以降低账单解析的复杂度，更快得到结果！
+                </>
+              )}
+            </CardDescription>
           </CardHeader>
           <CardContent className="tw-flex tw-flex-col tw-gap-3">
             <div className="tw-flex tw-items-center tw-gap-3">
               <Label htmlFor="import-broker">券商模板</Label>
-              <Select value={broker} onValueChange={setBroker}>
+              <Select
+                value={broker}
+                onValueChange={onBrokerChange}
+                disabled={lockedBroker !== null}
+              >
                 <SelectTrigger id="import-broker" aria-label="券商" className="tw-w-40">
                   <SelectValue />
                 </SelectTrigger>
@@ -625,7 +686,7 @@ export function Import() {
                 </SelectContent>
               </Select>
               <Label htmlFor="import-template">列对应模板</Label>
-              <Select value={templateChoice} onValueChange={setTemplateChoice}>
+              <Select value={templateChoice} onValueChange={onTemplateChange}>
                 <SelectTrigger id="import-template" aria-label="列对应模板" className="tw-w-60">
                   <SelectValue />
                 </SelectTrigger>
@@ -1021,7 +1082,7 @@ export function Import() {
                 <dt>文件</dt>
                 <dd>{preview.file.name}</dd>
                 <dt>券商</dt>
-                <dd>{preview.broker}</dd>
+                <dd>{brokerLabel(preview.broker)}</dd>
                 <dt>映射来源</dt>
                 <dd>
                   {preview.template ? (

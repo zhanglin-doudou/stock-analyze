@@ -58,6 +58,7 @@ from stock_ledger.repositories.imports import ImportBatchRepository, ImportPrevi
 from stock_ledger.repositories.quarantine import QuarantineRepository
 from stock_ledger.repositories.rules import rule_summary_code
 from stock_ledger.repositories.trades import TradeRepository, TradeRow
+from stock_ledger.template_presets import system_template_by_id
 
 log = get_logger("stock_ledger.imports")
 
@@ -529,23 +530,42 @@ async def commit_batch(
         types_modified_existing = 0
         if not legacy and finished.revoked_at is None and not covered:
             template_repo = ImportTemplateRepository(session)
+            # 套用系统预设时复制预设的全部类型（不只是本文件出现的）：
+            # 否则增量账单里首次出现的类型在下次导入时命不中已保存的模板。
+            preset = system_template_by_id(str(template_id)) if template_id else None
+            memory_resolutions = list(type_resolutions)
+            if preset is not None:
+                known_keys = {str(item.get("type_key")) for item in memory_resolutions}
+                for preset_type in preset.bill_types:
+                    if preset_type.type_key in known_keys:
+                        continue
+                    memory_resolutions.append(
+                        {
+                            "type_key": preset_type.type_key,
+                            "type_label": preset_type.type_key,
+                            "category": preset_type.category,
+                            "discard": preset_type.discarded,
+                            "source": "template",
+                        }
+                    )
             types_written, types_modified_existing = await ImportBillTypeRepository(
                 session
             ).upsert_many(
                 user_id,
-                type_resolutions,
+                memory_resolutions,
                 batch_id=finished.id,
                 broker=broker,
             )
             if signature and mapping_items:
                 # 类型先落库拿到 id，再按界面顺序（含废弃）整体覆盖模板引用；
-                # 本次未出现的旧 id 因此被静默丢弃（不删 import_bill_type 行）。
+                # 套用系统预设时 memory_resolutions 已补齐预设全部类型，
+                # 增量账单里新出现的类型无需再次确认。
                 type_rows = await ImportBillTypeRepository(session).by_keys(
-                    user_id, [str(item["type_key"]) for item in type_resolutions]
+                    user_id, [str(item["type_key"]) for item in memory_resolutions]
                 )
                 bill_type_ids = [
                     type_rows[key].id
-                    for item in type_resolutions
+                    for item in memory_resolutions
                     if (key := str(item.get("type_key"))) in type_rows
                 ]
                 template = await template_repo.upsert(

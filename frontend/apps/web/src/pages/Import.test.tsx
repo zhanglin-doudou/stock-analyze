@@ -1,8 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
-import type { ImportBatch, JobAccepted, JobEvent, Preview, RevokeResult } from "@sa/api-client";
-import { Import } from "./Import";
+import type {
+  ImportBatch,
+  ImportTemplateOut,
+  JobAccepted,
+  JobEvent,
+  Preview,
+  RevokeResult,
+} from "@sa/api-client";
+import { Import, templateChoiceForBroker } from "./Import";
 import { api } from "../client";
 
 vi.mock("../client", () => ({
@@ -184,5 +191,84 @@ describe("Import 导入页结果区", () => {
     // 撤销后刷新批次：can_revoke=false → 按钮消失
     await waitFor(() => expect(screen.queryByRole("button", { name: "撤销本次导入" })).toBeNull());
     expect(getBatch).toHaveBeenCalledTimes(2);
+  });
+});
+
+const pinganPreset: ImportTemplateOut = {
+  template_id: "sys:pingan",
+  broker: "pingan",
+  signature: "93142b97ae9e1045",
+  header_count: 22,
+  date_format: "YYYY-MM-DD",
+  preset_key: "pingan",
+  preset_version: 1,
+  source: "system",
+  has_user_overrides: false,
+};
+
+describe("Import 券商模板切换", () => {
+  it("按券商匹配系统预设：平安走 sys:pingan，自动/通用各有口径", () => {
+    expect(templateChoiceForBroker("auto", [pinganPreset])).toBe("auto");
+    expect(templateChoiceForBroker("generic", [pinganPreset])).toBe("none");
+    expect(templateChoiceForBroker("pingan", [pinganPreset])).toBe("sys:pingan");
+    // 预设还没加载时退回自动匹配（按表头签名仍可命中）。
+    expect(templateChoiceForBroker("huatai", [])).toBe("auto");
+  });
+
+  it("切换券商后带着新模板重新预览，页面列/类型映射随之刷新", async () => {
+    vi.mocked(api.imports.listTemplates).mockResolvedValue({
+      items: [],
+      system: [pinganPreset],
+      next_cursor: null,
+      has_more: false,
+    });
+    preview.mockResolvedValue(makePreview());
+    renderPage();
+
+    const input = document.querySelector('input[type="file"]');
+    if (!(input instanceof HTMLInputElement)) throw new Error("找不到文件输入框");
+    fireEvent.change(input, { target: { files: [new File(["x"], "huatai_2024.xlsx")] } });
+    await waitFor(() => expect(preview).toHaveBeenCalledTimes(1));
+
+    const trigger = screen.getByLabelText("券商");
+    fireEvent.keyDown(trigger, { key: "ArrowDown" });
+    fireEvent.click(await screen.findByText("平安证券"));
+
+    await waitFor(() =>
+      expect(preview).toHaveBeenLastCalledWith(expect.any(File), {
+        flow: "v2",
+        broker: "pingan",
+        reuse_template: false,
+        template_id: "sys:pingan",
+      }),
+    );
+  });
+
+  it("已有本人模板时锁定券商，并按首次模板的券商发起预览", async () => {
+    vi.mocked(api.imports.listTemplates).mockResolvedValue({
+      items: [{ ...pinganPreset, template_id: "tpl_1", source: "user", preset_key: null }],
+      system: [pinganPreset],
+      next_cursor: null,
+      has_more: false,
+    });
+    preview.mockResolvedValue(makePreview());
+    renderPage();
+
+    await waitFor(() =>
+      expect((screen.getByLabelText("券商") as HTMLButtonElement).disabled).toBe(true),
+    );
+
+    const input = document.querySelector('input[type="file"]');
+    if (!(input instanceof HTMLInputElement)) throw new Error("找不到文件输入框");
+    fireEvent.change(input, { target: { files: [new File(["x"], "huatai_2024.xlsx")] } });
+
+    await waitFor(() =>
+      expect(preview).toHaveBeenCalledWith(expect.any(File), {
+        flow: "v2",
+        broker: "pingan",
+        reuse_template: true,
+        template_id: undefined,
+      }),
+    );
   });
 });

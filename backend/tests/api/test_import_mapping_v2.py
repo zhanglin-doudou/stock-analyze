@@ -660,19 +660,67 @@ async def test_import_template_system_preset_and_writeback(
     assert saved["source"] == "user"
     assert saved["preset_version"] == 1
     assert saved["has_user_overrides"] is False
-    assert len(saved["bill_type_ids"]) == 1
-    assert [item["type_key"] for item in saved["bill_types"]] == ["证券买入"]
+    assert len(saved["bill_type_ids"]) == 18
+    saved_keys = [item["type_key"] for item in saved["bill_types"]]
+    assert saved_keys[0] == "证券买入"
+    # 套用预设时复制全部类型：本文件没出现的「证券卖出」也写入模板记忆。
+    assert "证券卖出" in saved_keys
     # 系统预设只读，不写库；列表里的 system 项固定来自代码（华泰 + 平安）。
     system = {item["template_id"]: item for item in listed.json()["system"]}
     assert list(system) == ["sys:huatai", "sys:pingan"]
     assert system["sys:pingan"]["broker"] == "pingan"
     assert system["sys:pingan"]["signature"] == "93142b97ae9e1045"
-    assert len(system["sys:pingan"]["bill_types"]) == 12
+    assert len(system["sys:pingan"]["bill_types"]) == 21
+    pingan_types = {
+        item["type_key"]: item["category"] for item in system["sys:pingan"]["bill_types"]
+    }
+    assert pingan_types["跨行转入"] == "transfer"
+    assert pingan_types["跨行转出"] == "transfer"
 
     # 再传同文件：命中自己的模板。
     again = await _preview(client, api_prefix, user, data=_huatai_preset_bill(2))
     assert again["template"]["source"] == "user"
     assert again["template"]["template_id"] == saved["template_id"]
+
+
+async def test_pingan_preset_copies_all_bill_types_on_commit(
+    client, api_prefix, user, settings
+) -> None:
+    """回归：套用平安预设后保存的模板必须带预设全部 21 类，供增量账单直接命中。"""
+    body = await _preview(
+        client,
+        api_prefix,
+        user,
+        data=_CBOND_FIXTURE.read_bytes(),
+        filename=_CBOND_FIXTURE.name,
+        content_type=_XLS_CONTENT_TYPE,
+        extra={"broker": "pingan", "template_id": "sys:pingan"},
+    )
+    assert body["template"]["template_id"] == "sys:pingan"
+    assert body["broker"] == "pingan"
+    assert body["stage"] == "ready"
+
+    await _commit(client, api_prefix, user, body)
+    await _drain_worker(settings)
+
+    listed = await client.get(f"{api_prefix}/imports/templates", headers=user.headers)
+    saved = listed.json()["items"][0]
+    keys = {item["type_key"] for item in saved["bill_types"]}
+    assert len(keys) == 21
+    # 本文件未出现的类型也被复制，后续增量账单无需再切换模板。
+    assert {"新股登记", "申购中签", "跨行转入"} <= keys
+
+    # 增量导入用默认（自动识别）时，命中本人模板后券商回显首次模板的券商。
+    again = await _preview(
+        client,
+        api_prefix,
+        user,
+        data=_CBOND_FIXTURE.read_bytes(),
+        filename=_CBOND_FIXTURE.name,
+        content_type=_XLS_CONTENT_TYPE,
+    )
+    assert again["template"]["template_id"] == saved["template_id"]
+    assert again["broker"] == "pingan"
 
 
 async def test_import_template_invalid_type_ids_are_marked_not_blocking(
@@ -692,8 +740,9 @@ async def test_import_template_invalid_type_ids_are_marked_not_blocking(
     again = await _preview(client, api_prefix, user, data=_huatai_preset_bill(2))
     template = again["template"]
     assert template["source"] == "user"
-    assert len(template["invalid_type_ids"]) == 1
-    assert template["bill_types"][0]["invalid"] is True
+    # 预设 18 类全部被模板引用，删掉类型行后都成为失效引用。
+    assert len(template["invalid_type_ids"]) == 18
+    assert all(item["invalid"] is True for item in template["bill_types"])
     # 失效引用不阻断导入：类型回落到规则建议，仍可继续。
     assert again["stage"] in ("types", "ready")
 
