@@ -78,6 +78,7 @@ _BASE_SYSTEM_RULES: tuple[tuple[str, str, str, str, str, str, int], ...] = (
     ),
     ("sys_brk_new_list", "新股上市→券商行为", "broker_action", "both", "contains", "新股上市", 11),
     ("sys_brk_sub", "认购→券商行为", "broker_action", "both", "exact", "认购", 11),
+    ("sys_brk_regis", "登记→券商行为", "broker_action", "both", "exact", "登记", 11),
     ("sys_brk_list", "上市→券商行为", "broker_action", "both", "exact", "上市", 11),
     # 新股/可转债申购（新口径）：只认真正扣款的缴款形态——「新股申购确认缴款」
     # 「新股申购」「新股认购」「认购清算」。「中签」「上市」等登记/行情事件不再单独归入
@@ -148,9 +149,9 @@ _BASE_SYSTEM_RULES: tuple[tuple[str, str, str, str, str, str, int], ...] = (
     # 据此映射成 core FIFO 的 BONUS 事件（不新增枚举值，沿用已有 other 分类）。
     # 优先级 45：晚于配股(13)/新股申购(14)、早于通用「费」(90)，且不会抢走
     # 「银行转存」(30) 等资金划转规则。
-    ("sys_bonus_stock", "送股→公司行为", "other", "both", "contains", "送股", 45),
-    ("sys_bonus_cap", "转增→公司行为", "other", "both", "contains", "转增", 45),
-    ("sys_bonus_split", "送转→公司行为", "other", "both", "contains", "送转", 45),
+    ("sys_bonus_stock", "送股→公司行为", "rights", "both", "contains", "送股", 45),
+    ("sys_bonus_cap", "转增→公司行为", "rights", "both", "contains", "转增", 45),
+    ("sys_bonus_split", "送转→公司行为", "rights", "both", "contains", "送转", 45),
     ("sys_fee", "费用→手续费", "fee", "both", "contains", "费", 90),
 )
 

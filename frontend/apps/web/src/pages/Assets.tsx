@@ -316,7 +316,7 @@ export function Assets() {
     },
     {
       key: "unrealized_pnl",
-      header: "浮动盈亏",
+      header: "持仓盈亏",
       priority: 2,
       align: "right",
       render: (row) => moneyCell(row.unrealized_pnl),
@@ -324,7 +324,7 @@ export function Assets() {
     {
       key: "daily_pnl",
       header: "日收益额",
-      priority: 3,
+      priority: 2,
       align: "right",
       render: (row) => moneyCell(row.daily_pnl),
     },
