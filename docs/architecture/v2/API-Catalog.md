@@ -208,7 +208,7 @@
 - 验收断言：① 200 且 counts.inserted==412、file_sha256 匹配；② 用户 B 访问 A 的 batch → 404；③ 断链账单导入后 `filled_count==len(fills)≥1` 且每项 `summary=="对账自动补差"`、金额为分转元的定点字符串；④ 正常账单 `filled_count==0`、`fills==[]` 且 warnings 不含 `RECONCILIATION_AUTOFILLED`；⑤ 撤销后 `filled_count==0`、`fills==[]`。
 #### API-014 GET /imports/{batch_id}/quarantine
 - 用途：隔离区（未知摘要、全零金额等未入库行）；FR-L5；认证：read；同步；游标分页。
-- 请求：path `batch_id`；query `limit`(默认 50) / `cursor` / `reason_code`(可选，∈`UNKNOWN_SUMMARY/UNMAPPED_COLUMN/INVALID_ROW/DUPLICATE_IN_FILE/INVALID_AMOUNT`)。
+- 请求：path `batch_id`；query `limit`(默认 50) / `cursor` / `reason_code`(可选，∈`UNKNOWN_SUMMARY/UNMAPPED_COLUMN/INVALID_ROW/DUPLICATE_IN_FILE/INVALID_AMOUNT/ZERO_AMOUNT_INFO/BILL_TYPE_DISCARDED/RECONCILIATION_BREAK`；中文文案以 `QUARANTINE_REASON_LABELS` 为准)。
 - 响应 200：`items[]{line_no,raw{date,security_code,summary,quantity,price,amount,cash_balance},reason_code,suggested_rule_id}` / `next_cursor` / `total_estimate`。
 - 错误码：NOT_FOUND(404)、INVALID_CURSOR(400)、VALIDATION_ERROR(422)。
 - 验收断言：① 200 且 fx_quarantine 第 7 行被隔离（line_no==7）；② 每项 raw.summary 与原始文件逐字一致；③ 用户 B 访问 A 的 batch → 404 且响应不含 A 任何字段；④ 新增匹配规则并 reclassify 后隔离区条目减少；⑤ 「佣金/印花税/其他费/发生金额/资金余额」五字段全为 0 的行 → `reason_code=="INVALID_AMOUNT"` 且 `line_no` 精确、该行不在 `GET /trades`；同内容重复的全零行也只记 `INVALID_AMOUNT`（判定先于 `DUPLICATE_IN_FILE`）。
@@ -537,7 +537,7 @@
   - `drawdown`（收益回撤，布尔）：回合内按数量加权的平均卖出价 < 区间最高收盘 × 95%（**严格**）；区间为「首笔买入日（含）至末笔卖出日（不含）」，即排除卖出当日。
   - `intraday_t`（日内做T，布尔）：同一交易日内先部分卖出（卖出数量严格小于卖出前持仓）再买入同一证券。
   - `swing_t`（波段做T，布尔）：回合内部分卖出后在更晚交易日再买入；同一笔卖出当日已被买入配对的（日内做T）不重复计入。
-  - `intraday_rebalance_out` / `intraday_rebalance_in`（日内调仓卖出/买入，布尔）：回合内先卖出当前证券、同日再买入其它证券 / 先卖出其它证券、同日再买入当前证券。判定范围为**当前用户同日全部流水、不按账户切分**（退化口径：所有账户合并为一条时间线），但对手方只认**真实二级市场证券成交**（2026-11-12 收紧）：`CASH` 资金行（转账/费用/利息/红利税补缴）、公司行动（分红/送转/配股）、新股申购都不算「买入/卖出其它证券」（2026-11-15 起货基已按普通持仓处理，其申赎计入对手方）；只判方向与全局行序，不要求金额匹配（清仓换股仍计为调仓卖出）。
+  - `intraday_rebalance_out` / `intraday_rebalance_in`（日内调仓卖出/买入，布尔）：回合内先卖出当前证券、同日再买入其它证券 / 先卖出其它证券、同日再买入当前证券。判定范围为**当前用户同日全部流水、不按账户切分**（退化口径：所有账户合并为一条时间线），但对手方只认**真实二级市场证券成交**（2026-11-12 收紧）：`CASH` 资金行（转账/费用/利息/红利税补缴）、公司行动（分红/送转/配股）、新股申购都不算「买入/卖出其它证券」（2026-11-15 起货基不再单独占「货基余额」字段：资产口径把货基份额按 1.0000 折算进现金、不进 FIFO；但其申赎仍计入对手方）；只判方向与全局行序，不要求金额匹配（清仓换股仍计为调仓卖出）。
   - `sold_too_early`（别名）= `stop_loss_sold_early > 0 或 profit_sold_early > 0`；`reason_missing`/`horizon_pending`/`corporate_action` 三个别名口径不变。
   - 账单级旗标（即时抄底/短期抄底/短期卖飞）在洞察读路径内联重算，行情回看比账单最早交易日多取 45 天，与账单旗标月度构建同口径。
 - 盈亏 × 持有期（2026-11-10，additive）：`summary.holding_by_pnl{flat_tolerance_display, classes[]}` 为「持有期分布」图表数据源。`classes[]` **恒定三条**、顺序 `loss → flat → win`，每项 `code`(`loss|flat|win`)/`label`(亏损/保本/盈利)/`count`/`avg_holding_trading_days`(一位小数串或 null)/`avg_holding_trading_days_x10`(交易日 × 10 的定点整数，供图表直接用；与展示串同源)。**盈亏判定与「保本」容差在后端**：`|pnl| ≤ flat_tolerance_display`（常量 `stock_core.insights.aggregate.PNL_FLAT_TOLERANCE_UNITS`，默认 100.00 元，边界含在内）即保本；前端不得重算分类或容差。无样本的类别仍返回（`count=0`、均值为 `null`，不输出 0）；`Σcount` 恒等于 `summary.swing.closed`。

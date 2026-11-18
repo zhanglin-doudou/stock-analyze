@@ -17,6 +17,7 @@
 | 知道**怎么上线/兜底/恢复** | [architecture/v2/Reliability.md](architecture/v2/Reliability.md) |
 | 知道**加功能要改哪里** | [architecture/v2/Extensibility.md](architecture/v2/Extensibility.md) |
 | 知道**先写什么、每期怎么本地验** | [DEV-PLAN-v2.md](DEV-PLAN-v2.md) — 三期开发清单（45 任务 / 96.0 人日） |
+| 搞懂**账单导入**（认列/认类型/对账/隔离及下游影响） | [help/2026-11-18-bill-import-guide.md](help/2026-11-18-bill-import-guide.md) |
 | 知道**为什么这么决策** | [architecture/v2/ADR.md](architecture/v2/ADR.md) |
 | 看 v2 文档包导读 | [architecture/v2/README.md](architecture/v2/README.md) |
 
@@ -30,6 +31,8 @@ docs/
 ├── DEV-PLAN-v2.md                  # ★ 开发清单：一期/二期/三期 + 交付；每期本地可验证脚本
 ├── prd/
 │   └── PRD-v2.md                   # 需求基线 v2.0（28 FR + 15 NFR，每条带 API 验收）
+├── help/                           # 面向使用者的功能说明（以代码为准）
+│   └── 2026-11-18-bill-import-guide.md  # 账单导入：列映射 / 类型映射 / 对账 / 隔离 / 下游影响
 └── architecture/v2/
     ├── README.md                   # v2 文档包索引（单一事实源表、关键数字、阅读路径）
     ├── API-Catalog.md              # ★ 88 端点 / 47 错误码 / 验收矩阵 88/88
