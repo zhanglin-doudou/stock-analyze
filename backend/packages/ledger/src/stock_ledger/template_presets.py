@@ -127,6 +127,8 @@ _PINGAN_BILL_TYPES: tuple[PresetBillType, ...] = (
     PresetBillType("基金赎回", "sell"),
     PresetBillType("现金产品快速取现客户方", "sell"),
     PresetBillType("红利发放", "interest"),
+    PresetBillType("基金认购清算", "buy"),
+    PresetBillType("申购中签", "broker_action"),
 )
 
 SYSTEM_TEMPLATES: tuple[SystemTemplate, ...] = (
