@@ -103,10 +103,7 @@ log = get_logger("stock_review.assets")
 #      running 盈余份额里 1:1 覆盖，耗尽后再按 increased 状态进入 oversell 或期初反推。
 #      避免"有过增持的基金 running 耗尽后直接全进 oversell，而 peers 的盈余闲置"。
 #      口径变化，bump 触发全量重建。
-# 2.7：money_fund_balances 去掉中间 max(0) clamp——clamp 会把 peer 扣减产生的负 offset
-#      （借出份额）在中间"豁免"，导致期末余额虚高；最终返回时才 clamp，保证余额口径
-#      不出现负值，同时期初/期末与全历史 peer 扣减口径一致。
-ASSET_DEFINITION_VERSION = "2.7"
+ASSET_DEFINITION_VERSION = "2.6"
 # 安全窗：每次有新数据/脏流水/行情 as_of 变化时重算最近 45 天。
 SAFETY_DAYS = 45
 # 水位线重叠窗：PG `now()` = 事务开始时间，覆盖「长事务晚提交」竞态。
