@@ -1,13 +1,25 @@
-"""公开 ID 生成：ULID 风格（时间有序、可排序、无碰撞）。"""
+"""公开 ID 生成：ULID 风格（时间有序、可排序、无碰撞）。
+
+同一毫秒内必须**严格递增**：导入时一张账单上百行会在同一毫秒里生成 ID，
+若随机位任意取值，`ORDER BY id` 就不再等于写入（文件行号）顺序。ULID 规范允许
+用「上一条 +1」的单调策略填充随机位，这里采用该策略；跨进程不保证单调，
+但同一进程内的导入写入顺序与 ID 顺序一致。
+"""
 
 from __future__ import annotations
 
 import os
 import secrets
+import threading
 import time
 from typing import Final
 
 _CROCKFORD: Final[str] = "0123456789ABCDEFGHJKMNPQRSTVWXYZ"
+_MAX_RANDOM: Final[int] = 1 << 80
+
+_lock = threading.Lock()
+_last_ms: int = -1
+_last_random: int = 0
 
 
 def _encode(value: int, length: int) -> str:
@@ -18,10 +30,27 @@ def _encode(value: int, length: int) -> str:
     return "".join(chars)
 
 
+def _next_parts(ms: int) -> tuple[int, int]:
+    """同一毫秒内递增随机位；时钟回拨时沿用上一次时间，保证 ID 单调。"""
+    global _last_ms, _last_random
+    with _lock:
+        if ms > _last_ms:
+            _last_ms = ms
+            _last_random = secrets.randbits(80)
+        elif _last_random + 1 >= _MAX_RANDOM:
+            _last_ms += 1
+            _last_random = 0
+        else:
+            _last_random += 1
+        return _last_ms, _last_random
+
+
 def new_ulid(now_ms: int | None = None) -> str:
-    """26 字符 ULID：10 位时间 + 16 位随机。"""
-    ms = now_ms if now_ms is not None else int(time.time() * 1000)
-    return _encode(ms, 10) + _encode(secrets.randbits(80), 16)
+    """26 字符 ULID：10 位时间 + 16 位随机（同毫秒单调递增）。"""
+    if now_ms is not None:
+        return _encode(now_ms, 10) + _encode(secrets.randbits(80), 16)
+    ms, value = _next_parts(int(time.time() * 1000))
+    return _encode(ms, 10) + _encode(value, 16)
 
 
 def new_id(prefix: str, now_ms: int | None = None) -> str:

@@ -50,6 +50,7 @@ async def _seed_trade(
     user_id: uuid.UUID,
     trade_date: date = date(2026, 6, 15),
     code: str = "600519",
+    trade_id: str | None = None,
     side: str = "buy",
     quantity_units: int = 1_000_000,
     price_units: int = 1_000_000,
@@ -61,7 +62,7 @@ async def _seed_trade(
     line_no: int | None = None,
     dedupe_key: str | None = None,
 ) -> str:
-    trade_id = f"trd_{uuid.uuid4().hex[:12]}"
+    trade_id = trade_id or f"trd_{uuid.uuid4().hex[:12]}"
     async with AsyncSession(engine) as session:
         session.add(
             Trade(
@@ -864,6 +865,46 @@ async def test_api_017_list_cursor_paging(client, api_prefix, user, owner_engine
     assert second.json()["has_more"] is False
 
 
+async def test_api_017_same_day_rows_follow_line_no(client, api_prefix, user, owner_engine) -> None:
+    """同日必须按文件行号排序：ULID 同毫秒内随机，只按 id 排会把余额链打乱。
+
+    构造 line_no 越大、id 字典序越小的三行（复现 2025-04-28 的 id 乱序）：
+    默认 `-trade_date` 下应得到 3 → 2 → 1，跨页游标也不跳过/重复。
+    """
+    seeded = [
+        ("trd_zzz000000000000", 1, 1_000_000),
+        ("trd_yyy000000000000", 2, 195_319),
+        ("trd_xxx000000000000", 3, 500_000),
+    ]
+    for row_id, line_no, amount in seeded:
+        await _seed_trade(
+            owner_engine,
+            user_id=user.user_id,
+            trade_date=date(2026, 6, 15),
+            trade_id=row_id,
+            line_no=line_no,
+            amount_units=amount,
+            cash_balance=amount,
+        )
+
+    first = (await client.get(f"{api_prefix}/trades?limit=1", headers=user.headers)).json()
+    assert [item["amount"] for item in first["items"]] == ["5000.00"]
+    assert first["has_more"] is True
+    second = (
+        await client.get(
+            f"{api_prefix}/trades?limit=1&cursor={first['next_cursor']}", headers=user.headers
+        )
+    ).json()
+    assert [item["amount"] for item in second["items"]] == ["1953.19"]
+    third = (
+        await client.get(
+            f"{api_prefix}/trades?limit=1&cursor={second['next_cursor']}", headers=user.headers
+        )
+    ).json()
+    assert [item["amount"] for item in third["items"]] == ["10000.00"]
+    assert third["has_more"] is False
+
+
 async def test_api_017_money_is_fixed_point_string(client, api_prefix, user, owner_engine) -> None:
     await _seed_trade(owner_engine, user_id=user.user_id)
     resp = await client.get(f"{api_prefix}/trades", headers=user.headers)
@@ -907,10 +948,10 @@ async def test_api_017_fractional_quantity_two_decimals(
     assert Decimal(item["quantity"]) * Decimal(item["price"]) == Decimal(item["amount"])
 
 
-async def test_api_017_sell_without_units_fills_money_fund_units(
+async def test_api_017_sell_without_units_without_fund_stays_cash_leg(
     client, api_prefix, user, settings
 ) -> None:
-    """货基赎回只落资金腿（有金额、无数量/单价）→ 落库前按 1 元净值补数量与价格。"""
+    """货基赎回只有资金腿、同日无份额腿且无货基持仓 → 保持资金腿，不再补成 CASH 货基。"""
     rows = ["2026-10-26,,,卖出,0,0.000,179999.00,0.00,0.00,0.00,180100.05,资管转让资金上账"]
     preview_id = await _preview_with_rows(client, api_prefix, user, rows)
     await _commit_import(client, api_prefix, user, preview_id)
@@ -920,8 +961,8 @@ async def test_api_017_sell_without_units_fills_money_fund_units(
     item = resp.json()["items"][0]
     assert item["category"] == "sell"
     assert item["side"] == "sell"
-    assert item["quantity"] == "179999"
-    assert item["price"] == "1.000000"
+    assert item["quantity"] == "0"
+    assert item["price"] == "0.000000"
     assert item["amount"] == "179999.00"
 
 
