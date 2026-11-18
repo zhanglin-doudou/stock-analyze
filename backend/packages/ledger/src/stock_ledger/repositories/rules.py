@@ -139,7 +139,7 @@ _BASE_SYSTEM_RULES: tuple[tuple[str, str, str, str, str, str, int], ...] = (
     ("sys_div_bonus_1", "股息→分红", "dividend", "both", "contains", "股息", 40),
     ("sys_div_bonus_2", "派息→分红", "dividend", "both", "contains", "派息", 40),
     # 基金分红发放（红利再投/现金分红）：与「红利入账」同口径，不能被宽泛「费」规则吞掉。
-    ("sys_div_paid", "红利发放→分红", "dividend", "both", "contains", "红利发放", 30),
+    ("sys_div_paid", "红利发放→利息", "interest", "both", "contains", "红利发放", 30),
     ("sys_interest", "利息归本→利息", "interest", "both", "contains", "利息", 50),
     # 配股（含「配股缴款」）：既有股票变更也有扣费，属 rights；优先级 13 早于
     # new_stock(14)，保证「配股缴款」不会被「新股/申购」类规则抢走。
