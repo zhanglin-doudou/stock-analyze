@@ -137,13 +137,37 @@ def _forward_shares(
 ) -> tuple[dict[str, int], tuple[MoneyFundOversell, ...]]:
     """全历史份额正推：返回 (期初反推份额, 超卖记录)。
 
-    - 出现过增持（申购/红利再投）之前的赎回缺口 → 期初已持有，计入反推期初；
-    - 出现过增持之后的赎回缺口 → 超卖，券商补记份额、当日计入收益，不进期初。
+    不变量：**running[code] == offset[code] + Σdelta** 始终成立。
+
+    缺口处理优先级（货基份额可跨基金 1:1 抵消）：
+
+    1. 任何货基的赎回缺口（running<0）都先从 peers 的 running 盈余里扣减——
+       peers 的余额本质上也是整个货基池的"已增持未赎回"份额；
+    2. peer 扣减同时更新 peer 的 offset，保持 running = offset + Σdelta 不变量；
+    3. 剩余未覆盖的缺口，按 increased 状态分流：有增持 → 超卖（券商补记份额、
+       当日计入收益）；从未增持 → 反推进期初。
     """
     running: dict[str, int] = dict.fromkeys(codes, 0)
     offset: dict[str, int] = dict.fromkeys(codes, 0)
     increased: dict[str, bool] = dict.fromkeys(codes, False)
     oversells: list[MoneyFundOversell] = []
+
+    def _cover_from_peers(code: str, deficit: int) -> int:
+        """从 peers 的 running 盈余里扣减 deficit 份额，返回剩余未覆盖缺口。
+
+        同时同步调整 peer 的 offset，保持 running[peer] == offset[peer] + Σdelta
+        不变量（因为 Σdelta 不变，running 被减了 take，offset 也必须减 take）。
+        """
+        remaining = deficit
+        for peer, bal in running.items():
+            if peer == code or bal <= 0 or remaining <= 0:
+                continue
+            take = min(bal, remaining)
+            running[peer] = bal - take
+            offset[peer] -= take
+            remaining -= take
+        return remaining
+
     for row in rows:
         code = _name(row.security_code)
         if code not in codes:
@@ -159,17 +183,19 @@ def _forward_shares(
         if running[code] >= 0:
             continue
         deficit = -running[code]
-        if increased[code]:
-            oversells.append(
-                MoneyFundOversell(
-                    trade_id=row.id,
-                    trade_date=row.trade_date,
-                    security_code=code,
-                    quantity_units=deficit,
+        still = _cover_from_peers(code, deficit)
+        if still > 0:
+            if increased[code]:
+                oversells.append(
+                    MoneyFundOversell(
+                        trade_id=row.id,
+                        trade_date=row.trade_date,
+                        security_code=code,
+                        quantity_units=still,
+                    )
                 )
-            )
-        else:
-            offset[code] += deficit
+            else:
+                offset[code] += still
         running[code] += deficit
     return offset, tuple(oversells)
 

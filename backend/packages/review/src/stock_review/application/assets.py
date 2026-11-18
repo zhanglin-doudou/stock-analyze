@@ -99,7 +99,11 @@ log = get_logger("stock_review.assets")
 #      （不计持仓/成本/FIFO/回合）；有持仓的配股与金额非 0 的配股不变。口径变化，bump 触发全量重建。
 # 2.5：货基超卖（赎回份额超过余额）按「券商补记份额」计入当日收益，不再反推进期初；
 #      期初反推只吸收此前无任何增持的赎回缺口。口径变化，bump 触发全量重建。
-ASSET_DEFINITION_VERSION = "2.5"
+# 2.6：共享持有逻辑增强——所有货基的赎回缺口（无论自身有没有增持）都先从其它货基的
+#      running 盈余份额里 1:1 覆盖，耗尽后再按 increased 状态进入 oversell 或期初反推。
+#      避免"有过增持的基金 running 耗尽后直接全进 oversell，而 peers 的盈余闲置"。
+#      口径变化，bump 触发全量重建。
+ASSET_DEFINITION_VERSION = "2.6"
 # 安全窗：每次有新数据/脏流水/行情 as_of 变化时重算最近 45 天。
 SAFETY_DAYS = 45
 # 水位线重叠窗：PG `now()` = 事务开始时间，覆盖「长事务晚提交」竞态。
