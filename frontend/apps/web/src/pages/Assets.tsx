@@ -26,7 +26,7 @@ interface AssetFilters {
   sort: "trade_date" | "-trade_date";
 }
 
-const EMPTY_FILTERS: AssetFilters = { period: "", status: "", sort: "trade_date" };
+const EMPTY_FILTERS: AssetFilters = { period: "", status: "", sort: "-trade_date" };
 
 const SORT_LABELS: Record<AssetFilters["sort"], string> = {
   trade_date: "正序（旧 → 新）",

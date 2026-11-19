@@ -2,6 +2,7 @@
 
 > 状态：**v0.2 — 已完成交叉评审并关闭 P0（3 名独立评审，记录见 [交叉评审](../reviews/2026-10-28-DevDesign-Review-dashboard.md)）；待人工拍板 A 类口径；本阶段只出文档，不写生产代码、不改 API/数据库**
 > 日期：2026-10-28 ｜ 作者：AI（Team Lead）
+> **2026-11-19 复核**：本文件是 Period2-12 的设计/验收快照；其中「G8 22 个 COVERAGE 骨架 + fee_breakeven」已细化为 **approval 红 23 项**（structure 已绿），`API-Catalog` 头已更新为 **110 端点 / 79 已实现**；其余暂停项不变：2-09/10/11-056/057/13/14 未完成，2-15 仅有数值转换基础门禁、完整规则待补。
 > 需求来源：用户本轮诉求（Dashboard 两板块 + 未完成验收入口预留/缺失清单）；`docs/DEV-PLAN-v2.md` §3.1/Period2-12；`docs/prd/PRD-v2.md` FR-D1；`docs/architecture/v2/API-Catalog.md` API-027/029/032/033/081/083；`docs/architecture/v2/Testing.md` §7。
 > 事实基线（2026-10-28）：
 > - 前端**没有** `Dashboard` 页面；`/` 目前重定向 `/trades`（`frontend/apps/web/src/router.tsx`）。

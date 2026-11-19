@@ -2,11 +2,13 @@
 
 本文档是**本仓 AI 编程助手的第一入口**。任何未阅读本文档就开始编码的 AI 会在 30 秒内踩坑。
 
-## 0. 当前阶段与固定本地账号（2026-11-04）
+## 0. 当前阶段与固定本地账号（2026-11-19）
 
-- **一期**：已完成；**二期核心**（回合、净值、资产、18 指标、Dashboard、API-083 月度编排、板块数据 API-087/088 + `/sectors`）已落地/验收。
+- **一期**：已完成（30/30 端点有验收）；**二期核心**（回合、净值、资产、18 指标、Dashboard、API-083 月度编排、板块数据 API-087/088 + `/sectors`）已落地/验收。
 - **Period2-08 五因子归因**：**08a~08g 已交付并验收（2026-11-02）**，2026-11-04 完成口径收口——[设计 v1.0](docs/architecture/2026-11-02-five-factor-attribution.md) / [交叉评审](docs/reviews/2026-11-02-DevDesign-Review-five-factor-attribution.md)；含 `GET /attribution`（API-036）与 `/attribution` 页面。当前口径：`new_stock` 按本期窗口判定、打新损益进账户级桶 `ipo_pnl`；降级只由「未归因标的损益」超容差（期末总资产 0.2%）触发；`VALUATION_GAP_ABOVE_TOLERANCE`/`SECTOR_BAR_FALLBACK`/`SECTOR_CLASSIFICATION_LOOKAHEAD` 为 `info`，lookahead 需 `SECTOR_LOOKAHEAD_ENABLED=true` + 请求 `classification_lookahead=allow`。**月报同源接入属 Period2-09（09b），未开始**（设计 §8.2 L715-720）。
-- **其余二期项**（月报/导出/设置增强/报告页/verify-p2）暂停，未完成功能只用占位入口，禁止伪造数据/下载。
+- **Period2-19 用户偏好（2026-11-13）**：API-055/096/097 已交付；**Period2-20 导入映射 v2（2026-11-13）**：API-098~106 已交付，并追加平安预设、模板锁定与预设类型复制。
+- **2026-11-15~19 增量（Period2-21，初始任务表外）**：超卖卖出人工修订 API-107~109（注入资金腿+买入腿、撤回、重算回合/资产，`revision_of` 标记）；账单数据治理 API-110（重置本人 `ledger`/`review` 数据）与 API-111（旗标重建状态/未覆盖原因）；`sync-market` 改增量同步；货基口径收口 2.4、送股/转增并入 `rights`。
+- **其余二期项**（月报/导出/基准与隐私/报告页/verify-p2/零口径门禁）暂停，未完成功能只用占位入口，禁止伪造数据/下载。剩余约 40 人日（二期 9 + 三期 23 + 交付 8），详见 [DEV-PLAN §0.6](docs/DEV-PLAN-v2.md#06-2026-11-19-进度快照)。
 - **导入映射重构（2026-11-13 已交付）**：迁移 `0015_import_mapping_v2`；v2 两阶段导入（`X-Import-Flow: v2` 显式开启，缺省保持 legacy 严格 422）：API-098 列映射（`If-Match: <mapping_version>` 乐观锁）→ API-099 类型确认 → API-011 提交；API-106 预览刷新、API-100/101 列映射模板、API-102~105 管理员列规则。`/import` 向导最初按设计 H-1 使用**限定范围 Tailwind + shadcn**；**2026-11-19 起已全局化**（`tw-` 前缀、`preflight:false`、全局 `styles/tailwind.css`、Radix 统一在 `components/ui` 二次封装，页面按子模块导入），见 [UI 全局化决议](docs/architecture/2026-11-19-frontend-ui-globalization.md)。原设计与评审见 [设计](docs/architecture/2026-11-13-import-mapping-refactor.md) / [DevDesign-Review](docs/reviews/2026-11-13-DevDesign-Review-import-mapping-refactor.md)（H-1 范围限制已被取代，历史记录保留）。
 - **固定本地测试 / 体验账号**：`1234@dev.com` / `1234`（仅本地；由 `make seed-tenants` / `make seed-demo` 创建）。
   - 隔离对照：`a@demo.example.com` / `b@demo.example.com`，管理员：`admin@demo.example.com`；本地 seed 口令统一为 `1234`。

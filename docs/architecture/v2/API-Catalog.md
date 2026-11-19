@@ -48,7 +48,7 @@
 - ETag `W/"<version>"`（列表含查询指纹），写响应返新 ETag；`If-Match` 不匹配 → 409 `VERSION_CONFLICT`（遵循 PRD FR-L4，不采用 412）。
 - 格式：金额**定点字符串 2 位** `"1234.56"`；价格 6 位、数量 4 位；比率十进制小数；时间 ISO 8601 UTC；业务日 `YYYY-MM-DD`（Asia/Shanghai）；`blocked` 时 `value` **字段缺省**。软删默认过滤 `deleted_at NULL`，`include_deleted=true` 仅本人；注销物理级联删除，审计留事件元数据。
 
-## §1 端点总表（105 个；API-089 预留不计数，API-090~095 已实现（2026-11-05/09），API-055/096/097 已实现（2026-11-13），API-098~106 已实现（2026-11-13 导入映射重构）；Path 省略公共前缀 `/api/v1`，标注「根」者不在前缀下）
+## §1 端点总表（110 个；API-089 预留不计数；API-090~095、API-055/096/097、API-098~106、API-107~111 均已实现；Path 省略公共前缀 `/api/v1`，标注「根」者不在前缀下）
 | API-ID | Method | Path | 用途 | FR | 认证/scope | 幂等 | 同步/异步 | 优先级 | 主要成功码 |
 |---|---|---|---|---|---|---|---|---|---|
 | API-001 | POST | `/auth/register` | 注册账号 | L2 | 公开 | 支持 | 同步 | P0 | 201 |
@@ -158,10 +158,13 @@
 | API-104 | PATCH | `/admin/import-column-rules/{rule_id}` | 管理员修改/禁用列规则（If-Match） | L3 | admin | 支持 | 同步 | P1 | 200 |
 | API-105 | DELETE | `/admin/import-column-rules/{rule_id}` | 管理员删除自定义列规则（系统行禁止） | L3 | admin | 幂等 | 同步 | P1 | 204 |
 | API-106 | GET | `/imports/previews/{preview_id}` | 刷新导入预览（映射/类型/就绪三阶段状态） | L3 | read | — | 同步 | P1 | 200 |
+| API-107 | GET | `/trades/{trade_id}/oversell-revision` | 查询超卖卖出未配对数量与人工修订状态 | R2/D1 | read | — | 同步 | P1 | 200 |
+| API-108 | PUT | `/trades/{trade_id}/oversell-revision` | 补录/覆盖超卖成本（可标打新），注入资金腿+买入腿并派发重算 | R2/D1 | write | 支持 | 同步 | P1 | 200 |
+| API-109 | DELETE | `/trades/{trade_id}/oversell-revision` | 撤回超卖人工修订（软删注入行）并派发重算 | R2/D1 | write | 幂等 | 同步 | P1 | 200 |
 
 
 
-> **编号说明（2026-11-05）**：**API-089 预留、暂不实现**，不进入 §1 计数；本任务（FIFO 回合分析增强）从 **API-090** 起编号。API-090~094 已于 2026-11-05 **实现并验收**：详细契约见 §2.6，OpenAPI 快照 / SDK / API 测试 / 隔离矩阵 / DEV-PLAN 已同步（commit `8a958d8`）。
+> **编号说明（2026-11-19 更新）**：**API-089 预留、暂不实现**，不进入 §1 计数；FIFO 回合分析增强从 **API-090** 起编号。API-090~095（2026-11-05/09）、API-098~106（2026-11-13 导入映射 v2）、**API-107~109（2026-11-15 超卖人工修订）**、**API-110/111（2026-11-19 账单数据治理）** 均已**实现并验收**：详细契约见 §2.6，OpenAPI 快照 / SDK / API 测试 / 隔离矩阵 / DEV-PLAN 已同步。
 
 ## §2 分域详细契约
 > 下列端点均有**详细契约**（以本节各 `####` 小节为准；一个小节可覆盖一个或一组端点，如 API-055/096 合并在一节）；未在此列出的端点，请求/响应字段以 `contracts/openapi.json` 为准（§1 已登记、§6 已配验收用例）。断言均为可脚本执行：状态码 + 字段值 + 状态迁移 + 副作用。
@@ -502,10 +505,10 @@
 - 错误码：401、ADMIN_CANNOT_READ_TRADES(403)、UNKNOWN_QUERY_PARAM(400)、VALIDATION_ERROR(422)、INVALID_CURSOR(400)。
 - 验收断言：① 目录未同步 → 200 + `items=[]` + `catalog_version=null` + `SECTOR_DATA_MISSING`；② `items` 按 `(level, sector_code)` 升序，L3 的 `path` 恰 3 层；③ L1/L2 `member_count` 为后代 L3 成分去重求和；④ `is_active=false` 默认不返回；⑤ 损坏 cursor → 400 INVALID_CURSOR；⑥ admin 403、无 token 401。
 
-### 2.6 回合洞察与人工理由（2026-11-05 设计登记，未实现）
+### 2.6 回合洞察、人工理由与超卖修订（已实现）
 
 > 设计依据：[FIFO 回合分析增强设计 v1.0](../2026-11-04-fifo-round-insights.md)（§4 数据模型、§6 API、§8 验收）。
-> 状态：**设计登记，暂未实现**；实现前 `make api-check` 将其列为“后续期次未实现”。实现时必须同步 OpenAPI 快照、SDK、§6 用例、隔离矩阵与 DEV-PLAN 排期。
+> 状态：**API-090~095 已实现并验收（2026-11-05/09）**；API-107~109（超卖人工修订）于 2026-11-15 实现并验收。OpenAPI 快照、SDK、§6 用例、隔离矩阵与 DEV-PLAN 已同步。
 > **路由顺序**：`GET /rounds/insights` 必须注册在 `GET /rounds/{round_id}` 之前（FastAPI 按注册序匹配），否则会被动态路由吞掉；前端静态路由同理。
 
 #### API-090 PUT /trades/{trade_id}/reason
@@ -578,6 +581,27 @@
   - **为什么不复用 `/nav` 月度 TWR**：`nav_daily` 是 `GET /nav` 的派生缓存——只覆盖被请求过的日期（按月稀疏），每次请求都会按本次区间重建点集、并在同事务内清理区间内不属于本次点集的陈旧行，点集随请求区间变化，因此不能作为稳定的月度收益序列数据源（该理由取决于派生缓存的写入方式，不依赖 `/nav` 的收益口径是否正确，口径修复后仍成立）；指标目录（18 项）不含月度收益率指标。资产日表逐日收益是看板回撤族已使用的 TWR 数据源，按月复利结果唯一。
 - 错误码：VALIDATION_ERROR(422，`months` 非 6/12/24)、ADMIN_CANNOT_READ_TRADES(403)。
 - 验收：`months=6/12/24` 月边界正确（跨年）；只返回本人数据；未构建月份显式 0 且列入 `months_without_data`；旧指纹月份旗标计数为 0 且列入 `stale_months`、笔数不受影响；`flag_config` 回显生效阈值与 `flags_hash`；`states[]` 每侧状态互斥（买侧首次建仓与加仓互斥、卖侧清仓与减仓互斥）；只读（调用前后表行数不变）；单月收益按日收益复利且符号/展示串由后端给出，无资产行月份 `available=false`+`value_bp=0`+`amount=null`，blocked/旧口径版本行不参与复利与金额累加，覆盖不足标 `partial`；金额为 `daily_pnl` 当月累加（已剔出入金，含分红/打新损益）。
+#### API-107 GET /trades/{trade_id}/oversell-revision（2026-11-15 超卖人工修订）
+- 用途：查询一笔卖出仍未配对的数量与人工修订状态，供回合/流水页发起补录；operationId `getOversellRevision`；认证 read；同步只读。
+- 响应 200：`sell{trade_id,trade_date,security_code,security_name,quantity,amount,oversell_quantity,note}` / `status ∈ none|revised|superseded|not_oversell` / `cost` / `is_new_stock` / `cash_trade` / `buy_trade` / `round_id`。`none`=可修订；`revised`=已有注入行；`superseded`=真实账单已覆盖注入行；`not_oversell`=无需修订。
+- 错误码：NOT_FOUND(404)、VALIDATION_ERROR(422)、ADMIN_CANNOT_READ_TRADES(403)、INSUFFICIENT_SCOPE(403)。
+- 验收：纯超卖卖出返回未配对数量=卖出数量；非超卖/买入/跨用户 404 或明确状态；只读不改行。
+
+#### API-108 PUT /trades/{trade_id}/oversell-revision（2026-11-15 超卖人工修订）
+- 用途：补录/覆盖该卖出未配对部分的总成本；服务端在同一事务内注入一条资金腿 + 一条无费用买入腿（`revision_of=<sell_id>`），再派发回合/资产重算；operationId `upsertOversellRevision`；认证 write；幂等：支持（同一卖出至多一条修订，重复 PUT 更新注入行不叠加）。
+- 请求：body `cost`（正数定点字符串，2 位小数）/ `is_new_stock`（bool，默认 false；true 时注入买入腿 `category=new_stock`，打新损益进账户级桶）。
+- 响应 200：`{revision{...同 API-107}, rebuild_job_id, assets_job_id}`；注入行以 `note` 标明人工修订，不混入真实成交。
+- 口径：注入买入腿排在卖出之前参与 FIFO；部分超卖只补未配对数量，修订后回合转 closed，`pnl = 卖款 −（原有成本 + 修订成本）`；`is_new_stock` 只影响分类与归因桶，不改变现金/成本金额。
+- 错误码：NOT_FOUND(404)、VALIDATION_ERROR(422)、JOB_ALREADY_RUNNING(409)、QUOTA_EXCEEDED(429)、ADMIN_CANNOT_READ_TRADES(403)、INSUFFICIENT_SCOPE(403)。
+- 验收：注入两条腿字段/来源/去重键正确；重复 PUT 不叠加；非超卖/买入/跨账号 422/404；重算后回合 closed 且 pnl 等于卖款减修订成本。
+
+#### API-109 DELETE /trades/{trade_id}/oversell-revision（2026-11-15 超卖人工修订）
+- 用途：撤回人工修订（软删注入的两条行），恢复超卖状态并派发重算；operationId `deleteOversellRevision`；认证 write；幂等：幂等（重复删除 200 同状态）。
+- 响应 200：`{revision{status:"none",...}, rebuild_job_id, assets_job_id}`。
+- 口径：只软删 `revision_of` 指向该卖出的注入行；真实账单行与其他批次不被误删；撤回后回合/资产按原超卖口径重算。
+- 错误码：NOT_FOUND(404)、VALIDATION_ERROR(422)、JOB_ALREADY_RUNNING(409)、QUOTA_EXCEEDED(429)、ADMIN_CANNOT_READ_TRADES(403)、INSUFFICIENT_SCOPE(403)。
+- 验收：删除后注入行不可见、超卖数量恢复；重复删除幂等；跨用户 404；区间覆盖/撤销批次不误删注入行。
+
 #### API-055 GET /settings · API-096 PATCH /settings（2026-11-13 用户偏好 v2.1）
 - 用途：读取/局部更新用户偏好（外观与显示、账单旗标阈值与窗口、行情时段、概念板块过滤）；operationId `getSettings` / `patchSettings`。
 - `GET` 响应 200：`{version,updated_at,appearance{theme,density,trend},bill_flags{near_equal_tolerance_pct,chase_margin_pct,stop_loss_margin_pct,short_term_margin_pct,window_trading_days,flags_hash,is_default},market_sessions{sessions[{open,close}],data_ready_after,session_notice_enabled,timezone},concept_filters{mode,excluded[{code,name,resolved}]},benchmark_id,privacy_flags}`；阈值一律百分比串、窗口为十进制整数字符串；无 `user_setting` 行时返回默认视图（`version=1`、`updated_at=null`）。响应头 `ETag: W/"<version>"`，支持 `If-None-Match` → 304。
@@ -682,6 +706,7 @@
 | IMPORT_PREVIEW_NOT_FOUND | 404 | 预览不存在/跨用户 | 找不到这次预览。 | 重新上传并预览。 | 否 |
 | IMPORT_TEMPLATE_NOT_FOUND | 404 | 模板不存在/跨用户 | 找不到这个对应关系。 | 刷新列表。 | 否 |
 | IMPORT_REIMPORT_CONFLICT | 409 | 同文件不同映射重导未确认 | 同一文件已用不同映射导入过。 | 用区间替换重导或显式确认。 | 否 |
+| IMPORT_CHAIN_DISCONTINUOUS | 422 | 向前补历史时资金余额接不上现有账单链 | 账单资金余额接不上，无法并入现有账单链。 | 核对报错行号前后的资金余额；向前补历史时请导出与库内首条账单衔接更早的区间。 | 否 |
 | IMPORT_STAGE_CONFLICT | 409 | 阶段不允许该操作 | 当前导入阶段不允许该操作。 | 先完成列对应/类型确认。 | 否 |
 | IMPORT_RULE_CONFLICT | 409 | 管理员规则重复 | 规则已存在。 | 修改已有规则或换表头/字段。 | 否 |
 | IMPORT_MAPPING_INVALID | 422 | 列对应重复/未知字段/多列非费用 | 列对应不合法。 | 检查重复字段与多列合并规则。 | 否 |
@@ -794,6 +819,9 @@ data: {"job_id":"job_01J9Z6","status":"succeeded","result_ref":"/api/v1/reports/
 | API-104 | admin_import_rules_update | 200 version+1；If-Match 缺失/过期 422/409；系统行改 target_field 422 | fx_base | P1 |
 | API-105 | admin_import_rules_delete | 自定义规则 204；系统行 422；跨用户不影响 | fx_base | P1 |
 | API-106 | imports_preview_get | 200 回填 stage/mapping_version/types；过期 410；跨用户 404 IMPORT_PREVIEW_NOT_FOUND | fx_base | P1 |
+| API-107 | oversell_revision_get | 200 返回未配对数量与状态；非超卖/买入/跨用户 404 或 `not_oversell`；只读不改行 | fx_base | P1 |
+| API-108 | oversell_revision_put | 200 注入资金腿+买入腿（`revision_of`）；重复 PUT 不叠加；成本非法/非超卖 422；跨用户 404；重算后回合 closed、pnl=卖款−修订成本；`is_new_stock` 影响分类与归因桶 | fx_base | P1 |
+| API-109 | oversell_revision_delete | 200 软删注入行并恢复超卖数量；重复删除幂等；跨用户 404；不误删真实账单/其他批次 | fx_base | P1 |
 | API-017 | trades_cursor_sort_fields | 游标无重无漏；非法 sort 400；fields 裁剪；304 | fx_round30 | P0 |
 | API-018 | trades_patch_version | version+1；旧 version 409；跨用户 404 | fx_base | P0 |
 | API-019 | trades_soft_delete | 204；默认不可见；include_deleted=true 可见 | fx_base | P1 |
@@ -877,7 +905,7 @@ data: {"job_id":"job_01J9Z6","status":"succeeded","result_ref":"/api/v1/reports/
 | API-095 | dashboard_trade_flags（已实现） | 200；months=6/12/24 月边界跨年正确；只本人数据；未构建月份显式 0；单月收益=资产日表日收益按月复利（value_bp/pct/display/sign 后端给），无资产行月份 available=false+value_bp=0+amount=null，blocked/旧版本行不参与，覆盖不足 partial；金额=daily_pnl 当月累加（已剔出入金，含分红/打新）；只读 | fx_round_insights | P1 |
 
 
-> **实现说明（API-090~094，2026-11-05）**：上述 5 行已实现并通过 `test_api_090_091_trade_reasons.py`、`test_api_092_094_round_insights.py`、`test_api_028_031_rounds.py`、契约与隔离矩阵；OpenAPI 示例与 SDK 已同步。既有 88 个端点的验收矩阵不变。
+> **实现说明（API-090~094，2026-11-05）**：上述 5 行已实现并通过 `test_api_090_091_trade_reasons.py`、`test_api_092_094_round_insights.py`、`test_api_028_031_rounds.py`、契约与隔离矩阵；OpenAPI 示例与 SDK 已同步。既有端点的验收矩阵不变（当前 §1 共 110 个登记端点）。
 
 ### 6.1 端到端脚本（5 条，覆盖「注册登录 → PAT → preview → commit → 取指标 → 下载月报」）
 ```bash
@@ -943,14 +971,14 @@ grep -c '2026-09' report.html
 | A3 限流与配额 | API-028、API-038、API-039、API-059、API-061、API-067 | 第 N+1 次 429 + Retry-After；同参重算同 job；并发上限 429 |
 | A4 审计日志 | API-065、API-066 | 含 login/token.revoke 且字段齐全；跨用户不可见；admin 视图无明细 |
 | R1 数据服务化 | API-029、API-030 | 导入 job 成功后 /rounds 立即可见；跨用户不可见 |
-| R2 期初资产与回合 | API-027~031、API-062~064 | 202→succeeded；pnl≤0.01、收益≤1bp；FIFO trade_id 集合一致；bridge balanced |
+| R2 期初资产与回合 | API-027~031、API-062~064、API-107~109 | 202→succeeded；pnl≤0.01、收益≤1bp；FIFO trade_id 集合一致；bridge balanced；超卖修订注入行可撤回且重算后回合闭合 |
 | R3 净值与收益 | API-032 | points/summary 字段齐全；blocked 无资产值；日收益 vs oracle≤1bp |
 | R4 选股诊断 | API-038、API-033 | 202→succeeded；domain=selection 含 BHAR/t/n/CI；as_of 无未来数据 |
 | R5 择时与绩效 | API-033、API-056、API-079 | timing 全字段含 n/CI/sample_status/data_as_of；默认基准显式标注 |
 | R6 行为偏差 | API-033 | de 含 value/CI；处置效应 fixture de>0 且 CI 不含 0；无效应 fixture CI 含 0 |
 | R7 归因 | API-036 | Σfactor+residual==total_pnl（≤0.01）；rank 1..5 连续；blocked 不输出金额；degraded/insufficient 以 `missing[]`/`sample_status` 披露（2026-11-02 08g 更新；2026-11-04 口径：降级只看未归因标的损益，`ipo_pnl` 独立桶，gap/bar fallback/lookahead 为 info） |
 | R8 统计可信度 | API-033、API-034、API-052、API-079 | n<10 → insufficient 且无结论；n≥30 有 CI；exploratory 不进行动建议 |
-| D1 Web SPA | API-005、API-029、API-032、API-033、API-036、API-040、API-047、API-055 等全部读端点 | 页面数据端点 100% 登记并过验收；`GET /` 200 |
+| D1 Web SPA | API-005、API-029、API-032、API-033、API-036、API-040、API-047、API-055、API-110/111 等全部读端点 | 页面数据端点 100% 登记并过验收；`GET /` 200 |
 | D2 月报 | API-039~042、API-062 | 202→succeeded；下载 200 且 Content-Disposition 正确；数字与 metrics 一致；同 spec 复用 |
 | D3 人话与下钻 | API-033~035 | explain 含 conclusion/method/drilldown；无裸术语；drilldown 端点可调非空 |
 | D4 交易日志 | API-046~051 | 201；按 round_id 过滤；平仓后 prompts；季度 summary；跨用户不可见 |

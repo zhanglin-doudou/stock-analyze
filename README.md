@@ -2,16 +2,18 @@
 
 面向个人投资者的交易复盘系统：导入券商对账单，自动落库/分类/对账，建立 FIFO 回合、净值/资产序列与三域指标，并在 Dashboard 中聚合展示。
 
-> **当前阶段（2026-11-13）**
+> **当前阶段（2026-11-19）**
 >
-> - **一期**：已完成（认证/多租户/RLS、导入、任务队列、流水维护、契约链路）。
+> - **一期**：已完成（认证/多租户/RLS、导入、任务队列、流水维护、契约链路），30/30 端点有验收。
 > - **二期核心**：已完成验收或已落地——FIFO 回合、`GET /nav`、资产表、18 指标引擎与 `/metrics`、**Dashboard 两板块（API-084）**、`POST /jobs/rebuild-period`（API-083）、**板块数据底座（API-087/088 + `/sectors`）**。
 > - **Period2-08 五因子归因**：**08a~08g 已交付并验收（2026-11-02）**，2026-11-04 完成口径收口——[设计 v1.0](docs/architecture/2026-11-02-five-factor-attribution.md) / [交叉评审](docs/reviews/2026-11-02-DevDesign-Review-five-factor-attribution.md)；含 `GET /attribution`（API-036）与 [`/attribution` 页](http://127.0.0.1:5173/attribution)。月报同源接入仍属 Period2-09（09b），未开始。
 > - **Period2-18 FIFO 回合洞察增强**：**已交付并验收（2026-11-05）**——迁移 `0012_review_round_insights`、真实交易日历 B0~B3 前瞻收益、持有期分桶/旗标、`/rounds/insights` 页、回合详情洞察区块、逐笔理由编辑；含 `PUT/DELETE /trades/{trade_id}/reason`（API-090/091）、`GET /rounds/insights`（API-092）、`GET /rounds/{round_id}/insights`（API-093）、`POST /rounds/insights/refresh`（API-094）。设计见 [2026-11-04-fifo-round-insights.md](docs/architecture/2026-11-04-fifo-round-insights.md)。未覆盖：>5000 笔转后台 202 分支（构造方式见验收记录）。
 > - **Period2-19 用户偏好配置**：**P0 + P1-1 + P1-2 + P1-3 已交付（2026-11-13）**——迁移 `0014_user_setting_preferences`、`GET /settings`（API-055）与 `PATCH /settings`（API-096）、`POST /settings/trade-flags/rebuild`（API-097）；账单旗标阈值/窗口参数化并带 `flags_hash` 过期识别与「立即重算」、看板/回合 stale 横幅；概念过滤 `off/hide/exclude` 接入 API-087（additive `concept.filters`/`filtered_*`/条件 ETag 与 `Cache-Control`）。设计见 [2026-11-11-user-preferences.md](docs/architecture/2026-11-11-user-preferences.md)。
-> - **二期剩余**：月报、导出、报告/导出前端页按计划**暂停**；前端已预留 `/reports`、`/exports` 占位入口，验收中按缺失清单 SKIP，不伪造数据。
-> - **导入映射重构（2026-11-13）**：迁移 `0015_import_mapping_v2`，两阶段导入确认（列映射 API-098 → 账单类型 API-099 → 提交 API-011）、预览刷新 API-106、列映射模板 API-100/101、管理员列规则 API-102~105；`/import` 改为「上传 → 列对应 → 账单类型 → 确认导入 → 结果」向导（该页按 H-1 批准使用限定范围 Tailwind + shadcn，`tw-` 前缀 + `preflight:false`，其余页面不变）。v2 由请求头 `X-Import-Flow: v2` 显式开启，旧客户端保持 legacy 严格 422 行为。设计见 [2026-11-13-import-mapping-refactor.md](docs/architecture/2026-11-13-import-mapping-refactor.md)，交叉评审见 [DevDesign-Review](docs/reviews/2026-11-13-DevDesign-Review-import-mapping-refactor.md)。
-> - **三期**：未开始。
+> - **Period2-20 导入映射重构（2026-11-13）**：迁移 `0015_import_mapping_v2`，两阶段导入确认（列映射 API-098 → 账单类型 API-099 → 提交 API-011）、预览刷新 API-106、列映射模板 API-100/101、管理员列规则 API-102~105；追加平安证券预设 `sys:pingan`、券商模板锁定与预设类型复制。v2 由请求头 `X-Import-Flow: v2` 显式开启，旧客户端保持 legacy 严格 422 行为。
+> - **2026-11-15~19 增量（未在原 DEV-PLAN 任务表内）**：超卖卖出人工修订 API-107~109（注入资金腿+买入腿、可撤回、重算回合/资产）；账单数据治理 API-110（重置本人账单数据）与 API-111（旗标重建状态/未覆盖原因）；前端 Tailwind + Radix 组件层**全局化**（取代导入页 H-1 限定域）；行情 `sync-market` 改增量同步并输出未到当日证券；货基口径收口至 2.4、送股/转增并入 `rights`。
+> - **二期剩余（6 项）**：月报（2-09，含归因同源 09b）、导出（2-10）、设置基准/隐私 API-056/057（2-11 收尾）、报告/导出前端页（2-13）、`verify-p2` 与越权全量（2-14）、前端零口径 ESLint 门禁（2-15）。`/reports`、`/exports` 仍是占位入口，验收按缺失清单 SKIP，不伪造数据。
+> - **三期 / 交付**：均未开始。
+> - **进度口径**：原始规划 55 项任务中，30 项完成、2 项部分完成（2-11 设置收尾、2-15 零口径门禁基础规则）、23 项未开始；剩余 25 项含 2 项收尾。按 DEV-PLAN 估时剩余约 **40 人日**（二期 9 + 三期 23 + 交付 8），约占最初 96 人日基线的 **42%**。端点：API-Catalog 登记 110 个，已实现 79 个，未实现 31 个（集中在二期暂停项与三期）。详见 [DEV-PLAN §0.6](docs/DEV-PLAN-v2.md#06-2026-11-19-进度快照)。
 >
 > 设计与验收记录见 [Dashboard 设计](docs/architecture/2026-10-28-dashboard.md)、[月度报告设计](docs/architecture/2026-10-28-monthly-report.md)、[S10 验收记录](docs/reviews/2026-10-27-p207-S10-acceptance.md)、[回合洞察设计](docs/architecture/2026-11-04-fifo-round-insights.md)。
 
@@ -26,9 +28,10 @@
 ## 功能特性
 
 - **多租户与安全**：注册 / 登录 / 刷新令牌轮换 / 登出 / PAT；仓储层强制 `user_id` + PostgreSQL RLS 双层隔离；跨账号 404，admin 禁读业务明细。
-- **对账单导入**：华泰账单解析、列映射预检、预览不落库 → 提交异步任务 → 批次撤销、隔离区、bag 去重、断链补差。
+- **对账单导入**：华泰/平安解析、v2 列映射与账单类型两阶段确认、预览不落库 → 提交异步任务 → 批次撤销、隔离区、bag 去重、断链补差；支持列映射模板、管理员列规则、券商模板锁定与预设类型复制。
 - **流水维护**：游标分页 / ETag / If-Match 并发控制 / 修正 / 软删恢复 / 历史。
 - **FIFO 回合**：稳定配对、分批减仓、股息归属、送转/配股、桥接恒等式；回合列表与配对明细。
+- **超卖人工修订**：对账单缺口造成的超卖卖出，可补录未配对部分成本并选择是否计入打新（API-107~109）；服务端注入资金腿+买入腿、重算回合与资产，支持撤回，注入行带 `revision_of` 标记、不混入真实成交。
 - **回合洞察**：`/rounds/insights` + 详情洞察区块——持有期分桶（scalp/short/position/long）、买卖 5/10/20 日 B0~B3 前瞻收益（真实交易日历、缺失显式 null）、回合状态旗标（抄底/止损卖飞/止盈卖飞计数、收益回撤、日内做T/波段做T、日内调仓）、逐笔买/卖理由与覆盖率；全部数字由后端格式化，前端只展示。
 - **净值与收益**：份额法 TWR、XIRR/MWR、日资产/现金流、`GET /nav`。
 - **资产快照**：`review.asset_daily` 逐日现金/市值/成本/浮盈；`GET /assets`、`POST /assets/build`。
@@ -36,7 +39,8 @@
 - **五因子归因**：`GET /attribution`（API-036）+ `/attribution` 页——选股/板块/买点/卖点/费用五因子，`Σ因子 + 残差 = 区间损益`；残差七桶（公司行动/未归因价格/无持仓股息/利息/打新收益/其他/估值差）。`new_stock` 按本期窗口判定，打新损益进账户级 `ipo_pnl`；降级只由「未归因标的损益」超容差（期末总资产 0.2%）触发，其余桶与 `VALUATION_GAP_ABOVE_TOLERANCE`（info）只披露；期初缺板块指数 bar 可回退节后首根并标 `SECTOR_BAR_FALLBACK`（info）；lookahead 仅在 `SECTOR_LOOKAHEAD_ENABLED=true` + 请求 `classification_lookahead=allow` 时启用（info 披露）。
 - **Dashboard 看板**：`/dashboard` 两个板块——资产概览（持仓/现金/仓位/总收益/峰值成本/费用 + 板块配置子块）与历史概览（平仓统计/盈亏占比/最大收益/最大回撤）；旧五卡以子块合并；未完成功能有占位入口。
 - **板块数据**：同花顺 THS 行业（扁平一级，互斥，Σ权重=1，分母 `E_map`）+ 概念板块（THS，多归属，不可加总）；`GET /sectors/overview`（集中度 HHI/TopK/主动权重/概念暴露 + `caveat`）、`GET /sectors`（公共目录树）；Dashboard 子块 + `/sectors` 详情页（行业一级、概念警示）；公共缓存落 `market.sector*`，replay 夹具 `fixtures/market/sectors.json`。
-- **用户偏好**：`/settings` 配置账单贴近阈值/追涨止损阈值/短线窗口、市场时段偏好与概念过滤；保存偏好**不会自动重算**历史账单旗标——新偏好写入独立 `flags_hash`，旧行由 `stale_months` 标为过期，需在设置页点「立即重算」（API-097）重建；概念过滤在读路径生效（`off` 严格零变化，`hide/exclude` 只裁剪行/TopN 并显式披露 `filters`/`filtered_*`）；前端只渲染后端结论。
+- **用户偏好**：`/settings` 配置账单贴近阈值/追涨止损阈值/短线窗口、市场时段偏好与概念过滤；保存偏好**不会自动重算**历史账单旗标——新偏好写入独立 `flags_hash`，旧行由 `stale_months` 标为过期，需在设置页点「立即重算」（API-097）重建；API-111 提供「是否需要重建 + 未覆盖月份/原因」的状态查询；概念过滤在读路径生效（`off` 严格零变化，`hide/exclude` 只裁剪行/TopN 并显式披露 `filters`/`filtered_*`）；前端只渲染后端结论。
+- **数据治理**：设置页支持重置本人账单数据（API-110，不可撤销、需二次确认），清空 `ledger`/`review` 业务数据（含导入批次/模板/列规则、回合/资产/指标/旗标等）以便从头重导；保留账号、用户偏好与审计。
 - **质量与契约**：OpenAPI 快照 → `api-check` → 前端 SDK；标度整数零 float；RLS/越权/端点/租户/金标门禁；pytest/vitest。
 
 ## 技术栈
@@ -46,7 +50,7 @@
 | 后端 | Python ≥ 3.12 · uv workspace · FastAPI · SQLAlchemy 2.0 async · asyncpg · Alembic |
 | 数据库 | PostgreSQL 16（多 schema + RLS） |
 | 任务 | PG 队列 + 独立 worker（SKIP LOCKED / 租约 / 心跳 / 单飞） |
-| 前端 | Vite · React 18 · TypeScript（strict）· React Router · TanStack Query · Vitest/RTL |
+| 前端 | Vite · React 18 · TypeScript（strict）· React Router · TanStack Query · Tailwind 3.4（`tw-` 前缀 / `preflight:false`）· Radix 包装层 · Vitest/RTL |
 | 明确未引入 | ECharts、MSW、Playwright（当前仓库依赖中没有；不要假设已安装） |
 | 质量 | ruff · mypy strict · import-linter · pytest · vitest · tsc |
 
@@ -275,7 +279,7 @@ pnpm -r test                 # vitest
 ```
 
 - API client：`packages/api-client/src/http.ts`（手写传输层）+ `src/api/generated/schema.d.ts`（契约生成，勿手改）；改接口后 `make api-snapshot && make sdk`。
-- 页面：登录/注册、**Dashboard**、交易流水、回合/详情、净值、资产、指标/详情、**板块（`/sectors`）**、**归因（`/attribution`）**、导入/导入记录、设置；`/reports`、`/exports` 为未完成功能占位页（可见、不返回假数据）。
+- 页面：登录/注册、**Dashboard**、交易流水、回合/详情、**回合洞察**、净值、资产、指标/详情/目录、**板块（`/sectors`）**、**归因（`/attribution`）**、导入/导入记录、设置；`/reports`、`/exports` 为未完成功能占位页（可见、不返回假数据）。
 
 ## 测试说明
 
@@ -306,9 +310,10 @@ STOCK_DB_PORT=5433 make test-p2     # 显式指向 Docker 库（不改 .env 的 
 
 ## 已知未完成（二期暂停项）
 
-- Period2-09 月报（含归因同源接入 09b）、Period2-10 导出、Period2-13 报告/导出页、Period2-14 `verify-p2`、Period2-15 零口径 ESLint 门禁。
-- G8 金标审批仍有 22 个 COVERAGE 骨架 + `perf.fee_breakeven` 口径待收尾；`make gate-golden` 可能红。
-- 具体缺失/占位/验收 SKIP 见 [Dashboard 设计 §7](docs/architecture/2026-10-28-dashboard.md)。
+- Period2-09 月报（含归因同源接入 09b）、Period2-10 导出、Period2-11 剩余的基准/隐私 API-056/057、Period2-13 报告/导出页、Period2-14 `verify-p2` 与越权全量、Period2-15 前端零口径 ESLint 门禁——共 6 项，约 9 人日。其中 2-15 已有 `parseFloat/parseInt/Number/toFixed` 基础规则与全 src 扫描，尚缺禁算术/禁结论拼接/禁裸 fetch/禁裸术语与 AST 断言。
+- G8 金标结构门禁（`make gate-golden-structure`）已绿；审批门禁仍有 **23 项红灯**（22 个 COVERAGE 夹具缺失 + `perf.fee_breakeven.blocked` 状态不符），`make gate-golden` 会红。
+- 三期（12 项、约 23 人日）与交付阶段（7 项、约 8 人日）未开始。
+- 具体缺失/占位/验收 SKIP 见 [Dashboard 设计 §7](docs/architecture/2026-10-28-dashboard.md) 与 [DEV-PLAN 进度快照](docs/DEV-PLAN-v2.md#06-2026-11-19-进度快照)。
 
 ## 开发约定
 
@@ -324,7 +329,10 @@ STOCK_DB_PORT=5433 make test-p2     # 显式指向 Docker 库（不改 .env 的 
 - [五因子归因设计（Period2-08，已交付）](docs/architecture/2026-11-02-five-factor-attribution.md) · [交叉评审](docs/reviews/2026-11-02-DevDesign-Review-five-factor-attribution.md)
 - [板块数据接入设计（2026-10-31，API-087/088）](docs/architecture/2026-10-31-sector-data.md)
 - [用户偏好配置设计（Period2-19，已交付）](docs/architecture/2026-11-11-user-preferences.md)
+- [导入映射重构（Period2-20，已交付）](docs/architecture/2026-11-13-import-mapping-refactor.md) · [交叉评审](docs/reviews/2026-11-13-DevDesign-Review-import-mapping-refactor.md)
+- [前端 UI 全局化决议（2026-11-19，已实施）](docs/architecture/2026-11-19-frontend-ui-globalization.md)
+- [账单导入功能说明（2026-11-18，现行口径）](docs/help/2026-11-18-bill-import-guide.md)
 - [月度报告设计（Period2-09，暂停）](docs/architecture/2026-10-28-monthly-report.md)
 - [S10 验收记录](docs/reviews/2026-10-27-p207-S10-acceptance.md)
 - [Period2-01/02 实施日志](docs/reviews/Period2-01-02-Implementation-Log.md)
-- [开发计划](docs/DEV-PLAN-v2.md) · [PRD](docs/prd/PRD-v2.md)
+- [开发计划与进度快照](docs/DEV-PLAN-v2.md) · [PRD](docs/prd/PRD-v2.md)
