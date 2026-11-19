@@ -1,0 +1,128 @@
+/* 看板 · 更新账单旗标弹窗（颜色一律走 tokens.css；无裸 hex）。 */
+.tfr-dialog {
+  width: min(560px, 92vw);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--r-md);
+  padding: var(--s5);
+  background: var(--surface);
+  color: inherit;
+}
+
+.tfr-dialog::backdrop {
+  background: rgb(0 0 0 / 45%);
+}
+
+.tfr-dialog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--s3);
+  margin-bottom: var(--s4);
+}
+
+.tfr-dialog-head h2 {
+  margin: 0;
+  font-size: var(--fs-h3);
+}
+
+.tfr-dialog-head button {
+  border: none;
+  background: none;
+  color: var(--muted);
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.tfr-summary {
+  margin: 0 0 var(--s3);
+  font-size: var(--fs-sm);
+}
+
+.tfr-reasons {
+  margin: 0 0 var(--s3);
+  padding: var(--s3) var(--s3) var(--s3) var(--s5);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  font-size: var(--fs-sm);
+}
+
+.tfr-flags {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-sm);
+}
+
+.tfr-flags th,
+.tfr-flags td {
+  padding: var(--s2) var(--s1);
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+}
+
+.tfr-flags th:last-child,
+.tfr-flags td:last-child {
+  text-align: right;
+}
+
+.tfr-count {
+  font-variant-numeric: tabular-nums;
+}
+
+.tfr-progress {
+  margin-top: var(--s4);
+}
+
+.tfr-progress-bar {
+  height: 6px;
+  border-radius: var(--r-pill);
+  background: var(--surface-2);
+  overflow: hidden;
+}
+
+.tfr-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width var(--dur) var(--ease);
+}
+
+.tfr-done {
+  margin: var(--s3) 0 0;
+  color: var(--text);
+  font-size: var(--fs-sm);
+}
+
+.tfr-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--s4);
+  margin-top: var(--s4);
+}
+
+/* 强制全量：仅下划线、无边框的文本按钮。 */
+.tfr-link-btn {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--accent);
+  font: inherit;
+  font-size: var(--fs-sm);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.tfr-link-btn:disabled {
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+.tfr-link-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.tfr-hint {
+  margin: var(--s3) 0 0;
+  font-size: var(--fs-xs);
+}

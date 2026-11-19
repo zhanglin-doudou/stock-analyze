@@ -1056,6 +1056,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/settings/trade-flags/status": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Trade Flag Rebuild Status
+         * @description API-111：账单旗标是否需要重建 + 库内旗标统计（纯读）。
+         */
+        get: operations["getTradeFlagRebuildStatus"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/summary-rules": {
         parameters: {
             query?: never;
@@ -5250,6 +5270,18 @@ export interface components {
             side?: ("buy" | "sell" | "both") | null;
         };
         /**
+         * TradeFlagCountOut
+         * @description API-111：单个旗标代码在库内的行数。
+         */
+        TradeFlagCountOut: {
+            /** Code */
+            code: string;
+            /** Count */
+            count: number;
+            /** Label Zh */
+            label_zh: string;
+        };
+        /**
          * TradeFlagGlossaryOut
          * @description 账单级旗标说明（中英文单点维护）。
          */
@@ -5327,8 +5359,17 @@ export interface components {
          *
          *     `scope=months` 必须给 `months`（`YYYY-MM`，去重后 ≤120）；`scope=all` 覆盖首笔交易月
          *     到最近交易月（服务端最多取最近 120 个月）。
+         *
+         *     `mode=full`（缺省，兼容旧调用）按 scope 全时段覆盖；`mode=auto` 仅支持 `scope=all`：
+         *     口径版本缺失/存在旧版本行时全时段重建，否则只更新待算且未来行情已覆盖的月份。
          */
         TradeFlagRebuildIn: {
+            /**
+             * Mode
+             * @default full
+             * @enum {string}
+             */
+            mode: "auto" | "full";
             /** Months */
             months?: string[];
             /**
@@ -5337,6 +5378,56 @@ export interface components {
              * @enum {string}
              */
             scope: "all" | "months";
+        };
+        /**
+         * TradeFlagRebuildReasonOut
+         * @description API-111：需要重建的原因（`code` 稳定，`message` 可直接展示）。
+         */
+        TradeFlagRebuildReasonOut: {
+            /** Code */
+            code: string;
+            /** Message */
+            message: string;
+        };
+        /**
+         * TradeFlagRebuildStatusOut
+         * @description API-111：账单旗标重建状态（是否需要重建 + 库内旗标统计）。
+         */
+        TradeFlagRebuildStatusOut: {
+            /** Bill Count */
+            bill_count: number;
+            /** Current Flag Rows */
+            current_flag_rows: number;
+            /** Definition Version */
+            definition_version: string;
+            /** Flag Kinds */
+            flag_kinds: number;
+            /** Flag Total */
+            flag_total: number;
+            /** Flags */
+            flags: components["schemas"]["TradeFlagCountOut"][];
+            /** Flags Hash */
+            flags_hash: string;
+            /** Has Bill Data */
+            has_bill_data: boolean;
+            /** Legacy Flag Rows */
+            legacy_flag_rows: number;
+            /** Market As Of */
+            market_as_of: string | null;
+            /** Needs Rebuild */
+            needs_rebuild: boolean;
+            /** Pending Count */
+            pending_count: number;
+            /** Pending Covered Count */
+            pending_covered_count: number;
+            /** Pending Months */
+            pending_months: string[];
+            /** Reasons */
+            reasons: components["schemas"]["TradeFlagRebuildReasonOut"][];
+            /** Uncovered Count */
+            uncovered_count: number;
+            /** Uncovered Months */
+            uncovered_months: string[];
         };
         /** TradeHistoryItem */
         TradeHistoryItem: {
@@ -9227,6 +9318,57 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getTradeFlagRebuildStatus: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TradeFlagRebuildStatusOut"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                     "application/problem+json": components["schemas"]["Error"];
                 };
             };

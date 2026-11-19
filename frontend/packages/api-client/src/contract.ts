@@ -134,6 +134,10 @@ export type TradeFlagRebuildIn = ApiSchemas["TradeFlagRebuildIn"];
 export type TradeFlagRebuildAccepted = ApiSchemas["TradeFlagRebuildAccepted"];
 // 2026-11-19：重置本人账单数据（API-110）
 export type BillDataResetOut = ApiSchemas["BillDataResetOut"];
+// 2026-11-19：账单旗标重建状态（API-111）
+export type TradeFlagRebuildStatusOut = ApiSchemas["TradeFlagRebuildStatusOut"];
+export type TradeFlagRebuildReasonOut = ApiSchemas["TradeFlagRebuildReasonOut"];
+export type TradeFlagCountOut = ApiSchemas["TradeFlagCountOut"];
 
 // Period2-03：净值与收益（API-032）
 export type NavOut = ApiSchemas["NavOut"];

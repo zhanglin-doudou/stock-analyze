@@ -396,6 +396,20 @@ OPERATION_META: dict[str, dict[str, Any]] = {
             "ADMIN_CANNOT_READ_TRADES",
         ],
     },
+    "getTradeFlagRebuildStatus": {
+        "api_id": "API-111",
+        "scope": "read",
+        "idempotent": False,
+        "async": False,
+        "error_codes": [
+            "VALIDATION_ERROR",
+            "TOKEN_EXPIRED",
+            "TOKEN_REVOKED",
+            "MULTIPLE_CREDENTIALS",
+            "INSUFFICIENT_SCOPE",
+            "ADMIN_CANNOT_READ_TRADES",
+        ],
+    },
     "rebuildTradeFlags": {
         "api_id": "API-097",
         "scope": "write",

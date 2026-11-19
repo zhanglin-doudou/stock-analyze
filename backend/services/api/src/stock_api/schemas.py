@@ -941,10 +941,14 @@ class TradeFlagRebuildIn(StrictModel):
 
     `scope=months` 必须给 `months`（`YYYY-MM`，去重后 ≤120）；`scope=all` 覆盖首笔交易月
     到最近交易月（服务端最多取最近 120 个月）。
+
+    `mode=full`（缺省，兼容旧调用）按 scope 全时段覆盖；`mode=auto` 仅支持 `scope=all`：
+    口径版本缺失/存在旧版本行时全时段重建，否则只更新待算且未来行情已覆盖的月份。
     """
 
     scope: Literal["all", "months"] = "all"
     months: list[str] = Field(default_factory=list)
+    mode: Literal["auto", "full"] = "full"
 
 
 class TradeFlagRebuildAccepted(StrictModel):
@@ -954,6 +958,43 @@ class TradeFlagRebuildAccepted(StrictModel):
     type: Literal["rebuild_trade_flags"] = "rebuild_trade_flags"
     status: Literal["pending"] = "pending"
     links: JobLinks
+
+
+class TradeFlagRebuildReasonOut(StrictModel):
+    """API-111：需要重建的原因（`code` 稳定，`message` 可直接展示）。"""
+
+    code: str
+    message: str
+
+
+class TradeFlagCountOut(StrictModel):
+    """API-111：单个旗标代码在库内的行数。"""
+
+    code: str
+    label_zh: str
+    count: int
+
+
+class TradeFlagRebuildStatusOut(StrictModel):
+    """API-111：账单旗标重建状态（是否需要重建 + 库内旗标统计）。"""
+
+    needs_rebuild: bool
+    reasons: list[TradeFlagRebuildReasonOut]
+    definition_version: str
+    flags_hash: str
+    has_bill_data: bool
+    bill_count: int
+    current_flag_rows: int
+    legacy_flag_rows: int
+    pending_count: int
+    pending_covered_count: int
+    pending_months: list[str]
+    uncovered_count: int
+    uncovered_months: list[str]
+    market_as_of: date | None
+    flag_kinds: int
+    flag_total: int
+    flags: list[TradeFlagCountOut]
 
 
 class BillDataResetOut(StrictModel):

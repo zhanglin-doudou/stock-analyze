@@ -3,6 +3,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { DashboardTradeFlagsOut } from "@sa/api-client";
 import { api } from "../../client";
 import { StaleFlagsNotice } from "../../ui/StaleFlagsNotice";
+import { TradeFlagRebuildDialog } from "./TradeFlagRebuildDialog";
 import { useChartPalette } from "./tradeFlagChartColors";
 import type {
   MonthlyReturnBarDatum,
@@ -80,6 +81,7 @@ export function buildCharts(
  */
 export function TradeFlagCharts(): ReactElement {
   const [months, setMonths] = useState<RangeMonths>(12);
+  const [rebuildOpen, setRebuildOpen] = useState(false);
   const palette = useChartPalette();
   const query = useQuery({
     queryKey: ["dashboard", "trade-flags", months],
@@ -97,6 +99,14 @@ export function TradeFlagCharts(): ReactElement {
       <div className="dash-panel-head">
         <h2>月度分析</h2>
         <span className="dash-panel-meta">按自然月聚合 · 后端计数</span>
+        <button
+          type="button"
+          className="tfc-text-btn"
+          data-testid="tfc-open-rebuild"
+          onClick={() => setRebuildOpen(true)}
+        >
+          更新账单旗标
+        </button>
         <div className="dash-grow" />
         <div className="tfc-range" role="group" aria-label="时间范围">
           {RANGES.map((range) => (
@@ -163,6 +173,8 @@ export function TradeFlagCharts(): ReactElement {
           </Suspense>
         </>
       )}
+
+      <TradeFlagRebuildDialog open={rebuildOpen} onClose={() => setRebuildOpen(false)} />
     </section>
   );
 }

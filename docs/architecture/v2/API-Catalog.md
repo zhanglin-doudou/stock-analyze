@@ -109,6 +109,7 @@
 | API-096 | PATCH | `/settings` | 通用偏好局部更新（外观/账单旗标/行情时段/概念过滤，If-Match CAS） | D1 | write | 支持 | 同步 | P0 | 200 |
 | API-097 | POST | `/settings/trade-flags/rebuild` | 按生效阈值重建账单旗标（异步任务） | D1 | write | 必需 | 异步 | P1 | 202 |
 | API-110 | POST | `/settings/reset-bill-data` | 重置本人账单数据（清空 ledger/review，不可撤销） | D1 | write | 必需 | 同步 | P1 | 200 |
+| API-111 | GET | `/settings/trade-flags/status` | 账单旗标重建状态（需重建原因 + 各旗标计数） | D1 | read | — | 同步 | P1 | 200 |
 | API-056 | PUT | `/settings/benchmark` | 切换基准（历史分段） | R5 | write | 幂等 | 同步 | P1 | 200 |
 | API-057 | PUT | `/settings/privacy` | 隐私与 LLM 开关 | D6 | write | 幂等 | 同步 | P1 | 200 |
 | API-058 | PUT | `/settings/behavior-rules` | 行为规则阈值 | D6 | write | 幂等 | 同步 | P1 | 200 |
@@ -588,9 +589,11 @@
 #### API-097 POST /settings/trade-flags/rebuild（2026-11-13 用户偏好 P1）
 
 - 用途：按**当前生效阈值**重建账单旗标；operationId `rebuildTradeFlags`；worker `rebuild_trade_flags` 逐月「先删后插」，每行落当前 `flags_hash`。
-- 请求：header `Idempotency-Key`（必填 16~128）、body `{scope:"all"|"months", months:["YYYY-MM",...]}`。
+- 请求：header `Idempotency-Key`（必填 16~128）、body `{scope:"all"|"months", months:["YYYY-MM",...], mode:"auto"|"full"}`。
   - `scope=months`：必须给 `months`；`YYYY-MM` 格式/去重后 ≤120，否则 422。
   - `scope=all`：覆盖首笔交易月到最近交易月，服务端只取最近 120 个月（超出在 job result 标 `truncated=true`）；此时传 `months` 422。
+  - `mode=full`（缺省，兼容旧调用）：按 scope 全时段/指定月覆盖重建。
+  - `mode=auto`（仅 `scope=all`，否则 422）：当前口径无行或存在旧 `definition_version` 行 → 全时段重建；否则只重建「`status=pending` 且未来行情已覆盖」的月份；无可更新月份 → job 成功空跑（`result.no_op=true`、`months=[]`）。
 - 响应 202：`{job_id,type:"rebuild_trade_flags",status:"pending",links{self,events}}` + `Location: /api/v1/jobs/{job_id}` + `Retry-After: 1`；同参数复用已有任务 → `X-Job-Reused: true`；同 scope 异参 → 409 `JOB_ALREADY_RUNNING`；配额超限 429。
 - 幂等：`Idempotency-Key` 重放返回缓存 body（`Idempotency-Replayed: true`）；请求指纹含规范化后的 `scope+months`。
 - 口径：`DEFINITION_VERSION` 不升；重建范围只覆盖所选月份（区间外月份保留旧指纹，仍会出现在 API-095 `stale_months[]`）；不改写偏好本身（阈值仍走 API-096）。
@@ -606,6 +609,21 @@
 - 幂等：`Idempotency-Key` 重放返回首次删除计数（`Idempotency-Replayed: true`）。
 - 审计：`audit_log(action="settings.reset_bill_data", meta={deleted,total})`。
 - 错误码：VALIDATION_ERROR(422)、IDEMPOTENCY_KEY_REUSED(422)、IDEMPOTENCY_IN_PROGRESS(409)、INSUFFICIENT_SCOPE(403)、ADMIN_CANNOT_READ_TRADES(403)。
+
+#### API-111 GET /settings/trade-flags/status（2026-11-19 看板更新账单旗标）
+
+- 用途：告诉前端「是否需要重建账单旗标」及原因，并给出库内旗标统计（纯读，不改库）；operationId `getTradeFlagRebuildStatus`；需 read scope；admin 403 `ADMIN_CANNOT_READ_TRADES`。
+- 需要重建（`needs_rebuild=true`）的触发原因（`reasons[].code` 稳定、`message` 可直接展示）：
+  - `NO_CURRENT_FLAGS`：用户有账单（`bill_count>0`）但当前 `definition_version` 无任何旗标行；
+  - `INCOMPLETE_COVERAGE`：存在 analyzed 账单（`side∈{buy,sell}` 且非公司行动）当前口径没有任何旗标行，即旗标未完全覆盖账单；`uncovered_count`/`uncovered_months` 给出未覆盖范围；
+  - `PENDING_MARKET_COVERED`：存在 `status=pending` 旗标，且基准交易日历已推进到窗口末日（`market_as_of` 覆盖），可重算。
+- 响应 200：`{needs_rebuild, reasons[], definition_version, flags_hash, has_bill_data, bill_count, current_flag_rows, legacy_flag_rows, pending_count, pending_covered_count, pending_months[], uncovered_count, uncovered_months[], market_as_of|null, flag_kinds, flag_total, flags[]{code,label_zh,count}}`。
+  - `flags` 只统计当前 `definition_version` 的行，按词表顺序；`flag_kinds=len(flags)`、`flag_total=Σcount`。
+- 口径：
+  - `pending` 覆盖判定与 `_future_status` 一致（`calendar[bisect_right(calendar, trade_date)+window-1] <= market_as_of`）；
+  - 未覆盖判定与写入端 `build_trade_flags_for_user` 同语义：SQL 反连接筛出「无当前口径旗标」的账单，再用同一 `_is_analyzed_trade` 过滤剔除公司行动，保证查询与写入口径一致。
+- 自动更新（API-097 `mode=auto`）：`NO_CURRENT_FLAGS`/版本变更 → 全时段；否则合并 `uncovered_months` 与 `pending_months` 重建，二者皆空则空跑成功。
+- 错误码：VALIDATION_ERROR(422)、INSUFFICIENT_SCOPE(403)、ADMIN_CANNOT_READ_TRADES(403)。
 
 
 ## §3 错误码总表
@@ -818,6 +836,7 @@ data: {"job_id":"job_01J9Z6","status":"succeeded","result_ref":"/api/v1/reports/
 | API-096 | settings_patch（已实现） | 200 + ETag；If-Match 必填/非法 422；CAS 冲突 409；未知键/只读键/空 body 422；无变更不 bump；幂等重放；审计仅在有变更时写入；跨用户互不影响 | fx_settings | P0 |
 | API-097 | settings_trade_flags_rebuild（已实现） | 202 + Location；Idempotency-Key 必填；months 格式/上限/scope 冲突 422；同参复用 X-Job-Reused；异参 409；重放幂等；重建后行指纹为当前 flags_hash；跨用户互不影响 | fx_settings | P1 |
 | API-110 | settings_reset_bill_data（已实现） | 200 含 deleted/total；Idempotency-Key 必填/非法 422；重放幂等；仅清本人 ledger/review 数据且跨用户互不影响；admin 403 | fx_settings | P1 |
+| API-111 | settings_trade_flags_status（已实现） | 200 含 needs_rebuild/reasons/flags 计数；有账单无当前口径 → NO_CURRENT_FLAGS；旗标未完全覆盖账单 → INCOMPLETE_COVERAGE；pending 行情未覆盖不触发、覆盖后触发 PENDING_MARKET_COVERED；只读不改行；跨用户隔离；admin 403 | fx_settings | P1 |
 | API-056 | settings_benchmark_switch | 200；GET /nav 的 benchmark_id 随之变化 | fx_base | P1 |
 | API-057 | settings_privacy_llm_off | 200；LLM 关闭后 chat fallback=true | fx_llm_off | P1 |
 | API-058 | settings_behavior_rules_effect | 200；触发后 alerts 增加对应 rule_code | fx_alert | P1 |

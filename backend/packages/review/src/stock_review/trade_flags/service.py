@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import hashlib
 import uuid
+from bisect import bisect_right
 from collections import Counter, defaultdict
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import date, timedelta
 
-from sqlalchemy import delete, distinct, func, select
+from sqlalchemy import delete, distinct, exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from stock_contracts.clock import Clock
 from stock_contracts.errors import ApiError, ErrorCode
@@ -28,6 +29,7 @@ from stock_core.trade_flags import (
     STACKED_STATE_FLAG_CODES,
     STATUS_HIT,
     STATUS_NO_COST_BASIS,
+    STATUS_PENDING,
     TRADE_FLAG_BY_CODE,
     TRADE_FLAG_CODES,
     TRADE_FLAG_DEFINITIONS,
@@ -390,6 +392,268 @@ async def has_stale_flags(
         .limit(1)
     )
     return found is not None
+
+
+@dataclass(frozen=True, slots=True)
+class FlagCount:
+    """单个账单旗标代码的库内行数。"""
+
+    code: str
+    label_zh: str
+    count: int
+
+
+@dataclass(frozen=True, slots=True)
+class FlagRebuildReason:
+    """需要重建账单旗标的原因（`code` 稳定，`message` 直接展示）。"""
+
+    code: str
+    message: str
+
+
+@dataclass(frozen=True, slots=True)
+class PendingFlagScope:
+    """待算旗标的可更新范围（未来行情已覆盖的月份）。"""
+
+    pending_count: int
+    covered_count: int
+    months: tuple[str, ...]
+    market_as_of: date | None
+
+
+@dataclass(frozen=True, slots=True)
+class IncompleteFlagScope:
+    """未被当前口径旗标覆盖的 analyzed 账单范围。"""
+
+    uncovered_count: int
+    months: tuple[str, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class TradeFlagRebuildStatus:
+    """账单旗标重建状态（API-111）：是否需要重建 + 库内旗标统计。"""
+
+    needs_rebuild: bool
+    reasons: tuple[FlagRebuildReason, ...]
+    definition_version: str
+    flags_hash: str
+    has_bill_data: bool
+    bill_count: int
+    current_flag_rows: int
+    legacy_flag_rows: int
+    pending_count: int
+    pending_covered_count: int
+    pending_months: tuple[str, ...]
+    uncovered_count: int
+    uncovered_months: tuple[str, ...]
+    market_as_of: date | None
+    flag_kinds: int
+    flag_total: int
+    flags: tuple[FlagCount, ...]
+
+
+def _month_label(day: date) -> str:
+    return f"{day.year:04d}-{day.month:02d}"
+
+
+async def pending_flag_scope(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    market_data: MarketDataSource,
+    config: TradeFlagConfig,
+) -> PendingFlagScope:
+    """找出待算旗标中「未来行情已覆盖」的月份（判定口径与 `_future_status` 一致）。
+
+    待算 = 当前口径下后 `window` 个行情日未齐备；若基准交易日历已推进到窗口末日，
+    说明行情覆盖已就绪，重算该月后不再是 pending（或转为行情不足/命中/未命中）。
+    """
+    rows = await session.execute(
+        select(TradeFlag.trade_date, func.count(TradeFlag.id))
+        .where(
+            TradeFlag.user_id == user_id,
+            TradeFlag.definition_version == DEFINITION_VERSION,
+            TradeFlag.status == STATUS_PENDING,
+        )
+        .group_by(TradeFlag.trade_date)
+    )
+    by_date = [(day, int(count)) for day, count in rows.all()]
+    as_of = market_data.as_of
+    if not by_date or as_of is None:
+        return PendingFlagScope(
+            pending_count=sum(count for _, count in by_date),
+            covered_count=0,
+            months=(),
+            market_as_of=as_of,
+        )
+
+    bench_symbol = benchmark_fetch_symbol(DEFAULT_BENCHMARK, market_data)
+    bars = await _fetch_bars(
+        market_data,
+        [bench_symbol],
+        start=min(day for day, _ in by_date) - _BUILD_WINDOW_PADDING,
+        end=as_of,
+    )
+    calendar = tuple(sorted({bar.trade_date for bar in bars}))
+    covered_count = 0
+    months: set[str] = set()
+    for day, count in by_date:
+        required_index = bisect_right(calendar, day) + config.window_trading_days - 1
+        if required_index < len(calendar) and calendar[required_index] <= as_of:
+            covered_count += count
+            months.add(_month_label(day))
+    return PendingFlagScope(
+        pending_count=sum(count for _, count in by_date),
+        covered_count=covered_count,
+        months=tuple(sorted(months)),
+        market_as_of=as_of,
+    )
+
+
+async def uncovered_flag_scope(session: AsyncSession, user_id: uuid.UUID) -> IncompleteFlagScope:
+    """找出有 analyzed 账单但当前口径没有任何旗标行的交易（按月聚合）。
+
+    判定口径与写入端 `build_trade_flags_for_user` 一致：仅 `_is_analyzed_trade`
+    的流水应产生旗标；公司行动等被排除的流水不计入未覆盖。先在 SQL 层反连接筛出
+    「无当前口径旗标」的账单，再在应用层用同一过滤函数剔除公司行动，保证语义一致。
+    """
+    rows = await session.scalars(
+        select(Trade).where(
+            Trade.user_id == user_id,
+            Trade.deleted_at.is_(None),
+            ~exists(
+                select(1).where(
+                    TradeFlag.user_id == Trade.user_id,
+                    TradeFlag.trade_dedupe_key == Trade.dedupe_key,
+                    TradeFlag.definition_version == DEFINITION_VERSION,
+                )
+            ),
+        )
+    )
+    uncovered = 0
+    months: set[str] = set()
+    for trade in rows:
+        if not _is_analyzed_trade(trade):
+            continue
+        uncovered += 1
+        months.add(_month_label(trade.trade_date))
+    return IncompleteFlagScope(
+        uncovered_count=uncovered,
+        months=tuple(sorted(months)),
+    )
+
+
+async def trade_flag_rebuild_status(
+    session: AsyncSession,
+    user_id: uuid.UUID,
+    *,
+    market_data: MarketDataSource,
+    flags_hash: str,
+) -> TradeFlagRebuildStatus:
+    """读取用户账单旗标重建状态：触发原因 + 各旗标代码行数（只读）。"""
+    bill_count = int(
+        await session.scalar(
+            select(func.count())
+            .select_from(Trade)
+            .where(
+                Trade.user_id == user_id,
+                Trade.deleted_at.is_(None),
+            )
+        )
+        or 0
+    )
+    rows = await session.execute(
+        select(TradeFlag.flag_code, func.count(TradeFlag.id))
+        .where(
+            TradeFlag.user_id == user_id,
+            TradeFlag.definition_version == DEFINITION_VERSION,
+        )
+        .group_by(TradeFlag.flag_code)
+    )
+    counts = {str(code): int(count) for code, count in rows.all()}
+    current_flag_rows = sum(counts.values())
+    legacy_flag_rows = int(
+        await session.scalar(
+            select(func.count(TradeFlag.id)).where(
+                TradeFlag.user_id == user_id,
+                TradeFlag.definition_version != DEFINITION_VERSION,
+            )
+        )
+        or 0
+    )
+
+    config, _ = await load_flag_config(session, user_id)
+    pending = await pending_flag_scope(
+        session,
+        user_id,
+        market_data=market_data,
+        config=config,
+    )
+    # 仅当已有当前口径旗标时才查未覆盖：current==0 已由 NO_CURRENT_FLAGS 覆盖，
+    # 且避免在全无旗标时拉全量账单。
+    uncovered = (
+        await uncovered_flag_scope(session, user_id)
+        if current_flag_rows > 0
+        else IncompleteFlagScope(0, ())
+    )
+
+    flags: list[FlagCount] = []
+    for definition in TRADE_FLAG_DEFINITIONS:
+        count = counts.get(definition.code, 0)
+        if count:
+            flags.append(FlagCount(code=definition.code, label_zh=definition.label_zh, count=count))
+
+    reasons: list[FlagRebuildReason] = []
+    if bill_count > 0 and current_flag_rows == 0:
+        reasons.append(
+            FlagRebuildReason(
+                code="NO_CURRENT_FLAGS",
+                message=(
+                    f"已导入 {bill_count} 条账单，但还没有口径 {DEFINITION_VERSION} 的账单旗标数据，"
+                    "需要全时段重建。"
+                ),
+            )
+        )
+    if uncovered.uncovered_count > 0:
+        reasons.append(
+            FlagRebuildReason(
+                code="INCOMPLETE_COVERAGE",
+                message=(
+                    f"有 {uncovered.uncovered_count} 条账单尚未生成账单旗标"
+                    f"（{len(uncovered.months)} 个月：{'、'.join(uncovered.months)}），需要更新以补全覆盖。"
+                ),
+            )
+        )
+    if pending.covered_count > 0:
+        reasons.append(
+            FlagRebuildReason(
+                code="PENDING_MARKET_COVERED",
+                message=(
+                    f"有 {pending.covered_count} 条待算旗标的未来行情已覆盖"
+                    f"（{len(pending.months)} 个月：{'、'.join(pending.months)}），可以更新。"
+                ),
+            )
+        )
+
+    return TradeFlagRebuildStatus(
+        needs_rebuild=bool(reasons),
+        reasons=tuple(reasons),
+        definition_version=DEFINITION_VERSION,
+        flags_hash=flags_hash,
+        has_bill_data=bill_count > 0,
+        bill_count=bill_count,
+        current_flag_rows=current_flag_rows,
+        legacy_flag_rows=legacy_flag_rows,
+        pending_count=pending.pending_count,
+        pending_covered_count=pending.covered_count,
+        pending_months=pending.months,
+        uncovered_count=uncovered.uncovered_count,
+        uncovered_months=uncovered.months,
+        market_as_of=pending.market_as_of,
+        flag_kinds=len(flags),
+        flag_total=sum(item.count for item in flags),
+        flags=tuple(flags),
+    )
 
 
 @dataclass(frozen=True, slots=True)
