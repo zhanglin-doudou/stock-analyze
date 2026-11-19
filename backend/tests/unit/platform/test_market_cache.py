@@ -455,6 +455,34 @@ async def test_sync_after_close_fetches_then_reuses_cache(
     ]
 
 
+async def test_sync_skip_up_to_date_symbol_without_pull_range(
+    app_db: Database, read_only_settings: Settings, owner_engine: AsyncEngine
+) -> None:
+    """增量同步：本地最新 bar 已到可拉取日 → 直接跳过，不发任何请求。
+
+    即使 `market.pull_range` 无覆盖（历史缺口未知），也只按「最新行情是否已到当日」
+    判定，符合 `make sync-market` 的增量语义。
+    """
+    clock = FrozenClock("2026-10-23T17:00:00+08:00")
+    inner = StubMarketDataSource({"000651": _bars("000651", (TODAY, 102))})
+    cache = _cache(app_db, read_only_settings, clock, inner)
+    async with owner_engine.begin() as conn:
+        await conn.execute(
+            text(
+                "INSERT INTO market.daily_bar "
+                "(symbol, adjust, trade_date, close_units, return_units, source, pulled_at) "
+                "VALUES ('000651', '', :trade_date, 102000000, 0, 'test', now())"
+            ),
+            {"trade_date": TODAY},
+        )
+
+    bars, failed = await cache.sync_daily_bars(
+        ["000651"], date(2026, 10, 20), TODAY, skip_up_to_date=True
+    )
+    assert (bars, failed) == (1, ())
+    assert inner.calls == []
+
+
 async def test_sync_before_close_excludes_today(
     app_db: Database, read_only_settings: Settings
 ) -> None:

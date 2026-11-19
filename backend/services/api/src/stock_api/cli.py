@@ -41,7 +41,13 @@ from stock_ledger.repositories.rules import seed_system_rules
 from stock_platform.config import REPO_ROOT, get_settings
 from stock_platform.db import Database
 from stock_platform.jobs import JobQueue
-from stock_platform.market_live import CURRENT_DAY_PULL_AFTER, validate_symbols
+from stock_platform.market_live import (
+    ADJUST,
+    CURRENT_DAY_PULL_AFTER,
+    sync_pull_end,
+    validate_symbols,
+)
+from stock_platform.market_models import DailyBar
 from stock_platform.repositories.users import UserRepository
 from stock_platform.sector_fixture import generate_sector_fixture
 from stock_platform.sector_source import create_live_sector_source
@@ -943,8 +949,9 @@ async def _sync_market(
     """收盘后把持仓/基准日线的缺口同步进本地 ``market.daily_bar``。
 
     读路径（API/worker 的 metrics/assets）默认只读本地缓存，盘中不拉第三方；
-    本命令是**批量**同步入口，盘中不会拉当天。资产表构建在缺行情时会按缺失标的与缺失
-    区间补拉一次（资产表设计 §6.5），同样走 ``sync_daily_bars``、同样受盘中截断约束。
+    本命令是**增量**同步入口：本地最新行情已到本次可拉取日（16:30 前为昨天）
+    的标的直接跳过、不发请求；显式 ``--start`` 视为历史回补，不做该短路。收盘后
+    拉当天仍受发布窗口约束。同步结束输出「最新行情未到可拉取日」的证券代码与名称。
     """
     settings = get_settings()
     clock = SystemClock()
@@ -958,11 +965,19 @@ async def _sync_market(
         async with db.session(begin=True) as session:
             rows = (
                 await session.execute(
-                    select(Trade.security_code).where(Trade.deleted_at.is_(None)).distinct()
+                    select(Trade.security_code, Trade.security_name)
+                    .where(Trade.deleted_at.is_(None))
+                    .distinct(Trade.security_code)
+                    .order_by(Trade.security_code, Trade.trade_date.desc())
                 )
             ).all()
             min_trade_date = await session.scalar(select(func.min(Trade.trade_date)))
-        codes = sorted({str(row[0]) for row in rows if row[0] and needs_quote(str(row[0]))})
+        names = {
+            str(code): str(name).strip()
+            for code, name in rows
+            if code and name and str(name).strip()
+        }
+        codes = sorted({str(code) for code, _name in rows if code and needs_quote(str(code))})
         wanted = symbols or tuple(validate_symbols((*codes, *BENCHMARK_PROXY_SYMBOLS)))
         sync_start = start or min_trade_date or (clock.today() - timedelta(days=365))
         if dry_run:
@@ -970,9 +985,13 @@ async def _sync_market(
             emit(f"  区间：{sync_start} ~ {clock.today()}（盘中自动截到昨天）")
             emit(f"  标的：{len(wanted)} 个")
             return 0
-        bars, failed = await market.sync_daily_bars(wanted, sync_start, clock.today())
+        # 显式 --start 视为历史回补：不做「最新已到当日即跳过」的增量短路。
+        bars, failed = await market.sync_daily_bars(
+            wanted, sync_start, clock.today(), skip_up_to_date=start is None
+        )
         emit(f"✅ 行情同步完成：{bars} 根 bar，{len(wanted)} 个标的")
         now_sh = clock.now().astimezone(SHANGHAI)
+        pull_end = sync_pull_end(clock)
         if (now_sh.hour, now_sh.minute) < CURRENT_DAY_PULL_AFTER:
             pull_after = f"{CURRENT_DAY_PULL_AFTER[0]:02d}:{CURRENT_DAY_PULL_AFTER[1]:02d}"
             emit(
@@ -981,6 +1000,28 @@ async def _sync_market(
             )
         if failed:
             emit(f"⚠️  失败 {len(failed)} 个：{', '.join(failed)}")
+        async with db.session(begin=True) as session:
+            latest_rows = (
+                await session.execute(
+                    select(DailyBar.symbol, func.max(DailyBar.trade_date))
+                    .where(DailyBar.symbol.in_(wanted), DailyBar.adjust == ADJUST)
+                    .group_by(DailyBar.symbol)
+                )
+            ).all()
+        latest = {str(symbol): last for symbol, last in latest_rows}
+        stale = [
+            (symbol, latest.get(symbol))
+            for symbol in wanted
+            if latest.get(symbol) is None or latest[symbol] < pull_end
+        ]
+        if stale:
+            emit(f"⚠️  最新行情未到 {pull_end} 的证券 {len(stale)} 个：")
+            for symbol, last in stale:
+                name = names.get(symbol) or "—"
+                mark = "（同步失败）" if symbol in failed else ""
+                emit(f"  {symbol} {name}  最新 {last or '无行情'}{mark}")
+        else:
+            emit(f"✅ 全部 {len(wanted)} 个标的最新行情已到 {pull_end}")
         return 0
     finally:
         await db.dispose()
@@ -1256,7 +1297,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="清空本机库全部数据表（保留表结构与 schema_version；本机 db-reset 路径）",
     )
     sync = subparsers.add_parser(
-        "sync-market", help="收盘后同步本地行情缓存（盘中不拉当天；读路径不联网）"
+        "sync-market", help="收盘后增量同步本地行情缓存（最新已到当日则跳过；读路径不联网）"
     )
     sync.add_argument("--start", type=date.fromisoformat, default=None, help="起始日 YYYY-MM-DD")
     sync.add_argument("--symbols", default=None, help="逗号分隔代码（默认全库持仓 + 基准代理）")

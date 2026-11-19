@@ -131,7 +131,12 @@ class SyncableMarketSource(Protocol):
     """
 
     async def sync_daily_bars(
-        self, symbols: Sequence[str], start: date, end: date
+        self,
+        symbols: Sequence[str],
+        start: date,
+        end: date,
+        *,
+        skip_up_to_date: bool = False,
     ) -> tuple[int, tuple[str, ...]]: ...
 
 

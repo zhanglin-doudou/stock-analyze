@@ -33,7 +33,7 @@ from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal, DecimalException
 from typing import Any
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from stock_contracts.clock import SHANGHAI, Clock
@@ -75,6 +75,16 @@ FAILURE_INVALID_DATA: str = "invalid_data"
 # 避免提示文案与实际阈值漂移。
 CURRENT_DAY_PULL_AFTER: tuple[int, int] = (16, 30)
 FINAL_READY_AFTER: tuple[int, int] = (18, 0)
+
+
+def sync_pull_end(clock: Clock) -> date:
+    """``sync-market`` 的可拉取上界（东八区）：16:30 前截至昨天，否则到当天。"""
+    today = clock.today()
+    now_sh = clock.now().astimezone(SHANGHAI)
+    if (now_sh.hour, now_sh.minute) < CURRENT_DAY_PULL_AFTER:
+        return today - timedelta(days=1)
+    return today
+
 
 _MAX_UNITS = 2**63 - 1
 _SYMBOL_RE = re.compile(r"^\d{6}$")
@@ -775,29 +785,44 @@ class CachedMarketDataSource:
         return tuple(sorted(collected, key=lambda bar: (bar.trade_date, bar.symbol)))
 
     async def sync_daily_bars(
-        self, symbols: Sequence[str], start: date, end: date
+        self,
+        symbols: Sequence[str],
+        start: date,
+        end: date,
+        *,
+        skip_up_to_date: bool = False,
     ) -> tuple[int, tuple[str, ...]]:
         """收盘后显式把本地缺口补到 ``end``；返回 (可读 bar 数, 失败标的)。
 
         - 只补 `market.daily_bar` 缺失区间，已有数据不重复请求第三方；
+        - ``skip_up_to_date=True``（``make sync-market``）：某标的本地最新 bar 已到
+          本次可拉取上界时直接跳过，不再判定历史缺口、不发任何请求；
         - 盘中（东八区 16:30 前）不拉当天，``end`` 最多截到昨天；
         - 失败标的记录后继续，避免一颗坏代码阻断整批同步。
         """
         wanted = validate_symbols(symbols)
         if start > end:
             raise ApiError(ErrorCode.VALIDATION_ERROR, detail=f"start({start}) 不能晚于 end({end})")
+        effective_end = min(end, sync_pull_end(self._clock))
         today = self._clock.today()
-        now = self._clock.now().astimezone(SHANGHAI)
-        effective_end = min(end, today)
-        if (now.hour, now.minute) < CURRENT_DAY_PULL_AFTER and effective_end >= today:
-            effective_end = today - timedelta(days=1)
         # 18:00 后上游日线已基本定型：空结果可覆盖当天，避免同一晚重复请求；
         # 16:30~18:00 之间仍留当天缺口，给晚发布留重试机会。
+        now = self._clock.now().astimezone(SHANGHAI)
         final_ready = (now.hour, now.minute) >= FINAL_READY_AFTER
         if effective_end < start:
             return 0, ()
         failed: list[str] = []
         for symbol in wanted:
+            if skip_up_to_date:
+                latest_date = await self._latest_bar_date(symbol)
+                if latest_date is not None and latest_date >= effective_end:
+                    log.info(
+                        "market.sync",
+                        symbol=symbol,
+                        latest=latest_date.isoformat(),
+                        result="up_to_date_skip",
+                    )
+                    continue
             ranges = await self._load_ranges(symbol, include_stale=True)
             # today=effective_end+1 让 plan_fetch 不再把尾段当缺口：本地已覆盖就不请求。
             gaps = plan_fetch(
@@ -1023,6 +1048,15 @@ class CachedMarketDataSource:
             rows = (await session.execute(stmt)).all()
         return [(row[0], row[1]) for row in rows]
 
+    async def _latest_bar_date(self, symbol: str) -> date | None:
+        """本地缓存中该标的的最新交易日（无数据为 None）。"""
+        stmt = select(func.max(DailyBar.trade_date)).where(
+            DailyBar.symbol == symbol,
+            DailyBar.adjust == ADJUST,
+        )
+        async with self._session_factory(begin=True) as session:
+            return await session.scalar(stmt)
+
     async def _load_bars(self, symbol: str, start: date, end: date) -> tuple[Bar, ...]:
         stmt = (
             select(
@@ -1160,5 +1194,6 @@ __all__ = [
     "SessionFactory",
     "akshare_available",
     "plan_fetch",
+    "sync_pull_end",
     "validate_symbols",
 ]
