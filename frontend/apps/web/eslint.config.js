@@ -60,4 +60,30 @@ export default [
     files: ["src/charts/geometry.ts", "src/**/*.test.{ts,tsx}"],
     rules: { "no-restricted-syntax": "off", "require-yield": "off" },
   },
+  {
+    // UI 全局化：Radix 只能在包装层出现；页面/功能代码按子模块消费 @/components/ui/<component>。
+    files: ["src/**/*.{ts,tsx}"],
+    ignores: ["src/components/ui/**"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            {
+              name: "@/components/ui",
+              message:
+                "按需从 @/components/ui/<component> 导入，避免 barrel 把整套 Radix 打进当前页面 chunk。",
+            },
+          ],
+          patterns: [
+            {
+              group: ["@radix-ui/*"],
+              message:
+                "Radix 只能在 src/components/ui 内二次封装；页面请从 @/components/ui/<component> 导入项目组件。",
+            },
+          ],
+        },
+      ],
+    },
+  },
 ];

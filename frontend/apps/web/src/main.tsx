@@ -6,6 +6,8 @@ import { App } from "./App";
 import "./styles.css";
 import "./styles/tokens.css";
 import "./styles/print.css";
+// 全局 Tailwind（tw- 前缀 / preflight:false）：所有页面共享，按需生成工具类。
+import "./styles/tailwind.css";
 import { initPreferences } from "./theme/theme";
 
 // 启动即应用主题/密度/涨跌色偏好；tokens.css 负责视觉映射。

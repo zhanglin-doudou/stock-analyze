@@ -131,12 +131,15 @@ export default defineConfig({
 - **概念警示**：概念表无“基准/主动”列，`concept.caveat` 由后端提供并原样渲染（`ui/Caveat.tsx`），前端不拼结论文案。
 - **深链**：`/sectors?taxonomy=industry&level=1|2|3&parent=<code>&as_of=<date>`；`level` 用字符串比较回填，不做数值解析。
 
-### 10. `/import` 向导的 Tailwind + shadcn 限定例外（2026-11-13，设计 H-1 已批准）
+### 10. 全局 UI 基础设施：Tailwind + Radix（2026-11-19 起，取代 H-1 限定域）
 
-- **范围**：Tailwind 3.4 与 shadcn 风格 Radix 组件只服务 `/import`；其余页面继续手写 CSS + 语义 token，不得扩散引入。
-- **隔离**：`tailwind.config.ts` 必须保持 `prefix: "tw-"`、`preflight: false`，content 只覆盖 `Import.tsx`、`components/ui` 与 `features/import`；`features/import/import.css` 只由 Import 页引入，作用域为 `[data-import-ui]`。
-- **组件**：组件源码入 `apps/web/src/components/ui`（不跑 shadcn CLI），`components.json` 保留生成约定；Tailwind 颜色只映射 `tokens.css` 语义变量。
-- **Portal**：Radix Portal 必须挂到 `#import-portal[data-import-ui]`，通过 `components/ui/portal.ts` 的 context 注入，避免弹出层逃离样式作用域。
+- **范围**：Tailwind 3.4 与 `components/ui` 包装组件对**全站页面**可用；H-1 的“仅 `/import`”限制已被 [`2026-11-19 前端 UI 全局化`](../docs/architecture/2026-11-19-frontend-ui-globalization.md) 取代。
+- **Tailwind**：`tailwind.config.ts` 必须保持 `prefix: "tw-"`、`preflight: false`、content 覆盖 `./src/**/*.{ts,tsx}`；唯一入口 `src/styles/tailwind.css` 由 `main.tsx` 引入；颜色/圆角/阴影/层级只映射 `tokens.css`，禁止裸 hex。
+- **透明度**：禁止 `tw-bg-primary/50` 这类写法（Tailwind v3 对 `var()` 颜色会静默丢弃 alpha）；需要浅色底用 `*-soft` token 或实体 `surface-2`。
+- **Radix 边界**：页面/功能代码禁止直接 `import "@radix-ui/*"`；只能消费 `src/components/ui` 的封装组件。新增 Radix 组件必须先在该目录完成 tokens 化包装、a11y、测试与 `index.ts` 导出，再允许业务使用。
+- **导入方式**：页面按需导入子模块 `@/components/ui/<component>`；**不要**从 `@/components/ui` barrel 导入（会把整套 Radix 打进当前页面 chunk，实测约 +10KB gzip）。
+- **Portal**：通过 `components/ui/portal.ts` 的 `usePortalContainer()`；默认 `undefined` → `document.body`，不再使用 `#import-portal[data-import-ui]`。
+- **门禁**：`eslint.config.js` 的 `no-restricted-imports` + `src/components/ui/architecture.test.ts` 双重校验上述边界；组件 smoke 在 `components.test.tsx`。
 - **测试**：jsdom polyfill 集中在 `src/test/setup.ts`；不得注入 `matchMedia` stub（会改变 AppShell 无该 API 时的默认紧凑布局行为）。
 
 ## 文件清单
@@ -176,6 +179,12 @@ export default defineConfig({
 | `apps/web/src/ui/DataTable.tsx` | Phase 2 统一数据表（粘性表头/列优先级/键盘行/空加载态） |
 | `apps/web/src/charts/zero-caliber.test.ts` | 全 src 零口径门禁（geometry 白名单除外） |
 | `apps/web/src/styles/tokens.css` | Phase 0 设计 tokens（颜色/字体/间距/圆角/状态/图表/密度），组件只消费语义变量 |
+| `apps/web/src/styles/tailwind.css` | 全局 Tailwind 唯一入口（`@tailwind` + 仅作用于 `tw-` 类元素的最小 reset） |
+| `apps/web/src/components/ui/` | Radix 二次封装层（button/input/card/table/select/dialog/dropdown/tooltip/tabs/checkbox/popover…） |
+| `apps/web/src/components/ui/README.md` | 组件使用与新增 Radix 组件规范 |
+| `apps/web/src/components/ui/index.ts` | 包装层统一出口（页面按子模块导入，避免 barrel 膨胀） |
+| `apps/web/src/components/ui/architecture.test.ts` | UI 边界门禁（禁止页面直连 Radix/barrel、包装层裸 hex、配置回归） |
+| `apps/web/src/components/ui/components.test.tsx` | 包装组件 smoke + a11y |
 | `apps/web/src/theme/theme.ts` | Phase 0 主题/密度/趋势色偏好读写（`data-theme`/`data-density`/`data-trend`） |
 
 ## 门禁命令

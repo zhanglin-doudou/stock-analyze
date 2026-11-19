@@ -1,7 +1,9 @@
 import * as React from "react";
 import * as AlertDialogPrimitive from "@radix-ui/react-alert-dialog";
 import { cn } from "@/lib/utils";
+import { buttonVariants } from "./button";
 import { usePortalContainer } from "./portal";
+import { overlayClass, popoverMotion } from "./styles";
 
 const AlertDialog = AlertDialogPrimitive.Root;
 const AlertDialogTrigger = AlertDialogPrimitive.Trigger;
@@ -12,12 +14,13 @@ const AlertDialogContent = React.forwardRef<
 >(({ className, children, ...props }, ref) => {
   const container = usePortalContainer();
   return (
-    <AlertDialogPrimitive.Portal container={container}>
-      <AlertDialogPrimitive.Overlay className="tw-fixed tw-inset-0 tw-z-50 tw-bg-scrim tw-backdrop-blur-[2px]" />
+    <AlertDialogPrimitive.Portal container={container ?? undefined}>
+      <AlertDialogPrimitive.Overlay className={cn(overlayClass, popoverMotion)} />
       <AlertDialogPrimitive.Content
         ref={ref}
         className={cn(
-          "tw-fixed tw-left-1/2 tw-top-1/2 tw-z-50 tw-grid tw-w-[calc(100%-2rem)] tw-max-w-lg tw--translate-x-1/2 tw--translate-y-1/2 tw-gap-3 tw-rounded-lg tw-border tw-border-border tw-bg-surface tw-p-5 tw-shadow-2",
+          "tw-fixed tw-left-1/2 tw-top-1/2 tw-grid tw-w-[calc(100%-2rem)] tw-max-w-lg tw--translate-x-1/2 tw--translate-y-1/2 tw-gap-4 tw-rounded-lg tw-border tw-border-border tw-bg-surface tw-p-5 tw-shadow-2 tw-max-h-[calc(100vh-2rem)] tw-overflow-auto",
+          popoverMotion,
           className,
         )}
         {...props}
@@ -34,14 +37,26 @@ function AlertDialogHeader({ className, ...props }: React.HTMLAttributes<HTMLDiv
 }
 
 function AlertDialogFooter({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn("tw-flex tw-justify-end tw-gap-2", className)} {...props} />;
+  return (
+    <div
+      className={cn(
+        "tw-flex tw-flex-col-reverse tw-gap-2 sm:tw-flex-row sm:tw-justify-end",
+        className,
+      )}
+      {...props}
+    />
+  );
 }
 
 const AlertDialogTitle = React.forwardRef<
   React.ElementRef<typeof AlertDialogPrimitive.Title>,
   React.ComponentPropsWithoutRef<typeof AlertDialogPrimitive.Title>
 >(({ className, ...props }, ref) => (
-  <AlertDialogPrimitive.Title ref={ref} className={cn("tw-text-base tw-font-semibold", className)} {...props} />
+  <AlertDialogPrimitive.Title
+    ref={ref}
+    className={cn("tw-text-h3 tw-font-semibold tw-leading-tight", className)}
+    {...props}
+  />
 ));
 AlertDialogTitle.displayName = AlertDialogPrimitive.Title.displayName;
 
@@ -51,7 +66,7 @@ const AlertDialogDescription = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <AlertDialogPrimitive.Description
     ref={ref}
-    className={cn("tw-text-sm tw-text-muted-foreground", className)}
+    className={cn("tw-text-small tw-text-muted-foreground", className)}
     {...props}
   />
 ));
@@ -63,10 +78,8 @@ const AlertDialogAction = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <AlertDialogPrimitive.Action
     ref={ref}
-    className={cn(
-      "tw-inline-flex tw-h-9 tw-items-center tw-rounded-md tw-bg-primary tw-px-4 tw-text-sm tw-font-medium tw-text-primary-foreground",
-      className,
-    )}
+    type="button"
+    className={cn(buttonVariants(), className)}
     {...props}
   />
 ));
@@ -78,10 +91,8 @@ const AlertDialogCancel = React.forwardRef<
 >(({ className, ...props }, ref) => (
   <AlertDialogPrimitive.Cancel
     ref={ref}
-    className={cn(
-      "tw-inline-flex tw-h-9 tw-items-center tw-rounded-md tw-border tw-border-input tw-px-4 tw-text-sm tw-font-medium",
-      className,
-    )}
+    type="button"
+    className={cn(buttonVariants({ variant: "outline" }), className)}
     {...props}
   />
 ));
