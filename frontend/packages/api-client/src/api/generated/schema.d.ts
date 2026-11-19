@@ -1014,6 +1014,28 @@ export interface paths {
         patch: operations["patchSettings"];
         trace?: never;
     };
+    "/api/v1/settings/reset-bill-data": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reset Bill Data
+         * @description API-110：清空本人 ledger + review 数据（账单/导入/回合/指标/资产等）。
+         *
+         *     不可撤销：前端必须二次确认；服务端强制 `Idempotency-Key`，重放返回首次结果。
+         */
+        post: operations["resetBillData"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/settings/trade-flags/rebuild": {
         parameters: {
             query?: never;
@@ -2073,6 +2095,18 @@ export interface components {
             next_cursor?: string | null;
             /** Total Estimate */
             total_estimate?: number | null;
+        };
+        /**
+         * BillDataResetOut
+         * @description API-110：重置账单数据的删除计数（只列实际删除行数 > 0 的表）。
+         */
+        BillDataResetOut: {
+            /** Deleted */
+            deleted: {
+                [key: string]: number;
+            };
+            /** Total */
+            total: number;
         };
         /**
          * BillFlagsPatch
@@ -9016,6 +9050,67 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SettingsOut"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 资源状态冲突 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    resetBillData: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BillDataResetOut"];
                 };
             };
             /** @description 未认证或凭证无效 */

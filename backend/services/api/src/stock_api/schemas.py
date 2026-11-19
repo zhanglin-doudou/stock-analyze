@@ -956,6 +956,13 @@ class TradeFlagRebuildAccepted(StrictModel):
     links: JobLinks
 
 
+class BillDataResetOut(StrictModel):
+    """API-110：重置账单数据的删除计数（只列实际删除行数 > 0 的表）。"""
+
+    deleted: dict[str, int]
+    total: int
+
+
 class AssetBuildMissingOut(StrictModel):
     """API-082：缺行情提示项（字段名沿用归因/看板的 `missing[]` 风格）。"""
 

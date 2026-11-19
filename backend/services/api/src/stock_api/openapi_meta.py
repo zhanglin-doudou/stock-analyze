@@ -414,6 +414,22 @@ OPERATION_META: dict[str, dict[str, Any]] = {
             "ADMIN_CANNOT_READ_TRADES",
         ],
     },
+    "resetBillData": {
+        "api_id": "API-110",
+        "scope": "write",
+        "idempotent": True,
+        "async": False,
+        "error_codes": [
+            "IDEMPOTENCY_KEY_REUSED",
+            "IDEMPOTENCY_IN_PROGRESS",
+            "VALIDATION_ERROR",
+            "TOKEN_EXPIRED",
+            "TOKEN_REVOKED",
+            "MULTIPLE_CREDENTIALS",
+            "INSUFFICIENT_SCOPE",
+            "ADMIN_CANNOT_READ_TRADES",
+        ],
+    },
     "cancelJob": {
         "api_id": "API-064",
         "scope": "write",

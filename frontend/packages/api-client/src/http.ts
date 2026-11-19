@@ -12,6 +12,7 @@ import type {
   AuthTokens,
   Attribution,
   BatchList,
+  BillDataResetOut,
   CommitImportBody,
   CreateTokenBody,
   DashboardOut,
@@ -547,6 +548,14 @@ export function createClient(options: ClientOptions) {
         path: "/settings/trade-flags/rebuild",
         method: "POST",
         body,
+        idempotencyKey,
+      }).then((r) => r.data);
+    },
+    /** API-110：清空本人 ledger/review 账单数据（不可撤销；幂等重放返回首次计数）。 */
+    resetBillData(idempotencyKey: string) {
+      return send<BillDataResetOut>({
+        path: "/settings/reset-bill-data",
+        method: "POST",
         idempotencyKey,
       }).then((r) => r.data);
     },

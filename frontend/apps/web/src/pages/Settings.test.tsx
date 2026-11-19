@@ -16,6 +16,7 @@ vi.mock("../client", () => ({
       get: vi.fn(),
       patch: vi.fn(),
       rebuildTradeFlags: vi.fn(),
+      resetBillData: vi.fn(),
     },
     jobs: {
       get: vi.fn(),
@@ -31,6 +32,7 @@ const listTokens = vi.mocked(api.tokens.list);
 const getSettings = vi.mocked(api.settings.get);
 const patchSettings = vi.mocked(api.settings.patch);
 const rebuildTradeFlags = vi.mocked(api.settings.rebuildTradeFlags);
+const resetBillData = vi.mocked(api.settings.resetBillData);
 const getJob = vi.mocked(api.jobs.get);
 const listSectors = vi.mocked(api.sectors.list);
 
@@ -427,5 +429,35 @@ describe("Settings（偏好四组，API-055/096）", () => {
     );
     expect(await screen.findByTestId("settings-rebuild-done")).toBeTruthy();
     await waitFor(() => expect(getSettings).toHaveBeenCalledTimes(2));
+  });
+});
+
+describe("Settings（重置账单数据，API-110）", () => {
+  beforeEach(() => {
+    saveTokens({ access_token: "access-token" });
+    getSettings.mockResolvedValue({
+      settings: makeSettings(),
+      etag: 'W/"2"',
+      notModified: false,
+    } as never);
+  });
+
+  it("二次确认前禁用提交，确认后调用并展示删除行数", async () => {
+    resetBillData.mockResolvedValue({ deleted: { trade: 3 }, total: 3 });
+
+    render(<Settings />);
+    await screen.findByRole("heading", { name: "账单旗标阈值" });
+
+    fireEvent.click(screen.getByTestId("settings-reset"));
+    const confirm = screen.getByTestId("settings-reset-confirm") as HTMLButtonElement;
+    expect(confirm.disabled).toBe(true);
+
+    fireEvent.change(screen.getByLabelText("输入「重置」确认"), { target: { value: "重置" } });
+    expect(confirm.disabled).toBe(false);
+    fireEvent.click(confirm);
+
+    await waitFor(() => expect(resetBillData).toHaveBeenCalledTimes(1));
+    expect(await screen.findByTestId("settings-reset-done")).toBeTruthy();
+    expect(screen.getByText("已删除 3 行账单数据。")).toBeTruthy();
   });
 });

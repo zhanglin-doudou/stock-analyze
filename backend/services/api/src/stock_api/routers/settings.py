@@ -14,7 +14,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, Request, Response
 from fastapi.responses import JSONResponse
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from stock_contracts.errors import ApiError, ErrorCode, FieldError
 from stock_core.preferences import (
@@ -23,17 +23,43 @@ from stock_core.preferences import (
     canonical_json,
     resolve,
 )
+from stock_ledger.models import (
+    ImportBatch,
+    ImportBillType,
+    ImportColumnRule,
+    ImportPreview,
+    ImportTemplate,
+    QuarantineRow,
+    Reconciliation,
+    SummaryRule,
+    Trade,
+    TradeHistory,
+)
 from stock_platform import audit
 from stock_platform.idempotency import IdempotencyStore
 from stock_platform.market_models import TAXONOMY_CONCEPT, Sector
 from stock_platform.models import UserSetting
 from stock_platform.repositories.users import UserSettingRepository
 from stock_platform.tenant import TenantContext
+from stock_review.models import (
+    AssetBuildState,
+    AssetDaily,
+    MetricDependency,
+    MetricResult,
+    NavDaily,
+    Round,
+    RoundBuildState,
+    RoundFill,
+    TradeFlag,
+    TradeForwardReturn,
+    TradeReason,
+)
 
 from stock_api.deps import get_state, get_tenant
 from stock_api.routing import StrictQueryRoute
 from stock_api.schemas import (
     AppearancePrefsOut,
+    BillDataResetOut,
     BillFlagsPrefsOut,
     ConceptExcludedOut,
     ConceptFiltersPrefsOut,
@@ -49,9 +75,36 @@ router = APIRouter(tags=["settings"], route_class=StrictQueryRoute)
 
 _ENDPOINT_PATCH = "settings.patch"
 _ENDPOINT_REBUILD = "POST /settings/trade-flags/rebuild"
+_ENDPOINT_RESET = "POST /settings/reset-bill-data"
 _JOBS_PREFIX = "/api/v1/jobs"
 _MAX_REBUILD_MONTHS = 120
 _MONTH_LABEL = re.compile(r"^\d{4}-(0[1-9]|1[0-2])$")
+
+#: 重置账单数据的删除顺序：先子表后父表（`metric_dependency`→`metric_result`、
+#: `round_fill`→`round`、`trade_history`→`trade`），review 与 ledger 各自独立。
+_RESET_TABLES: tuple[tuple[str, type[Any]], ...] = (
+    ("metric_dependency", MetricDependency),
+    ("metric_result", MetricResult),
+    ("round_fill", RoundFill),
+    ("round", Round),
+    ("asset_daily", AssetDaily),
+    ("asset_build_state", AssetBuildState),
+    ("round_build_state", RoundBuildState),
+    ("nav_daily", NavDaily),
+    ("trade_flag", TradeFlag),
+    ("trade_reason", TradeReason),
+    ("trade_forward_return", TradeForwardReturn),
+    ("trade_history", TradeHistory),
+    ("trade", Trade),
+    ("quarantine_row", QuarantineRow),
+    ("reconciliation", Reconciliation),
+    ("summary_rule", SummaryRule),
+    ("import_bill_type", ImportBillType),
+    ("import_column_rule", ImportColumnRule),
+    ("import_template", ImportTemplate),
+    ("import_preview", ImportPreview),
+    ("import_batch", ImportBatch),
+)
 
 #: `platform.user_setting` 参与偏好解析的列（只读回显列不在此列）。
 _SETTING_COLUMNS: tuple[str, ...] = (
@@ -421,6 +474,84 @@ async def rebuild_trade_flags(
     if reused:
         response.headers["X-Job-Reused"] = "true"
     return accepted
+
+
+async def _delete_user_rows(session: AsyncSession, user_id: Any) -> dict[str, int]:
+    """按依赖顺序删除该用户在 ledger/review schema 的所有业务行，返回非零计数。"""
+    deleted: dict[str, int] = {}
+    for table, model in _RESET_TABLES:
+        result = await session.execute(delete(model).where(model.user_id == user_id))
+        # AsyncSession.execute 静态返回 Result（不含 rowcount）；运行时实为 CursorResult。
+        count = int(getattr(result, "rowcount", 0) or 0)
+        if count:
+            deleted[table] = count
+    return deleted
+
+
+@router.post(
+    "/settings/reset-bill-data",
+    response_model=BillDataResetOut,
+    operation_id="resetBillData",
+)
+async def reset_bill_data(
+    request: Request,
+    ctx: Annotated[TenantContext, Depends(get_tenant)],
+    idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
+) -> BillDataResetOut | JSONResponse:
+    """API-110：清空本人 ledger + review 数据（账单/导入/回合/指标/资产等）。
+
+    不可撤销：前端必须二次确认；服务端强制 `Idempotency-Key`，重放返回首次结果。
+    """
+    user_id = ctx.require_write()
+    ctx.forbid_admin_trades()
+    state = get_state(request)
+    if not idempotency_key or not 16 <= len(idempotency_key) <= 128:
+        raise ApiError(
+            ErrorCode.VALIDATION_ERROR,
+            errors=[FieldError("Idempotency-Key", "required", "该操作必须携带幂等键(16~128)")],
+        )
+    request_hash = hashlib.sha256(
+        canonical_json(
+            {"method": "POST", "path": "/settings/reset-bill-data", "user_id": str(user_id)}
+        ).encode("utf-8")
+    ).hexdigest()
+
+    async with state.db.session(user_id=user_id, begin=True) as session:
+        record = await state.idempotency.begin(
+            session,
+            user_id=user_id,
+            endpoint=_ENDPOINT_RESET,
+            key=idempotency_key,
+            request_hash=request_hash,
+        )
+        if record is not None:
+            return JSONResponse(
+                content=IdempotencyStore.payload_of(record) or {},
+                status_code=IdempotencyStore.status_of(record),
+                headers={"Idempotency-Replayed": "true"},
+            )
+
+        deleted = await _delete_user_rows(session, user_id)
+        out = BillDataResetOut(deleted=deleted, total=sum(deleted.values()))
+        await audit.record(
+            session,
+            action="settings.reset_bill_data",
+            actor_id=user_id,
+            target_type="user",
+            target_id=str(user_id),
+            meta={"deleted": deleted, "total": out.total},
+            request_id=request.headers.get("x-request-id"),
+            source="api",
+        )
+        await state.idempotency.complete(
+            session,
+            user_id=user_id,
+            endpoint=_ENDPOINT_RESET,
+            key=idempotency_key,
+            status_code=200,
+            body=out.model_dump(mode="json"),
+        )
+    return out
 
 
 __all__ = ["router"]
