@@ -40,6 +40,7 @@ from stock_review.application.assets import (
     MISSING_QUOTE_FINAL_REASON,
     MISSING_QUOTE_HINT,
     OVERSELL_REASON,
+    STALE_QUOTE_REASON_PREFIX,
     AssetBuildSummary,
     build_assets,
     build_assets_job,
@@ -860,6 +861,18 @@ async def test_build_pulls_missing_quotes_once_and_fills_blocked_rows(
                 close_units=price("12.40"),
                 return_units=0,
             ),
+            Bar(
+                symbol="600519",
+                trade_date=date(2026, 6, 30),
+                close_units=price("1700.00"),
+                return_units=0,
+            ),
+            Bar(
+                symbol="000001",
+                trade_date=date(2026, 6, 30),
+                close_units=price("12.40"),
+                return_units=0,
+            ),
         ],
     )
 
@@ -883,6 +896,42 @@ async def test_build_pulls_missing_quotes_once_and_fills_blocked_rows(
     assert state is not None
     assert state.last_status == "ok"
     assert state.status_reason is None
+
+
+async def test_build_degrades_data_as_of_day_when_held_quote_is_stale(
+    owner_engine: AsyncEngine, app_db: Database
+) -> None:
+    """data_as_of 当天：持仓股缺当日行情但有更早收盘 → 该日 degraded，原因带代码+名称。"""
+    user_id = await _insert_user(owner_engine)
+    await _seed_two_missing_symbols(owner_engine, user_id)
+    market = _PullableMarket(
+        as_of=date(2026, 6, 30),
+        upstream=[
+            Bar(
+                symbol="600519",
+                trade_date=date(2026, 6, 24),
+                close_units=price("1700.00"),
+                return_units=0,
+            ),
+            Bar(
+                symbol="000001",
+                trade_date=date(2026, 6, 25),
+                close_units=price("12.40"),
+                return_units=0,
+            ),
+        ],
+    )
+
+    await _build(app_db, user_id, market)
+
+    rows = await _rows(app_db, user_id)
+    last = rows[-1]
+    assert last.trade_date == date(2026, 6, 30)
+    assert last.status == "degraded"
+    reason = str(last.status_reason)
+    assert reason.startswith(STALE_QUOTE_REASON_PREFIX)
+    assert "600519" in reason
+    assert "000001" in reason
 
 
 async def test_build_shows_support_hint_when_pull_still_missing(

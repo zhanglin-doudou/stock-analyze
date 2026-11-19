@@ -107,7 +107,9 @@ log = get_logger("stock_review.assets")
 # 2.7：货基按证券名称兜底归并——代码不同但名称相同视为同一只产品，份额/超卖/余额
 #      按归并身份键统一推演（身份键优先取 6 位数字真实代码），避免同一只货基因
 #      场内代码与登记账号代码并存而被拆成两份、互相误判超卖。口径变化，bump 触发全量重建。
-ASSET_DEFINITION_VERSION = "2.7"
+# 2.8：行情覆盖日（data_as_of）当天，持仓股缺当日行情但更早有收盘（同步失败/晚发布）
+#      → 该日 degraded，原因透出「代码+名称 行情不是最新」；口径变化，bump 触发全量重建。
+ASSET_DEFINITION_VERSION = "2.8"
 # 安全窗：每次有新数据/脏流水/行情 as_of 变化时重算最近 45 天。
 SAFETY_DAYS = 45
 # 水位线重叠窗：PG `now()` = 事务开始时间，覆盖「长事务晚提交」竞态。
@@ -136,6 +138,7 @@ NO_ANCHOR_REASON = "无现金余额锚点（无 cash_balance 行）"
 FIFO_ERROR_REASON = "FIFO 数据异常（配股/送转等无可用持仓）"
 OVERSELL_REASON = "超卖（卖出数量超过可用持仓），需人工补录成本"
 MARKET_UNCOVERED_REASON = "行情未覆盖，按最近收盘估值"
+STALE_QUOTE_REASON_PREFIX = "行情不是最新"
 MISSING_PRICE_PREFIX = "缺行情数据"
 # 缺行情补拉一次后仍未取到：给用户的最终提示（构建整体原因 + 行级原因后缀）。
 MISSING_QUOTE_FINAL_REASON = "缺少行情数据，请联系技术支持解决"
@@ -266,8 +269,9 @@ def _row_status_reason(
     fifo_error: bool,
     uncovered: bool,
     oversell: bool = False,
+    stale_quotes: str | None = None,
 ) -> str | None:
-    """行级 degraded 原因（FIFO 异常 / 超卖 / 行情未覆盖）。
+    """行级 degraded 原因（FIFO 异常 / 超卖 / 行情未覆盖 / 当日行情不是最新）。
 
     按成本估值的非行情持仓（债券、伪代码）与新股/可转债的认购成本兜底都视为正常估值，
     不产生 degraded，只在 remark 留痕。都不命中返回 NULL。
@@ -279,7 +283,36 @@ def _row_status_reason(
         reasons.append(OVERSELL_REASON)
     if uncovered:
         reasons.append(MARKET_UNCOVERED_REASON)
-    return "；".join(reasons) if reasons else None
+    if stale_quotes:
+        reasons.append(stale_quotes)
+    return "；".join(reasons)[:_REASON_MAX] if reasons else None
+
+
+def _stale_quote_reason(
+    holdings: dict[str, int],
+    ladder: dict[str, list[tuple[date, int]]],
+    trade_date: date,
+    names: dict[str, str],
+) -> str | None:
+    """覆盖日当天「最新行情不是当日」的持仓标的 → 行级原因（代码 + 名称）。
+
+    仅对需行情的品种（A 股/场内基金）生效：有更早收盘价说明可以估值（不阻断），
+    但当日行情缺失（同步失败/上游晚发布），必须显式降级提示，避免按旧价静默估值。
+    """
+    stale = [
+        symbol
+        for symbol, qty in holdings.items()
+        if qty != 0
+        and needs_quote(symbol)
+        and (entries := ladder.get(symbol) or [])
+        and entries[-1][0] < trade_date
+    ]
+    if not stale:
+        return None
+    items = [
+        f"{symbol} {names[symbol]}" if names.get(symbol) else symbol for symbol in sorted(stale)
+    ]
+    return f"{STALE_QUOTE_REASON_PREFIX}：{','.join(items)}"
 
 
 def _with_missing_quote_hint(reason: str) -> str:
@@ -328,6 +361,12 @@ def compute_daily_valuations(
     `missing_quotes` 返回，供调用方做**一次**定向补拉。
     """
     alias = bond_alias or {}
+    # 行级原因要透出「代码 + 名称」：按规范化代码取最近一次非空证券名称。
+    quote_names: dict[str, str] = {}
+    for trade in trades:
+        name = (trade.security_name or "").strip()
+        if trade.security_code and name:
+            quote_names[canonical_code(alias, trade.security_code)] = name
     # 配股前置校验：零金额且无前置持仓的配股按 broker_action 处理（与 FIFO 同源）。
     rights = rights or RightsResolution(frozenset())
     # 新股待上市（认购缴款已入库、尚无行情）：按认购成本兜底估值，不阻断（设计 D11）。
@@ -479,18 +518,28 @@ def compute_daily_valuations(
         )
         unrealized_pnl_units = market_value_units - holding_cost_units
         uncovered = cursor_date > as_of and nonzero_holdings > 0
+        # 行情覆盖日（data_as_of）当天：个别标的当日 bar 缺失（同步失败/晚发布）时，
+        # 虽可用更早收盘估值，但必须显式降级，避免「最后一个同步行情日」静默按旧价。
+        stale_quotes = (
+            _stale_quote_reason(holdings, ladder, cursor_date, quote_names)
+            if cursor_date == as_of
+            else None
+        )
         # FIFO 异常只影响持有问题代码的那些天；对无 FIFO 问题代码持仓的其他天不降级。
         fifo_error_today = any(code in fifo_error_codes for code in holdings)
         # 超卖：当日有卖出数量超过可用持仓 → 该日降级并提示人工补录成本（修订后重算恢复）。
         oversell_today = pending_oversell_day
         status = (
             ROW_STATUS_DEGRADED
-            if (fifo_error_today or oversell_today or uncovered)
+            if (fifo_error_today or oversell_today or uncovered or stale_quotes)
             else ROW_STATUS_OK
         )
         status_reason = (
             _row_status_reason(
-                fifo_error=fifo_error_today, uncovered=uncovered, oversell=oversell_today
+                fifo_error=fifo_error_today,
+                uncovered=uncovered,
+                oversell=oversell_today,
+                stale_quotes=stale_quotes,
             )
             if status == ROW_STATUS_DEGRADED
             else None
