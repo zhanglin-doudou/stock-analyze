@@ -12,7 +12,7 @@ export const focusRing =
 export const disabledState = "disabled:tw-pointer-events-none disabled:tw-opacity-50";
 
 /** 模态遮罩（对话 / 警告对话共用）。 */
-export const overlayClass = "tw-fixed tw-inset-0 tw-z-dialog tw-bg-scrim tw-backdrop-blur-[2px]";
+export const overlayClass = "tw-fixed tw-inset-0 tw-z-overlay tw-bg-scrim tw-backdrop-blur-[2px]";
 
 /** 浮层面板（下拉 / 弹出 / 选择器共用）。 */
 export const panelClass =

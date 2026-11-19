@@ -112,6 +112,7 @@ export default {
         rail: "var(--z-rail)",
         topbar: "var(--z-topbar)",
         drawer: "var(--z-drawer)",
+        overlay: "var(--z-overlay)",
         dialog: "var(--z-dialog)",
         command: "var(--z-command)",
         toast: "var(--z-toast)",

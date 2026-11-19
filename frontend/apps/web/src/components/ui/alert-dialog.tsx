@@ -19,7 +19,7 @@ const AlertDialogContent = React.forwardRef<
       <AlertDialogPrimitive.Content
         ref={ref}
         className={cn(
-          "tw-fixed tw-left-1/2 tw-top-1/2 tw-grid tw-w-[calc(100%-2rem)] tw-max-w-lg tw--translate-x-1/2 tw--translate-y-1/2 tw-gap-4 tw-rounded-lg tw-border tw-border-border tw-bg-surface tw-p-5 tw-shadow-2 tw-max-h-[calc(100vh-2rem)] tw-overflow-auto",
+          "tw-fixed tw-left-1/2 tw-top-1/2 tw-z-dialog tw-grid tw-w-[calc(100%-2rem)] tw-max-w-lg tw--translate-x-1/2 tw--translate-y-1/2 tw-gap-4 tw-rounded-lg tw-border tw-border-border tw-bg-surface tw-p-5 tw-shadow-2 tw-max-h-[calc(100vh-2rem)] tw-overflow-auto",
           popoverMotion,
           className,
         )}
