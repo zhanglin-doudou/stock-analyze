@@ -1198,21 +1198,21 @@ export function Import() {
                   回合已由后台自动按 FIFO 建立（导入完成后可在「回合」查看）。
                 </p>
                 <div className="import-actions">
-                  <Link className="btn btn-ghost" to={`/imports?batch=${batch.batch_id}`}>
-                    查看批次
-                  </Link>
                   {batch.can_revoke ? (
                     <RevokeBatchButton batchId={batch.batch_id} label="撤销本次导入" onRevoked={onRevoked} />
                   ) : (
                     <span className="muted">该批次已不可撤销（{batch.status}）。</span>
                   )}
-                  <Link className="btn btn-ghost" to="/trades">
+                  <Link to={`/imports?batch=${batch.batch_id}`}>
+                    查看批次
+                  </Link>
+                  <Link to="/trades">
                     去交易流水核对
                   </Link>
-                  <Link className="btn btn-ghost" to="/rounds">
+                  <Link to="/rounds">
                     查看回合
                   </Link>
-                  <Link className="btn btn-ghost" to="/dashboard">
+                  <Link to="/dashboard">
                     去看板
                   </Link>
                 </div>

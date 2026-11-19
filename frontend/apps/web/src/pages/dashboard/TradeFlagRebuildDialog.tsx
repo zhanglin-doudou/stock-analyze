@@ -121,12 +121,11 @@ export function TradeFlagRebuildDialog({ open, onClose }: TradeFlagRebuildDialog
   const mainLabel =
     phase === "running"
       ? progressLive
-        ? `更新中 ${completion.progress}%…`
+        ? `更新中 ${completion.progress??0}%…`
         : "更新中…"
       : phase === "done"
         ? "更新完成"
         : "更新账单旗标";
-
   return (
     <dialog
       ref={dialogRef}

@@ -97,7 +97,7 @@ export function TradeFlagCharts(): ReactElement {
   return (
     <section className="dash-panel tfc" data-testid="trade-flag-charts">
       <div className="dash-panel-head">
-        <h2>月度分析</h2>
+        <h2>按月聚合分析</h2>
         <span className="dash-panel-meta">按自然月聚合 · 后端计数</span>
         <button
           type="button"
@@ -150,8 +150,8 @@ export function TradeFlagCharts(): ReactElement {
         <>
           {data.months_without_data.length > 0 ? (
             <p className="dash-muted tfc-unbuilt" data-testid="tfc-unbuilt">
-              其中 {data.months_without_data.length} 个月无旗标记录（可能未构建或当月无交易）：
-              {data.months_without_data.join("、")}
+              其中 {data.months_without_data.length} 个月无旗标记录（可能未构建或当月无交易）
+              {data.months_without_data.length !== months ? '：' + data.months_without_data.join("、") : ''}
             </p>
           ) : null}
           <Suspense fallback={<p className="dash-chart-empty">图表加载中…</p>}>
@@ -174,7 +174,7 @@ export function TradeFlagCharts(): ReactElement {
         </>
       )}
 
-      <TradeFlagRebuildDialog open={rebuildOpen} onClose={() => setRebuildOpen(false)} />
+      {rebuildOpen && <TradeFlagRebuildDialog open={rebuildOpen} onClose={() => setRebuildOpen(false)} />}
     </section>
   );
 }
