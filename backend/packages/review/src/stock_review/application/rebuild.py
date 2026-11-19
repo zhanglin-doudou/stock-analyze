@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
+from collections.abc import Sequence
 from dataclasses import asdict, dataclass, replace
 from datetime import date, datetime, timedelta
 from typing import Any
@@ -108,7 +109,7 @@ def kind_for_trade(trade: Trade) -> EventKind:
 
 
 def _base_events(
-    trades: list[Trade] | tuple[Trade, ...],
+    trades: Sequence[Trade],
     *,
     bond_alias: dict[str, str] | None = None,
 ) -> list[FifoEvent]:
@@ -161,7 +162,7 @@ def _base_events(
 
 
 def rights_resolution(
-    trades: list[Trade] | tuple[Trade, ...],
+    trades: Sequence[Trade],
     *,
     bond_alias: dict[str, str] | None = None,
 ) -> RightsResolution:

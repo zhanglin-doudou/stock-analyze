@@ -54,7 +54,9 @@ def zero_amount_rights_codes(trades: Iterable[object]) -> frozenset[str]:
         code = getattr(trade, "security_code", None)
         if not code:
             continue
-        if getattr(trade, "amount_units", 0) == 0 and trade_category(trade) == "rights":
+        if (
+            getattr(trade, "amount_units", 0) == 0 and trade_category(trade) == "rights"  # type: ignore[arg-type]
+        ):
             codes.add(code)
     return frozenset(codes)
 

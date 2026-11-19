@@ -89,7 +89,7 @@ def _is_share_leg(row: Any) -> bool:
 
 
 def _implied_amount_units(row: Any) -> int:
-    return abs(row.quantity_units) * row.price_units // QTY_PRICE_SCALE
+    return int(abs(row.quantity_units) * row.price_units // QTY_PRICE_SCALE)
 
 
 class _FundIndex:
@@ -149,8 +149,8 @@ def _can_pair(leg: Any, share: Any, funds: _FundIndex, rows: Sequence[Any]) -> b
     if share.security_code in funds.codes:
         key = funds.key(share.security_code) or share.security_code
         return funds.balances(leg.trade_date).get(key, 0) >= value
-    return _share_quantity_before(rows, share.security_code, leg.trade_date) >= abs(
-        share.quantity_units
+    return _share_quantity_before(rows, share.security_code, leg.trade_date) >= int(
+        abs(share.quantity_units)
     )
 
 
@@ -176,7 +176,7 @@ def _find_share_leg(leg: Any, candidates: Sequence[Any], used: set[int]) -> Any 
 
 def _apply_pair(leg: Any, share: Any) -> int:
     """把份额腿的证券代码/数量/单价写到资金腿，返回带方向的份额变更数（仅日志用）。"""
-    quantity = abs(share.quantity_units)
+    quantity = int(abs(share.quantity_units))
     leg.security_code = share.security_code
     leg.security_name = share.security_name or leg.security_name
     leg.quantity_units = quantity
