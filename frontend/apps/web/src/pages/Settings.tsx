@@ -806,18 +806,22 @@ export function Settings() {
             ))}
           </div>
 
-          <div className="settings-actions">
-            <button
-              type="button"
-              className="settings-btn settings-btn-ghost"
-              disabled={sessions.rows.length >= 2}
-              onClick={() =>
-                setSessions({ ...sessions, rows: [...sessions.rows, { open: "", close: "" }] })
-              }
-            >
-              增加时段
-            </button>
-          </div>
+          {sessions.rows.length < 2 && (
+            <div className="settings-actions">
+              <button
+                type="button"
+                className="settings-btn settings-btn-ghost"
+                onClick={() =>
+                  setSessions({
+                    ...sessions,
+                    rows: [...sessions.rows, { open: '', close: '' }],
+                  })
+                }
+              >
+                增加时段
+              </button>
+            </div>
+          )}
 
           <div className="settings-field-group">
             <label className="settings-field">
@@ -825,12 +829,13 @@ export function Settings() {
               <input
                 type="time"
                 value={sessions.dataReadyAfter}
+                disabled={true}
                 onChange={(event) =>
                   setSessions({ ...sessions, dataReadyAfter: event.target.value })
                 }
               />
             </label>
-            <span className="settings-hint">不早于最后一段收盘时间。</span>
+            <span className="settings-hint">不早于最后一段收盘时间。（系统管理员设定，暂不支持调整）</span>
           </div>
 
           <label className="check settings-check">

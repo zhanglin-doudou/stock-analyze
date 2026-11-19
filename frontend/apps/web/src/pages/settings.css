@@ -147,6 +147,10 @@
   font: inherit;
 }
 
+.settings-field input:disabled {
+  cursor: not-allowed;
+}
+
 .settings-checks {
   display: flex;
   gap: var(--s5);

@@ -355,8 +355,7 @@ export function Import() {
     };
   }, []);
 
-  // 模板选择控件：系统预设（只读）与本人模板（提交后 copy-on-write 生成）。
-  useEffect(() => {
+  const fetchTemplates = useCallback(() => {
     let alive = true;
     api.imports
       .listTemplates({ limit: 50 })
@@ -373,7 +372,12 @@ export function Import() {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [])
+
+  // 模板选择控件：系统预设（只读）与本人模板（提交后 copy-on-write 生成）。
+  useEffect(() => {
+    fetchTemplates();
+  }, [fetchTemplates]);
 
   useEffect(() => {
     if (!lockedBroker || broker === lockedBroker) return;
@@ -591,8 +595,9 @@ export function Import() {
       setDone(`任务结束：${status}`);
       if (status !== "succeeded" || !batchId) return;
       void loadBatch(batchId);
+      void fetchTemplates();
     },
-    [batchId, loadBatch],
+    [batchId, loadBatch, fetchTemplates],
   );
 
   const onRevoked = useCallback(

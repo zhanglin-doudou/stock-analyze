@@ -393,7 +393,21 @@ export function Assets() {
 
   return (
     <div>
-      <h1>资产表</h1>
+      <div className="row-actions" style={{ justifyContent: 'space-between'}}>
+        <h1>资产表</h1>
+        <button
+          className="btn btn-ghost"
+          type="button"
+          disabled={executing}
+          aria-busy={executing}
+          onClick={() => {
+            setNotice("");
+            void auto.submit("auto");
+          }}
+        >
+          {actionLabel}
+        </button>
+        </div>
       <p className="muted">
         每日资产快照（总资产 = 现金 + 持仓市值），用于资产变化与后续回撤；本页不做计算。
       </p>
@@ -413,18 +427,6 @@ export function Assets() {
               onClick={() => setFilters(draft)}
             >
               应用筛选
-            </button>
-            <button
-              className="btn btn-ghost"
-              type="button"
-              disabled={executing}
-              aria-busy={executing}
-              onClick={() => {
-                setNotice("");
-                void auto.submit("auto");
-              }}
-            >
-              {actionLabel}
             </button>
             <button className="btn btn-ghost" type="button" disabled={loading} onClick={() => void load()}>
               刷新
