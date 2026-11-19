@@ -13,6 +13,8 @@ from datetime import date
 
 from stock_ledger.models import Trade
 
+from stock_review.application.rights import RightsResolution
+
 _CORPORATE_CATEGORIES = frozenset({"bonus", "rights"})
 
 
@@ -22,17 +24,20 @@ def corporate_action_symbols(
     t0: date,
     t1: date,
     canonical: Callable[[str], str],
+    rights: RightsResolution | None = None,
 ) -> dict[str, str]:
     """窗口内有送转/配股事件的标的集合：`canonical_code -> 事件摘要`。
 
     `canonical` 为可转债发债代码归一函数（`bond_alias.canonical_code` 的偏函数）。
+    `rights` 为配股有效分类：零金额且无持仓的配股已降级为券商行为，不算公司行动。
     摘要形如 `送转/配股`，供 `missing[]` reason 使用。
     """
+    rights = rights or RightsResolution(frozenset())
     hits: dict[str, str] = {}
     for trade in trades:
         if not (t0 <= trade.trade_date <= t1):
             continue
-        kind = (trade.category or "").strip().lower()
+        kind = (rights.category(trade) or "").strip().lower()
         if kind not in _CORPORATE_CATEGORIES:
             continue
         code = canonical(trade.security_code)

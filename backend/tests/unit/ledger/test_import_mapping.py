@@ -19,9 +19,10 @@ from stock_ledger.application.import_analysis import (
     TypeGroup,
     apply_type_resolutions,
     completeness_issues,
+    resolve_broker_with_preset,
     verify_fee_merge,
 )
-from stock_ledger.parsers.columns import COLUMN_ALIASES
+from stock_ledger.parsers.columns import COLUMN_ALIASES, normalize_summary
 from stock_ledger.parsers.huatai import parse_bill, parse_bill_with_plan
 from stock_ledger.parsers.mapping import (
     MappingItem,
@@ -30,6 +31,7 @@ from stock_ledger.parsers.mapping import (
     derive_type_key,
     header_signature,
     merge_fee_units,
+    normalize_type_key,
     plan_from_legacy_mapping,
     suggest_items,
     validate_plan,
@@ -175,6 +177,15 @@ def test_detect_broker_huatai_high_and_generic_low() -> None:
     assert generic.confidence == "low"
 
 
+def test_resolve_broker_with_preset_for_auto_detection() -> None:
+    # 自动识别未覆盖平安：签名命中预设时以预设券商为准，不再显示 generic。
+    assert resolve_broker_with_preset("auto", "generic", "pingan") == "pingan"
+    assert resolve_broker_with_preset(None, "generic", "pingan") == "pingan"
+    # 显式选择优先；没有预设时沿用检测结果。
+    assert resolve_broker_with_preset("huatai", "generic", "pingan") == "huatai"
+    assert resolve_broker_with_preset("auto", "huatai", None) == "huatai"
+
+
 def test_detect_broker_ambiguous_when_two_brokers_tie() -> None:
     rules = [
         {"broker": "alpha", "header_norm": "日期", "match_type": "exact", "is_fingerprint": True},
@@ -286,6 +297,51 @@ def test_read_rows_matches_inspection_headers() -> None:
     rows = read_rows(data, ".xlsx")
     inspection = inspect_table(data, "bill.xlsx")
     assert rows[inspection.header_row_index] == inspection.headers
+
+
+def test_trailing_blank_columns_trimmed_for_padded_sheet() -> None:
+    """Excel dimension 被撑到数据列之外时，不应把尾部空列带进表头与预览。"""
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["成交日期", "证券代码", "成交数量", "成交价格", "成交金额", "摘要"])
+    sheet.append(["20260304", "600519", "100", "10.00", "1000.00", "证券买入"])
+    # 只有格式没有内容的单元格会把工作表 dimension 撑到 Z 列。
+    sheet["Z1"] = " "
+    buffer = io.BytesIO()
+    workbook.save(buffer)
+    data = buffer.getvalue()
+
+    rows = read_rows(data, ".xlsx")
+    assert {len(row) for row in rows} == {6}
+
+    inspection = inspect_table(data, "bill.xlsx")
+    assert inspection.headers == [
+        "成交日期",
+        "证券代码",
+        "成交数量",
+        "成交价格",
+        "成交金额",
+        "摘要",
+    ]
+    assert inspection.unresolved_headers == []
+
+
+def test_trailing_blank_columns_trimmed_for_csv() -> None:
+    """CSV 尾部连续空单元格同样裁掉；只有表头的空列仍保留。"""
+    data = (
+        "成交日期,证券代码,成交数量,成交价格,成交金额,摘要,备注,\n"
+        "20260304,600519,100,10.00,1000.00,证券买入,,\n"
+    ).encode()
+    inspection = inspect_table(data, "bill.csv")
+    assert inspection.headers == [
+        "成交日期",
+        "证券代码",
+        "成交数量",
+        "成交价格",
+        "成交金额",
+        "摘要",
+        "备注",
+    ]
 
 
 _TEXT_XLS_HEADERS = (
@@ -516,6 +572,24 @@ def test_completeness_allows_only_fully_mapped_cash_mode() -> None:
         _plan([("date", "trade_date"), ("amount", "amount"), ("side", "side")])
     )
     assert "summary" in {issue["field"] for issue in issues}
+
+
+def test_normalize_summary_strips_wrapping_and_inner_whitespace() -> None:
+    """摘要归一：折行/空白/NBSP/全角空格/零宽字符全部删除，非空白字符保持原序。"""
+    assert normalize_summary("股息红利税\n补缴") == "股息红利税补缴"
+    assert normalize_summary(" 股息红利税\r\n\t补缴 ") == "股息红利税补缴"
+    assert normalize_summary("股息\u00a0红利税\u3000补\u200b缴") == "股息红利税补缴"
+    # 纯中文摘要（无空白）逐字不变，不引入额外分隔符。
+    assert normalize_summary("证券买入") == "证券买入"
+
+
+def test_normalize_type_key_stable_across_whitespace_variants() -> None:
+    """类型 key 与摘要归一同口径：带空白与不带空白得到同一个 key。"""
+    canonical = normalize_type_key("股息红利税补缴")
+    assert normalize_type_key("股息红利税\n补缴") == canonical
+    assert normalize_type_key(" 股息红利税 补缴 ") == canonical
+    # 既有 ASCII 小写/NFKC 口径不退化。
+    assert normalize_type_key(" IPO Buy ") == "ipobuy"
 
 
 @pytest.mark.parametrize(

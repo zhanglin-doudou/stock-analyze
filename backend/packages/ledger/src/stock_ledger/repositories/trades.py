@@ -1,7 +1,9 @@
 """交易明细仓储：游标分页、乐观锁更新、软删/恢复、对账余额链、导出。
 
-游标用 `base64url(json({"d": trade_date, "i": id}))`：把“上一页最后一行”的排序键编码
-进 token，比 offset 分页更稳（新写入不会导致翻页错位）。非法游标一律抛 INVALID_CURSOR。
+游标用 `base64url(json({"d": trade_date, "l": line_no, "i": id}))`：把“上一页最后一行”
+的排序键编码进 token，比 offset 分页更稳（新写入不会导致翻页错位）。同一天内必须按
+文件行号排序——ULID 在同一毫秒内不再保证写入顺序，只按 id 排会把同日流水打乱。
+非法游标一律抛 INVALID_CURSOR。
 """
 
 from __future__ import annotations
@@ -15,7 +17,7 @@ from dataclasses import dataclass
 from datetime import UTC, date, datetime
 from typing import Any
 
-from sqlalchemy import case, func, or_, select
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from stock_contracts.constants import CURSOR_MAX_LIMIT
@@ -287,7 +289,11 @@ class TradeRepository:
         at: datetime,
         only_version_1: bool = True,
     ) -> int:
-        """撤销导入：只软删该批次写入、且未被人工改过（version=1）的行。"""
+        """撤销导入：只软删该批次写入、且未被人工改过（version=1）的行。
+
+        返回值只计入直接被本批次写入的行，不包括后续额外软删的人工修订注入行（见
+        `soft_delete_revisions_for_batch`），以便调用方把两类脏数据分开计数和报告。
+        """
         trades = await self._session.scalars(
             select(Trade).where(
                 Trade.user_id == user_id,
@@ -299,6 +305,42 @@ class TradeRepository:
         for trade in trades:
             if only_version_1 and trade.version != 1:
                 continue
+            trade.deleted_at = at
+            trade.version += 1
+            count += 1
+        await self._session.flush()
+        return count
+
+    async def soft_delete_revisions_for_batch(
+        self, user_id: uuid.UUID, batch_id: str, *, at: datetime
+    ) -> int:
+        """撤销导入时顺带清理脏数据：revision_of 指向本批次交易的人工修订注入行。
+
+        修订注入行 `batch_id=NULL`（不参与批次归属），但一旦被修订的导入行撤销，
+        注入行就失去存在前提——如果不清理，后续任何资产/收益重算都会以"手工买入"
+        的形式凭空计入这两条现金腿。
+
+        覆盖范围：本批次所有导入行的 trade_id 都纳入（包括已被人工改过 v>1 或
+        已软删的），避免漏掉任何 revision_of 关联。
+        """
+        all_batch_ids = set(
+            await self._session.scalars(
+                select(Trade.id).where(
+                    Trade.user_id == user_id, Trade.batch_id == batch_id
+                )
+            )
+        )
+        if not all_batch_ids:
+            return 0
+        revision_rows = await self._session.scalars(
+            select(Trade).where(
+                Trade.user_id == user_id,
+                Trade.revision_of.in_(all_batch_ids),
+                Trade.deleted_at.is_(None),
+            )
+        )
+        count = 0
+        for trade in revision_rows:
             trade.deleted_at = at
             trade.version += 1
             count += 1
@@ -363,7 +405,7 @@ class TradeRepository:
         dedupe_keys: Sequence[str] | None = None,
         exclude_dedupe_keys: Sequence[str] | None = None,
     ) -> tuple[list[Trade], str | None]:
-        """按 (trade_date DESC, id DESC) 游标翻页；多取 1 行判断是否还有下一页。"""
+        """按 (trade_date DESC, line_no DESC NULLS LAST, id DESC) 游标翻页；多取 1 行判断是否还有下一页。"""
         capped = max(1, min(limit, CURSOR_MAX_LIMIT))
         stmt = select(Trade).where(Trade.user_id == user_id)
         if not include_deleted:
@@ -386,23 +428,53 @@ class TradeRepository:
             payload = decode_cursor(cursor)
             try:
                 cursor_date = date.fromisoformat(payload["d"])
+                raw_line = payload["l"]
+                cursor_line = int(raw_line) if raw_line else None
                 cursor_id = payload["i"]
             except (KeyError, ValueError) as exc:
                 raise ApiError(ErrorCode.INVALID_CURSOR, detail="游标字段缺失") from exc
-            stmt = stmt.where(
-                or_(
-                    Trade.trade_date < cursor_date,
-                    (Trade.trade_date == cursor_date) & (Trade.id < cursor_id),
+            if cursor_line is None:
+                # 行号为空的行排在同日最后，下一页只能是同为空的更小 id。
+                stmt = stmt.where(
+                    or_(
+                        Trade.trade_date < cursor_date,
+                        and_(
+                            Trade.trade_date == cursor_date,
+                            Trade.line_no.is_(None),
+                            Trade.id < cursor_id,
+                        ),
+                    )
                 )
-            )
-        stmt = stmt.order_by(Trade.trade_date.desc(), Trade.id.desc()).limit(capped + 1)
+            else:
+                stmt = stmt.where(
+                    or_(
+                        Trade.trade_date < cursor_date,
+                        and_(
+                            Trade.trade_date == cursor_date,
+                            or_(
+                                Trade.line_no.is_(None),
+                                Trade.line_no < cursor_line,
+                                and_(Trade.line_no == cursor_line, Trade.id < cursor_id),
+                            ),
+                        ),
+                    )
+                )
+        stmt = stmt.order_by(
+            Trade.trade_date.desc(), Trade.line_no.desc().nulls_last(), Trade.id.desc()
+        ).limit(capped + 1)
         rows = list(await self._session.scalars(stmt))
         has_more = len(rows) > capped
         rows = rows[:capped]
         next_cursor = None
         if has_more and rows:
             last = rows[-1]
-            next_cursor = encode_cursor({"d": last.trade_date.isoformat(), "i": last.id})
+            next_cursor = encode_cursor(
+                {
+                    "d": last.trade_date.isoformat(),
+                    "l": "" if last.line_no is None else str(last.line_no),
+                    "i": last.id,
+                }
+            )
         return rows, next_cursor
 
     async def history(self, user_id: uuid.UUID, trade_id: str) -> list[TradeHistory]:
@@ -632,7 +704,9 @@ class TradeRepository:
             stmt = stmt.where(Trade.trade_date >= date_from)
         if date_to is not None:
             stmt = stmt.where(Trade.trade_date <= date_to)
-        stmt = stmt.order_by(Trade.trade_date.asc(), Trade.id.asc())
+        stmt = stmt.order_by(
+            Trade.trade_date.asc(), Trade.line_no.asc().nulls_first(), Trade.id.asc()
+        )
         return list(await self._session.scalars(stmt))
 
     async def existing_dedupe_keys(self, user_id: uuid.UUID, keys: Sequence[str]) -> set[str]:

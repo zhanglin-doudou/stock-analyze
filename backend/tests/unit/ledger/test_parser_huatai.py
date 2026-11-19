@@ -13,7 +13,7 @@ from openpyxl import Workbook
 from stock_contracts.clock import FrozenClock
 from stock_contracts.enums import QuarantineReason, WarningCode
 from stock_contracts.errors import ApiError, ErrorCode
-from stock_ledger.parsers.columns import detect_date_format, map_columns
+from stock_ledger.parsers.columns import detect_date_format, map_columns, normalize_name
 from stock_ledger.parsers.huatai import (
     ParsedBill,
     parse_bill,
@@ -95,6 +95,30 @@ def test_column_recognition_and_scaling() -> None:
     assert row.amount_units == -168_042_00
     assert row.commission_units == 42_00
     assert row.cash_balance_units == 100000_00
+
+
+def test_security_name_normalized_like_summary() -> None:
+    """证券名称与摘要同口径归一：折行/制表/全角空格/NBSP/零宽字符一律删除。"""
+    rows = [
+        _buy_row(证券代码="940018", 证券名称="华泰紫金天\n天发货币"),
+        _buy_row(证券代码="600519", 证券名称="贵州\u3000茅台\u00a0A"),
+        _buy_row(证券代码="000001", 证券名称="平\u200b安银行\t"),
+    ]
+    bill = _parse(_xlsx(_HEADERS, rows))
+
+    assert [row.security_name for row in bill.rows] == [
+        "华泰紫金天天发货币",
+        "贵州茅台A",
+        "平安银行",
+    ]
+
+
+def test_normalize_name_matches_summary_whitespace_rules() -> None:
+    assert normalize_name("华泰紫金天\n天发货币") == "华泰紫金天天发货币"
+    assert normalize_name("贵州\u3000茅台\u00a0A") == "贵州茅台A"
+    assert normalize_name("平\u200b安\u200d银行") == "平安银行"
+    assert normalize_name("  贵州茅台  ") == "贵州茅台"
+    assert normalize_name("") == ""
 
 
 def test_amount_scaling_handles_thousands_separator() -> None:
@@ -399,9 +423,9 @@ def test_non_trade_interest() -> None:
 
 
 def test_non_trade_dividend_tax_with_newline() -> None:
-    """股息红利税补缴（含换行符）：无证券代码 → CASH 占位；方向由 Category 决定。"""
+    """股息红利税补缴（含换行/空格）：解析边界归一后落库摘要无空白，CASH 占位。"""
     row = _buy_row(
-        证券代码="", 证券名称="", 买卖标志="", 摘要="股息红利税\n补缴", 成交金额="-60.00"
+        证券代码="", 证券名称="", 买卖标志="", 摘要=" 股息红利税\n补缴 ", 成交金额="-60.00"
     )
     bill = _parse(_xlsx(_HEADERS, [row]))
     assert len(bill.rows) == 1
@@ -410,6 +434,16 @@ def test_non_trade_dividend_tax_with_newline() -> None:
     assert r.security_code == "CASH"
     assert r.side == "unknown"
     assert r.amount_units == -60_00
+    # 归一：删除换行与首尾/中间空白（含 NBSP），纯中文语义不变。
+    assert r.summary == "股息红利税补缴"
+    assert r.security_name == "股息红利税补缴"
+
+
+def test_summary_without_whitespace_unchanged() -> None:
+    """不含空白的摘要归一后必须逐字不变（不误伤既有口径）。"""
+    row = _buy_row(摘要="证券买入")
+    bill = _parse(_xlsx(_HEADERS, [row]))
+    assert bill.rows[0].summary == "证券买入"
 
 
 def test_non_trade_market_value_subscription_is_cash_row() -> None:
@@ -501,9 +535,11 @@ def test_real_bill_amount_is_signed_net_cash_flow() -> None:
 def test_fund_redemption_confirmation_not_quarantined() -> None:
     """基金账单（无「买卖标志」列）：申赎确认方向由分类阶段 Category 决定，不被隔离。"""
     bill = _parse(_FUND_BILL.read_bytes(), file_name=_FUND_BILL.name)
-    assert len(bill.rows) == 7
-    # 零金额的「红利发放」按账单分类正常入账，不再隔离。
-    assert bill.quarantined == []
+    # 零金额「红利发放」（金额/余额全 0）按统一口径隔离 INVALID_AMOUNT，其余 6 行入账。
+    assert len(bill.rows) == 6
+    assert [(item.line_no, item.reason_code) for item in bill.quarantined] == [
+        (19, QuarantineReason.INVALID_AMOUNT.value)
+    ]
 
     by_line = {row.line_no: row for row in bill.rows}
     redeem = by_line[17]
@@ -525,17 +561,11 @@ def test_fund_redemption_confirmation_not_quarantined() -> None:
 def test_statement_stops_at_total_row_before_holdings_sections() -> None:
     """流水明细「合计」之后的股票/基金持仓、声明区块不是交易行 → 不进隔离区。"""
     bill = _parse(_STATEMENT_BILL.read_bytes(), file_name=_STATEMENT_BILL.name)
-    # 10 条明细：3 条 [省心投]红利发放内容完全一致 → 1 条入账（dividend），2 条按
-    # DUPLICATE_IN_FILE 隔离；转托管确认 + 证券清理五金额全 0 → INVALID_AMOUNT。
-    assert len(bill.rows) == 6
-    assert sorted(q.line_no for q in bill.quarantined) == [18, 19, 20, 25]
-    reason_by_line = {q.line_no: q.reason_code for q in bill.quarantined}
-    assert reason_by_line == {
-        18: QuarantineReason.DUPLICATE_IN_FILE.value,
-        19: QuarantineReason.DUPLICATE_IN_FILE.value,
-        20: QuarantineReason.INVALID_AMOUNT.value,
-        25: QuarantineReason.INVALID_AMOUNT.value,
-    }
+    # 10 条明细：3 条 [省心投]红利发放 + 转托管确认 + 证券清理五金额全 0 →
+    # 全部 INVALID_AMOUNT 隔离（全零口径不做摘要豁免，也不进入重复判定）。
+    assert len(bill.rows) == 5
+    assert sorted(q.line_no for q in bill.quarantined) == [17, 18, 19, 20, 25]
+    assert {q.reason_code for q in bill.quarantined} == {QuarantineReason.INVALID_AMOUNT.value}
     # 「合计」在夹具第 27 行；持仓/声明区一行都不应被解析，更不能当 INVALID_ROW 隔离。
     assert max(row.line_no for row in bill.rows) == 26
     assert all(q.reason_code != QuarantineReason.INVALID_ROW.value for q in bill.quarantined)
@@ -546,7 +576,7 @@ def test_wrapped_summary_newline_normalized_for_side_and_parse() -> None:
     bill = _parse(_STATEMENT_BILL.read_bytes(), file_name=_STATEMENT_BILL.name)
     by_line = {row.line_no: row for row in bill.rows}
     subscribe = by_line[21]
-    assert subscribe.summary == "[省心投]申\n购确认"
+    assert subscribe.summary == "[省心投]申购确认"
     assert subscribe.side == "unknown"
     # 「[省心投]申购确认」视同银行转出（设计 D14）：CASH 占位、无份额语义；
     # 发生金额（负值流出）与资金余额原样保留，分类走 transfer。
@@ -557,7 +587,7 @@ def test_wrapped_summary_newline_normalized_for_side_and_parse() -> None:
     assert subscribe.cash_balance_units == 27196_66
     # 打新缴款摘要同样含「申购确认」，方向由分类 new_stock 规则兜底。
     ipo_payment = by_line[23]
-    assert ipo_payment.summary == "新股申购确\n认缴款"
+    assert ipo_payment.summary == "新股申购确认缴款"
     assert ipo_payment.side == "unknown"
     assert ipo_payment.amount_units == -26630_00
     # 托管转出发生金额 0 但资金余额非 0 → 保留为 unknown 方向；证券清理全零 → 隔离。
@@ -566,8 +596,8 @@ def test_wrapped_summary_newline_normalized_for_side_and_parse() -> None:
     assert quarantined_lines[25].reason_code == QuarantineReason.INVALID_AMOUNT.value
 
 
-def test_sxt_dividend_enters_ledger_even_with_cash_balance() -> None:
-    """「[省心投]红利发放」按账单分类正常入账：金额 0、份额保留，资金余额不影响。"""
+def test_sxt_dividend_with_real_balance_still_enters_ledger() -> None:
+    """资金余额是非 0 的真实值时不受全零规则影响：金额 0、份额保留，正常入账。"""
     row = _buy_row(
         证券代码="004262",
         证券名称="招商招禧宝货币B",
@@ -866,8 +896,12 @@ def test_non_trade_asset_transfer_without_code_is_cash_row() -> None:
     assert row.cash_balance_units == 180100_05
 
 
-def test_zero_amount_share_rows_enter_ledger() -> None:
-    """零金额「红利发放」「非交易过户确认」按账单分类正常入账，不再隔离。"""
+def test_zero_amount_share_rows_quarantined_as_invalid_amount() -> None:
+    """全零的「红利发放」「非交易过户确认」不做摘要豁免，一律隔离 INVALID_AMOUNT。
+
+    这类行的「资金余额」列常是券商占位 0.00（真实案例：2026-10-27 940018 红利发放
+    金额 0、407.6 份、余额列 0），放进账本会直接成为期末余额锚点。
+    """
     rows = [
         _money_row(
             line_date="20261023",
@@ -907,10 +941,10 @@ def test_zero_amount_share_rows_enter_ledger() -> None:
         ),
     ]
     bill = _parse(_xlsx(_HEADERS, rows))
-    assert bill.quarantined == []
-    assert len(bill.rows) == 4
-    by_line = {row.line_no: row for row in bill.rows}
-    assert by_line[3].amount_units == 0
-    assert by_line[3].quantity_units == 600_0000
-    assert by_line[5].amount_units == 0
-    assert by_line[5].quantity_units == 40_7600
+    assert [row.line_no for row in bill.rows] == [2, 4]
+    assert {item.line_no: item.reason_code for item in bill.quarantined} == {
+        3: QuarantineReason.INVALID_AMOUNT.value,
+        5: QuarantineReason.INVALID_AMOUNT.value,
+    }
+    # 隔离行保留原始内容（含份额），供人工复核后决定是否补录。
+    assert bill.quarantined[1].raw["摘要"] == "红利发放"

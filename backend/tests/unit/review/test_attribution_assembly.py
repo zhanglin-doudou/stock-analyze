@@ -431,6 +431,62 @@ def test_golden_residual_buckets_and_coverage() -> None:
     assert coverage.unattributed == ()
 
 
+def test_money_fund_excluded_from_plans_and_residual() -> None:
+    """货币基金是现金等价物：不生成归因计划，申购/赎回净额也不落残差桶/未归因列表。"""
+    money_fund = [
+        _trade(
+            trade_date=date(2025, 3, 10),
+            security_code="940018",
+            security_name="华泰紫金天天发货币",
+            side="buy",
+            category="buy",
+            quantity_units=100_000_000,  # 10,000 份
+            price_units=1_000_000,  # 1.00
+            amount_units=-10_000_00,  # −10,000.00
+            summary="基金申购",
+        ),
+        _trade(
+            trade_date=date(2025, 3, 20),
+            security_code="940018",
+            security_name="华泰紫金天天发货币",
+            side="sell",
+            category="sell",
+            quantity_units=99_000_000,  # 9,900 份
+            price_units=1_000_000,  # 1.00
+            amount_units=9_900_00,  # +9,900.00
+            summary="基金赎回",
+        ),
+    ]
+    trades = _golden_trades() + money_fund
+    bundle = _build_bundle(trades, memberships=MEMBERSHIPS)
+    assert {plan.security_code for plan in bundle.plans} == {"600000"}
+
+    split = split_residual(
+        plans=bundle.plans,
+        trades=trades,
+        t0=T0,
+        t1=T1,
+        begin_date=P0_DATE,
+        end_date=T1,
+        bucket_mv={"600000": (570_000, 280_000)},
+        holdings_at={"600000": (6_000_000, 2_000_000)},
+        corporate={},
+        canonical=lambda c: c,
+    )
+    assert "940018" not in split.per_symbol
+    assert split.buckets[BUCKET_UNATTRIBUTED] == 0
+    assert split.buckets[BUCKET_OTHER] == 0
+    assert split.fee_bucketed_units == 0
+
+    coverage = build_coverage(
+        plans=bundle.plans,
+        decomposition=decompose(bundle.plans[0].segments, 172_840, extra_fee_units=0),
+        per_symbol=split.per_symbol,
+        base_basis="market",
+    )
+    assert coverage.symbols_total == 1
+
+
 def test_split_routes_new_stock_to_ipo_bucket() -> None:
     """`new_stock` 标的的本期盯市损益进 `ipo_pnl`（账户级），不进 `unattributed_price_pnl`；
     破发（负值）同样只进 ipo_pnl；其余非归因标的仍留在 unattributed。

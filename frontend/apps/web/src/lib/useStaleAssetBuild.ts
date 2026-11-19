@@ -223,7 +223,7 @@ export function useStaleAssetBuild({
   // 前端检测 + 显式触发：只在读到后端 stale 时 POST（不在渲染期触发）。
   // 同一 stale 指纹共用模块级 Promise：StrictMode 双挂载、跨页并发挂载都只发一次 POST。
   useEffect(() => {
-    if (!build || build.state !== "stale") return;
+    if (!build || !["stale", "missing"].includes(build.state)) return;
     if (activeJobId || submitting) return;
 
     const fingerprint = staleFingerprint(build);

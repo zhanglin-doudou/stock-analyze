@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { newIdempotencyKey } from "@sa/api-client";
 import type {
+  BillDataResetOut,
   CreatedPatToken,
   Job,
   PatToken,
@@ -191,6 +192,13 @@ export function Settings() {
   const [catalogLoading, setCatalogLoading] = useState(false);
   const [catalogError, setCatalogError] = useState<unknown>(null);
   const [conceptQuery, setConceptQuery] = useState("");
+
+  // API-110：重置账单数据（不可撤销，需输入确认词）。
+  const [resetOpen, setResetOpen] = useState(false);
+  const [resetConfirm, setResetConfirm] = useState("");
+  const [resetBusy, setResetBusy] = useState(false);
+  const [resetResult, setResetResult] = useState<BillDataResetOut | null>(null);
+  const [resetError, setResetError] = useState<unknown>(null);
 
   const load = useCallback(async () => {
     setError(null);
@@ -385,6 +393,22 @@ export function Settings() {
       setRebuildJobId(accepted.job_id);
     } catch (err) {
       setRebuildError(err);
+    }
+  }
+
+  async function resetBillData(): Promise<void> {
+    setResetBusy(true);
+    setResetError(null);
+    try {
+      const result = await api.settings.resetBillData(newIdempotencyKey());
+      setResetResult(result);
+      setResetOpen(false);
+      setResetConfirm("");
+      await loadSettings();
+    } catch (err) {
+      setResetError(err);
+    } finally {
+      setResetBusy(false);
     }
   }
 
@@ -782,18 +806,22 @@ export function Settings() {
             ))}
           </div>
 
-          <div className="settings-actions">
-            <button
-              type="button"
-              className="settings-btn settings-btn-ghost"
-              disabled={sessions.rows.length >= 2}
-              onClick={() =>
-                setSessions({ ...sessions, rows: [...sessions.rows, { open: "", close: "" }] })
-              }
-            >
-              增加时段
-            </button>
-          </div>
+          {sessions.rows.length < 2 && (
+            <div className="settings-actions">
+              <button
+                type="button"
+                className="settings-btn settings-btn-ghost"
+                onClick={() =>
+                  setSessions({
+                    ...sessions,
+                    rows: [...sessions.rows, { open: '', close: '' }],
+                  })
+                }
+              >
+                增加时段
+              </button>
+            </div>
+          )}
 
           <div className="settings-field-group">
             <label className="settings-field">
@@ -801,12 +829,13 @@ export function Settings() {
               <input
                 type="time"
                 value={sessions.dataReadyAfter}
+                disabled={true}
                 onChange={(event) =>
                   setSessions({ ...sessions, dataReadyAfter: event.target.value })
                 }
               />
             </label>
-            <span className="settings-hint">不早于最后一段收盘时间。</span>
+            <span className="settings-hint">不早于最后一段收盘时间。（系统管理员设定，暂不支持调整）</span>
           </div>
 
           <label className="check settings-check">
@@ -1015,6 +1044,76 @@ export function Settings() {
           rowKey={(row) => row.token_id}
           emptyText="暂无令牌"
         />
+      </section>
+
+      <section className="settings-card settings-card-danger">
+        <div className="settings-card-head">
+          <h2>重置账单数据</h2>
+          <span className="settings-meta">不可撤销</span>
+        </div>
+        <p className="settings-hint">
+          清空当前账号的账单、导入批次与模板、回合、净值、资产与指标数据；偏好设置与令牌不受影响，且无法恢复。
+        </p>
+        {resetOpen ? (
+          <div>
+            <label className="settings-field">
+              输入「重置」确认
+              <input
+                value={resetConfirm}
+                onChange={(event) => setResetConfirm(event.target.value)}
+                placeholder="重置"
+                autoComplete="off"
+              />
+            </label>
+            <div className="settings-actions">
+              <button
+                type="button"
+                className="settings-btn settings-btn-danger"
+                data-testid="settings-reset-confirm"
+                disabled={resetBusy || resetConfirm.trim() !== "重置"}
+                onClick={() => void resetBillData()}
+              >
+                {resetBusy ? "重置中…" : "确认重置"}
+              </button>
+              <button
+                type="button"
+                className="settings-btn settings-btn-ghost"
+                disabled={resetBusy}
+                onClick={() => {
+                  setResetOpen(false);
+                  setResetConfirm("");
+                }}
+              >
+                取消
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="settings-actions">
+            <button
+              type="button"
+              className="settings-btn settings-btn-danger"
+              data-testid="settings-reset"
+              onClick={() => {
+                setResetOpen(true);
+                setResetResult(null);
+                setResetError(null);
+              }}
+            >
+              重置账单数据
+            </button>
+          </div>
+        )}
+        {resetResult ? (
+          <p className="settings-hint" data-testid="settings-reset-done">
+            已删除 {resetResult.total} 行账单数据。
+          </p>
+        ) : null}
+        {resetError ? (
+          <p className="settings-error" role="alert">
+            重置失败：{toProblem(resetError).user_message}
+          </p>
+        ) : null}
       </section>
     </div>
   );

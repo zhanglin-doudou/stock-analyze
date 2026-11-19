@@ -123,7 +123,7 @@ async def test_api_032_happy_path(client, account_factory, owner_engine):
     body = r.json()
     assert body["period"] == "2026-06"
     assert body["benchmark_id"] == "hs300_tr"
-    assert body["definition_version"] == "1.0"
+    assert body["definition_version"] == "1.1"
 
     points = body["points"]
     assert len(points) >= 1

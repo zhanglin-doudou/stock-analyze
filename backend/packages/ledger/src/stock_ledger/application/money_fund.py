@@ -1,0 +1,314 @@
+"""货币基金（现金类产品）识别与余额推演（纯计算，无 I/O、无 wall-clock）。
+
+口径（2026-11-16 人工确认）：
+
+* 货基是**现金等价物**：不进 FIFO、不产生回合、不进持仓/持仓成本/市值，也不请求行情；
+  资产表/净值把它并入「现金余额」，总资产恒等式仍为「现金 + 持仓市值」。
+* 识别按**整只证券代码**判定，避免单行证据误伤普通基金：
+  1. 强证据：证券名称含「货币」或「现金」；
+  2. 兜底证据（同时满足）：非行情品种（`needs_quote` 为 False）、名称不含
+     ETF/LOF/REIT、至少一笔数量非 0 的申赎、且该标的所有数量非 0 的行单位价格
+     恰为 1.000000、三费全 0。
+* 申赎方向看 `category`（导入行可能 `side=unknown`）：`sell` 减少余额，`buy`/
+  `dividend` 等增加（红利发放/红利再投以份额形式增加余额）；`broker_action`
+  （零金额登记/份额过户）一律不影响余额，避免与资金腿重复计入。
+* 份额正推识别超卖：赎回份额超过当时余额时，区分两种缺口——
+  - 此前**没有任何增持**（历史首笔即赎回）→ 期初已持有，计入反推期初余额；
+  - 此前出现过申购/红利再投 → 超卖，券商以补记份额处理，当日按收益计入，
+    **不进期初**（否则缺口会被摊进初始资产，申购前后的历史被一并改写）。
+
+本模块放在 ledger 层：导入提交的「资金腿归一」需要在落库前复用同一份识别/余额口径，
+review 侧通过 `stock_review.application.money_fund` 兼容转发。
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterable
+from dataclasses import dataclass
+from datetime import date
+
+from stock_platform.symbols import needs_quote
+
+from stock_ledger.models import Trade
+
+# 货基单位净值：1.000000（价格标度 6）。
+UNIT_PRICE_UNITS = 1_000_000
+# 数量（scale=4）× 价格（scale=6）→ 金额（scale=2）。
+QTY_PRICE_SCALE = 10**8
+# 强证据：名称关键词（人工确认含「现金」，如「现金宝」「平安证券现金宝」）。
+NAME_KEYWORDS: tuple[str, ...] = ("货币", "现金")
+# 名称反证：交易型基金即使名称含「货币」也不按 1 元现金产品处理。
+NON_CASH_NAME_KEYWORDS: tuple[str, ...] = ("ETF", "LOF", "REIT")
+
+
+def _name(value: str | None) -> str:
+    return (value or "").strip()
+
+
+def _is_money_fund_name(name: str) -> bool:
+    text = _name(name)
+    if not text or any(keyword in text.upper() for keyword in NON_CASH_NAME_KEYWORDS):
+        return False
+    return any(keyword in text for keyword in NAME_KEYWORDS)
+
+
+def _looks_like_cash_product(code: str, rows: list[Trade]) -> bool:
+    """兜底证据：非行情品种 + 全部有效申赎都是 1 元零费。"""
+    if needs_quote(code):
+        return False
+    quantity_rows = [row for row in rows if row.quantity_units != 0]
+    if not quantity_rows:
+        return False
+    return all(
+        row.price_units == UNIT_PRICE_UNITS
+        and not row.commission_units
+        and not row.stamp_tax_units
+        and not row.other_fee_units
+        for row in quantity_rows
+    )
+
+
+def money_fund_codes(rows: Iterable[Trade]) -> frozenset[str]:
+    """整只证券代码维度的货基集合（强证据命中即命中，兜底证据需全量一致）。"""
+    grouped: dict[str, list[Trade]] = {}
+    for row in rows:
+        code = _name(row.security_code)
+        if code:
+            grouped.setdefault(code, []).append(row)
+    matched: set[str] = set()
+    for code, items in grouped.items():
+        if any(_is_money_fund_name(row.security_name) for row in items):
+            matched.add(code)  # 强证据：名称含「货币」/「现金」
+        elif _looks_like_cash_product(code, items):
+            matched.add(code)  # 兜底证据：非行情品种 + 全部申赎 1 元零费
+    return frozenset(matched)
+
+
+def money_fund_identity(rows: Iterable[Trade]) -> dict[str, str]:
+    """货基代码 → 归并身份键（同名不同代码共享同一份持仓）。
+
+    同一只货基在券商/登记口径上可能以不同代码出现（例如场内代码与登记/理财账号
+    代码并存），名称相同即视为同一只产品：份额、超卖与余额都按合并后的身份键推演。
+    归并只在货基集合内部进行，身份键优先取**6 位数字真实代码**（可回填到导入流水、
+    可做行情/展示），其次取组内最近有流水的代码，同一日期再按字典序保证稳定；
+    名称缺失的代码不参与归并，身份键即自身。
+    """
+    items = list(rows)
+    codes = money_fund_codes(items)
+    if not codes:
+        return {}
+    parent = {code: code for code in codes}
+
+    def _find(code: str) -> str:
+        root = code
+        while parent[root] != root:
+            root = parent[root]
+        while parent[code] != root:  # 路径压缩
+            parent[code], code = root, parent[code]
+        return root
+
+    latest: dict[str, date] = {}
+    name_owner: dict[str, str] = {}
+    for row in items:
+        code = _name(row.security_code)
+        if code not in codes:
+            continue
+        latest[code] = max(latest.get(code, date.min), row.trade_date)
+        name = _name(row.security_name)
+        if not name:
+            continue
+        owner = name_owner.setdefault(name, code)
+        if owner != code:  # 同名不同代码 → 并入同一组（可传递）
+            parent[_find(code)] = _find(owner)
+    components: dict[str, set[str]] = {}
+    for code in codes:
+        components.setdefault(_find(code), set()).add(code)
+    identity = {code: code for code in codes}
+    for members in components.values():
+        if len(members) < 2:
+            continue
+        canonical = max(
+            members, key=lambda code: (_is_real_code(code), latest.get(code, date.min), code)
+        )
+        for code in members:
+            identity[code] = canonical
+    return identity
+
+
+def _is_real_code(code: str) -> bool:
+    """6 位数字证券代码；理财账号/伪代码（如 `A40006`）不是真实证券代码。"""
+    return len(code) == 6 and code.isdigit()
+
+
+def money_fund_value_units(row: Trade) -> int:
+    """单笔货基流水对余额的金额影响（scale=2；申购买入为正、赎回卖出为负）。
+
+    `broker_action` 是登记/过户类动作（如「非交易过户确认」），份额变动只用于
+    核对，不代表余额增减；若同时存在资金腿，加回来会重复计入，故一律返回 0。
+    """
+    if (row.category or "").strip().lower() == "broker_action":
+        return 0
+    quantity = row.quantity_units
+    if quantity == 0:
+        return 0
+    price = row.price_units if row.price_units > 0 else UNIT_PRICE_UNITS
+    value = abs(quantity) * price // QTY_PRICE_SCALE
+    return -value if (row.category or "").strip().lower() == "sell" else value
+
+
+@dataclass(frozen=True, slots=True)
+class MoneyFundOversell:
+    """份额正推发现的货基超卖（赎回份额超过当时余额，券商以补记份额处理）。"""
+
+    trade_id: str
+    trade_date: date
+    security_code: str
+    # 超出当时余额的份额（scale=4，正数）；货基单位价格恒 1.000000，即超卖金额 ×100。
+    quantity_units: int
+
+    @property
+    def value_units(self) -> int:
+        """超卖份额折算的金额（scale=2），用于把缺口计入选当日收益。"""
+        return _shares_to_value_units(self.quantity_units)
+
+
+def _share_delta(row: Trade) -> int:
+    """带方向份额增量（scale=4）：赎回为负，申购/红利再投为正，登记类为 0。"""
+    quantity = row.quantity_units
+    if quantity == 0:
+        return 0
+    category = (row.category or "").strip().lower()
+    if category == "broker_action":
+        return 0
+    return -quantity if category == "sell" else quantity
+
+
+def _shares_to_value_units(quantity_units: int) -> int:
+    """份额（scale=4）→ 金额（scale=2）：货基单位价格恒 1.000000。"""
+    return abs(quantity_units) * UNIT_PRICE_UNITS // QTY_PRICE_SCALE
+
+
+def _forward_shares(
+    rows: list[Trade], keys: frozenset[str], identity: dict[str, str]
+) -> tuple[dict[str, int], tuple[MoneyFundOversell, ...]]:
+    """全历史份额正推：返回 (期初反推份额, 超卖记录)，均按归并身份键。
+
+    不变量：**running[key] == offset[key] + Σdelta** 始终成立。
+
+    缺口处理优先级（货基份额可跨基金 1:1 抵消）：
+
+    1. 任何货基的赎回缺口（running<0）都先从 peers 的 running 盈余里扣减——
+       peers 的余额本质上也是整个货基池的"已增持未赎回"份额；
+    2. peer 扣减同时更新 peer 的 offset，保持 running = offset + Σdelta 不变量；
+    3. 剩余未覆盖的缺口，按 increased 状态分流：有增持 → 超卖（券商补记份额、
+       当日计入收益）；从未增持 → 反推进期初。
+    """
+    running: dict[str, int] = dict.fromkeys(keys, 0)
+    offset: dict[str, int] = dict.fromkeys(keys, 0)
+    increased: dict[str, bool] = dict.fromkeys(keys, False)
+    oversells: list[MoneyFundOversell] = []
+
+    def _cover_from_peers(key: str, deficit: int) -> int:
+        """从 peers 的 running 盈余里扣减 deficit 份额，返回剩余未覆盖缺口。
+
+        同时同步调整 peer 的 offset，保持 running[peer] == offset[peer] + Σdelta
+        不变量（因为 Σdelta 不变，running 被减了 take，offset 也必须减 take）。
+        """
+        remaining = deficit
+        for peer, bal in running.items():
+            if peer == key or bal <= 0 or remaining <= 0:
+                continue
+            take = min(bal, remaining)
+            running[peer] = bal - take
+            offset[peer] -= take
+            remaining -= take
+        return remaining
+
+    for row in rows:
+        key = identity.get(_name(row.security_code))
+        if key is None:
+            continue
+        delta = _share_delta(row)
+        if delta == 0:
+            continue
+        if delta > 0:
+            increased[key] = True
+            running[key] += delta
+            continue
+        running[key] += delta
+        if running[key] >= 0:
+            continue
+        deficit = -running[key]
+        still = _cover_from_peers(key, deficit)
+        if still > 0:
+            if increased[key]:
+                oversells.append(
+                    MoneyFundOversell(
+                        trade_id=row.id,
+                        trade_date=row.trade_date,
+                        security_code=key,
+                        quantity_units=still,
+                    )
+                )
+            else:
+                offset[key] += still
+        running[key] += deficit
+    return offset, tuple(oversells)
+
+
+def money_fund_oversells(rows: Iterable[Trade]) -> tuple[MoneyFundOversell, ...]:
+    """全历史份额正推得到的货基超卖记录（日期 / 归并身份键 / 超出份额）。"""
+    ordered = list(rows)
+    identity = money_fund_identity(ordered)
+    if not identity:
+        return ()
+    return _forward_shares(ordered, frozenset(identity.values()), identity)[1]
+
+
+def money_fund_balances(rows: Iterable[Trade], *, before: date | None = None) -> dict[str, int]:
+    """各货基在 `before`（不含）时点的余额（scale=2），无货基返回 `{}`。
+
+    键是**归并身份键**（同名不同代码合并成一只），与 `money_fund_identity` 对齐；
+    调用方按交易行的 `security_code` 取身份键后再累加。
+
+    期初反推只吸收「此前无任何增持」的赎回缺口（首笔即赎回、账单缺申购流水）；
+    申购/红利再投之后出现的缺口是超卖，按当日收益处理，不抬升期初，保证时点
+    余额与申购以前的历史不受未来超卖影响。任何时点的余额仍按 0 兜底（不出现负余额）。
+    """
+    ordered = list(rows)
+    identity = money_fund_identity(ordered)
+    if not identity:
+        return {}
+    offset, _oversells = _forward_shares(ordered, frozenset(identity.values()), identity)
+    shares = dict(offset)
+    for row in ordered:
+        key = identity.get(_name(row.security_code))
+        if key is None:
+            continue
+        if before is not None and row.trade_date >= before:
+            continue
+        delta = _share_delta(row)
+        if delta == 0:
+            continue
+        shares[key] = max(0, shares[key] + delta)
+    return {key: _shares_to_value_units(value) for key, value in shares.items()}
+
+
+def money_fund_total_units(rows: Iterable[Trade], *, before: date | None = None) -> int:
+    """各货基在 `before`（不含）时点的余额合计（scale=2）。"""
+    return sum(money_fund_balances(rows, before=before).values())
+
+
+__all__ = [
+    "NAME_KEYWORDS",
+    "NON_CASH_NAME_KEYWORDS",
+    "QTY_PRICE_SCALE",
+    "UNIT_PRICE_UNITS",
+    "MoneyFundOversell",
+    "money_fund_balances",
+    "money_fund_codes",
+    "money_fund_identity",
+    "money_fund_oversells",
+    "money_fund_total_units",
+    "money_fund_value_units",
+]

@@ -12,6 +12,7 @@ import type {
   AuthTokens,
   Attribution,
   BatchList,
+  BillDataResetOut,
   CommitImportBody,
   CreateTokenBody,
   DashboardOut,
@@ -550,6 +551,14 @@ export function createClient(options: ClientOptions) {
         idempotencyKey,
       }).then((r) => r.data);
     },
+    /** API-110：清空本人 ledger/review 账单数据（不可撤销；幂等重放返回首次计数）。 */
+    resetBillData(idempotencyKey: string) {
+      return send<BillDataResetOut>({
+        path: "/settings/reset-bill-data",
+        method: "POST",
+        idempotencyKey,
+      }).then((r) => r.data);
+    },
   };
 
   const imports = {
@@ -562,6 +571,7 @@ export function createClient(options: ClientOptions) {
       if (opts.reuse_template !== undefined) {
         form.append("reuse_template", String(opts.reuse_template));
       }
+      if (opts.template_id) form.append("template_id", opts.template_id);
       const headers = opts.flow === "v2" ? { "X-Import-Flow": "v2" } : undefined;
       return send<Preview>({
         path: "/imports/preview",

@@ -147,6 +147,10 @@
   font: inherit;
 }
 
+.settings-field input:disabled {
+  cursor: not-allowed;
+}
+
 .settings-checks {
   display: flex;
   gap: var(--s5);
@@ -345,6 +349,20 @@
 .settings-btn-ghost {
   background: var(--surface);
   color: var(--accent);
+}
+
+.settings-card-danger {
+  border-color: var(--danger);
+}
+
+.settings-btn-danger {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: #fff;
+}
+
+.settings-btn-danger:disabled {
+  opacity: 0.55;
 }
 
 .settings-token-once {

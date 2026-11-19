@@ -36,9 +36,10 @@ from stock_review.application.bridge import _initial_cash
 from stock_review.application.money_fund import (
     money_fund_balances,
     money_fund_codes,
+    money_fund_identity,
     money_fund_value_units,
 )
-from stock_review.application.rebuild import trades_to_events
+from stock_review.application.rebuild import rights_resolution, trades_to_events
 from stock_review.application.valuation import (
     CASHFLOW_CATEGORIES as _CASHFLOW_CATEGORIES,
 )
@@ -52,16 +53,13 @@ from stock_review.application.valuation import (
     blocked_price_reason as _blocked_reason,
 )
 from stock_review.application.valuation import (
-    category as _category,
-)
-from stock_review.application.valuation import (
     close_on_or_before as _close_on_or_before,
 )
 from stock_review.application.valuation import (
     holding_delta as _holding_delta,
 )
 from stock_review.application.valuation import (
-    is_cash_balance as _is_cash_balance,
+    is_cash_anchor as _is_cash_anchor,
 )
 from stock_review.application.valuation import (
     load_prices as _load_prices,
@@ -195,11 +193,16 @@ async def compute_nav_points(
     initial_cash, assumption = initial
     # 货币基金 = 现金等价物（2.3 口径）：余额并入现金，不进持仓/行情/成本。
     fund_codes = money_fund_codes(trades)
+    # 同名不同代码的货基合并成同一身份键共享持仓（与余额/超卖口径一致）。
+    fund_identity = money_fund_identity(trades)
     fund_balances: dict[str, int] = dict(money_fund_balances(trades, before=period_start))
 
     # 可转债发债→上市代码别名（设计 D3）：从全量明细派生，期初持仓/区间交易/行情统一
     # 用 canonical 代码，避免「754019 申购持仓 + 113xxx 上市卖出」被当成两只证券。
     bond_alias, _unresolved = build_bond_alias((t.security_code, t.security_name) for t in trades)
+
+    # 配股前置校验：零金额且此前无持仓的配股按 broker_action 处理（与 FIFO/资产表同源）。
+    rights = rights_resolution(trades, bond_alias=bond_alias)
 
     # 2. FIFO 结果用于检测 data_error（降级）
     fifo_all = build_rounds(trades_to_events(trades, bond_alias=bond_alias))
@@ -248,7 +251,7 @@ async def compute_nav_points(
         for t in all_trades_in_range
         if t.security_code
         and t.security_code not in fund_codes
-        and _holding_delta(_category(t), t.quantity_units, amount_units=t.amount_units) != 0
+        and _holding_delta(rights.category(t), t.quantity_units, amount_units=t.amount_units) != 0
     }
     all_symbols = sorted(
         code
@@ -365,17 +368,19 @@ async def compute_nav_points(
         balance_override: int | None = None
 
         for trade in day_trades:
-            category = _category(trade)
+            category = rights.category(trade)
             code = trade.security_code
             if code and code in fund_codes:
                 # 货基申赎：金额照常进出券商现金，余额单独累计后并入现金。
-                fund_balances[code] = max(
-                    0, fund_balances.get(code, 0) + money_fund_value_units(trade)
+                # 余额按归并身份键累计：同名不同代码视为同一只货基共享持仓。
+                fund_key = fund_identity.get(code, code)
+                fund_balances[fund_key] = max(
+                    0, fund_balances.get(fund_key, 0) + money_fund_value_units(trade)
                 )
                 day_cash_delta += trade.amount_units
                 if category in _CASHFLOW_CATEGORIES:
                     cashflow += trade.amount_units
-                if _is_cash_balance(trade):
+                if _is_cash_anchor(trade):
                     balance_override = int(trade.cash_balance_units or 0)
                 continue
             if code:
@@ -409,7 +414,7 @@ async def compute_nav_points(
             # 超卖净卖款：卖款已在现金/总资产里，不计收益，也不标成外部现金流。
             oversell_today += oversell_proceeds.get(trade.id, 0)
             # 余额行覆盖
-            if _is_cash_balance(trade):
+            if _is_cash_anchor(trade):
                 balance_override = int(trade.cash_balance_units or 0)
 
         state.cashflow_units = cashflow

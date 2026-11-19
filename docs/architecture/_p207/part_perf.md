@@ -49,7 +49,7 @@
 | 印花税 | `trade.stamp_tax_units` | `models.py:170`；A 股卖出单边，生成器口径 `0.0005`（`ledger/fixtures.py:56-64`） |
 | 其他费 | `trade.other_fee_units` | `models.py:171` |
 | 发生金额 | `trade.amount_units`（带符号、**已含费用**） | `parsers/huatai.py:72-73`「净现金流，含费用」 |
-| 独立费用行 | `trade.category='fee'`（股息红利税/独立手续费行） | `repositories/rules.py:48,72`（`sys_div_tax`/`sys_fee`） |
+| 独立费用行 | 独立手续费行 `trade.category='fee'`；股息红利税按 `dividend`（负数冲减分红收入） | `repositories/rules.py`（`sys_fee` / `sys_div_tax`） |
 
 - **"禁止二次扣费"的准确含义**：`amount_units` 已折算费用，**不得再叠加三个费用列**去求成本/净额（`application/valuation.py:33-35` 明文）。费用列只用于**费用指标自身的分子**，绝不回写 pnl/成本。
 - 成交额 `turnover` 只统计 `category ∈ {buy, sell}`（存量代码的持仓影响类见 `valuation.py:30`）；`new_stock/rights/bonus/transfer/fee` 不算成交额 → **H-04**。

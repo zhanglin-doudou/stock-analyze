@@ -14,7 +14,12 @@ from decimal import Decimal
 
 from stock_ledger.models import Trade
 from stock_platform.ports import Bar, MarketCapabilities, Quote
-from stock_review.application.dashboard import _drawdown_segments, _holdings_at
+from stock_review.application.dashboard import (
+    _annualized_xirr,
+    _drawdown_segments,
+    _first_cash_gap,
+    _holdings_at,
+)
 from stock_review.models import AssetDaily
 
 _USER = uuid.uuid4()
@@ -272,19 +277,27 @@ async def test_holdings_report_missing_price_for_ordinary_stock() -> None:
     assert fallback == []
 
 
-def _asset_row(trade_date: date, *, status: str, daily_return_units: int | None) -> AssetDaily:
+def _asset_row(
+    trade_date: date,
+    *,
+    status: str,
+    daily_return_units: int | None,
+    total_assets_units: int = 0,
+    cashflow_units: int = 0,
+    prev_total_assets_units: int | None = None,
+) -> AssetDaily:
     return AssetDaily(
         id=f"ast_{trade_date.isoformat()}",
         user_id=_USER,
         trade_date=trade_date,
         cash_units=0,
         market_value_units=0,
-        total_assets_units=0,
+        total_assets_units=total_assets_units,
         holding_cost_units=0,
         unrealized_pnl_units=0,
         holding_count=0,
-        cashflow_units=0,
-        prev_total_assets_units=None,
+        cashflow_units=cashflow_units,
+        prev_total_assets_units=prev_total_assets_units,
         daily_pnl_units=None,
         daily_return_units=daily_return_units,
         status=status,
@@ -292,6 +305,69 @@ def _asset_row(trade_date: date, *, status: str, daily_return_units: int | None)
         definition_version="1.7",
         rebuilt_at=datetime(2026, 1, 1, tzinfo=UTC),
     )
+
+
+def test_annualized_xirr_follows_total_profit_sign() -> None:
+    """总收益为负时年化必须为负：小资金期正收益不能盖过大资金期亏损（TWR 会失真）。"""
+    series = [
+        _asset_row(
+            date(2020, 1, 2), status="ok", daily_return_units=0, total_assets_units=200, cashflow_units=100, prev_total_assets_units=100
+        ),
+        _asset_row(
+            date(2020, 6, 1), status="ok", daily_return_units=0, total_assets_units=250, prev_total_assets_units=200
+        ),
+        _asset_row(
+            date(2021, 1, 4), status="ok", daily_return_units=0, total_assets_units=1200, cashflow_units=1000, prev_total_assets_units=250
+        ),
+        _asset_row(
+            date(2022, 1, 4), status="ok", daily_return_units=0, total_assets_units=1100, prev_total_assets_units=1200
+        ),
+    ]
+    assert _annualized_xirr(series) is not None
+    assert _annualized_xirr(series) < 0
+
+
+def test_annualized_xirr_requires_two_valid_days() -> None:
+    assert _annualized_xirr([]) is None
+    assert (
+        _annualized_xirr([_asset_row(date(2020, 1, 2), status="ok", daily_return_units=0)])
+        is None
+    )
+
+
+def test_first_cash_gap_keeps_money_fund_oversell_as_income() -> None:
+    """货基超卖（赎回超余额、券商补记份额）是当日收益，不得被误判成漏记流水缺口。"""
+    trades = [
+        _trade(
+            trade_date=date(2026, 9, 29),
+            category="buy",
+            security_code="940018",
+            security_name="华泰紫金天天发货币",
+            quantity_units=shares("106708.53"),
+            amount_units=-cents("106708.53"),
+            price_units=price("1"),
+        ),
+        _trade(
+            trade_date=date(2026, 9, 30),
+            category="sell",
+            side="sell",
+            security_code="940018",
+            security_name="华泰紫金天天发货币",
+            quantity_units=shares("106720.80"),
+            amount_units=cents("106720.80"),
+            price_units=price("1"),
+        ),
+    ]
+    rows = []
+    for day, cash in (
+        (date(2026, 9, 29), cents("106809.68")),
+        (date(2026, 9, 30), cents("106821.95")),
+    ):
+        row = _asset_row(day, status="ok", daily_return_units=0)
+        row.cash_units = cash
+        rows.append(row)
+    # 09-30 现金多出 12.27（超卖份额的赎回款）；旧逻辑会把它当缺口。
+    assert _first_cash_gap(rows, trades) is None
 
 
 def test_degraded_rows_do_not_break_drawdown_segments() -> None:

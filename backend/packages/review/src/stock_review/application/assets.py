@@ -51,15 +51,18 @@ from stock_review.application.bridge import _initial_cash
 from stock_review.application.money_fund import (
     money_fund_balances,
     money_fund_codes,
+    money_fund_identity,
+    money_fund_oversells,
     money_fund_value_units,
 )
-from stock_review.application.rebuild import trades_to_events
+from stock_review.application.rebuild import rights_resolution, trades_to_events
+from stock_review.application.rights import RightsResolution
 from stock_review.application.valuation import (
     CASHFLOW_CATEGORIES,
     PRICE_LOOKBACK,
     blocked_price_reason,
-    category,
     holding_delta,
+    is_cash_anchor,
     is_cash_balance,
     load_prices,
     new_stock_pending_codes,
@@ -93,7 +96,18 @@ log = get_logger("stock_review.assets")
 #      修订后该日重算恢复 ok。口径变化，bump 触发全量重建。
 # 2.3：货币基金（现金等价物）不进 FIFO/回合/持仓/市值，余额并入现金列（总资产不变）；
 #      识别见 `application.money_fund`。口径变化，bump 触发全量重建。
-ASSET_DEFINITION_VERSION = "2.3"
+# 2.4：配股前置校验——零金额且该证券此前无持仓的 `rights` 流水按 `broker_action` 处理
+#      （不计持仓/成本/FIFO/回合）；有持仓的配股与金额非 0 的配股不变。口径变化，bump 触发全量重建。
+# 2.5：货基超卖（赎回份额超过余额）按「券商补记份额」计入当日收益，不再反推进期初；
+#      期初反推只吸收此前无任何增持的赎回缺口。口径变化，bump 触发全量重建。
+# 2.6：共享持有逻辑增强——所有货基的赎回缺口（无论自身有没有增持）都先从其它货基的
+#      running 盈余份额里 1:1 覆盖，耗尽后再按 increased 状态进入 oversell 或期初反推。
+#      避免"有过增持的基金 running 耗尽后直接全进 oversell，而 peers 的盈余闲置"。
+#      口径变化，bump 触发全量重建。
+# 2.7：货基按证券名称兜底归并——代码不同但名称相同视为同一只产品，份额/超卖/余额
+#      按归并身份键统一推演（身份键优先取 6 位数字真实代码），避免同一只货基因
+#      场内代码与登记账号代码并存而被拆成两份、互相误判超卖。口径变化，bump 触发全量重建。
+ASSET_DEFINITION_VERSION = "2.7"
 # 安全窗：每次有新数据/脏流水/行情 as_of 变化时重算最近 45 天。
 SAFETY_DAYS = 45
 # 水位线重叠窗：PG `now()` = 事务开始时间，覆盖「长事务晚提交」竞态。
@@ -296,6 +310,7 @@ def compute_daily_valuations(
     bond_alias: dict[str, str] | None = None,
     oversell_proceeds: dict[str, int] | None = None,
     quotes_pull_attempted: bool = False,
+    rights: RightsResolution | None = None,
 ) -> _DailyValuations:
     """内存重放 `[start, end]`，为 `[rebuild_from, end]` 生成资产日行（纯计算，无 I/O）。
 
@@ -313,6 +328,8 @@ def compute_daily_valuations(
     `missing_quotes` 返回，供调用方做**一次**定向补拉。
     """
     alias = bond_alias or {}
+    # 配股前置校验：零金额且无前置持仓的配股按 broker_action 处理（与 FIFO 同源）。
+    rights = rights or RightsResolution(frozenset())
     # 新股待上市（认购缴款已入库、尚无行情）：按认购成本兜底估值，不阻断（设计 D11）。
     pending_codes = {canonical_code(alias, code) for code in new_stock_pending_codes(trades)}
     initial = _initial_cash(trades, start)
@@ -327,6 +344,8 @@ def compute_daily_valuations(
     oversell_proceeds_by_trade = oversell_proceeds or {}
     # 货币基金 = 现金等价物：不进持仓/成本/市值/行情，余额并入现金列（2.3 口径）。
     fund_codes = money_fund_codes(trades)
+    # 同名不同代码的货基合并成同一身份键共享持仓（与余额/超卖口径一致）。
+    fund_identity = money_fund_identity(trades)
     fund_balances: dict[str, int] = dict(money_fund_balances(trades, before=start))
     initial_total = initial_cash + sum(fund_balances.values())
 
@@ -357,16 +376,18 @@ def compute_daily_valuations(
         balance_override: int | None = None
 
         for trade in day_trades:
-            trade_category = category(trade)
+            trade_category = rights.category(trade)
             code = trade.security_code
             if code and code in fund_codes:
                 # 申赎金额照常进出券商现金，货基余额单独累计；两者之和即「现金余额」。
                 # 红利发放/再投行金额为 0、以份额增加余额 → 计入收益（不进外部现金流）。
-                fund_balances[code] = max(
-                    0, fund_balances.get(code, 0) + money_fund_value_units(trade)
+                # 余额按归并身份键累计：同名不同代码视为同一只货基共享持仓。
+                fund_key = fund_identity.get(code, code)
+                fund_balances[fund_key] = max(
+                    0, fund_balances.get(fund_key, 0) + money_fund_value_units(trade)
                 )
                 day_cash_delta += trade.amount_units
-                if is_cash_balance(trade):
+                if is_cash_anchor(trade):
                     balance_override = int(trade.cash_balance_units or 0)
                 continue
             if code:
@@ -395,7 +416,7 @@ def compute_daily_valuations(
             if trade.id in oversell_proceeds_by_trade:
                 day_oversell = True
                 oversell_adjust += oversell_proceeds_by_trade[trade.id]
-            if is_cash_balance(trade):
+            if is_cash_anchor(trade):
                 balance_override = int(trade.cash_balance_units or 0)
 
         if balance_override is not None:
@@ -629,13 +650,19 @@ async def _reset_state(
     await _persist_state(repo, user_id, existing=existing, fields=fields)
 
 
-def _symbols(live: list[Trade], bond_alias: dict[str, str] | None = None) -> list[str]:
+def _symbols(
+    live: list[Trade],
+    bond_alias: dict[str, str] | None = None,
+    rights: RightsResolution | None = None,
+) -> list[str]:
     """需要请求行情的持仓标的（`needs_quote`：A 股/场内基金）。
 
     债券与伪代码（A40006 等）不读行情、按买入价估值，因此不发起行情请求。发债代码
     归并为上市代码：行情请求只发 canonical 代码（申购代码无行情，设计 D3）。
+    `rights` 提供配股有效分类：降级的零金额配股不产生持仓，也就不请求行情。
     """
     alias = bond_alias or {}
+    rights = rights or RightsResolution(frozenset())
     fund_codes = money_fund_codes(live)
     return sorted(
         {
@@ -645,7 +672,7 @@ def _symbols(live: list[Trade], bond_alias: dict[str, str] | None = None) -> lis
             and trade.security_code not in fund_codes
             and needs_quote(trade.security_code)
             and holding_delta(
-                category(trade), trade.quantity_units, amount_units=trade.amount_units
+                rights.category(trade), trade.quantity_units, amount_units=trade.amount_units
             )
             != 0
         }
@@ -984,6 +1011,9 @@ async def build_assets(
             data_as_of=None,
         )
 
+    # 配股前置校验（2.4）：零金额且此前无持仓的配股按 broker_action 处理。
+    # FIFO/回合、资产表、净值、归因共用同一判定结果，避免各层各自过滤。
+    rights = rights_resolution(live, bond_alias=bond_alias)
     fifo_result = build_rounds(trades_to_events(live, bond_alias=bond_alias))
     # 超卖：卖款视同资金划转（计现金、不计收益），行级标 degraded 提供人工修订入口；
     # 它不再算「FIFO 异常」——其它 FIFO 数据异常（配股/送转无持仓等）语义不变。
@@ -1100,7 +1130,7 @@ async def build_assets(
 
     # 6) 行情：全量拉 [start-45, end]；增量只拉窗口 [rebuild_from-45, end]。
     price_from = (start if full else rebuild_from) - PRICE_LOOKBACK
-    symbols = _symbols(live, bond_alias)
+    symbols = _symbols(live, bond_alias, rights)
     ladder, market_causes = await load_prices(market_data, symbols, price_from, end)
     oversell_proceeds = {
         e.trade_id: e.proceeds_units for e in fifo_result.data_errors if e.kind == "oversell"
@@ -1124,10 +1154,30 @@ async def build_assets(
             bond_alias=bond_alias,
             oversell_proceeds=oversell_proceeds,
             quotes_pull_attempted=quotes_pull_attempted,
+            rights=rights,
         )
 
     # 7) 内存逐日推演（无 I/O）；仅窗口行待写。
     valuations = _valuate()
+
+    # 7a) 货基超卖留痕：份额正推发现赎回超过余额（券商补记份额，计入当日收益）。
+    fund_oversells = money_fund_oversells(live)
+    if fund_oversells:
+        fund_names = {
+            trade.security_code: trade.security_name
+            for trade in live
+            if trade.security_code and trade.security_name
+        }
+        for item in fund_oversells:
+            whole, frac = divmod(item.quantity_units, 10_000)
+            log.info(
+                "货基超卖（券商补记份额，计入当日收益）：日期=%s 代码=%s 名称=%s 超卖份额=%d.%04d",
+                item.trade_date.isoformat(),
+                item.security_code,
+                fund_names.get(item.security_code) or "",
+                whole,
+                frac,
+            )
 
     # 7b) 缺行情自愈（设计 §6.5）：先按 blocked 行定位「缺的标的 + 缺失日期区间」，向
     #     可补拉的行情源（live + 本地缓存）**补拉一次**，再用补拉后的行情重算一次。
@@ -1148,6 +1198,23 @@ async def build_assets(
             valuations = _valuate()
 
     build_mode = BUILD_MODE_FULL if full else BUILD_MODE_INCREMENTAL
+
+    # 配股降级留痕：页面不展示，仅在构建日志里给一条 warning（笔数 + 涉及代码），
+    # 便于运维判断是「券商登记行」还是账单分类需要修。
+    if rights.demoted:
+        demoted_codes = sorted(
+            {
+                canonical_code(bond_alias or {}, trade.security_code)
+                for trade in live
+                if trade.id in rights.demoted
+            }
+        )
+        log.warning(
+            "assets.rights_demoted",
+            user_id=str(user_id),
+            count=len(rights.demoted),
+            codes=demoted_codes,
+        )
 
     # 8) 全局无锚点：不写日行，state 标 blocked。
     if valuations.global_blocked:

@@ -1014,6 +1014,28 @@ export interface paths {
         patch: operations["patchSettings"];
         trace?: never;
     };
+    "/api/v1/settings/reset-bill-data": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reset Bill Data
+         * @description API-110：清空本人 ledger + review 数据（账单/导入/回合/指标/资产等）。
+         *
+         *     不可撤销：前端必须二次确认；服务端强制 `Idempotency-Key`，重放返回首次结果。
+         */
+        post: operations["resetBillData"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/settings/trade-flags/rebuild": {
         parameters: {
             query?: never;
@@ -2075,6 +2097,18 @@ export interface components {
             total_estimate?: number | null;
         };
         /**
+         * BillDataResetOut
+         * @description API-110：重置账单数据的删除计数（只列实际删除行数 > 0 的表）。
+         */
+        BillDataResetOut: {
+            /** Deleted */
+            deleted: {
+                [key: string]: number;
+            };
+            /** Total */
+            total: number;
+        };
+        /**
          * BillFlagsPatch
          * @description `null` = 恢复该列默认值；只更新出现键。
          */
@@ -2136,6 +2170,11 @@ export interface components {
              * @default true
              */
             reuse_template: boolean;
+            /**
+             * Template Id
+             * @description 显式模板：sys:<key> 或本人模板 id
+             */
+            template_id?: string | null;
         };
         /**
          * BridgeIdentityOut
@@ -2942,6 +2981,8 @@ export interface components {
             items?: components["schemas"]["PreviewTemplateOut"][];
             /** Next Cursor */
             next_cursor?: string | null;
+            /** System */
+            system?: components["schemas"]["PreviewTemplateOut"][];
         };
         /** ImportTypeResolutionIn */
         ImportTypeResolutionIn: {
@@ -3753,6 +3794,11 @@ export interface components {
         OversellRevisionIn: {
             /** Cost */
             cost: string;
+            /**
+             * Is New Stock
+             * @default false
+             */
+            is_new_stock: boolean;
         };
         /** OversellRevisionMutationOut */
         OversellRevisionMutationOut: {
@@ -3768,6 +3814,11 @@ export interface components {
             cash_trade?: components["schemas"]["TradeOut"] | null;
             /** Cost */
             cost?: string | null;
+            /**
+             * Is New Stock
+             * @default false
+             */
+            is_new_stock: boolean;
             /** Round Id */
             round_id?: string | null;
             sell: components["schemas"]["OversellRevisionSellOut"];
@@ -4075,18 +4126,53 @@ export interface components {
             /** Summary */
             summary?: string | null;
         };
+        /**
+         * PreviewTemplateBillType
+         * @description 模板引用的账单类型；`invalid=True` 表示 id 已失效（不自动删、不阻断）。
+         */
+        PreviewTemplateBillType: {
+            /** Category */
+            category?: string | null;
+            /**
+             * Discarded
+             * @default false
+             */
+            discarded: boolean;
+            /** Id */
+            id?: string | null;
+            /**
+             * Invalid
+             * @default false
+             */
+            invalid: boolean;
+            /** Type Key */
+            type_key?: string | null;
+            /** Type Label */
+            type_label?: string | null;
+        };
         /** PreviewTemplateOut */
         PreviewTemplateOut: {
+            /** Bill Type Ids */
+            bill_type_ids?: string[];
+            /** Bill Types */
+            bill_types?: components["schemas"]["PreviewTemplateBillType"][];
             /** Broker */
             broker: string;
             /** Created At */
             created_at?: string | null;
             /** Date Format */
             date_format?: string | null;
+            /**
+             * Has User Overrides
+             * @default false
+             */
+            has_user_overrides: boolean;
             /** Header Count */
             header_count: number;
             /** Ignored */
             ignored?: string[];
+            /** Invalid Type Ids */
+            invalid_type_ids?: string[];
             /** Items */
             items?: {
                 [key: string]: unknown;
@@ -4095,8 +4181,18 @@ export interface components {
             last_batch_id?: string | null;
             /** Origin Batch Id */
             origin_batch_id?: string | null;
+            /** Preset Key */
+            preset_key?: string | null;
+            /** Preset Version */
+            preset_version?: number | null;
             /** Signature */
             signature: string;
+            /**
+             * Source
+             * @default user
+             * @enum {string}
+             */
+            source: "user" | "system";
             /** Template Id */
             template_id: string;
             /** Updated At */
@@ -8954,6 +9050,67 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SettingsOut"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 资源状态冲突 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    resetBillData: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["BillDataResetOut"];
                 };
             };
             /** @description 未认证或凭证无效 */

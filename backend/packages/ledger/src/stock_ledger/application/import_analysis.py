@@ -63,6 +63,19 @@ def resolve_broker(requested: str | None, detected: str) -> str:
     return requested
 
 
+def resolve_broker_with_preset(
+    requested: str | None, detected: str, preset_broker: str | None
+) -> str:
+    """auto 且命中系统预设时以预设券商为准。
+
+    券商检测目前只覆盖华泰等少数画像，平安等靠表头签名命中预设；若继续用 detected，
+    确认页会错误显示 `generic`。
+    """
+    if (requested is None or requested == "auto") and preset_broker:
+        return preset_broker
+    return resolve_broker(requested, detected)
+
+
 def completeness_issues(plan: MappingPlan) -> list[dict[str, Any]]:
     """映射完整性闸门：只有拿到 L1（+交易/资金二选一）才允许进入解析。"""
     fields = plan.mapped_fields()

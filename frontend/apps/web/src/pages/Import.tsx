@@ -5,6 +5,7 @@ import {
   type ImportBatch,
   type ImportMappingIn,
   type ImportTypesIn,
+  type ImportTemplateOut,
   type JobAccepted,
   type JobStatus,
   type Preview,
@@ -64,6 +65,7 @@ interface TypeRow {
   amountSum: string;
   samples: string[];
   suggestedCategory: string | null;
+  source: string;
   needsConfirmation: boolean;
   category: string;
   discard: boolean;
@@ -110,6 +112,125 @@ function readTypes(preview: Preview): Record<string, unknown>[] {
   return (preview.types ?? []) as unknown as Record<string, unknown>[];
 }
 
+const BROKER_LABELS: Record<string, string> = {
+  auto: "自动识别",
+  huatai: "华泰证券",
+  pingan: "平安证券",
+  generic: "通用",
+};
+
+function brokerLabel(code: string): string {
+  return BROKER_LABELS[code] ?? code;
+}
+
+/**
+ * 券商模板 → 列对应模板选择：auto 走自动匹配、generic 不复用，其余取同名的系统预设。
+ * 预设列表尚未加载时退回 auto（预览仍可按表头签名自动匹配）。
+ */
+export function templateChoiceForBroker(
+  broker: string,
+  system: ImportTemplateOut[],
+): string {
+  if (broker === "auto") return "auto";
+  if (broker === "generic") return "none";
+  return system.find((item) => item.broker === broker)?.template_id ?? "auto";
+}
+
+// 第 3 步的 Category 速查说明（纯文案，不参与任何计算）。
+// `code` 与后端 BillCategory 一致；中文名优先取接口返回的 categories，缺失时用这里的兜底。
+const CATEGORY_GUIDE: readonly {
+  code: string;
+  name: string;
+  book: string;
+  risk: string;
+}[] = [
+  {
+    code: "buy",
+    name: "买入",
+    book: "按成交金额（含佣金等费用）建仓，进入先进先出队列，等卖出时才结算盈亏。",
+    risk: "当成卖出会反向减仓、误报超卖；当成资金划转只动现金不建仓，资产表会少一块市值。",
+  },
+  {
+    code: "sell",
+    name: "卖出",
+    book: "按成交净额（已扣佣金、印花税）平仓，与买入批次配对成回合，计入已实现盈亏。",
+    risk: "当成买入会凭空增加持仓、成本翻倍；当成资金划转会卖了也不减仓，持仓永远对不上。",
+  },
+  {
+    code: "bonus",
+    name: "送转",
+    book: "送股/转增：只增加股数、不花钱，成本总额不变，每股成本自然摊薄。",
+    risk: "当成买入会凭空建仓并虚增成本；当成卖出会误报超卖。",
+  },
+  {
+    code: "dividend",
+    name: "分红",
+    book: "现金红利计入收益与现金；红利税如果是单独一行，请归「费用」单独扣减。",
+    risk: "当成买入会拿红利金额凭空建仓；当成资金划转会让收益少算一块。",
+  },
+  {
+    code: "rights",
+    name: "配股",
+    book: "按缴款金额增加股数与成本；若该证券此前没有持仓且金额为 0，系统会自动按「券商行为」处理。",
+    risk: "当成买入或新股会绕过配股校验，成本与回合一起偏；当成卖出会误报超卖。",
+  },
+  {
+    code: "interest",
+    name: "利息",
+    book: "利息归本：增加现金并计入收益。",
+    risk: "当成资金划转会把利息当成外部入金，收益率被稀释。",
+  },
+  {
+    code: "fee",
+    name: "费用",
+    book: "只减少现金、单独计为费用，不进入持仓成本。",
+    risk: "当成买入会拿费用金额建仓；当成卖出会误报超卖；当成资金划转会漏掉这笔成本。",
+  },
+  {
+    code: "transfer",
+    name: "资金划转",
+    book: "银证转入/转出等外部资金流：只改现金，不建仓、不进盈亏。",
+    risk: "当成买入或卖出会凭空建仓/减仓，回合与成本全乱。",
+  },
+  {
+    code: "new_stock",
+    name: "新股/可转债中签",
+    book: "只认真正扣款的缴款行，按认购成本建仓；上市后卖出请归「卖出」。",
+    risk: "把「申购中签」这类零金额登记行归进来会凭空建仓、虚增成本；把「市值认购资金扣收」归进来会给 CASH 伪代码记成本。",
+  },
+  {
+    code: "broker_action",
+    name: "券商行为",
+    book: "券商侧的登记/份额锁定动作（申购中签、申购还款、新股入账、证券清理、转托管等）：不建仓、不计成本；金额非 0 时按外部现金流处理。",
+    risk: "当成买入或新股会凭空建仓、虚增成本；当成卖出会误报超卖。",
+  },
+  {
+    code: "other",
+    name: "其他",
+    book: "兜底分类：不影响持仓，金额只进现金。",
+    risk: "真实买卖被归到这里会漏建仓/漏平仓，资产表与账单从此对不上。",
+  },
+];
+
+// 真实账单摘要举例（华泰常见行），帮助用户对号入座。
+const CATEGORY_CASES: readonly { summary: string; right: string; wrong: string }[] = [
+  {
+    summary: "「市值认购资金扣收」",
+    right: "应归「资金划转」：只有资金流出、没有证券代码。",
+    wrong: "若归「新股/可转债中签」，系统会给 CASH 伪代码建仓并记成本，市值凭空多一块。",
+  },
+  {
+    summary: "「申购中签」",
+    right: "应归「券商行为」：不扣款的登记动作。",
+    wrong: "若归「新股/可转债中签」，会凭空建仓、虚增持仓成本（系统对零金额登记行有自动改判兜底）。",
+  },
+  {
+    summary: "「配股缴款」",
+    right: "应归「配股」：数量与成本同步增加。",
+    wrong: "若归「买入」，配股校验与成本口径失效，无持仓的配股也无法被识别为券商行为。",
+  },
+];
+
 function rowsFromPreview(preview: Preview): MappingRow[] {
   const existing = new Map<string, string>();
   for (const item of (preview.mapping_items ?? []) as unknown as {
@@ -151,6 +272,7 @@ function typesFromPreview(preview: Preview, saved?: Map<string, TypeChoice>): Ty
       amountSum: String(item.amount_sum ?? "0.00"),
       samples: (item.samples as string[] | undefined) ?? [],
       suggestedCategory: suggested,
+      source: String(item.source ?? "none"),
       needsConfirmation: Boolean(item.needs_confirmation),
       category,
       discard,
@@ -189,10 +311,18 @@ export function Import() {
   const [types, setTypes] = useState<TypeRow[]>([]);
   const [dateFormat, setDateFormat] = useState("");
   const [broker, setBroker] = useState("auto");
-  const [reuseTemplate, setReuseTemplate] = useState(true);
+  const [templateChoice, setTemplateChoice] = useState("auto");
+  const [templateOptions, setTemplateOptions] = useState<{
+    system: ImportTemplateOut[];
+    mine: ImportTemplateOut[];
+  }>({ system: [], mine: [] });
+  // 切换券商/模板需要重新解析：保留原始文件，并丢弃过期请求的返回。
+  const lastFile = useRef<File | null>(null);
+  const previewSeq = useRef(0);
   const [confirmUnmapped, setConfirmUnmapped] = useState(false);
   const [ackReimport, setAckReimport] = useState(false);
   const [allowEditHistorical, setAllowEditHistorical] = useState(false);
+  const [showCategoryGuide, setShowCategoryGuide] = useState(false);
   const [job, setJob] = useState<JobAccepted | null>(null);
   const [batchId, setBatchId] = useState<string | null>(null);
   const [batch, setBatch] = useState<ImportBatch | null>(null);
@@ -209,6 +339,8 @@ export function Import() {
     previewId: "",
     choices: new Map(),
   });
+  // 一个账号只允许一家券商：已有本人模板后，券商模板锁定为首次创建模板的券商。
+  const lockedBroker = templateOptions.mine.find((item) => item.broker)?.broker ?? null;
 
   // Portal 容器必须带 data-import-ui，弹层才吃到 scoped reset。
   useEffect(() => {
@@ -222,6 +354,36 @@ export function Import() {
       setPortal(null);
     };
   }, []);
+
+  const fetchTemplates = useCallback(() => {
+    let alive = true;
+    api.imports
+      .listTemplates({ limit: 50 })
+      .then((page) => {
+        if (!alive) return;
+        setTemplateOptions({
+          system: page.system ?? [],
+          mine: page.items ?? [],
+        });
+      })
+      .catch(() => {
+        // 选不到模板不影响导入，自动匹配仍可用。
+      });
+    return () => {
+      alive = false;
+    };
+  }, [])
+
+  // 模板选择控件：系统预设（只读）与本人模板（提交后 copy-on-write 生成）。
+  useEffect(() => {
+    fetchTemplates();
+  }, [fetchTemplates]);
+
+  useEffect(() => {
+    if (!lockedBroker || broker === lockedBroker) return;
+    setBroker(lockedBroker);
+    setTemplateChoice("auto");
+  }, [broker, lockedBroker]);
 
   useEffect(() => {
     if (!preview) return;
@@ -265,27 +427,53 @@ export function Import() {
     [],
   );
 
-  async function onFile(file: File): Promise<void> {
+  async function loadPreview(
+    file: File,
+    nextBroker: string,
+    nextTemplate: string,
+  ): Promise<void> {
+    const seq = ++previewSeq.current;
     setBusy(true);
     setError(null);
+    try {
+      const dto = await api.imports.preview(file, {
+        flow: "v2",
+        broker: nextBroker,
+        reuse_template: nextTemplate === "auto",
+        template_id:
+          nextTemplate !== "auto" && nextTemplate !== "none" ? nextTemplate : undefined,
+      });
+      if (seq === previewSeq.current) applyPreview(dto);
+    } catch (err) {
+      if (seq === previewSeq.current) setError(err);
+    } finally {
+      if (seq === previewSeq.current) setBusy(false);
+    }
+  }
+
+  async function onFile(file: File): Promise<void> {
+    lastFile.current = file;
     setBatch(null);
     setBatchError(null);
     setRevokeNotice("");
     setDone("");
     setJob(null);
     setBatchId(null);
-    try {
-      const dto = await api.imports.preview(file, {
-        flow: "v2",
-        broker,
-        reuse_template: reuseTemplate,
-      });
-      applyPreview(dto);
-    } catch (err) {
-      setError(err);
-    } finally {
-      setBusy(false);
-    }
+    await loadPreview(file, broker, templateChoice);
+  }
+
+  /** 切换券商模板：自动选中对应系统预设并重新预览，列/类型映射随预览刷新。 */
+  function onBrokerChange(next: string): void {
+    setBroker(next);
+    const nextTemplate = templateChoiceForBroker(next, templateOptions.system);
+    setTemplateChoice(nextTemplate);
+    if (lastFile.current) void loadPreview(lastFile.current, next, nextTemplate);
+  }
+
+  /** 手动切换列对应模板同样重新预览（无新文件时只更新选择）。 */
+  function onTemplateChange(next: string): void {
+    setTemplateChoice(next);
+    if (lastFile.current) void loadPreview(lastFile.current, broker, next);
   }
 
   const issues = useMemo(() => completeness(rows), [rows]);
@@ -407,8 +595,9 @@ export function Import() {
       setDone(`任务结束：${status}`);
       if (status !== "succeeded" || !batchId) return;
       void loadBatch(batchId);
+      void fetchTemplates();
     },
-    [batchId, loadBatch],
+    [batchId, loadBatch, fetchTemplates],
   );
 
   const onRevoked = useCallback(
@@ -472,28 +661,68 @@ export function Import() {
         <Card className="tw-mb-4">
           <CardHeader>
             <CardTitle>1 · 上传</CardTitle>
-            <CardDescription>支持 .xls / .xlsx / .csv，≤20MB；券商默认自动识别。</CardDescription>
+            <CardDescription>
+              支持 .xls / .xlsx / .csv，≤20MB；
+              {lockedBroker ? (
+                <>一个账号仅支持一家券商，券商模板已锁定为 <b>{brokerLabel(lockedBroker)}</b>。</>
+              ) : (
+                <>
+                  <b>主动选择对应券商模板</b>可以降低账单解析的复杂度，更快得到结果！
+                </>
+              )}
+            </CardDescription>
           </CardHeader>
           <CardContent className="tw-flex tw-flex-col tw-gap-3">
             <div className="tw-flex tw-items-center tw-gap-3">
-              <Label htmlFor="import-broker">券商</Label>
-              <Select value={broker} onValueChange={setBroker}>
+              <Label htmlFor="import-broker">券商模板</Label>
+              <Select
+                value={broker}
+                onValueChange={onBrokerChange}
+                disabled={lockedBroker !== null}
+              >
                 <SelectTrigger id="import-broker" aria-label="券商" className="tw-w-40">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="auto">自动识别</SelectItem>
                   <SelectItem value="huatai">华泰证券</SelectItem>
+                  <SelectItem value="pingan">平安证券</SelectItem>
                   <SelectItem value="generic">通用</SelectItem>
                 </SelectContent>
               </Select>
-              <Label htmlFor="import-reuse">复用已确认的列对应</Label>
-              <Switch
-                id="import-reuse"
-                aria-label="复用已确认的列对应"
-                checked={reuseTemplate}
-                onCheckedChange={setReuseTemplate}
-              />
+              <Label htmlFor="import-template">列对应模板</Label>
+              <Select value={templateChoice} onValueChange={onTemplateChange}>
+                <SelectTrigger id="import-template" aria-label="列对应模板" className="tw-w-60">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="auto">自动匹配（推荐）</SelectItem>
+                  <SelectItem value="none">不复用模板</SelectItem>
+                  {templateOptions.system.length > 0 ? (
+                    <SelectGroup>
+                      <SelectLabel>系统预设</SelectLabel>
+                      {templateOptions.system.map((item) => (
+                        <SelectItem key={item.template_id} value={item.template_id}>
+                          {brokerLabel(item.broker)}
+                          {item.preset_version ? ` · v${item.preset_version}` : ""}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  ) : null}
+                  {templateOptions.mine.length > 0 ? (
+                    <SelectGroup>
+                      <SelectLabel>我的模板</SelectLabel>
+                      {templateOptions.mine.map((item) => (
+                        <SelectItem key={item.template_id} value={item.template_id}>
+                          {brokerLabel(item.broker)}
+                          {` · ${item.signature}`}
+                          {item.has_user_overrides ? " · 已自定义" : ""}
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  ) : null}
+                </SelectContent>
+              </Select>
             </div>
             <Uploader disabled={busy} onFile={(file) => void onFile(file)} />
           </CardContent>
@@ -515,7 +744,18 @@ export function Import() {
               <CardTitle>2 · 列对应</CardTitle>
               <CardDescription>
                 文件：{preview.file.name}（{preview.file.bytes} 字节，哈希 {preview.file.sha256.slice(0, 8)}）
-                {preview.template ? " · 已复用你确认过的列对应，可修改" : ""}
+                {preview.template ? (
+                  <span>
+                    {" · "}
+                    {preview.template.source === "system" ? (
+                      <>已套用系统预设（华泰）列对应，可修改；确认导入后保存为你自己的模板</>
+                    ) : (
+                      <>已复用你确认过的列对应，可修改；改动会在确认导入后保存</>
+                    )}
+                  </span>
+                ) : (
+                  ""
+                )}
               </CardDescription>
             </CardHeader>
             <CardContent className="tw-flex tw-flex-col tw-gap-3">
@@ -679,6 +919,64 @@ export function Import() {
               </div>
             </CardHeader>
             <CardContent className="tw-flex tw-flex-col tw-gap-3">
+              <div className="tw-rounded-md tw-border tw-border-border">
+                <button
+                  type="button"
+                  aria-expanded={showCategoryGuide}
+                  aria-controls="category-guide"
+                  onClick={() => setShowCategoryGuide((current) => !current)}
+                  className="tw-flex tw-w-full tw-cursor-pointer tw-items-center tw-justify-between tw-gap-3 tw-px-3 tw-py-2 tw-text-left tw-text-sm hover:tw-bg-muted/50"
+                >
+                  <span>
+                    Category 说明：11 类分别怎么记账、归错会怎样
+                    <span className="tw-ml-1 tw-text-muted-foreground">（点开查看）</span>
+                  </span>
+                  <span aria-hidden="true">{showCategoryGuide ? "▾" : "▸"}</span>
+                </button>
+                {showCategoryGuide ? (
+                  <div
+                    id="category-guide"
+                    className="tw-flex tw-flex-col tw-gap-4 tw-border-t tw-border-border tw-px-3 tw-py-3"
+                  >
+                    <p className="tw-text-xs tw-text-muted-foreground">
+                      这里只解释分类含义，不参与任何计算；系统建议只做预填，仍需你在本步整步确认。
+                    </p>
+                    <dl className="tw-grid tw-gap-3">
+                      {CATEGORY_GUIDE.map((item) => {
+                        const label =
+                          categoryOptions.find((option) => option.code === item.code)?.label ?? item.name;
+                        return (
+                          <div key={item.code} className="tw-rounded-sm tw-bg-muted/40 tw-px-3 tw-py-2">
+                            <dt className="tw-flex tw-flex-wrap tw-items-baseline tw-gap-2 tw-text-sm tw-font-medium">
+                              <span>{label}</span>
+                              <code className="tw-text-xs tw-text-muted-foreground">{item.code}</code>
+                            </dt>
+                            <dd className="tw-mt-1 tw-text-sm">记账：{item.book}</dd>
+                            <dd className="tw-mt-1 tw-text-sm tw-text-destructive/90">归错类：{item.risk}</dd>
+                          </div>
+                        );
+                      })}
+                    </dl>
+                    <div className="tw-rounded-sm tw-border tw-border-border tw-px-3 tw-py-2">
+                      <p className="tw-text-sm tw-font-medium">几个常见例子</p>
+                      <ul className="tw-mt-1 tw-flex tw-flex-col tw-gap-2 tw-text-sm">
+                        {CATEGORY_CASES.map((item) => (
+                          <li key={item.summary}>
+                            <span className="tw-font-medium">{item.summary}</span>
+                            {item.right} {item.wrong}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+              {(preview.template?.invalid_type_ids ?? []).length > 0 ? (
+                <p role="alert" className="tw-text-sm tw-text-amber-600">
+                  模板中有 {preview.template?.invalid_type_ids?.length} 个类型引用已失效，本次已跳过（不影响导入）；
+                  确认导入后会从模板里移除。
+                </p>
+              ) : null}
               <Table aria-label="账单类型">
                 <TableHeader>
                   <TableRow>
@@ -698,7 +996,7 @@ export function Import() {
                       <TableCell>
                         {row.label}
                         {row.isNew ? (
-                          <Badge variant="secondary" className="tw-ml-2">
+                          <Badge variant="secondary" className="tw-ml-2 tw-bg-destructive tw-text-destructive-foreground">
                             新类型
                           </Badge>
                         ) : (
@@ -706,7 +1004,15 @@ export function Import() {
                             历史类型
                           </Badge>
                         )}
-                        {row.suggestedCategory && row.category === row.suggestedCategory ? (
+                        {row.source === "template" ? (
+                          <Badge variant="outline" className="tw-ml-1">
+                            模板
+                          </Badge>
+                        ) : row.source === "import_type" ? (
+                          <Badge variant="outline" className="tw-ml-1">
+                            历史记忆
+                          </Badge>
+                        ) : row.source === "summary_rule" ? (
                           <Badge variant="outline" className="tw-ml-1">
                             系统建议
                           </Badge>
@@ -781,9 +1087,18 @@ export function Import() {
                 <dt>文件</dt>
                 <dd>{preview.file.name}</dd>
                 <dt>券商</dt>
-                <dd>{preview.broker}</dd>
+                <dd>{brokerLabel(preview.broker)}</dd>
                 <dt>映射来源</dt>
-                <dd>{preview.template ? "已复用模板" : "手动确认"}</dd>
+                <dd>
+                  {preview.template ? (
+                    <>
+                      {preview.template.source === "system" ? "系统预设" : "我的模板"}
+                      {preview.template.has_user_overrides ? "（已自定义，保存为我的模板）" : ""}
+                    </>
+                  ) : (
+                    "手动确认"
+                  )}
+                </dd>
                 <dt>忽略列</dt>
                 <dd>{preview.ignored_columns?.length ?? 0}</dd>
                 <dt>预估</dt>
@@ -793,6 +1108,21 @@ export function Import() {
                   {preview.estimated.discarded}
                 </dd>
               </dl>
+              {(preview.template?.invalid_type_ids ?? []).length > 0 ? (
+                <p role="alert" className="tw-text-sm tw-text-amber-600">
+                  模板中有 {preview.template?.invalid_type_ids?.length} 个类型引用已失效，本次已跳过（不影响导入）；
+                  确认导入后会从模板里移除。
+                </p>
+              ) : null}
+              {preview.template?.source === "user" && preview.template.has_user_overrides ? (
+                <p className="tw-text-sm tw-text-muted-foreground">
+                  你的模板与系统预设{preview.template.preset_version ? `（v${preview.template.preset_version}）` : ""}
+                  存在差异，已保留你的自定义设置，系统更新不会自动覆盖。
+                </p>
+              ) : null}
+              <p className="tw-text-sm tw-text-muted-foreground">
+                确认导入成功后，本次列对应与 {types.length} 个账单类型映射会保存到你的模板，下次同格式自动复用。
+              </p>
               {(preview.blocking ?? []).length > 0 ? (
                 <ul role="alert" className="tw-text-sm tw-text-destructive">
                   {(preview.blocking ?? []).map((item) => (
@@ -897,7 +1227,8 @@ export function Import() {
                   </div>
                   {batch.mapping_source !== "legacy" ? (
                     <p className="muted">
-                      本次列对应已保存{batch.mapping?.is_origin ? "（首次导入，撤销会一并删除）" : "（增量导入，撤销保留列对应）"}，
+                      本次列对应与账单类型映射已保存
+                      {batch.mapping?.is_origin ? "（首次导入，撤销会一并删除）" : "（增量导入，撤销保留）"}，
                       下次同格式账单会自动复用。
                     </p>
                   ) : null}

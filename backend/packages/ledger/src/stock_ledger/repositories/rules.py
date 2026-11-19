@@ -35,8 +35,8 @@ SUMMARY_CODE_MAX_LENGTH = 16
 # 买卖类规则统一 `side="both"`：分类由摘要决定（方向另有 Trade.side 字段承载），
 # 避免账单侧记录不一致（如合成夹具摘要与买卖标志随机组合）把本可分类的行误隔离。
 _BASE_SYSTEM_RULES: tuple[tuple[str, str, str, str, str, str, int], ...] = (
-    ("sys_buy_stock", "证券买入→买入", "buy", "both", "exact", "证券买入", 10),
-    ("sys_sell_stock", "证券卖出→卖出", "sell", "both", "exact", "证券卖出", 10),
+    ("sys_buy_stock", "证券买入→买入", "buy", "both", "contains", "证券买入", 10),
+    ("sys_sell_stock", "证券卖出→卖出", "sell", "both", "contains", "证券卖出", 10),
     ("sys_buy_plain", "买入→买入", "buy", "both", "exact", "买入", 20),
     ("sys_sell_plain", "卖出→卖出", "sell", "both", "exact", "卖出", 20),
     # 省心投申购确认（华泰基金投顾）：主账户资金转出到省心投投顾账户，转出动作不在
@@ -52,8 +52,8 @@ _BASE_SYSTEM_RULES: tuple[tuple[str, str, str, str, str, str, int], ...] = (
         12,
     ),
     # 券商行为（broker_action）：券商侧的份额锁定/登记动作，不扣款、不影响持仓、不计成本。
-    # 优先级 11 必须早于「新股」(14) 与「申购」(16)，否则「申购中签」「申购还款」
-    # 「新股入账」会被抢去 new_stock 并虚增持仓/成本；也早于基金「申购确认」(15)。
+    # 优先级 11 必须早于「新股申购」(14) 与基金「申购确认」(15)，否则「申购中签」
+    # 「申购还款」「新股入账」会被抢去 new_stock 并虚增持仓/成本。
     ("sys_brk_win", "申购中签→券商行为", "broker_action", "both", "contains", "申购中签", 11),
     ("sys_brk_repay", "申购还款→券商行为", "broker_action", "both", "contains", "申购还款", 11),
     ("sys_brk_arrive", "新股入账→券商行为", "broker_action", "both", "contains", "新股入账", 11),
@@ -64,25 +64,57 @@ _BASE_SYSTEM_RULES: tuple[tuple[str, str, str, str, str, str, int], ...] = (
     ("sys_brk_rehold", "转托管→券商行为", "broker_action", "both", "contains", "转托管", 11),
     ("sys_brk_hold_out", "托管转出→券商行为", "broker_action", "both", "contains", "托管转出", 11),
     ("sys_brk_hold_in", "托管转入→券商行为", "broker_action", "both", "contains", "托管转入", 11),
-    # 新股/可转债申购（新口径）：只认真正扣款的行——摘要含「新股」「认购」「申购」。
-    # 「中签」「缴款」不再单独归入（登记类见上方 broker_action）；上市后卖出统一走 sell。
-    # 「新股」「认购」放 14：早于基金「申购确认」(15)，保证「新股申购确认缴款」不被当成
-    # 基金买入；单字「申购」放 16：晚于基金，避免把「申购确认」抢成打新。
+    # 不扣款的认购/上市登记：摘要只记「可转债认购」「新股上市」或裸「认购」「上市」，
+    # 没有资金流、也不产生持仓变动，一律归券商行为；priority 11 保证不被新股/买入规则抢走。
+    # 用具体词或精确匹配，避免把真正扣款的「新股认购」「市值认购资金扣收」也吃进来。
+    (
+        "sys_brk_cb_sub",
+        "可转债认购→券商行为",
+        "broker_action",
+        "both",
+        "contains",
+        "可转债认购",
+        11,
+    ),
+    ("sys_brk_new_list", "新股上市→券商行为", "broker_action", "both", "contains", "新股上市", 11),
+    ("sys_brk_sub", "认购→券商行为", "broker_action", "both", "exact", "认购", 11),
+    ("sys_brk_regis", "登记→券商行为", "broker_action", "both", "contains", "登记", 11),
+    ("sys_brk_list", "上市→券商行为", "broker_action", "both", "exact", "上市", 11),
+    # 新股/可转债申购（新口径）：只认真正扣款的缴款形态——「新股申购确认缴款」
+    # 「新股申购」「新股认购」「认购清算」。「中签」「上市」等登记/行情事件不再单独归入
+    # （登记类见上方 broker_action；上市后卖出统一走 sell）。
+    # 优先级 14 早于基金「申购确认」(15)，保证「新股申购确认缴款」不被当成基金买入；
     # 零金额降级（classify._CATEGORY_ZERO_AMOUNT_FALLBACK）：规则表本身只负责 pattern 匹配，
     # 发生金额=0 的登记动作（如中签登记、获配登记）在分类应用层自动降级为 broker_action，
     # 避免把不扣款的登记行误判为建仓并虚增持仓成本。
-    ("sys_new_stock", "新股→新股申购", "new_stock", "both", "contains", "新股", 14),
-    ("sys_new_sub", "认购→新股申购", "new_stock", "both", "contains", "认购", 14),
+    (
+        "sys_new_stock",
+        "新股申购确认缴款→新股申购",
+        "new_stock",
+        "both",
+        "contains",
+        "新股申购确认缴款",
+        14,
+    ),
+    ("sys_new_apply", "新股申购→新股申购", "new_stock", "both", "contains", "新股申购", 14),
+    ("sys_new_sub", "新股认购→新股申购", "new_stock", "both", "contains", "新股认购", 14),
+    ("sys_new_pay", "认购清算→新股申购", "new_stock", "both", "contains", "认购清算", 14),
     # 上市后卖出统一走 sell：新股口径收窄后含「新股」的规则只认建仓，这里给「新股卖出」
     # 这类非标准卖出摘要一个明确落点（不能只靠 exact「卖出」，否则会整行隔离）。
     ("sys_new_sell", "新股卖出→卖出", "sell", "both", "contains", "新股卖出", 13),
-    ("sys_new_apply", "申购→新股申购", "new_stock", "both", "contains", "申购", 16),
     # 未中签/未成交/退回的资金腿：申购冻结/解冻、退款只有现金进出，没有持仓与成本，
-    # 归资金划转（外部现金流，不进收益）。早于「申购」(16)，避免被当成打新建仓。
+    # 归资金划转（外部现金流，不进收益）。早于「新股申购」(14) 与基金「申购确认」(15)。
     ("sys_sub_freeze", "申购冻结→资金划转", "transfer", "both", "contains", "申购冻结", 12),
     ("sys_sub_unfreeze", "申购解冻→资金划转", "transfer", "both", "contains", "申购解冻", 12),
     ("sys_sub_refund", "申购退款→资金划转", "transfer", "both", "contains", "申购退款", 12),
     ("sys_win_refund", "中签退款→资金划转", "transfer", "both", "contains", "中签退款", 12),
+    # 跨行转账：与银证/存管同属外部资金流，但不在 `TRANSFER_SUMMARY_KEYWORDS` 里
+    # （解析器把跨行行归 NON_TRADE，资金腿仍需分类），单独成规则；码长须 ≤16。
+    ("sys_cross_in", "跨行转入→资金划转", "transfer", "both", "contains", "跨行转入", 12),
+    ("sys_cross_out", "跨行转出→资金划转", "transfer", "both", "contains", "跨行转出", 12),
+    # 银证转入/转出不在这里重复定义：`TRANSFER_SUMMARY_KEYWORDS` 已逐词生成
+    # `sys_syb_in` / `sys_syb_out`（priority 30），再写一条同 pattern 的规则会造成
+    # 「同一摘要两条规则竞争」，也让词表同源校验失配。
     # 市值认购资金扣收：按市值认购可转债/新股的缴款腿（解析器已转成 CASH 资金行），
     # 只有资金流出、没有证券代码，属于广义资金划转而不是打新建仓。exact + priority 12
     # 必须早于「认购」(14)，否则会被 sys_new_sub 抢成 new_stock 并给 CASH 伪代码记成本。
@@ -98,15 +130,17 @@ _BASE_SYSTEM_RULES: tuple[tuple[str, str, str, str, str, str, int], ...] = (
     ),
     # 基金申赎确认（基金账单通常没有「买卖标志」列，摘要只写「申购/赎回确认」）：
     # 方向由 Category 决定（申购确认→buy，赎回确认→sell），解析器不再从摘要推断方向。
-    # priority 15 必须晚于券商行为(11)与「新股/认购」(14)，早于单字「申购」(16)。
+    # priority 15 晚于券商行为(11)与新股申购(14)，保证「新股申购确认缴款」先归打新。
     ("sys_fund_buy", "申购确认→买入", "buy", "both", "contains", "申购确认", 15),
     ("sys_redeem", "赎回确认→卖出", "sell", "both", "contains", "赎回确认", 15),
-    # 股息红利税（含「股息红利税\n补缴」）优先于通用「股息」规则：它是资金流出/费用，不是分红收入。
-    ("sys_div_tax", "股息红利税→费用", "fee", "both", "contains", "红利税", 25),
+    # 股息红利税（含「股息红利税\n补缴」）优先于通用「股息」规则：按分红口径入账，
+    # 负数金额直接冲减分红收入，而不是单独计入交易费用。
+    ("sys_div_tax", "股息红利税→分红", "dividend", "both", "contains", "红利税", 25),
     ("sys_dividend", "红利入账→分红", "dividend", "both", "exact", "红利入账", 30),
-    ("sys_div_bonus", "股息→分红", "dividend", "both", "contains", "股息", 40),
+    ("sys_div_bonus_1", "股息→分红", "dividend", "both", "contains", "股息", 40),
+    ("sys_div_bonus_2", "派息→分红", "dividend", "both", "contains", "派息", 40),
     # 基金分红发放（红利再投/现金分红）：与「红利入账」同口径，不能被宽泛「费」规则吞掉。
-    ("sys_div_paid", "红利发放→分红", "dividend", "both", "contains", "红利发放", 30),
+    ("sys_div_paid", "红利发放→利息", "interest", "both", "contains", "红利发放", 30),
     ("sys_interest", "利息归本→利息", "interest", "both", "contains", "利息", 50),
     # 配股（含「配股缴款」）：既有股票变更也有扣费，属 rights；优先级 13 早于
     # new_stock(14)，保证「配股缴款」不会被「新股/申购」类规则抢走。
@@ -115,9 +149,9 @@ _BASE_SYSTEM_RULES: tuple[tuple[str, str, str, str, str, str, int], ...] = (
     # 据此映射成 core FIFO 的 BONUS 事件（不新增枚举值，沿用已有 other 分类）。
     # 优先级 45：晚于配股(13)/新股申购(14)、早于通用「费」(90)，且不会抢走
     # 「银行转存」(30) 等资金划转规则。
-    ("sys_bonus_stock", "送股→公司行为", "other", "both", "contains", "送股", 45),
-    ("sys_bonus_cap", "转增→公司行为", "other", "both", "contains", "转增", 45),
-    ("sys_bonus_split", "送转→公司行为", "other", "both", "contains", "送转", 45),
+    ("sys_bonus_stock", "送股→公司行为", "rights", "both", "contains", "送股", 45),
+    ("sys_bonus_cap", "转增→公司行为", "rights", "both", "contains", "转增", 45),
+    ("sys_bonus_split", "送转→公司行为", "rights", "both", "contains", "送转", 45),
     ("sys_fee", "费用→手续费", "fee", "both", "contains", "费", 90),
 )
 
@@ -140,17 +174,34 @@ _TRANSFER_RULE_NAMES: tuple[str, ...] = (
     "银行转取→资金划转",
     "转存管转入→资金划转",
     "转存管转出→资金划转",
-    "资管转让上账→资金划转",
+    "资管转让资金上账→赎回",
     "银证转入→资金划转",
     "银证转出→资金划转",
+)
+# 「资管转让资金上账」是华泰资管转让的货基赎回资金腿（如 940018），
+# 必须落 sell 才能与份额腿配对、避免现金与货基余额双计；其余仍是资金划转。
+_TRANSFER_RULE_CATEGORIES: tuple[str, ...] = (
+    "transfer",
+    "transfer",
+    "transfer",
+    "transfer",
+    "transfer",
+    "transfer",
+    "sell",
+    "transfer",
+    "transfer",
 )
 
 SYSTEM_RULES: tuple[tuple[str, str, str, str, str, str, int], ...] = (
     *_BASE_SYSTEM_RULES,
     *(
-        (code, name, "transfer", "both", "contains", keyword, 30)
-        for code, name, keyword in zip(
-            _TRANSFER_RULE_CODES, _TRANSFER_RULE_NAMES, TRANSFER_SUMMARY_KEYWORDS, strict=True
+        (code, name, category, "both", "contains", keyword, 30)
+        for code, name, category, keyword in zip(
+            _TRANSFER_RULE_CODES,
+            _TRANSFER_RULE_NAMES,
+            _TRANSFER_RULE_CATEGORIES,
+            TRANSFER_SUMMARY_KEYWORDS,
+            strict=True,
         )
     ),
 )

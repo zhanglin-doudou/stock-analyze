@@ -41,6 +41,7 @@ from stock_platform.ids import new_id
 from stock_platform.ports import Bar, MarketDataSource
 from stock_platform.repositories.users import UserSettingRepository
 from stock_platform.symbols import classify_symbol, is_convertible_bond
+from stock_review.application.money_fund import money_fund_codes
 from stock_review.insights import reasons
 from stock_review.insights.reasons import REASON_LABELS, ReasonDTO
 from stock_review.metrics.context import Period, parse_period_label
@@ -1437,13 +1438,21 @@ async def get_insights_page(
             ErrorCode.VALIDATION_ERROR, detail=f"非法的 security_type: {unknown_types[0]}"
         )
 
-    rounds = await _load_rounds(session, user_id, start=resolved.start, end=resolved.end)
+    trades = await _load_trades(session, user_id, end=resolved.end)
+    # 货币基金是现金等价物，不属于「回合洞察」的证券口径（历史遗留回合也一并剔除）。
+    fund_codes = money_fund_codes(trades)
+    rounds = [
+        round_row
+        for round_row in await _load_rounds(
+            session, user_id, start=resolved.start, end=resolved.end
+        )
+        if round_row.security_code not in fund_codes
+    ]
     symbol_trade_ids = {round_row.open_trade_id for round_row in rounds} | {
         round_row.close_trade_id for round_row in rounds if round_row.close_trade_id
     }
-    trades = await _load_trades(session, user_id, end=resolved.end)
     by_id = {trade.id: trade for trade in trades}
-    symbols = {trade.security_code for trade in trades}
+    symbols = {trade.security_code for trade in trades if trade.security_code not in fund_codes}
     market = await _load_market(
         market_data,
         symbols,
@@ -1602,6 +1611,8 @@ async def get_round_insight(
     if round_row is None:
         raise ApiError(ErrorCode.NOT_FOUND, detail=f"round {round_id} 不存在")
     trades = await _load_trades(session, user_id, end=round_row.close_date or clock.today())
+    if round_row.security_code in money_fund_codes(trades):
+        raise ApiError(ErrorCode.NOT_FOUND, detail=f"round {round_id} 不存在")
     by_id = {trade.id: trade for trade in trades}
     buy = by_id.get(round_row.open_trade_id)
     sell = by_id.get(round_row.close_trade_id) if round_row.close_trade_id else None

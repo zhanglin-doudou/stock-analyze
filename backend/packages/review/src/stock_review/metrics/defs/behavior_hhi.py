@@ -31,6 +31,7 @@ from stock_review.metrics.defs._common import (
     asset_days_in_period,
     close_ladders,
     close_on_or_before,
+    effective_category,
     money_units,
     trades_until,
 )
@@ -61,7 +62,7 @@ def _build_items(ctx: MetricContext, filters: DrilldownFilters) -> Sequence[Dril
 
 class HhiDef:
     id = "behavior.hhi"
-    definition_version = "1.0"
+    definition_version = "1.1"
     domain = "behavior"
     scope = ScopeSpec(unit="day", cohort="trade_date", period="month")
     params_schema = EmptyParams
@@ -119,11 +120,11 @@ class HhiDef:
             while cursor < len(trades) and trades[cursor].trade_date <= row.trade_date:
                 trade = trades[cursor]
                 cursor += 1
-                if trade.category in _ADD_CATEGORIES:
+                if effective_category(trade) in _ADD_CATEGORIES:
                     positions[trade.security_code] = (
                         positions.get(trade.security_code, 0) + trade.quantity_units
                     )
-                elif trade.category == "sell":
+                elif effective_category(trade) == "sell":
                     positions[trade.security_code] = (
                         positions.get(trade.security_code, 0) - trade.quantity_units
                     )

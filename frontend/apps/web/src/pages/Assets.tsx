@@ -216,13 +216,15 @@ export function Assets() {
     [filters],
   );
 
-  const loadOversellRounds = useCallback(async (): Promise<void> => {
+  const loadOversellRounds = useCallback(async (): Promise<Round[]> => {
     try {
       const list = await api.rounds.list({ limit: 100, status: "oversell" });
       setOversellRounds(list.items);
+      return list.items;
     } catch {
       // 修订入口是增强块：接口失败不影响资产表本身。
       setOversellRounds([]);
+      return [];
     }
   }, []);
 
@@ -234,7 +236,7 @@ export function Assets() {
     void loadOversellRounds();
   }, [loadOversellRounds]);
 
-  // 首屏加载完成且整体状态非正常（degraded/blocked）时，用该状态回填筛选并触发一次过滤，
+  // 首屏加载完成或者资产重新构建了且整体状态非正常（degraded/blocked）时，用该状态回填筛选并触发一次过滤，
   // 让异常数据直接可见；只自动应用一次，之后尊重用户的手动筛选。
   useEffect(() => {
     if (!page || autoFilterApplied.current) return;
@@ -252,6 +254,7 @@ export function Assets() {
     const fresh = await load();
     void loadOversellRounds();
     if (fresh) setNotice(buildNotice(fresh.build, fresh.data_as_of));
+    setAutoFiltered(false);
   }, [load, loadOversellRounds]);
 
   // 资产表 stale 自动构建：判定 / 触发 / 全局去重 / 轮询都在公共 hook 内（与看板同源）。
@@ -267,6 +270,11 @@ export function Assets() {
     : missing
       ? "构建资产表"
       : "更新资产表";
+
+  // 执行build后需要重新自动过滤出异常账单
+  useEffect(() => {
+    if (executing) autoFilterApplied.current = false;
+  }, [executing]);
 
   /** 日期 → 当日超卖回合（用于「补录成本」入口；按 close_date 精确对应资产行）。 */
   const oversellByDate = new Map<string, Round[]>();
@@ -308,7 +316,7 @@ export function Assets() {
     },
     {
       key: "unrealized_pnl",
-      header: "浮动盈亏",
+      header: "持仓盈亏",
       priority: 2,
       align: "right",
       render: (row) => moneyCell(row.unrealized_pnl),
@@ -316,7 +324,7 @@ export function Assets() {
     {
       key: "daily_pnl",
       header: "日收益额",
-      priority: 3,
+      priority: 2,
       align: "right",
       render: (row) => moneyCell(row.daily_pnl),
     },
@@ -385,7 +393,21 @@ export function Assets() {
 
   return (
     <div>
-      <h1>资产表</h1>
+      <div className="row-actions" style={{ justifyContent: 'space-between'}}>
+        <h1>资产表</h1>
+        <button
+          className="btn btn-ghost"
+          type="button"
+          disabled={executing}
+          aria-busy={executing}
+          onClick={() => {
+            setNotice("");
+            void auto.submit("auto");
+          }}
+        >
+          {actionLabel}
+        </button>
+        </div>
       <p className="muted">
         每日资产快照（总资产 = 现金 + 持仓市值），用于资产变化与后续回撤；本页不做计算。
       </p>
@@ -405,18 +427,6 @@ export function Assets() {
               onClick={() => setFilters(draft)}
             >
               应用筛选
-            </button>
-            <button
-              className="btn btn-ghost"
-              type="button"
-              disabled={executing}
-              aria-busy={executing}
-              onClick={() => {
-                setNotice("");
-                void auto.submit("auto");
-              }}
-            >
-              {actionLabel}
             </button>
             <button className="btn btn-ghost" type="button" disabled={loading} onClick={() => void load()}>
               刷新
@@ -551,7 +561,13 @@ export function Assets() {
           // 只刷新超卖回合列表（已补录的回合会从列表消失）；不刷新资产表，
           // 避免 build.state 变 stale 触发 useStaleAssetBuild 自动构建——
           // 资产表等用户全部补录完成后手动点「更新资产表」统一重算。
-          void loadOversellRounds();
+          loadOversellRounds().then((ors) => {
+            if (ors.every(item => !item.close_date || !item.close_trade_id)) {
+              auto.submit('auto');
+              setDraft({ ...draft, status: '' });
+              filters.status = '';
+            }
+          });
         }}
       />
     </div>

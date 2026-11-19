@@ -26,6 +26,8 @@ from stock_review.application.assets import (
 )
 from stock_review.application.bond_alias import build_bond_alias, canonical_code
 from stock_review.application.money_fund import money_fund_codes
+from stock_review.application.rebuild import rights_resolution
+from stock_review.application.rights import RightsResolution, zero_amount_rights_codes
 from stock_review.metrics.views import (
     AssetBuildView,
     AssetDailyView,
@@ -138,7 +140,7 @@ def _fill_view(row: RoundFill) -> FillView:
     )
 
 
-def _trade_view(row: Any) -> TradeView:
+def _trade_view(row: Any, *, effective_category: str = "") -> TradeView:
     return TradeView(
         id=row.id,
         trade_date=row.trade_date,
@@ -156,6 +158,7 @@ def _trade_view(row: Any) -> TradeView:
         deleted_at=row.deleted_at,
         version=row.version,
         security_name=row.security_name or "",
+        effective_category=effective_category,
     )
 
 
@@ -323,6 +326,19 @@ async def load_viewset(
     fund_codes = money_fund_codes(trades_raw)
     if fund_codes:
         trades_raw = [row for row in trades_raw if row.security_code not in fund_codes]
+    # 配股前置校验（2.4）：只有「零金额配股」可能被降级，且持仓判定按代码独立推进，
+    # 因此只取这些代码到期末的流水即可（起始日天然是各代码首笔），不必扫全历史；
+    # 窗口内没有零金额配股时直接跳过，连查询都不发。
+    rights = RightsResolution(frozenset())
+    candidate_codes = zero_amount_rights_codes(trades_raw)
+    if candidate_codes:
+        classification_raw = await repo.trades_for_codes(user_id, candidate_codes, period_end)
+        # 与资产表/净值/归因同一口径：发债代码归并到上市代码后再做判定。
+        bond_alias, _alias_unresolved = build_bond_alias(
+            (row.security_code, row.security_name)
+            for row in (*trades_raw, *classification_raw)
+        )
+        rights = rights_resolution(classification_raw, bond_alias=bond_alias)
     # 资产日多取一段回看：beta/drawdown 用「期末回看 60 个交易日」而不是自然月内。
     asset_raw = await repo.asset_daily_in_period(
         user_id, period_start - timedelta(days=_ASSET_LOOKBACK_DAYS), period_end
@@ -482,7 +498,9 @@ async def load_viewset(
     return ViewSet(
         rounds=tuple(_round_view(row) for row in rounds_raw),
         fills=tuple(_fill_view(row) for row in fills_raw),
-        trades=tuple(_trade_view(row) for row in trades_raw),
+        trades=tuple(
+            _trade_view(row, effective_category=rights.category(row)) for row in trades_raw
+        ),
         asset_daily=tuple(_asset_daily_view(row) for row in asset_raw),
         asset_build=asset_build,
         bars=bars,

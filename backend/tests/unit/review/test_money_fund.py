@@ -14,6 +14,8 @@ from stock_ledger.models import Trade
 from stock_review.application.money_fund import (
     money_fund_balances,
     money_fund_codes,
+    money_fund_identity,
+    money_fund_oversells,
     money_fund_total_units,
     money_fund_value_units,
 )
@@ -141,6 +143,21 @@ def test_value_units_sign_and_dividend_reinvest() -> None:
     )
 
 
+def test_broker_action_does_not_change_balance_or_holdings() -> None:
+    """登记/过户类份额行不影响货基余额（避免与同日资金腿重复计入）。"""
+    assert (
+        money_fund_value_units(
+            _trade(category="broker_action", quantity_units=10_000_000, amount_units=0)
+        )
+        == 0
+    )
+    rows = [
+        _trade(category="buy", quantity_units=10_000_000, amount_units=-1_000_00),
+        _trade(category="broker_action", quantity_units=10_000_000, amount_units=0),
+    ]
+    assert money_fund_balances(rows) == {"119924": 1_000_00}
+
+
 def test_balances_fold_and_backsolve_first_redemption() -> None:
     rows = [
         _trade(
@@ -160,6 +177,36 @@ def test_balances_fold_and_backsolve_first_redemption() -> None:
     assert money_fund_balances(rows, before=date(2026, 6, 3)) == {"119924": 0}
     assert money_fund_balances(rows) == {"119924": 400_00}
     assert money_fund_total_units(rows, before=date(2026, 6, 2)) == 1_000_00
+
+
+def test_oversell_after_purchase_is_income_not_initial_balance() -> None:
+    """申购后的赎回缺口是超卖（券商补记份额）：计入当日收益，不进期初资产。"""
+    rows = [
+        _trade(trade_date=date(2026, 9, 23), quantity_units=1_162_953_800, amount_units=-11_629_538),
+        _trade(
+            trade_date=date(2026, 9, 29),
+            category="sell",
+            quantity_units=1_162_953_800,
+            amount_units=11_629_538,
+        ),
+        _trade(trade_date=date(2026, 9, 29), quantity_units=1_067_085_300, amount_units=-10_670_853),
+        # 赎回 106,720.80 份 > 持有 106,708.53 份：超卖 12.27 份。
+        _trade(
+            trade_date=date(2026, 9, 30),
+            category="sell",
+            quantity_units=1_067_208_000,
+            amount_units=10_672_080,
+        ),
+    ]
+    # 期初不再被未来的超卖抬高；超卖前后的时点余额保持真实。
+    assert money_fund_balances(rows, before=date(2026, 9, 1)) == {"119924": 0}
+    assert money_fund_balances(rows, before=date(2026, 9, 30)) == {"119924": 106_708_53}
+    assert money_fund_balances(rows) == {"119924": 0}
+    # 份额正推记录超卖：日期 / 证券代码 / 超出份额。
+    oversells = money_fund_oversells(rows)
+    assert [(item.trade_date, item.security_code, item.quantity_units) for item in oversells] == [
+        (date(2026, 9, 30), "119924", 122_700)
+    ]
 
 
 # ── 不进 FIFO / 回合 ──────────────────────────────────────
@@ -185,3 +232,98 @@ def test_money_fund_skipped_by_fifo_and_rounds() -> None:
     result = build_rounds(trades_to_events(rows))
     assert {round_.security_code for round_ in result.rounds} == {"600519"}
     assert result.data_errors == ()
+
+
+# ── 同名不同代码：共享持仓 ────────────────────────────────
+
+
+def test_same_name_different_codes_share_holding() -> None:
+    """代码不同、名称相同 → 同一只货基：赎回可消耗另一代码买入的份额。"""
+    rows = [
+        _trade(
+            trade_date=date(2026, 6, 1),
+            security_code="119924",
+            security_name="平安证券现金宝",
+            quantity_units=10_000_000,
+            amount_units=-1_000_00,
+        ),
+        # 同日另一代码、同名：转托管后的新代码。
+        _trade(
+            trade_date=date(2026, 6, 2),
+            security_code="970172",
+            security_name="平安证券现金宝",
+            quantity_units=4_000_000,
+            amount_units=-400_00,
+        ),
+        # 只用新代码赎回 14,000 份：不共享持仓时会被判 10,000 份超卖。
+        _trade(
+            trade_date=date(2026, 6, 3),
+            security_code="970172",
+            security_name="平安证券现金宝",
+            category="sell",
+            quantity_units=14_000_000,
+            amount_units=1_400_00,
+        ),
+    ]
+    identity = money_fund_identity(rows)
+    # 身份键取最近有流水的代码（代码变更后以新代码为主）。
+    assert identity == {"119924": "970172", "970172": "970172"}
+    assert money_fund_codes(rows) == {"119924", "970172"}
+    # 合并后余额归到身份键，赎回后为 0，且不产生超卖。
+    assert money_fund_balances(rows) == {"970172": 0}
+    assert money_fund_balances(rows, before=date(2026, 6, 3)) == {"970172": 1_400_00}
+    assert money_fund_oversells(rows) == ()
+
+
+def test_same_name_oversell_uses_merged_balance() -> None:
+    """名称相同合并后仍不足 → 按合并余额判定超卖，只记真正缺口。"""
+    rows = [
+        _trade(
+            trade_date=date(2026, 6, 1),
+            security_code="119924",
+            security_name="平安证券现金宝",
+            quantity_units=10_000_000,
+            amount_units=-1_000_00,
+        ),
+        _trade(
+            trade_date=date(2026, 6, 2),
+            security_code="970172",
+            security_name="平安证券现金宝",
+            quantity_units=2_000_000,
+            amount_units=-200_00,
+        ),
+        _trade(
+            trade_date=date(2026, 6, 3),
+            security_code="970172",
+            security_name="平安证券现金宝",
+            category="sell",
+            quantity_units=15_000_000,
+            amount_units=1_500_00,
+        ),
+    ]
+    assert [(item.trade_date, item.security_code, item.quantity_units) for item in
+            money_fund_oversells(rows)] == [(date(2026, 6, 3), "970172", 3_000_000)]
+
+
+def test_different_names_stay_separate() -> None:
+    """名称不同即使代码结构相似也不归并。"""
+    rows = [
+        _trade(
+            trade_date=date(2026, 6, 1),
+            security_code="119924",
+            security_name="平安证券现金宝",
+            quantity_units=10_000_000,
+            amount_units=-1_000_00,
+        ),
+        _trade(
+            trade_date=date(2026, 6, 2),
+            security_code="940018",
+            security_name="华泰紫金天天发货币",
+            category="sell",
+            quantity_units=3_000_000,
+            amount_units=300_00,
+        ),
+    ]
+    assert money_fund_identity(rows) == {"119924": "119924", "940018": "940018"}
+    # 940018 从未增持，赎回缺口按共享池扣减 119924 的盈余。
+    assert money_fund_balances(rows) == {"119924": 700_00, "940018": 0}

@@ -1,11 +1,13 @@
 # 导入重构：券商无关的字段映射与账单类型映射（MVP）开发设计
 
 > 状态：**v0.2 — 已实现并完成自动验收（2026-11-13）**（评审结论与 P0/P1 处置见[独立交叉评审记录](../reviews/2026-11-13-DevDesign-Review-import-mapping-refactor.md)；实际命令/结果、实现偏差与手工 SKIP 见附录 E）
+>
+> **2026-11-18 口径变更（以代码为准）**：资产口径 2.1 起已移除「货币基金余额」功能（迁移 `0017_remove_money_fund` 删除 `ledger.trade.money_fund_balance_units` 与 `review.asset_daily.money_fund_units`；当前口径 2.4：货基份额按 1.0000 折算进现金，不参与 FIFO）。因此本文凡是涉及 `money_fund_balance` 字段、`supports_money_fund`、「货基无余额 → fail-closed」的内容均已作废，字段目录以 `stock_contracts/import_fields.py` 为准。另：解析层五金额全为 0 的行统一隔离 `INVALID_AMOUNT`，不再有「红利发放 / 非交易过户确认」摘要豁免。现行导入说明见 [账单导入功能说明](../help/2026-11-18-bill-import-guide.md)。
 > 日期：2026-11-13 ｜ 作者：AI（Team Lead）
 > 需求来源：用户 2026-11-13 原始诉求（4 条 MVP + 2 条技术要求）
 >
 > 关联文档：
-> - [账单解析与估值口径](2026-10-29-bill-parsing-and-valuation-caliber.md)（现有解析器语义：货基、债券、零金额信息行、可转债、省心投）
+> - [账单解析与估值口径](2026-10-29-bill-parsing-and-valuation-caliber.md)（现有解析器语义：省心投、可转债、债券、零金额信息行；货基余额口径已下线）
 > - [API-Catalog v2](../architecture/v2/API-Catalog.md)（API-010~016 导入契约、§3 错误码、§6 验收矩阵）
 > - [用户偏好 v2.1](2026-11-11-user-preferences.md)（本仓设计文档结构与门禁写法）
 > - [独立交叉评审记录（2026-11-13）](../reviews/2026-11-13-DevDesign-Review-import-mapping-refactor.md)（v0.1 → v0.2 的 P0/P1 处置）
@@ -35,7 +37,7 @@
 | D-13 | 增量导入 | 模板**精确命中** → 跳过列对应步骤；已知类型自动应用；只有**新类型**才进入类型步骤 | 每次重走两步（违反需求 3） | 满足「首次确定，后续不改变」；文件格式变化（签名不同）才重新确认 |
 | D-14 | 撤销导入 | **任意批次**撤销都删除本批次写入（新增或修改）的账单类型映射；**只有 origin 批次**撤销才删除该签名的字段/列模板（增量撤销保留列模板）；删除动作进审计 | 任意撤销都删列模板（增量用户下次要重配）/ 只删流水（不满足需求 4） | 满足需求 4 的区分口径：增量撤销不破坏已确认的列对应；对话框按批次类型给不同提示 |
 | D-15 | Category 枚举 | 把 `routers/rules.py::ALLOWED_CATEGORIES` 上提为 `stock_contracts.enums.BillCategory`（10 值），DB 仍用 `text` 存 | 新建 DB Enum 类型（新增值要迁移） | 单一真相；前端下拉、后端校验、文档同源 |
-| D-16 | 解析器 | 把现有 `parse_bill` 改造成 **mapping plan 驱动 + profile 语义**：华泰的货基/可转债/省心投/合计行语义作为 `huatai` profile 保留；通用券商走 `generic` profile | 直接重写（回归风险极高）/ 只加适配层（多列费用无法合并） | 复用 80% 现有逻辑；华泰 golden 测试作为回归闸门 |
+| D-16 | 解析器 | 把现有 `parse_bill` 改造成 **mapping plan 驱动 + profile 语义**：华泰的可转债/省心投/合计行语义作为 `huatai` profile 保留；通用券商走 `generic` profile（货基余额语义已随迁移 0017 移除） | 直接重写（回归风险极高）/ 只加适配层（多列费用无法合并） | 复用 80% 现有逻辑；华泰 golden 测试作为回归闸门 |
 | D-17 | 前端 | 引入 **Tailwind v3.4 + shadcn（Radix primitives + CVA）**，但**只服务 `/import` 向导**：`preflight:false`、content 只扫 import 功能、CSS 随路由懒加载、颜色映射到既有 tokens | 全站 Tailwind（违反首屏 Budget 与既有 CSS 体系）/ 不用 shadcn（违反技术要求） | 满足技术要求且不污染现有页面；需评审批准例外 |
 | D-18 | 提交一致性 | commit 时把 **mapping/type 快照写入 job params 与 batch**，worker 只用快照；PUT 映射用 `mapping_version` 乐观锁 | worker 重新读 preview 最新状态（提交后被改会错写） | 消除 TOCTOU；支持审计与重放 |
 | D-19 | 旧预览/旧客户端兼容 | 迁移前的 preview 标记 `stage='legacy'`；**新请求不带 `X-Import-Flow: v2` 也走 legacy 单步流程**（旧 preview→commit 不变）；带 v2 的新预览必须 `stage='ready'` | 直接拒绝旧客户端（v1 破坏性变更） | v1 兼容；legacy 计划在 v2 稳定 90 天后下线，不是 24h |
@@ -202,7 +204,7 @@
 | `stamp_tax` | `ledger.trade.stamp_tax_units` | L3 | 否 | money | 缺省 0 |
 | `other_fee` | `ledger.trade.other_fee_units` | L3 | **是** | money | 多列求和；唯一允许多对一字段 |
 | `cash_balance` | `ledger.trade.cash_balance_units` | L3 | 否 | money | 缺省则无法对账，告警 |
-| `money_fund_balance` | `ledger.trade.money_fund_balance_units` | L3 | 否 | money | 货基余额（华泰 profile 用） |
+| ~~`money_fund_balance`~~ | ~~`ledger.trade.money_fund_balance_units`~~ | — | — | — | **已移除（迁移 0017，2026-11-15）**：货基按现金等价物处理，不再映射余额列 |
 | `summary` | `ledger.trade.summary` | **L2** | 否 | text | **账单类型**来源；与 `side` 二选一 |
 | `note` | `ledger.trade.note` | L3 | 否 | text | 备注，不参与分类 |
 | `account` | `ledger.trade.account_masked` | L3 | 否 | text | 入库前 MD5 脱敏，样例也脱敏 |
@@ -322,8 +324,8 @@ def signature(keys: list[str]) -> str:
 - **匹配方式**：默认 `exact`；`prefix/contains` 由管理员显式创建（按 `priority` 排序，`exact` 先于 `prefix` 先于 `contains`）。不做正则，避免表头规则变成不可审计的代码。
 - **歧义**：同一表头命中多条规则时，按 **broker 专属优先（非 `*`）→ `priority` → 匹配精度（exact>prefix>contains）→ `id`** 稳定排序取第一条作为建议；其余候选 P1 在 UI 展开。
 - **seed 策略**：新表 `stock_contracts/import_fields.py::FIELD_ALIASES`（**与 legacy `parsers/columns.py::COLUMN_ALIASES` 分开**，避免改旧解析器语义；例如新表把「备注」映射到 `note` 而不是 `summary`）生成 `broker='*'` 规则；华泰 12 个精确表头生成 `broker='huatai'` 指纹规则。`seed_import_column_rules()` **只插缺、不覆盖**管理员改动；系统行不可删（422 提示改为禁用）。应用层在 preview/commit 前调用（自愈，与 `load_rules` 同款）。
-- **券商识别**：对每个 `broker`，`score = Σ命中权重 / Σ该 broker 全部 is_fingerprint 规则权重`；`score ≥ 0.6` 且命中权重 ≥6，并严格大于第二名 → 判定该 broker；否则 `generic`。阈值刻意偏高：避免只命中「成交日期/证券代码」等通用列就被误判成华泰而套用可转债/货基专属语义。用户可在上传步骤手动改；generic 走通用语义。
-- **未注册 profile 的券商**：识别只影响「用哪套系统建议 + 展示哪个券商」；语义 profile 仍回退 `generic`。新增华泰之外的专属语义（货基锚点/可转债手数等）需新增 profile 代码（P1）；MVP 的「覆盖所有券商」= 通用平铺表格能导入，不承诺每家专属口径。券商展示名来自 `stock_contracts/import_fields.py::BROKER_LABELS`（代码常量，P1 可改为表驱动）。
+- **券商识别**：对每个 `broker`，`score = Σ命中权重 / Σ该 broker 全部 is_fingerprint 规则权重`；`score ≥ 0.6` 且命中权重 ≥6，并严格大于第二名 → 判定该 broker；否则 `generic`。阈值刻意偏高：避免只命中「成交日期/证券代码」等通用列就被误判成华泰而套用可转债/省心投专属语义。用户可在上传步骤手动改；generic 走通用语义。
+- **未注册 profile 的券商**：识别只影响「用哪套系统建议 + 展示哪个券商」；语义 profile 仍回退 `generic`。新增华泰之外的专属语义（省心投、可转债手数等）需新增 profile 代码（P1）；MVP 的「覆盖所有券商」= 通用平铺表格能导入，不承诺每家专属口径。券商展示名来自 `stock_contracts/import_fields.py::BROKER_LABELS`（代码常量，P1 可改为表驱动）。
 - 规则修改**只影响后续预览的建议**，不回溯模板、不重写历史 trade。
 
 ### 3.6 用户模板（用户级、与用户绑定）
@@ -415,13 +417,15 @@ for row in parsed_rows:
 | `buy` | 买入 | 证券买入、货基申购确认 |
 | `sell` | 卖出 | 证券卖出、货基赎回确认 |
 | `bonus` | 送转 | 送股、转增（当前规则仍落 `other`，枚举保留） |
-| `dividend` | 分红 | 红利入账、红利发放 |
+| `dividend` | 分红 | 红利入账、红利发放、股息红利税（负数冲减分红收入） |
 | `rights` | 配股 | 配股 |
 | `interest` | 利息 | 利息归本 |
-| `fee` | 费用 | 佣金、印花税、红利税 |
+| `fee` | 费用 | 佣金、印花税、独立手续费行 |
 | `transfer` | 资金划转 | 银行转证券/转银行、转托管、省心投申购 |
 | `new_stock` | 新股 | 申购、中签、新股入账 |
 | `other` | 其他 | 证券清理、送股（当前口径）、未知业务 |
+
+> 注：枚举现为 11 值，另有 `broker_action`（券商行为）：申购中签/申购还款/新股入账/证券清理/转托管等登记动作，不建仓、不计成本。
 
 > `trade.summary` 是 `String(64)`：类型键统一按**入库值**（≤64 字符）规范化，保证 commit 后 `reclassify` 用同一键；更长文本在预览中截断展示（`type_label` 最多 120）。
 
@@ -771,7 +775,7 @@ CREATE INDEX ix_import_batch_user_signature ON ledger.import_batch (user_id, sig
 | `IMPORT_FEE_MERGE_INVALID` | 费用合并算术错误 |
 | `IMPORT_FEE_MERGE_VERIFY_FAILED` | 合并后余额链不符 |
 | `IMPORT_LAYOUT_UNSUPPORTED` | 多行表头/找不到唯一表头行（合并单元格不在 MVP 检测范围） |
-| `IMPORT_PROFILE_REQUIRED` | generic profile 遇到货基无余额/省心投等专属语义 |
+| `IMPORT_PROFILE_REQUIRED` | generic profile 遇到省心投等专属语义（货基无余额判定已随迁移 0017 移除） |
 | `VALIDATION_ERROR` | 日期格式非法、列键格式非法、`options` 非法等 |
 | `VERSION_CONFLICT` | `If-Match` 版本过期 |
 | `IMPORT_STAGE_CONFLICT` | `stage=legacy`（旧预览不支持两步编辑） |
@@ -822,7 +826,7 @@ CREATE INDEX ix_import_batch_user_signature ON ledger.import_batch (user_id, sig
 | API-010 `POST /imports/preview` | 请求新增 `broker?/reuse_template?`；响应新增 `broker/signature/stage/mapping_version/template/catalog/types/verification/blocking`；**缺 L1 不再 422**（返回 200 + blocking）；`mapping` 仅 legacy |
 | API-011 `POST /imports` | 请求新增 `mapping_version?`、`acknowledge_reimport?`；`mapping_version` 不一致 → 409 `VERSION_CONFLICT`；`mapping` 仅用于 `stage=legacy`；v2 预览必须 `stage=ready`，否则 409 `IMPORT_STAGE_CONFLICT`；`requires_reimport_ack && mode!=replace_range && !acknowledge_reimport` → 409 `IMPORT_REIMPORT_CONFLICT`；快照写入 job params |
 | API-013 `GET /imports/{batch_id}` | `counts` 新增 `discarded`；新增 `mapping{source,template_id,signature,remap_required,is_origin}`（`is_origin` 决定撤销对话框文案）；`assumptions` 保留 |
-| API-014 `GET .../quarantine` | `reason_code` 白名单新增 `BILL_TYPE_DISCARDED`；`raw` 支持 `note/money_fund_balance` 映射 |
+| API-014 `GET .../quarantine` | `reason_code` 白名单新增 `BILL_TYPE_DISCARDED`；`raw` 支持 `note` 映射（`money_fund_balance` 随迁移 0017 移除） |
 | API-015 `POST .../revoke` | 响应新增**顶层** `mapping_revoked{mapping_deleted: bool, types_deleted: int}`；`reverted{inserted,updated}` 保持 int 不变（避免 bool 被 pydantic 变成 1/0）；行为见 §7.4 |
 | API-012 `GET /imports` | 列表项新增 `discarded`、`mapping_source`（additive） |
 
@@ -839,7 +843,7 @@ CREATE INDEX ix_import_batch_user_signature ON ledger.import_batch (user_id, sig
 | `IMPORT_BILL_TYPES_UNRESOLVED` | 422 | 还有账单类型没有分类。 | 为每个类型选择 Category，或标记为废弃。 |
 | `IMPORT_CATEGORY_INVALID` | 422 | 账单分类不合法。 | 从系统提供的 10 个分类中选择。 |
 | `IMPORT_CLASSIFICATION_SOURCE_MISSING` | 422 | 无法判断买卖方向或账单类型。 | 映射「买卖标志」或「摘要/业务名称」列。 |
-| `IMPORT_PROFILE_REQUIRED` | 422 | 这张账单需要对应券商的能力才能正确处理。 | 选择正确的券商 profile，或映射缺失的货基余额列。 |
+| `IMPORT_PROFILE_REQUIRED` | 422 | 这张账单需要对应券商的能力才能正确处理。 | 选择正确的券商 profile（货基自 0017 起不再要求余额列）。 |
 | `IMPORT_REIMPORT_CONFLICT` | 409 | 同一文件已用不同的对应关系导入过。 | 用区间替换重导，或确认「重新导入」后再提交。 |
 | `IMPORT_STAGE_CONFLICT` | 409 | 当前导入阶段不允许该操作。 | 先完成列对应/类型确认。 |
 | `IMPORT_LAYOUT_UNSUPPORTED` | 422 | 这个表格布局暂不支持。 | 导出为单行表头的 CSV 后重试。 |
@@ -869,14 +873,14 @@ CREATE INDEX ix_import_batch_user_signature ON ledger.import_batch (user_id, sig
 
 ### 7.1 解析器重构（不改变华泰口径）
 
-目标：把「怎么读表 / 哪列是什么」与「业务语义（货基、可转债、省心投、合计行）」解耦。
+目标：把「怎么读表 / 哪列是什么」与「业务语义（可转债、省心投、合计行、零金额信息行）」解耦。
 
 | 模块 | 职责 |
 |---|---|
 | `parsers/mapping.py`（新） | `header_key`、`signature`、`MappingPlan`、`validate_plan`、`merge_fee_units`、`normalize_type_key`、`derive_type_key` |
 | `parsers/table.py`（新） | 读 xls/xlsx/csv（复用现有 `_read_rows`）、**纯 headers 表头探测**、列键生成、按 plan 取列下标、按字段聚值；返回 `header_row_index` |
 | 表头探测算法 | 扫描前 30 行，按「非空单元格比例 + 文本占比 + **静态别名命中数（`FIELD_ALIASES`，不是 admin 规则/plan）**」打分；并列时 `line_no` 最小确定性 tiebreak；仍无法唯一/疑似多行表头 → `IMPORT_LAYOUT_UNSUPPORTED`。探测**不依赖 plan/管理员规则**，并在 preview/batch 持久化 `header_row_index`；commit 只用快照，不重探测。合并单元格不在 MVP 检测范围（读取层只给字符串矩阵），不承诺识别 |
-| `parsers/profiles.py`（新） | `Profile` dataclass + 注册表：`huatai`（`supports_money_fund/cbond/sxt`）、`generic`；`detect_broker(headers, rules)` |
+| `parsers/profiles.py`（新） | `Profile` dataclass + 注册表：`huatai`（`apply_sxt` 省心投语义）、`generic`；`detect_broker(headers, rules)` |
 | `parsers/huatai.py`（改） | 保留 `_build_candidate` 与业务分支；入参从 `mapping: dict[str,str]` 改为 `plan: MappingPlan`；`field_value(field)` 对 `other_fee` 返回多列和；金额带符号由 `options.amount_signed` 决定；其他逻辑不动 |
 | `parsers/columns.py`（改） | `COLUMN_ALIASES` 保留给 legacy 路径（不改语义）；新 seed 源在 `stock_contracts/import_fields.py::FIELD_ALIASES`；`map_columns` 标记 legacy（仅旧路径/兼容） |
 
@@ -884,14 +888,14 @@ CREATE INDEX ix_import_batch_user_signature ON ledger.import_batch (user_id, sig
 
 1. `_build_candidate` 现在用 `field_headers[field]` 取单个表头；改为 `field_columns[field]`（列下标元组），`other_fee` 用求和包装。
 2. `amount_signed` 从 `is_signed_amount_header(header)` 改为 plan 的 `options.amount_signed`，系统规则预置。
-3. `parse_bill` 增加 `profile` 参数；`huatai` 分支保留 `_money_fund_*`、`_CBOND_LOT_SIZE`、省心投；`generic` 只保留通用规则（合计停表、零金额信息行、金额/方向推导、隔离），检测到货基行无余额/省心投摘要等专属构造时 **fail-closed** `IMPORT_PROFILE_REQUIRED`，不静默按普通交易入库。
+3. `parse_bill` 增加 `profile` 参数；`huatai` 分支保留 `_CBOND_LOT_SIZE`、省心投；`generic` 只保留通用规则（合计停表、零金额信息行、金额/方向推导、隔离），检测到省心投等专属摘要时 **fail-closed** `IMPORT_PROFILE_REQUIRED`，不静默入库。（货基无余额判定已随迁移 0017 移除。）
 4. `parse_bill` 的 `mapping` 参数保留为 legacy 兼容（内部转成 plan），新路径走 `plan`。
 5. `ParsedBill` 增加 `signature`、`profile`、`mapping_items` 快照（可选），其余字段不变。
 
 **generic profile 能力边界（必须在前端/结果页可见）**：
 
 - 支持：平铺表头、日期格式、代码/名称、方向、量/价、带符号或毛额、佣金/印花税/其他费（含多列合并）、资金余额、摘要类型、去重、隔离、**合计行停表、零金额信息行隔离**（这些是通用规则，不依赖 profile）。
-- 货基：若映射了 `money_fund_balance` 列，按货基行处理；**没有该列但检测到货基行**（名称含「货币」或价格=1 且费用全 0）→ **fail-closed** `IMPORT_PROFILE_REQUIRED`（422，提示映射货基余额列或选择对应券商 profile），不按普通交易静默入库（否则会复现 2026-10-29 D14 的资产错账）。
+- 货基：**2026-11-15 起不再有货基余额语义**（迁移 0017 删除 `money_fund_balance_units`）。货基行按普通基金买入/卖出分类，资产层再把货基份额按 1.0000 折算进现金（口径 2.3）；不再要求映射余额列，也不再因「货基无余额」fail-closed。
 - 省心投：检测到 `[省心投]申购确认`/`[省心投]红利发放` 等华泰专属摘要 → `IMPORT_PROFILE_REQUIRED`（提示选择 `huatai` profile），generic 不猜测语义。
 - 可转债：×10/手口径在 **review 层**按 `is_convertible_bond` 判定，与 profile 无关；解析器里的 `_CBOND_LOT_SIZE` 只用于 WARN，不是 generic 的差异化能力（删除原「generic 会手/张偏差」的错误表述）。
 
@@ -907,7 +911,7 @@ CREATE INDEX ix_import_batch_user_signature ON ledger.import_batch (user_id, sig
   - 注意：**不能**把建议 plan 当成已确认；`columns[].source` 标明来源，`can_commit=false` 除非模板命中且类型全已知。
   - 非模板命中时，即使建议 plan 完整、解析成功，也只用于 `estimated/verification`，**不返回 `types`**（`stage=mapping`）；类型聚合只在 `save_mapping` 成功后暴露，保证「先列对应、后类型」的顺序。
   - 建议 plan 不完整/解析失败**不阻断上传**：返回 `stage=mapping`、`types=[]`、`blocking[]`（缺哪些 L1/L2）、`estimated` 置 0 且 `estimated_available=false`（UI 显示「待映射后计算」，不能把 0 当空文件）；用户手工补全后再走 `save_mapping` 的硬校验。上传即 422 会让「未被规则识别的表头」永远无法进入映射界面——这正是当前实现的最大可用性缺口。
-  - **profile 专属语义**（货基无余额/省心投）在 `create_preview` 只转成 `blocking[]` 的 `IMPORT_PROFILE_REQUIRED` + 建议 broker（让用户改选 profile），**不直接 422**；`save_mapping`/commit 才 fail-closed 422。否则用户会被卡在“还没机会改券商”的死路。
+  - **profile 专属语义**（省心投等；货基无余额判定已随 0017 移除）在 `create_preview` 只转成 `blocking[]` 的 `IMPORT_PROFILE_REQUIRED` + 建议 broker（让用户改选 profile），**不直接 422**；`save_mapping`/commit 才 fail-closed 422。否则用户会被卡在“还没机会改券商”的死路。
 - `save_mapping(...)`：锁 preview → 校验 → 重解析 → 聚合类型 → 重算 `estimated`（含已存在 dedupe 的 skipped）→ 重算 `mapping_fingerprint`（含 `mapping_items+ignored_columns+date_format`）与 `requires_reimport_ack` → 写 `mapping_items/mapping_version/mapping_confirmed_at/types/verification/estimated` → 清空旧类型确认。**不写任何用户级持久记忆**（`import_template`/`import_bill_type` 只在 commit 成功时写）。
 - `save_types(...)`：锁 preview → 校验覆盖率 → 写 `type_resolutions/types_confirmed_at` → stage=ready。
 - `preview_out(...)`：组装 `catalog/columns/types/verification`；金额一律 `Money` 字符串。
@@ -915,7 +919,7 @@ CREATE INDEX ix_import_batch_user_signature ON ledger.import_batch (user_id, sig
 `application/imports.py::commit_batch`：
 
 1. 读 preview（存在性/过期）与 job params 快照（`mapping_items/type_resolutions/mapping_version/signature`）。
-2. 用快照 plan 解析（与预览同一函数 → 计数一致）；generic profile 命中货基无余额/省心投等专属构造时，在写任何 trade 之前失败 `IMPORT_PROFILE_REQUIRED`（job error），不留半截数据。
+2. 用快照 plan 解析（与预览同一函数 → 计数一致）；generic profile 命中省心投等专属构造时，在写任何 trade 之前失败 `IMPORT_PROFILE_REQUIRED`（job error），不留半截数据。（货基无余额判定已随 0017 移除。）
 3. 逐行：
    - `type_key` 命中 `resolution`：
      - `discard` → 隔离 `BILL_TYPE_DISCARDED`，`discarded_count++`；
@@ -1419,7 +1423,7 @@ H-1（Tailwind/shadcn 例外）与 H-2（撤销删除范围）已于 2026-11-13 
 
 ## 附录 D：新增券商/账单格式的接入清单（运营可执行）
 
-目标：**不写代码**也能让一种新券商账单进入「系统建议 + 用户确认」的流程；只有专属语义（货基锚点/可转债手数等）才需要 profile 代码。
+目标：**不写代码**也能让一种新券商账单进入「系统建议 + 用户确认」的流程；只有专属语义（省心投、可转债手数等）才需要 profile 代码。
 
 1. 收集 2~3 份脱敏样例（不同月份、含费用/转账/分红）。
 2. 在管理员 API 新增 `broker` 的指纹规则：把该券商稳定出现的表头（如「成交日期/证券代码/买卖标志/成交数量/成交价格/成交金额/佣金/印花税/其他费/资金余额/摘要」）设为 `is_fingerprint=true`、`weight=1`；阈值按 §3.5。

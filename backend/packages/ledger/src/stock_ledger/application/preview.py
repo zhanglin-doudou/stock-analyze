@@ -11,6 +11,7 @@ legacy 兼容：调用方显式传 `mapping` 时保持旧行为（stage=`legacy`
 from __future__ import annotations
 
 import hashlib
+import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -38,6 +39,7 @@ from stock_ledger.application.import_analysis import (
     public_categories,
     resolutions_from_types,
     resolve_broker,
+    resolve_broker_with_preset,
     stage_for,
     suggestions_for_headers,
     unresolved_types,
@@ -62,8 +64,15 @@ from stock_ledger.repositories.import_mapping import (
 )
 from stock_ledger.repositories.imports import ImportBatchRepository, ImportPreviewRepository
 from stock_ledger.repositories.trades import TradeRepository
+from stock_ledger.template_presets import (
+    SystemTemplate,
+    find_system_template,
+    system_template_by_id,
+    system_template_payload,
+)
 
 SAMPLE_LIMIT = 10
+log = logging.getLogger(__name__)
 
 
 class LocalObjectStore:
@@ -344,6 +353,7 @@ async def create_preview(
     object_store: ObjectStore,
     broker: str = "auto",
     reuse_template: bool = False,
+    template_id: str | None = None,
 ) -> ImportPreviewDTO:
     """解析并落预览；v2 默认走映射/类型两段式，显式 `mapping` 保持 legacy。"""
     sha256 = hashlib.sha256(data).hexdigest()
@@ -419,20 +429,52 @@ async def create_preview(
     resolved_broker = resolve_broker(broker, detection.code)
     templates = ImportTemplateRepository(session)
     plan: MappingPlan | None = None
-    template_id: str | None = None
+    resolved_template_id: str | None = None
     template_payload: dict[str, Any] | None = None
-    if reuse_template:
+    template = None
+    preset: SystemTemplate | None = None
+    if template_id:
+        # 显式选择：系统预设（sys:<key>）或本人的模板 id。签名不匹配时放弃套用，
+        # 继续走系统建议，不阻断导入。
+        preset = system_template_by_id(template_id)
+        if preset is not None:
+            if preset.signature != inspection.signature:
+                preset = None
+        else:
+            template = await templates.by_id(user_id, template_id)
+            if template is not None and template.signature != inspection.signature:
+                template = None
+    elif reuse_template:
+        # 自动匹配：本人模板优先，其次同签名的系统预设。
         template = await templates.by_signature(user_id, inspection.signature)
-        if template is not None:
-            plan = MappingPlan.from_dict(
-                {
-                    "header_row_index": inspection.header_row_index,
-                    "items": template.items,
-                    "ignored": template.ignored,
-                }
-            )
-            template_id = template.id
-            template_payload = _template_dict(template)
+        if template is None:
+            preset = find_system_template(signature=inspection.signature)
+    if template is not None:
+        plan = MappingPlan.from_dict(
+            {
+                "header_row_index": inspection.header_row_index,
+                "items": template.items,
+                "ignored": template.ignored,
+            }
+        )
+        resolved_template_id = template.id
+        template_payload = await user_template_payload(session, user_id, template)
+    elif preset is not None:
+        plan = MappingPlan.from_dict(
+            {
+                "header_row_index": inspection.header_row_index,
+                "items": list(preset.items),
+                "ignored": list(preset.ignored),
+            }
+        )
+        resolved_template_id = preset.template_id
+        template_payload = system_template_payload(preset)
+    # 自动识别只覆盖部分券商画像：命中系统预设或本人模板时，以模板记录的券商为准，
+    # 避免增量导入的确认页显示 generic / 与首次创建模板不一致。
+    matched_broker = (
+        preset.broker if preset is not None else (template.broker if template is not None else None)
+    )
+    resolved_broker = resolve_broker_with_preset(broker, detection.code, matched_broker)
     if plan is None:
         from stock_ledger.parsers.mapping import suggest_items
 
@@ -463,7 +505,7 @@ async def create_preview(
     except ApiError as exc:
         # 自动建议可能把多账户账单的其他费全部合并；让用户进入映射步骤修正，
         # 而不是在展示建议前就 422。API-098 保存映射时仍执行同样的硬校验。
-        if template_id is not None or exc.code not in {
+        if resolved_template_id is not None or exc.code not in {
             ErrorCode.IMPORT_FEE_MERGE_INVALID,
             ErrorCode.IMPORT_FEE_MERGE_VERIFY_FAILED,
         }:
@@ -477,6 +519,11 @@ async def create_preview(
             {},
             "mapping",
         )
+    if template_payload is not None:
+        # 模板类型优先级最高：覆盖历史记忆/摘要规则的预填；模板内类型视为已确认，
+        # 未被模板覆盖的类型仍需用户整步确认。
+        _apply_template_types(analysis.groups, template_payload.get("bill_types") or [])
+        await _refresh_analysis_estimates(session, user_id, analysis)
     warnings = _v2_warnings(analysis)
     if await _has_reimport_conflict(session, user_id, sha256, plan.fingerprint()):
         warnings.append(WarningCode.MAPPING_CHANGED_REIMPORT.value)
@@ -507,7 +554,7 @@ async def create_preview(
         mapping_items=plan.as_items(),
         ignored_columns=list(plan.ignored),
         mapping_version=1,
-        template_id=template_id,
+        template_id=resolved_template_id,
         verification=analysis.verification,
         discarded_count=analysis.estimates.get("discarded", 0),
         type_resolutions=resolutions_from_types(analysis.groups),
@@ -603,11 +650,15 @@ async def save_mapping(
     preview.ignored_columns = list(bill_plan.ignored)
     preview.mapping_version += 1
     preview.mapping_confirmed_at = clock.now()
+    template_payload = await load_template_payload(session, user_id, preview)
+    if template_payload is not None:
+        _apply_template_types(analysis.groups, template_payload.get("bill_types") or [])
+    _keep_user_type_choices(preview, analysis)
+    await _refresh_analysis_estimates(session, user_id, analysis)
     preview.stage = analysis.stage
     preview.columns = _plan_columns(inspection, bill_plan)
     preview.mapping = {}
     preview.verification = analysis.verification
-    _keep_user_type_choices(preview, analysis)
     preview.type_resolutions = resolutions_from_types(analysis.groups)
     preview.types_confirmed_at = None
     preview.discarded_count = analysis.estimates.get("discarded", 0)
@@ -795,6 +846,48 @@ async def _load_column_rules(session: AsyncSession, user_id: uuid.UUID) -> list[
     return await ImportColumnRuleRepository(session).list_effective(user_id)
 
 
+def _apply_template_types(
+    groups: dict[str, TypeGroup], bill_types: list[dict[str, Any]]
+) -> None:
+    """把模板里的类型映射盖到聚合结果上（`source="template"`）。
+
+    模板只覆盖本文件真正出现的 `type_key`；失效 id 在 payload 里已标 `invalid`，
+    这里直接跳过，不阻断导入。其余类型保留历史记忆/摘要规则的预填。
+    """
+    by_key = {
+        str(item.get("type_key")): item
+        for item in bill_types
+        if item.get("type_key") and not item.get("invalid")
+    }
+    for key, group in groups.items():
+        item = by_key.get(key)
+        if item is None:
+            continue
+        discarded = bool(item.get("discarded"))
+        group.source = "template"
+        group.discard = discarded
+        group.category = None if discarded else item.get("category")
+        group.suggested_category = group.category
+        # 模板映射是用户此前整步确认过的结果，直接视为已确认；未覆盖的类型仍走
+        # 历史记忆/规则建议，必要时保持待确认。
+        group.needs_confirmation = False
+
+
+async def _refresh_analysis_estimates(
+    session: AsyncSession, user_id: uuid.UUID, analysis: _Analysis
+) -> None:
+    """类型/废弃变化后重算计数与阶段（模板预填会改变废弃行数）。"""
+    if analysis.bill is None:
+        return
+    existing_keys = await TradeRepository(session).existing_dedupe_keys(
+        user_id, [row.dedupe_key for row in analysis.bill.rows]
+    )
+    analysis.estimates = estimate_counts(
+        analysis.bill, analysis.groups, existing_keys=existing_keys
+    )
+    analysis.stage = stage_for([], analysis.groups, parse_failed=False)
+
+
 def _template_dict(template: Any) -> dict[str, Any]:
     return {
         "template_id": template.id,
@@ -808,17 +901,116 @@ def _template_dict(template: Any) -> dict[str, Any]:
         "last_batch_id": template.last_batch_id,
         "created_at": template.created_at.isoformat() if template.created_at else None,
         "updated_at": template.updated_at.isoformat() if template.updated_at else None,
+        "source": "user",
+        "preset_key": None,
+        "preset_version": None,
+        "has_user_overrides": False,
+        "bill_type_ids": list(template.bill_type_ids or []),
+        "bill_types": [],
+        "invalid_type_ids": [],
     }
+
+
+def _has_user_overrides(
+    template: Any, bill_types: list[dict[str, Any]], preset: SystemTemplate | None
+) -> bool:
+    """用户模板与同签名系统预设是否存在差异（只做提示，不自动覆盖）。"""
+    if preset is None:
+        return False
+    current = sorted(
+        (
+            str(item.get("column_key")),
+            str(item.get("field")),
+            tuple(sorted((item.get("options") or {}).items())),
+        )
+        for item in template.items or []
+    )
+    baseline = sorted(
+        (
+            str(item.get("column_key")),
+            str(item.get("field")),
+            tuple(sorted((item.get("options") or {}).items())),
+        )
+        for item in preset.items
+    )
+    if current != baseline or list(template.ignored or []) != list(preset.ignored):
+        return True
+    current_types = {
+        str(item.get("type_key")): (item.get("category"), bool(item.get("discarded")))
+        for item in bill_types
+        if item.get("type_key")
+    }
+    baseline_types = {item.type_key: (item.category, item.discarded) for item in preset.bill_types}
+    # 模板只覆盖本文件出现过的类型，是预设的子集不算「用户改动」；
+    # 只有共有类型的分类/废弃不一致，或用户新增了预设外的类型，才算覆盖。
+    return any(
+        key not in baseline_types or baseline_types[key] != value
+        for key, value in current_types.items()
+    )
+
+
+async def user_template_payload(
+    session: AsyncSession, user_id: uuid.UUID, template: Any
+) -> dict[str, Any]:
+    """用户模板 payload：按 `bill_type_ids` 回填类型；查不到的 id 标失效并记一条日志。"""
+    ids = [str(value) for value in (template.bill_type_ids or [])]
+    rows = await ImportBillTypeRepository(session).by_ids(user_id, ids)
+    bill_types: list[dict[str, Any]] = []
+    invalid_ids: list[str] = []
+    for type_id in ids:
+        row = rows.get(type_id)
+        if row is None:
+            invalid_ids.append(type_id)
+            bill_types.append(
+                {
+                    "id": type_id,
+                    "type_key": None,
+                    "type_label": None,
+                    "category": None,
+                    "discarded": False,
+                    "invalid": True,
+                }
+            )
+            continue
+        bill_types.append(
+            {
+                "id": row.id,
+                "type_key": row.type_key,
+                "type_label": row.type_label,
+                "category": row.category,
+                "discarded": row.discarded,
+                "invalid": False,
+            }
+        )
+    if invalid_ids:
+        log.warning(
+            "import.template.invalid_bill_type_ids",
+            extra={"template_id": template.id, "invalid_count": len(invalid_ids)},
+        )
+    preset = find_system_template(signature=template.signature)
+    payload = _template_dict(template)
+    payload["bill_types"] = bill_types
+    payload["invalid_type_ids"] = invalid_ids
+    payload["preset_key"] = preset.key if preset is not None else None
+    payload["preset_version"] = preset.preset_version if preset is not None else None
+    payload["has_user_overrides"] = _has_user_overrides(template, bill_types, preset)
+    return payload
 
 
 async def load_template_payload(
     session: AsyncSession, user_id: uuid.UUID, preview: ImportPreview
 ) -> dict[str, Any] | None:
-    """预览关联的模板（API-106 刷新时回填「已复用模板」提示）。"""
+    """预览关联的模板（API-106 刷新时回填「已复用模板」提示）。
+
+    系统预设的 `template_id` 形如 `sys:<key>`，不落库、按代码内置 payload 回填。
+    """
     if not preview.template_id:
         return None
+    preset = system_template_by_id(preview.template_id)
+    if preset is not None:
+        return system_template_payload(preset)
     template = await ImportTemplateRepository(session).by_id(user_id, preview.template_id)
-    return _template_dict(template) if template is not None else None
+    return await user_template_payload(session, user_id, template) if template is not None else None
 
 
 async def _load_template_payload(

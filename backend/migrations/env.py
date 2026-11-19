@@ -38,10 +38,12 @@ OWNED_SCHEMAS = ("platform", "ledger", "review", "delivery", "market")
 def _include_object(
     obj: Any, name: str | None, type_: str, reflected: bool, compare_to: Any
 ) -> bool:
-    """只迁移自有 schema，忽略 public / 扩展对象。"""
+    """只迁移自有 schema，忽略 public / 扩展对象与手工备份表（*_bak_*）。"""
     if type_ == "table":
         schema = getattr(obj, "schema", None)
         if schema is not None and schema not in OWNED_SCHEMAS:
+            return False
+        if "_bak_" in (name or getattr(obj, "name", "") or ""):
             return False
     return True
 

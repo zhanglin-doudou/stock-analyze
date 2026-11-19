@@ -61,6 +61,7 @@ def side_from_category(category: str | None) -> str:
 # 后期加新规则只需在这里追加一行，规则表 pattern 保持纯语义。
 _CATEGORY_ZERO_AMOUNT_FALLBACK: dict[str, str] = {
     BillCategory.NEW_STOCK.value: BillCategory.BROKER_ACTION.value,
+    BillCategory.RIGHTS.value: BillCategory.BROKER_ACTION.value,
 }
 
 
@@ -73,7 +74,7 @@ def category_after_amount_fallback(category: str, amount_units: int) -> str:
 
 def _matches(rule: SummaryRule, summary: str) -> bool:
     if rule.match_type == "regex":
-        # 正则按原文匹配（用户可能显式依赖换行/空格）；其余匹配类型统一去折行。
+        # 摘要已在解析边界归一（无空白），正则的 pattern 原样使用、不再二次归一。
         try:
             return re.search(rule.pattern, summary) is not None
         except re.error:

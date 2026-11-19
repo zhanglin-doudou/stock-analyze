@@ -13,12 +13,14 @@ from __future__ import annotations
 
 import re
 import uuid
-from datetime import date
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 from stock_contracts.errors import ErrorCode
+from stock_review.models import Round
 from test_api_028_031_rounds import (
     _closed_round,
     _idem_key,
@@ -974,3 +976,63 @@ async def test_api_092_093_flag_glossary_serialized(client, api_prefix, user, se
     assert [entry["code"] for entry in detail.json()["flag_glossary"]] == [
         entry["code"] for entry in glossary
     ]
+
+
+async def test_api_092_093_money_fund_rounds_excluded(
+    scenario, client, api_prefix, user, owner_engine
+) -> None:
+    """货基是现金等价物：历史遗留的货基回合不进列表，直接详情也按不存在处理。"""
+    buy = await _seed_trade(
+        owner_engine,
+        user_id=user.user_id,
+        trade_date=date(2026, 6, 2),
+        side="buy",
+        quantity_units=10_000_000,
+        price_units=1_000_000,
+        amount_units=-10_000,
+        security_code="940018",
+    )
+    sell = await _seed_trade(
+        owner_engine,
+        user_id=user.user_id,
+        trade_date=date(2026, 6, 20),
+        side="sell",
+        quantity_units=10_000_000,
+        price_units=1_000_000,
+        amount_units=10_000,
+        security_code="940018",
+    )
+    async with AsyncSession(owner_engine) as session:
+        session.add(
+            Round(
+                id="rnd_moneyfund01",
+                user_id=user.user_id,
+                security_code="940018",
+                security_name="940018",
+                status="closed",
+                open_trade_id=buy,
+                close_trade_id=sell,
+                open_date=date(2026, 6, 2),
+                close_date=date(2026, 6, 20),
+                quantity_units=10_000_000,
+                cost_units=10_000,
+                proceeds_units=10_000,
+                dividend_units=0,
+                pnl_units=0,
+                return_rate_units=0,
+                holding_days=18,
+                data_error=False,
+                oversell_units=0,
+                fills_count=1,
+                rebuilt_at=datetime(2026, 6, 30, 15, 0, tzinfo=UTC),
+            )
+        )
+        await session.commit()
+
+    resp = await _list(client, api_prefix, user.headers, "?period=2026-06")
+    assert resp.status_code == 200, resp.text
+    assert [item["security_code"] for item in resp.json()["items"]] == ["600519"]
+
+    detail = await _detail(client, api_prefix, user.headers, "rnd_moneyfund01")
+    assert detail.status_code == 404
+    assert detail.json()["code"] == ErrorCode.NOT_FOUND.value

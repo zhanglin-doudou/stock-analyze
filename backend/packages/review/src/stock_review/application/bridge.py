@@ -51,12 +51,14 @@ from stock_ledger.repositories.trades import TradeRepository
 from stock_review.application.bond_alias import build_bond_alias
 from stock_review.application.money_fund import (
     money_fund_codes,
+    money_fund_oversells,
     money_fund_total_units,
     money_fund_value_units,
 )
 from stock_review.application.rebuild import trades_to_events
 from stock_review.application.valuation import CASHFLOW_CATEGORIES as _CASHFLOW_CATEGORIES
 from stock_review.application.valuation import category as _category
+from stock_review.application.valuation import is_cash_anchor as _is_cash_anchor
 from stock_review.application.valuation import is_cash_balance as _is_cash_balance
 
 # 桥接容差：1 分（标度整数最小单位的 1 倍；金额全部是分）。
@@ -137,14 +139,20 @@ def _initial_cash(trades: list[Trade], period_start: date) -> tuple[int, str] | 
         期初 = B.balance − B.amount − Σ{t.amount : period_start ≤ t.date 且 t 稳定序在 B 之前}
 
       B=全历史首行时 Σ 为空，退化为原「首行反推」口径。
+
+    「余额行」只认 `is_cash_anchor`：零金额但有份额的行（货基红利发放/再投、送转、
+    非交易过户）不改变券商现金，其「资金余额」列常为 0 占位，用作锚点会丢余额。
     """
     anchor_before: Trade | None = None
     anchor_after: Trade | None = None
-    for trade in trades:
-        if not _is_cash_balance(trade):
-            continue
+    # 零金额份额行（货基红利发放/再投、送转、非交易过户）的「资金余额」是占位值，
+    # 不能当锚点；只有全历史都没有可用锚点时才退回任意余额行（保持旧行为不 blocked）。
+    candidates = [t for t in trades if _is_cash_anchor(t)]
+    if not candidates:
+        candidates = [t for t in trades if _is_cash_balance(t)]
+    for trade in candidates:
         if trade.trade_date < period_start:
-            anchor_before = trade  # trades 按稳定序升序，最后命中即区间前最近一条
+            anchor_before = trade  # 候选按稳定序升序，最后命中即区间前最近一条
         elif anchor_after is None:
             anchor_after = trade  # 区间当日或之后第一条
     if anchor_before is not None:
@@ -161,14 +169,24 @@ def _initial_cash(trades: list[Trade], period_start: date) -> tuple[int, str] | 
     return cash, "back_solved"
 
 
+def _fund_cash_net(trade: Trade, oversold_units: int) -> int:
+    """货基行对现金合计的净额：券商资金变动 + 货基余额变动 + 超卖补记份额。"""
+    return trade.amount_units + money_fund_value_units(trade) + oversold_units
+
+
 def _ending_cash(
     trades: list[Trade], period_start: date, period_end: date, *, initial_cash: int
 ) -> tuple[int, str]:
-    """期末现金：区间内最后一条余额；没有则按现金流推导（调用方据此降级）。"""
+    """期末现金：区间内最后一条**可作锚点**的余额；没有则按现金流推导（调用方据此降级）。
+
+    零金额份额行（货基红利发放等）的余额列是占位值，不能作为期末锚点：真实案例里
+    2026-10-27 收盘前最后一笔是货基红利发放（金额 0、余额 0），而上一行申购确认的
+    余额是 101.15 元，误取 0 会让全历史桥接正好差 101.15 元并让 dashboard 降级。
+    """
     balances_in_period = [
         trade
         for trade in trades
-        if period_start <= trade.trade_date <= period_end and _is_cash_balance(trade)
+        if period_start <= trade.trade_date <= period_end and _is_cash_anchor(trade)
     ]
     if balances_in_period:
         return int(balances_in_period[-1].cash_balance_units or 0), "statement"
@@ -208,6 +226,8 @@ async def bridge_for_period(
     # 货币基金 = 现金等价物（2.3 口径）：期初/期末现金都含货基余额；申赎是现金内部
     # 转换（不产生现金流），只有红利/利息（现金发放或再投份额）才计入收益。
     fund_codes = money_fund_codes(trades)
+    # 货基超卖（赎回超余额、券商补记份额）经济实质是分红再投：计入收益，不留桥接残差。
+    oversell_value = {item.trade_id: item.value_units for item in money_fund_oversells(trades)}
     initial_cash = initial_cash_broker + money_fund_total_units(trades, before=period_start)
     result_start = build_rounds(
         trades_to_events([t for t in trades if t.trade_date < period_start], bond_alias=bond_alias)
@@ -247,10 +267,12 @@ async def bridge_for_period(
         category = _category(trade)
         if trade.security_code and trade.security_code in fund_codes:
             # 货基：申赎是现金内部转换（amount 与余额变动相互抵消，净额为 0）；
-            # 红利/利息（现金发放或再投份额）按净额计入收益，不产生桥接残差。
-            extra = trade.amount_units + money_fund_value_units(trade)
+            # 红利/利息（现金发放或再投份额）按净额计入收益，不产生桥接残差；
+            # 超卖缺口由券商补记份额，等价于红利再投，同样计入收益。
+            oversold = oversell_value.get(trade.id, 0)
+            extra = _fund_cash_net(trade, oversold)
             if extra:
-                if category == "dividend":
+                if oversold or category == "dividend":
                     dividends += extra
                 elif category == "interest":
                     interest += extra

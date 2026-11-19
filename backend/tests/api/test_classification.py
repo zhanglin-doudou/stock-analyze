@@ -154,14 +154,14 @@ async def test_real_bill_all_rows_classified_and_zero_unknown(
     trades = await _trades(client, api_prefix, user)
     assert len(trades) == 175
     assert all(item["category"] for item in trades), "真实账单必须 100% 分类"
-    # 分类分布：买入 83 / 卖出 62 / 资金划转 24（转存管 2 行全零被隔离）/ 分红 3 / 利息 2 / 费用 1。
+    # 分类分布：买入 83 / 卖出 62 / 资金划转 24（转存管 2 行全零被隔离）/ 分红 4
+    # （3 笔红利 + 1 笔红利税负数冲减）/ 利息 2。
     assert Counter(item["category"] for item in trades) == {
         "buy": 83,
         "sell": 62,
         "transfer": 24,
-        "dividend": 3,
+        "dividend": 4,
         "interest": 2,
-        "fee": 1,
     }
     # 非交易摘要命中资金划转，而不是被「费」等宽泛规则吞掉或被隔离。
     transfer_summaries = {item["summary"] for item in trades if item["category"] == "transfer"}
@@ -171,7 +171,7 @@ async def test_real_bill_all_rows_classified_and_zero_unknown(
     assert {item["summary_code"] for item in trades if item["summary"] == "银行转存"} == {
         "sys_transfer_in"
     }
-    assert {item["summary_code"] for item in trades if item["summary"] == "股息红利税\n补缴"} == {
+    assert {item["summary_code"] for item in trades if item["summary"] == "股息红利税补缴"} == {
         "sys_div_tax"
     }
 
@@ -194,18 +194,18 @@ async def test_real_bill_all_rows_classified_and_zero_unknown(
     assert body["filled_count"] == 0
 
 
-async def test_fund_bill_imports_with_zero_amount_dividend(
+async def test_fund_bill_imports_with_zero_amount_dividend_quarantined(
     client, api_prefix, user, settings
 ) -> None:
-    """货币基金账单：申赎确认命中规则；零金额「红利发放」按账单分类正常入账。"""
+    """货币基金账单：申赎确认命中规则；零金额「红利发放」按 INVALID_AMOUNT 隔离。"""
     preview = await _preview(
         client, api_prefix, user, _FUND_BILL.read_bytes(), _FUND_BILL.name, _XLSX_CONTENT_TYPE
     )
     assert preview["estimated"] == {
-        "parsed": 7,
-        "inserted": 7,
+        "parsed": 6,
+        "inserted": 6,
         "skipped": 0,
-        "quarantined": 0,
+        "quarantined": 1,
         "discarded": 0,
         "estimated_available": True,
     }
@@ -216,19 +216,19 @@ async def test_fund_bill_imports_with_zero_amount_dividend(
 
     batch = await _batch(client, api_prefix, user, accepted["batch_id"])
     assert batch["counts"] == {
-        "parsed": 7,
-        "inserted": 7,
+        "parsed": 6,
+        "inserted": 6,
         "skipped": 0,
-        "quarantined": 0,
+        "quarantined": 1,
         "discarded": 0,
     }
     assert "UNKNOWN_SUMMARY" not in set(batch["warnings"])
 
     items = await _quarantine(client, api_prefix, user, accepted["batch_id"])
-    assert items == []
+    assert [(item["line_no"], item["reason_code"]) for item in items] == [(19, "INVALID_AMOUNT")]
 
     trades = await _trades(client, api_prefix, user)
-    assert len(trades) == 7
+    assert len(trades) == 6
     assert all(item["category"] for item in trades)
     by_summary = {(item["summary"], item["side"]): item for item in trades}
 
@@ -242,16 +242,15 @@ async def test_fund_bill_imports_with_zero_amount_dividend(
     assert subscribe["summary_code"] == "sys_fund_buy"
     assert subscribe["amount"] == "-106708.53"
 
-    dividend = next(item for item in trades if item["summary"] == "红利发放")
-    assert dividend["category"] == "dividend"
-    assert dividend["amount"] == "0.00"
-    assert {item["category"] for item in trades} == {"buy", "sell", "transfer", "dividend"}
+    # 全零红利发放不进明细：不产生 dividend 流水（隔离区可人工复核补录）。
+    assert "红利发放" not in {item["summary"] for item in trades}
+    assert {item["category"] for item in trades} == {"buy", "sell", "transfer"}
 
 
 async def test_real_statement_excerpt_quarantine_only_zero_amount(
     client, api_prefix, user, settings
 ) -> None:
-    """真实对账单节选：折行摘要全部命中；零金额「红利发放」入账，其余全零行仍隔离。"""
+    """真实对账单节选：折行摘要全部命中；五金额全 0 的行一律隔离 INVALID_AMOUNT。"""
     preview = await _preview(
         client,
         api_prefix,
@@ -261,10 +260,10 @@ async def test_real_statement_excerpt_quarantine_only_zero_amount(
         _XLSX_CONTENT_TYPE,
     )
     assert preview["estimated"] == {
-        "parsed": 6,
-        "inserted": 6,
+        "parsed": 5,
+        "inserted": 5,
         "skipped": 0,
-        "quarantined": 4,
+        "quarantined": 5,
         "discarded": 0,
         "estimated_available": True,
     }
@@ -275,10 +274,10 @@ async def test_real_statement_excerpt_quarantine_only_zero_amount(
 
     batch = await _batch(client, api_prefix, user, accepted["batch_id"])
     assert batch["counts"] == {
-        "parsed": 6,
-        "inserted": 6,
+        "parsed": 5,
+        "inserted": 5,
         "skipped": 0,
-        "quarantined": 4,
+        "quarantined": 5,
         "discarded": 0,
     }
     assert "UNKNOWN_SUMMARY" not in set(batch["warnings"])
@@ -287,37 +286,34 @@ async def test_real_statement_excerpt_quarantine_only_zero_amount(
     assert batch["fills"] == []
 
     items = await _quarantine(client, api_prefix, user, accepted["batch_id"])
-    assert len(items) == 4
-    # 3 条零金额「红利发放」内容完全一致：1 条按账单分类入账，2 条文件内重复；
-    # 转托管确认与证券清理（全零）仍隔离 INVALID_AMOUNT。
-    assert {item["reason_code"] for item in items} == {
-        "INVALID_AMOUNT",
-        "DUPLICATE_IN_FILE",
-    }
-    assert {item["line_no"] for item in items} == {18, 19, 20, 25}
+    assert len(items) == 5
+    # 3 条 [省心投]红利发放 + 转托管确认 + 证券清理（全零）全部 INVALID_AMOUNT；
+    # 全零校验先于文件内重复判定，不再出现 DUPLICATE_IN_FILE。
+    assert {item["reason_code"] for item in items} == {"INVALID_AMOUNT"}
+    assert {item["line_no"] for item in items} == {17, 18, 19, 20, 25}
     # 持仓/声明区块（夹具第 27 行起）不应出现在隔离区。
     assert all(item["line_no"] < 27 for item in items)
 
     trades = await _trades(client, api_prefix, user)
-    assert len(trades) == 6
+    assert len(trades) == 5
     assert all(item["category"] for item in trades)
     by_summary = {item["summary"]: item for item in trades}
     # [省心投]申购确认视同银行转出（设计 D14）：category=transfer，CASH 占位、方向由 Category 派生（transfer→unknown）。
-    assert by_summary["[省心投]申\n购确认"]["category"] == "transfer"
-    assert by_summary["[省心投]申\n购确认"]["security_code"] == "CASH"
-    assert by_summary["新股申购确\n认缴款"]["category"] == "new_stock"
-    assert by_summary["[省心投]申\n购确认"]["side"] == "unknown"
+    # 折行摘要已在解析边界归一并落库（如「[省心投]申\n购确认」→「[省心投]申购确认」）。
+    assert by_summary["[省心投]申购确认"]["category"] == "transfer"
+    assert by_summary["[省心投]申购确认"]["security_code"] == "CASH"
+    assert by_summary["新股申购确认缴款"]["category"] == "new_stock"
+    assert by_summary["[省心投]申购确认"]["side"] == "unknown"
     # 券商登记动作（托管转出/新股入帐/证券清理…）归 broker_action：不影响持仓与成本（资产口径 1.9）。
     assert by_summary["托管转出"]["category"] == "broker_action"
     assert by_summary["新股入帐"]["category"] == "broker_action"
-    assert by_summary["[省心投]红\n利发放"]["category"] == "dividend"
-    assert by_summary["[省心投]红\n利发放"]["amount"] == "0.00"
+    # 全零红利发放已隔离，不进明细。
+    assert "[省心投]红利发放" not in by_summary
     assert {item["category"] for item in trades} == {
         "sell",
         "transfer",
         "new_stock",
         "broker_action",
-        "dividend",
     }
 
 

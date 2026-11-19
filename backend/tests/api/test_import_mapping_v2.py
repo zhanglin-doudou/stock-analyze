@@ -112,10 +112,12 @@ async def _preview(
     data: bytes | None = None,
     filename: str = "huatai.csv",
     content_type: str = "text/csv",
+    extra: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     resp = await client.post(
         f"{api_prefix}/imports/preview",
         headers={**user.headers, **V2},
+        data=extra or {},
         files={"file": (filename, data or _bill(), content_type)},
     )
     assert resp.status_code == 200, resp.text
@@ -271,6 +273,8 @@ async def test_api_010_huatai_cbond_bill_type_table_is_complete(client, api_pref
         data=_CBOND_FIXTURE.read_bytes(),
         filename=_CBOND_FIXTURE.name,
         content_type=_XLS_CONTENT_TYPE,
+        # 该 22 列表头与平安预设同签名；本用例验证「无模板时全部类型必须人工确认」。
+        extra={"reuse_template": "false"},
     )
     assert body["broker"] == "huatai"
     assert body["estimated"]["parsed"] == sum(_CBOND_TYPE_ROW_COUNTS.values())
@@ -607,6 +611,168 @@ async def test_api_098_remap_from_ready_keeps_user_type_choices(client, api_pref
     assert again["stage"] == "types"
     assert {item["category"] for item in again["types"]} == {"other"}
     assert all(item["needs_confirmation"] for item in again["types"])
+
+
+_HUATAI_PRESET_HEADER = (
+    "日期,币种,股东账号,证券代码,证券名称,摘要,成交数量,成交均价,佣金,印花税,其他费,"
+    "发生金额,资金余额\n"
+)
+
+
+def _huatai_preset_bill(index: int = 1) -> bytes:
+    """与系统预设 huatai 同签名（86a2e1d34c53b1c9）的最小账单。
+
+    `index` 用来换一行不同的成交，避免重复导入被去重成空文件。
+    """
+    balance = 8995.00 - 1005.00 * (index - 1)
+    return (
+        _HUATAI_PRESET_HEADER
+        + f"2026010{index},人民币,A1,60000{index},测试银行{index},证券买入,100,10.00,"
+        f"5.00,0.00,0.00,-1005.00,{balance:.2f}\n"
+    ).encode()
+
+
+async def test_import_template_system_preset_and_writeback(
+    client, api_prefix, user, settings
+) -> None:
+    body = await _preview(client, api_prefix, user, data=_huatai_preset_bill())
+    template = body["template"]
+    assert template["source"] == "system"
+    assert template["template_id"] == "sys:huatai"
+    assert template["preset_version"] == 1
+    assert len(template["bill_types"]) == 18
+    assert template["invalid_type_ids"] == []
+    # 模板覆盖历史记忆/规则建议，且视为已确认 → 直接 ready。
+    buy = next(item for item in body["types"] if item["type_key"] == "证券买入")
+    assert buy["source"] == "template"
+    assert buy["category"] == "buy"
+    assert buy["needs_confirmation"] is False
+    assert body["stage"] == "ready"
+
+    await _commit(client, api_prefix, user, body)
+    await _drain_worker(settings)
+
+    listed = await client.get(f"{api_prefix}/imports/templates", headers=user.headers)
+    assert listed.status_code == 200
+    items = listed.json()["items"]
+    assert len(items) == 1
+    saved = items[0]
+    assert saved["source"] == "user"
+    assert saved["preset_version"] == 1
+    assert saved["has_user_overrides"] is False
+    assert len(saved["bill_type_ids"]) == 18
+    saved_keys = [item["type_key"] for item in saved["bill_types"]]
+    assert saved_keys[0] == "证券买入"
+    # 套用预设时复制全部类型：本文件没出现的「证券卖出」也写入模板记忆。
+    assert "证券卖出" in saved_keys
+    # 系统预设只读，不写库；列表里的 system 项固定来自代码（华泰 + 平安）。
+    system = {item["template_id"]: item for item in listed.json()["system"]}
+    assert list(system) == ["sys:huatai", "sys:pingan"]
+    assert system["sys:pingan"]["broker"] == "pingan"
+    assert system["sys:pingan"]["signature"] == "93142b97ae9e1045"
+    assert len(system["sys:pingan"]["bill_types"]) == 21
+    pingan_types = {
+        item["type_key"]: item["category"] for item in system["sys:pingan"]["bill_types"]
+    }
+    assert pingan_types["跨行转入"] == "transfer"
+    assert pingan_types["跨行转出"] == "transfer"
+
+    # 再传同文件：命中自己的模板。
+    again = await _preview(client, api_prefix, user, data=_huatai_preset_bill(2))
+    assert again["template"]["source"] == "user"
+    assert again["template"]["template_id"] == saved["template_id"]
+
+
+async def test_pingan_preset_copies_all_bill_types_on_commit(
+    client, api_prefix, user, settings
+) -> None:
+    """回归：套用平安预设后保存的模板必须带预设全部 21 类，供增量账单直接命中。"""
+    body = await _preview(
+        client,
+        api_prefix,
+        user,
+        data=_CBOND_FIXTURE.read_bytes(),
+        filename=_CBOND_FIXTURE.name,
+        content_type=_XLS_CONTENT_TYPE,
+        extra={"broker": "pingan", "template_id": "sys:pingan"},
+    )
+    assert body["template"]["template_id"] == "sys:pingan"
+    assert body["broker"] == "pingan"
+    assert body["stage"] == "ready"
+
+    await _commit(client, api_prefix, user, body)
+    await _drain_worker(settings)
+
+    listed = await client.get(f"{api_prefix}/imports/templates", headers=user.headers)
+    saved = listed.json()["items"][0]
+    keys = {item["type_key"] for item in saved["bill_types"]}
+    assert len(keys) == 21
+    # 本文件未出现的类型也被复制，后续增量账单无需再切换模板。
+    assert {"新股登记", "申购中签", "跨行转入"} <= keys
+
+    # 增量导入用默认（自动识别）时，命中本人模板后券商回显首次模板的券商。
+    again = await _preview(
+        client,
+        api_prefix,
+        user,
+        data=_CBOND_FIXTURE.read_bytes(),
+        filename=_CBOND_FIXTURE.name,
+        content_type=_XLS_CONTENT_TYPE,
+    )
+    assert again["template"]["template_id"] == saved["template_id"]
+    assert again["broker"] == "pingan"
+
+
+async def test_import_template_invalid_type_ids_are_marked_not_blocking(
+    client, api_prefix, user, settings, owner_engine: AsyncEngine
+) -> None:
+    body = await _preview(client, api_prefix, user, data=_huatai_preset_bill())
+    await _commit(client, api_prefix, user, body)
+    await _drain_worker(settings)
+
+    # 直接删掉类型行，模拟失效引用（模板里的 id 不做级联删除）。
+    async with owner_engine.begin() as conn:
+        await conn.execute(
+            text("DELETE FROM ledger.import_bill_type WHERE user_id = :uid"),
+            {"uid": user.user_id},
+        )
+
+    again = await _preview(client, api_prefix, user, data=_huatai_preset_bill(2))
+    template = again["template"]
+    assert template["source"] == "user"
+    # 预设 18 类全部被模板引用，删掉类型行后都成为失效引用。
+    assert len(template["invalid_type_ids"]) == 18
+    assert all(item["invalid"] is True for item in template["bill_types"])
+    # 失效引用不阻断导入：类型回落到规则建议，仍可继续。
+    assert again["stage"] in ("types", "ready")
+
+
+async def test_import_template_preset_updates_do_not_override_user_edits(
+    client, api_prefix, user, settings, owner_engine: AsyncEngine
+) -> None:
+    body = await _preview(client, api_prefix, user, data=_huatai_preset_bill())
+    await _commit(client, api_prefix, user, body)
+    await _drain_worker(settings)
+
+    # 用户改掉模板里的分类 → 出现差异提示，但预设不会被自动覆盖。
+    listed = await client.get(f"{api_prefix}/imports/templates", headers=user.headers)
+    saved = listed.json()["items"][0]
+    async with owner_engine.begin() as conn:
+        await conn.execute(
+            text(
+                "UPDATE ledger.import_bill_type SET category = 'other' "
+                "WHERE user_id = :uid AND type_key = '证券买入'"
+            ),
+            {"uid": user.user_id},
+        )
+
+    again = await _preview(client, api_prefix, user, data=_huatai_preset_bill(2))
+    assert again["template"]["template_id"] == saved["template_id"]
+    assert again["template"]["has_user_overrides"] is True
+    buy = next((item for item in again["types"] if item["type_key"] == "证券买入"), None)
+    assert buy is not None, again["types"]
+    assert buy["category"] == "other"
+    assert buy["source"] == "template"
 
 
 async def test_api_106_cross_account_404(client, api_prefix, user, account_factory) -> None:

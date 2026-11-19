@@ -36,12 +36,14 @@ from stock_ledger.application.preview import (
     require_preview,
     save_mapping,
     save_types,
+    user_template_payload,
 )
 from stock_ledger.parsers.mapping import MappingItem, MappingPlan
 from stock_ledger.repositories.import_mapping import ImportTemplateRepository
 from stock_ledger.repositories.imports import ImportBatchRepository, ImportPreviewRepository
 from stock_ledger.repositories.quarantine import QuarantineRepository
 from stock_ledger.repositories.trades import TradeRepository
+from stock_ledger.template_presets import SYSTEM_TEMPLATES, system_template_payload
 from stock_platform.idempotency import IdempotencyStore
 from stock_platform.obs import get_logger
 from stock_platform.tenant import TenantContext
@@ -237,20 +239,11 @@ def _raw_out(raw: dict[str, Any], columns: dict[str, Any]) -> QuarantineRaw:
     return QuarantineRaw(**values)
 
 
-def _template_out(template: Any) -> PreviewTemplateOut:
-    return PreviewTemplateOut(
-        template_id=template.id,
-        broker=template.broker,
-        signature=template.signature,
-        header_count=template.header_count,
-        date_format=template.date_format,
-        items=list(template.items or []),
-        ignored=list(template.ignored or []),
-        origin_batch_id=template.origin_batch_id,
-        last_batch_id=template.last_batch_id,
-        created_at=template.created_at,
-        updated_at=template.updated_at,
-    )
+async def _template_out(
+    session: Any, user_id: Any, template: Any
+) -> PreviewTemplateOut:
+    payload = await user_template_payload(session, user_id, template)
+    return PreviewTemplateOut(**payload)
 
 
 @router.post("/imports/preview", response_model=PreviewOut, operation_id="previewImport")
@@ -262,6 +255,9 @@ async def preview_import(
     date_format: Annotated[str | None, Form()] = None,
     broker: Annotated[str, Form(description="auto|huatai|generic")] = "auto",
     reuse_template: Annotated[bool, Form(description="复用同签名模板")] = True,
+    template_id: Annotated[
+        str | None, Form(description="显式模板：sys:<key> 或本人模板 id")
+    ] = None,
     flow: Annotated[str | None, Header(alias="X-Import-Flow")] = None,
 ) -> PreviewOut:
     """API-010：解析账单、列映射建议、质量预检；同步 200，不写 ledger.trade。
@@ -292,6 +288,7 @@ async def preview_import(
             object_store=state.object_store,
             broker=broker,
             reuse_template=reuse_template,
+            template_id=template_id,
         )
     return _preview_out(dto)
 
@@ -605,7 +602,16 @@ async def list_import_templates(
         rows, next_cursor = await ImportTemplateRepository(session).list_with_cursor(
             user_id, cursor=cursor, limit=limit
         )
-    return ImportTemplatePage(items=[_template_out(row) for row in rows], next_cursor=next_cursor)
+        items = [await _template_out(session, user_id, row) for row in rows]
+    return ImportTemplatePage(
+        items=items,
+        next_cursor=next_cursor,
+        has_more=next_cursor is not None,
+        system=[
+            PreviewTemplateOut(**system_template_payload(template))
+            for template in SYSTEM_TEMPLATES
+        ],
+    )
 
 
 @router.delete(

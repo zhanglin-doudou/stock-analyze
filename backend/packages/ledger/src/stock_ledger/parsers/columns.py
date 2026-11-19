@@ -65,6 +65,19 @@ def normalize_header(raw: str) -> str:
     return raw.replace("\ufeff", "").replace(" ", "").replace("\u3000", "").strip()
 
 
+_INVISIBLE_CHARS = frozenset({"\u200b", "\u200c", "\u200d", "\ufeff"})
+
+
+def strip_all_whitespace(text: str) -> str:
+    """删除全部空白与零宽字符（不替换为空格）。
+
+    账单摘要里的空白几乎都是折行/对齐产物（如「股息红利税\\n补缴」），删除后
+    中文语义不变；统一「删除」而不是「替换为单个空格」，避免下游还要再处理
+    一个额外的分隔符。规则匹配与类型 key 共用这一口径。
+    """
+    return "".join(char for char in text if char not in _INVISIBLE_CHARS and not char.isspace())
+
+
 def normalize_cell(raw: object) -> str:
     """单元格归一：None → 空串，其余去空白（金额里的千分位留给数值解析处理）。"""
     if raw is None:
@@ -73,15 +86,23 @@ def normalize_cell(raw: object) -> str:
 
 
 def normalize_summary(raw: str) -> str:
-    """摘要归一：去换行/制表/空白。
+    """摘要归一：删除换行/制表/空格/全角空格/零宽字符。
 
     券商常把摘要折行导出（如「[省心投]红\\n利发放」「新股申购确\\n认缴款」），
     不归一会导致方向识别与分类规则全部失配，整片行被误判成「未知摘要」隔离。
+    解析入口统一调用本函数，保证落库摘要、类型 key、规则匹配、模板比对同一口径。
     """
-    text = normalize_header(raw)
-    for joiner in ("\n", "\r", "\t"):
-        text = text.replace(joiner, "")
-    return text
+    return strip_all_whitespace(normalize_header(raw))
+
+
+def normalize_name(raw: str) -> str:
+    """证券名称归一：与摘要同口径删除换行/制表/空格/全角空格/零宽字符。
+
+    券商对长名称会折行（如「华泰紫金天\\n天发货币」），也会在中间插对齐用的
+    全角空格/NBSP。名称是展示与配对（可转债别名、同标的归一）的业务标识，
+    必须和摘要共用「删除而不压成单个空格」的口径，否则同一只证券会出现两个名字。
+    """
+    return normalize_summary(raw)
 
 
 def is_signed_amount_header(raw: str | None) -> bool:
@@ -326,7 +347,9 @@ __all__ = [
     "map_columns",
     "normalize_cell",
     "normalize_header",
+    "normalize_name",
     "normalize_summary",
     "parse_date_text",
     "resolve_side",
+    "strip_all_whitespace",
 ]

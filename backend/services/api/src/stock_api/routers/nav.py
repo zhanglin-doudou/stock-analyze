@@ -23,7 +23,9 @@ from stock_api.schemas import NavHoldingOut, NavOut, NavPointOut, NavSummaryOut
 router = APIRouter(tags=["nav"], route_class=StrictQueryRoute)
 
 _PERIOD_RE = re.compile(r"^(\d{4})-(\d{2})$")
-_DEFINITION_VERSION = "1.0"
+# 1.1：配股前置校验——零金额且该证券此前无持仓的 `rights` 流水按券商行为处理，
+# 不计入持仓与市值（与资产表/指标/归因同一有效分类）。
+_DEFINITION_VERSION = "1.1"
 
 # cost (scale=2) / qty (scale=4) → price (scale=6): cost * 1e8 / qty
 _COST_QTY_TO_PRICE_SCALE = 10**8

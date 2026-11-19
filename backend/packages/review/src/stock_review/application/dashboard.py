@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, cast
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from stock_contracts.clock import Clock
+from stock_core.nav import CashflowPoint, compute_xirr
 from stock_core.stats.drawdown import DrawdownFamily, drawdown_family
 from stock_core.values import Money
 from stock_ledger.models import Trade
@@ -38,11 +39,15 @@ from stock_review.application.assets import (
 )
 from stock_review.application.bond_alias import build_bond_alias, canonical_code
 from stock_review.application.bridge import bridge_for_period
+from stock_review.application.money_fund import (
+    money_fund_codes,
+    money_fund_oversells,
+    money_fund_value_units,
+)
 from stock_review.application.portfolio import (
     HOLDINGS_MAX,
     Holding,
     holdings_at,
-    holdings_from_rounds,
     ratio_units,
 )
 from stock_review.application.valuation import (
@@ -243,10 +248,21 @@ def _first_cash_gap(series: list[AssetDaily], trades: list[Trade]) -> tuple[date
     现金优先取账单余额（``balance_override``），否则累加上日现金；因此「本行现金 −
     （上一条可用行现金 + 期间流水合计）」不为零，说明有一批流水既没入账、又被余额
     「接回」了——这正是桥接残差的来源。blocked 行现金不可用，跳过且不重置基准。
+
+    资产表现金含货基余额，而货基红利/再投行金额为 0、以份额增加现金；不把份额变动
+    折算成金额补进当日流水，这些天会被误判成缺口（真实案例：2025-04-30 的 0.85 元
+    其实是三只货基的红利份额，不是漏记流水）。货基超卖同理：赎回超过余额的部分由
+    券商补记份额、计入当日收益，必须按资产构建同一套份额正推补回缺口金额。
     """
+    fund_codes = money_fund_codes(trades)
+    oversell_value = {item.trade_id: item.value_units for item in money_fund_oversells(trades)}
     day_deltas: dict[date, int] = {}
     for trade in trades:
-        day_deltas[trade.trade_date] = day_deltas.get(trade.trade_date, 0) + trade.amount_units
+        delta = trade.amount_units
+        if trade.security_code and trade.security_code in fund_codes:
+            delta += money_fund_value_units(trade)
+            delta += oversell_value.get(trade.id, 0)
+        day_deltas[trade.trade_date] = day_deltas.get(trade.trade_date, 0) + delta
     ordered = sorted(day_deltas.items())
     index = 0
     pending = 0
@@ -533,25 +549,30 @@ def _max_drawdown(
     )
 
 
-def _annualized_twr(series: list[AssetDaily]) -> int | None:
-    """全历史年化 TWR（时间加权，正确处理资金进出）。
+def _annualized_xirr(series: list[AssetDaily]) -> int | None:
+    """全历史年化 XIRR（资金加权，与 ``total_profit`` 同向）。
 
-    取最长连续有效段（与回撤同口径：ok/degraded 且日收益非 NULL），把逐日收益
-    复利累计后按自然日年化。无断链时用整条序列起止（含首日锚点），有断链时用
-    最长有效段起止。有效观测 < 2 或跨度 <= 0 → None（不伪造 0）。
+    与 `/nav` 的 ``mwr`` 同口径：期初按首行 ``prev_total_assets_units``（锚点）计投入，
+    区间内外部现金流按投资人方向取负，期末总资产作为终值。blocked 行没有有效估值，
+    跳过。有效观测 < 2 或无现金流 → None（不伪造 0）。
+
+    不用 TWR：TWR 是时间加权、与资金规模无关，小资金期的正收益会覆盖大资金期的
+    亏损，出现「总收益为负、年化为正」的误导。
     """
-    segments, has_gaps, _valid = _drawdown_segments(series)
-    if not segments:
+    rows = [row for row in series if row.status in {"ok", "degraded"}]
+    if len(rows) < 2:
         return None
-    dates, returns = max(segments, key=lambda item: len(item[1]))
-    if len(returns) < 2:
+    flows: list[CashflowPoint] = []
+    for idx, row in enumerate(rows):
+        amount = -(row.cashflow_units or 0)
+        if idx == 0:
+            amount -= row.prev_total_assets_units or 0
+        flows.append(CashflowPoint(row.trade_date, amount))
+    last = rows[-1]
+    flows[-1] = CashflowPoint(last.trade_date, flows[-1].amount_units + last.total_assets_units)
+    if not any(point.amount_units for point in flows):
         return None
-    start = series[0].trade_date if (not has_gaps and len(segments) == 1) else dates[0]
-    natural_days = (dates[-1] - start).days
-    if natural_days <= 0:
-        return None
-    family = drawdown_family(returns, natural_days=natural_days)
-    return family.twr_annual_units
+    return compute_xirr(flows)
 
 
 async def build_dashboard(
@@ -573,14 +594,22 @@ async def build_dashboard(
     )
     series = await asset_repo.series(user_id, definition_version=definition_version)
     trades = list(await TradeRepository(session).balances_ordered(user_id, period_end=today))
-    rounds = await RoundRepository(session).closed_rounds(user_id)
-    all_rounds = await RoundRepository(session).all_rounds(user_id)
+    # 货币基金按现金等价物处理：不参与历史概览/交易次数等「证券」口径统计。
+    fund_codes = money_fund_codes(trades)
+    rounds = [
+        round_
+        for round_ in await RoundRepository(session).closed_rounds(user_id)
+        if round_.security_code not in fund_codes
+    ]
+    all_rounds = [
+        round_
+        for round_ in await RoundRepository(session).all_rounds(user_id)
+        if round_.security_code not in fund_codes
+    ]
     # 可转债发债/上市代码映射（持仓聚合与 TopN 共用）。
     bond_alias, _unresolved = build_bond_alias(
         (trade.security_code, trade.security_name) for trade in trades
     )
-    # 当前持仓从 FIFO open 回合聚合（与回合页面数量+成本口径完全一致）。
-    open_rounds = [round_ for round_ in all_rounds if round_.status == "open"]
 
     fallback_as_of = build_view.data_as_of if isinstance(build_view.data_as_of, date) else today
     as_of = latest.trade_date if latest is not None else fallback_as_of
@@ -640,10 +669,10 @@ async def build_dashboard(
         total_assets_units = None
         position_ratio_units = None
     else:
-        holdings, missing_prices, cost_fallback, truncated = await holdings_from_rounds(
-            open_rounds,
-            trades=trades,
-            bond_alias=bond_alias,
+        # 成本口径：移动加权平均，与资产表 holding_cost 同源（避免 Dashboard 持仓概览
+        # 与资产表汇总浮盈因 FIFO/移动加权不同而对不上）。
+        holdings, missing_prices, cost_fallback, truncated = await holdings_at(
+            trades,
             as_of=latest.trade_date,
             market_data=market_data,
         )
@@ -700,7 +729,11 @@ async def build_dashboard(
 
     total_fees_units: int | None = None
     if not asset_blocked:
-        trade_slice = [trade for trade in trades if trade.trade_date <= as_of]
+        trade_slice = [
+            trade
+            for trade in trades
+            if trade.trade_date <= as_of and trade.security_code not in fund_codes
+        ]
         total_fees_units = fee_breakdown(cast("list[TradeView]", trade_slice)).fee_amount
 
     total_profit_units: int | None = None
@@ -799,7 +832,7 @@ async def build_dashboard(
         )
 
     # 全历史年化 TWR：资产表有效日收益复利累计后按自然日年化（正确处理出入金）。
-    annualized_return_units = None if asset_blocked else _annualized_twr(series)
+    annualized_return_units = None if asset_blocked else _annualized_xirr(series)
     if annualized_return_units is None:
         missing.append(
             DashboardMissing(
@@ -888,14 +921,14 @@ async def build_dashboard(
 
     # 交易次数 Top3：按证券代码（可转债归并上市代码）统计流水 buy/sell 行数
     # （买入/卖出分别计一次交易）；同时聚合个股累计收益（全部回合 pnl）与个股总费用。
-    # 现金类不计。
+    # 现金类/货币基金不计。
     buy_counts: dict[str, int] = {}
     sell_counts: dict[str, int] = {}
     fee_by_code: dict[str, int] = {}
     trade_names: dict[str, str] = {}
     for trade in trades:
         code = canonical_code(bond_alias, trade.security_code)
-        if not code or category(trade) in CASHFLOW_CATEGORIES:
+        if not code or trade.security_code in fund_codes or category(trade) in CASHFLOW_CATEGORIES:
             continue
         if code not in trade_names and trade.security_name:
             trade_names[code] = trade.security_name

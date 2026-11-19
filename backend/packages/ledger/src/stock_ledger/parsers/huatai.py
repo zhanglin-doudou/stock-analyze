@@ -33,6 +33,7 @@ from stock_ledger.parsers.columns import (
     is_signed_amount_header,
     map_columns,
     normalize_header,
+    normalize_name,
     normalize_summary,
     parse_date_text,
     resolve_side,
@@ -107,19 +108,6 @@ def _is_zero_amount_info_summary(summary: str) -> bool:
         return False
     normalized = normalize_summary(summary)
     return any(keyword in normalized for keyword in _ZERO_AMOUNT_INFO_KEYWORDS)
-
-
-# 零金额但带份额的行（红利发放/非交易过户确认）：按账单分类正常入账，不隔离。
-# 它们没有资金流，但份额/业务类型需要留痕（红利再投、份额过户）。
-_ZERO_AMOUNT_SHARE_SUMMARIES: frozenset[str] = frozenset({"红利发放", "非交易过户确认"})
-
-
-def _is_zero_amount_share_summary(summary: str) -> bool:
-    normalized = normalize_summary(summary)
-    # 摘要可能带账户前缀（如「[省心投]红利发放」）：去掉首个方括号标签再比对。
-    if normalized.startswith("[") and "]" in normalized:
-        normalized = normalized.split("]", 1)[1]
-    return normalized in _ZERO_AMOUNT_SHARE_SUMMARIES
 
 
 def _is_cbond_subscription_name(name: str) -> bool:
@@ -349,9 +337,10 @@ def _build_candidate_from_values(
         raise _RowError(QuarantineReason.ZERO_AMOUNT_INFO)
 
     # 五个金额字段（佣金/印花税/其他费/发生金额/资金余额）全为 0：没有资金流语义
-    # （典型是份额再投、转托管确认等噪音行），不入明细，隔离为 INVALID_AMOUNT。
-    # 例外：「红利发放」「非交易过户确认」带份额的行按账单分类正常入账（用户口径），
-    # 零金额只表示当日无资金流，份额/业务类型仍需落库。
+    # （份额再投、转托管确认、红利发放等登记/通知行），一律不入明细，隔离为
+    # INVALID_AMOUNT。这里**不做任何摘要豁免**：这类行的「资金余额」列常是券商占位
+    # 0.00（真实案例：2026-10-27 940018 红利发放），放进账本会直接成为期末余额锚点；
+    # 需要份额/红利留痕时从隔离区人工处理。
     # 资金余额列缺失（None）不算 0，交后续对账按 MISSING_CASH_BALANCE 降级处理。
     if (
         commission_units == 0
@@ -359,16 +348,20 @@ def _build_candidate_from_values(
         and other_fee_units == 0
         and amount_units == 0
         and cash_balance_units == 0
-        and not (quantity_units != 0 and _is_zero_amount_share_summary(value("summary")))
     ):
         raise _RowError(QuarantineReason.INVALID_AMOUNT)
 
-    summary = value("summary") or None
+    # 摘要在这里（解析边界）统一归一：删除折行/空格/零宽字符后再落 ParsedRow。
+    # 落库摘要、类型 key、规则匹配、模板比对因此共用同一文本，避免各自再归一分叉。
+    summary = normalize_summary(value("summary")) or None
     # 账号明文已在 parse_bill 入口统一抹成 MD5（空账号留空串 → 这里转 None）。
     # 此值同时作为 ParsedRow.account_masked（落库列）与下游去重键的业务要素。
     account_masked = value("account") or None
     # 非交易行证券名称为空时，用摘要填充（如「银行转存」），避免默认成 CASH 无法辨识业务。
-    security_name = value("security_name") or (summary or "资金业务" if code == "CASH" else code)
+    # 名称与摘要同口径归一并落库：券商折行会写成「华泰紫金天\n天发货币」。
+    security_name = normalize_name(value("security_name")) or (
+        summary or "资金业务" if code == "CASH" else code
+    )
     # 「[省心投]申购确认」视同银行转出（设计 D14）：主账户资金流出到省心投投顾账户，
     # 但转出动作不在账单留记录，申购确认行本身就是转出证据。转 CASH 资金行（与
     # 「银行转取」同构）：无份额语义（qty/price 清零，原始值留 raw 可溯源）、不进持仓；

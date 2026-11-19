@@ -144,6 +144,7 @@ BROKER_LABELS: Final[dict[str, str]] = {
     "auto": "自动识别",
     "generic": "通用",
     "huatai": "华泰证券",
+    "pingan": "平安证券",
 }
 
 #: v2 支持的日期格式（与 legacy `DATE_FORMATS` 同口径）。

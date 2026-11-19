@@ -25,7 +25,7 @@ TEST_DIRS = (REPO_ROOT / "backend/tests/api", REPO_ROOT / "backend/tests/isolati
 API_PREFIX = "/api/v1"
 ROOT_MARK = "（根）"
 EXPECTED_PERIOD1 = 30
-EXPECTED_ALL_ENDPOINTS = 105  # API-090~106 已登记；API-089 预留不计数
+EXPECTED_ALL_ENDPOINTS = 106  # API-090~106 + API-110 已登记；API-089 预留不计数
 EXPECTED_PERIOD2 = 50  # Period2-20 新增 API-098~106
 
 # 07 指标端点所属任务（DEV-PLAN A.1 第 3/6 列）：Period2-06 = 指标端点，

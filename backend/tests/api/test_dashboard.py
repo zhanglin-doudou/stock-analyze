@@ -103,6 +103,7 @@ async def _seed_trade(
     cash_balance_units: int | None = None,
     category: str = "other",
     security_code: str = "600519",
+    security_name: str | None = None,
     summary: str = "证券买入",
 ) -> None:
     async with AsyncSession(engine) as session:
@@ -113,7 +114,7 @@ async def _seed_trade(
                 batch_id=None,
                 trade_date=trade_date,
                 security_code=security_code,
-                security_name=security_code,
+                security_name=security_name or security_code,
                 side=side,
                 quantity_units=quantity_units,
                 price_units=price_units,
@@ -490,6 +491,38 @@ async def test_api_084_happy_path_two_sections(
     }
     assert body["assumptions"]["total_profit_basis"] == "full_history_bridge"
     assert re.match(r"^[0-9a-f]{64}$", body["inputs_hash"])
+
+
+# ── 货币基金剔除 ─────────────────────────────────────────────
+
+
+async def test_api_084_money_fund_excluded_from_history(
+    dashboard_client: Any,
+    account_factory: Any,
+    owner_engine: AsyncEngine,
+) -> None:
+    """货基是现金等价物：不计入交易次数 Top3（即使货基流水行数更多）。"""
+    acc = await account_factory()
+    await _seed_happy_chain(owner_engine, user_id=acc.user_id)
+    for day in (date(2026, 5, 6), date(2026, 5, 7), date(2026, 5, 8)):
+        await _seed_trade(
+            owner_engine,
+            user_id=acc.user_id,
+            trade_date=day,
+            side="buy",
+            category="buy",
+            security_code="940018",
+            security_name="华泰紫金天天发货币",
+            quantity_units=10_000_000,
+            price_units=1_000_000,
+            amount_units=-10_000,
+        )
+
+    resp = await dashboard_client.get("/api/v1/dashboard", headers=acc.headers)
+    assert resp.status_code == 200, resp.text
+    history = resp.json()["history_overview"]
+    assert [item["security_code"] for item in history["top_trade_counts"]] == ["600519"]
+    assert history["top_trade_counts"][0]["trade_count"] == 1
 
 
 # ── missing / blocked / insufficient ─────────────────────────

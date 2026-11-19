@@ -115,7 +115,8 @@ class QuarantineReason(StrEnum):
     # 用户把该账单类型标记为「废弃」（噪音）：整类行落隔离区，单独计 `discarded_count`，
     # 不并入 `quarantined`（设计 D-12 / §4.3）。
     BILL_TYPE_DISCARDED = "BILL_TYPE_DISCARDED"
-    # 与上一行余额接不上（资金余额链断裂）：先隔离该行、继续向后尝试接上。
+    # 与上一行余额接不上（资金余额链断裂）：从该行起连续隔离到链尾
+    # （锚点已不可信，继续接受会吞掉缺口），首条断行保留差额/对照行。
     # 与 INVALID_ROW（字段本身解析失败）区分，便于前端提示与恢复策略不同。
     RECONCILIATION_BREAK = "RECONCILIATION_BREAK"
 

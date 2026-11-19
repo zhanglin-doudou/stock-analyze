@@ -160,6 +160,39 @@ async def test_put_oversell_revision_injects_two_legs_and_closes_round(
     assert len(injected) == 1  # 资金腿 `CASH` 不在该证券过滤下
 
 
+async def test_put_oversell_revision_supports_new_stock_switch(
+    client, api_prefix, user, owner_engine
+):
+    """打新开关：开启时注入买入腿 category=new_stock，关闭/更新后回到 buy。"""
+    sell_id = await _seed_oversell_sell(owner_engine, user.user_id)
+    url = f"{api_prefix}/trades/{sell_id}/oversell-revision"
+
+    resp = await client.put(
+        url, headers=user.headers, json={"cost": "1000.00", "is_new_stock": True}
+    )
+    assert resp.status_code == 200, resp.text
+    revision = resp.json()["revision"]
+    assert revision["is_new_stock"] is True
+    assert revision["buy_trade"]["category"] == "new_stock"
+    rows = await _revision_rows(owner_engine, user.user_id, sell_id)
+    buy = next(row for row in rows if row.dedupe_key.endswith(":buy"))
+    assert buy.category == "new_stock"
+
+    # 关闭开关重复提交：同一注入行改写 category 并更新成本，不叠加新行。
+    resp = await client.put(url, headers=user.headers, json={"cost": "1200.00"})
+    assert resp.status_code == 200, resp.text
+    revision = resp.json()["revision"]
+    assert revision["is_new_stock"] is False
+    assert revision["buy_trade"]["category"] == "buy"
+    assert revision["buy_trade"]["amount"] == "-1200.00"
+    rows = await _revision_rows(owner_engine, user.user_id, sell_id)
+    assert len(rows) == 2
+
+    got = await client.get(url, headers=user.headers)
+    assert got.status_code == 200, got.text
+    assert got.json()["is_new_stock"] is False
+
+
 async def test_partial_oversell_revision_closes_round(client, api_prefix, user, owner_engine):
     """部分超卖回合也能修订：只补未配对部分，修订后转 closed。"""
     await _seed_trade(

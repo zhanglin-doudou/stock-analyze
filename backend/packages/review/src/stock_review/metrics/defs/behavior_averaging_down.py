@@ -27,7 +27,7 @@ from stock_review.metrics.base import (
     ScopeSpec,
     StatusRule,
 )
-from stock_review.metrics.defs._common import EmptyParams, trades_until
+from stock_review.metrics.defs._common import EmptyParams, effective_category, trades_until
 from stock_review.metrics.gate import (
     REASON_DATA_OUT_OF_RANGE,
     REASON_DATASET_UNAVAILABLE,
@@ -61,7 +61,7 @@ def _build_items(ctx: MetricContext, filters: DrilldownFilters) -> Sequence[Dril
 
 class AveragingDownDef:
     id = "behavior.averaging_down"
-    definition_version = "1.0"
+    definition_version = "1.1"
     domain = "behavior"
     scope = ScopeSpec(unit="trade", cohort="trade_date", period="month")
     params_schema = EmptyParams
@@ -105,8 +105,9 @@ class AveragingDownDef:
             symbol = trade.security_code
             qty_before, cost_before = positions.get(symbol, [0, 0])
             in_period = trade.trade_date >= ctx.period_start
-            if trade.category in _ADD_CATEGORIES:
-                if trade.category == "buy" and in_period:
+            trade_category = effective_category(trade)
+            if trade_category in _ADD_CATEGORIES:
+                if trade_category == "buy" and in_period:
                     if qty_before <= 0:
                         n_first_build += 1
                     elif cost_before <= 0:
@@ -124,7 +125,7 @@ class AveragingDownDef:
                 qty = qty_before + trade.quantity_units
                 cost = cost_before + abs(trade.amount_units)
                 positions[symbol] = [qty, cost]
-            elif trade.category == "sell":
+            elif trade_category == "sell":
                 qty = qty_before - trade.quantity_units
                 if qty_before > 0:
                     cost = (

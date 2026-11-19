@@ -108,6 +108,7 @@
 | API-055 | GET | `/settings` | 设置总览（四组偏好生效值 + version/ETag） | D1 | read | — | 同步 | P0 | 200 |
 | API-096 | PATCH | `/settings` | 通用偏好局部更新（外观/账单旗标/行情时段/概念过滤，If-Match CAS） | D1 | write | 支持 | 同步 | P0 | 200 |
 | API-097 | POST | `/settings/trade-flags/rebuild` | 按生效阈值重建账单旗标（异步任务） | D1 | write | 必需 | 异步 | P1 | 202 |
+| API-110 | POST | `/settings/reset-bill-data` | 重置本人账单数据（清空 ledger/review，不可撤销） | D1 | write | 必需 | 同步 | P1 | 200 |
 | API-056 | PUT | `/settings/benchmark` | 切换基准（历史分段） | R5 | write | 幂等 | 同步 | P1 | 200 |
 | API-057 | PUT | `/settings/privacy` | 隐私与 LLM 开关 | D6 | write | 幂等 | 同步 | P1 | 200 |
 | API-058 | PUT | `/settings/behavior-rules` | 行为规则阈值 | D6 | write | 幂等 | 同步 | P1 | 200 |
@@ -208,7 +209,7 @@
 - 验收断言：① 200 且 counts.inserted==412、file_sha256 匹配；② 用户 B 访问 A 的 batch → 404；③ 断链账单导入后 `filled_count==len(fills)≥1` 且每项 `summary=="对账自动补差"`、金额为分转元的定点字符串；④ 正常账单 `filled_count==0`、`fills==[]` 且 warnings 不含 `RECONCILIATION_AUTOFILLED`；⑤ 撤销后 `filled_count==0`、`fills==[]`。
 #### API-014 GET /imports/{batch_id}/quarantine
 - 用途：隔离区（未知摘要、全零金额等未入库行）；FR-L5；认证：read；同步；游标分页。
-- 请求：path `batch_id`；query `limit`(默认 50) / `cursor` / `reason_code`(可选，∈`UNKNOWN_SUMMARY/UNMAPPED_COLUMN/INVALID_ROW/DUPLICATE_IN_FILE/INVALID_AMOUNT`)。
+- 请求：path `batch_id`；query `limit`(默认 50) / `cursor` / `reason_code`(可选，∈`UNKNOWN_SUMMARY/UNMAPPED_COLUMN/INVALID_ROW/DUPLICATE_IN_FILE/INVALID_AMOUNT/ZERO_AMOUNT_INFO/BILL_TYPE_DISCARDED/RECONCILIATION_BREAK`；中文文案以 `QUARANTINE_REASON_LABELS` 为准)。
 - 响应 200：`items[]{line_no,raw{date,security_code,summary,quantity,price,amount,cash_balance},reason_code,suggested_rule_id}` / `next_cursor` / `total_estimate`。
 - 错误码：NOT_FOUND(404)、INVALID_CURSOR(400)、VALIDATION_ERROR(422)。
 - 验收断言：① 200 且 fx_quarantine 第 7 行被隔离（line_no==7）；② 每项 raw.summary 与原始文件逐字一致；③ 用户 B 访问 A 的 batch → 404 且响应不含 A 任何字段；④ 新增匹配规则并 reclassify 后隔离区条目减少；⑤ 「佣金/印花税/其他费/发生金额/资金余额」五字段全为 0 的行 → `reason_code=="INVALID_AMOUNT"` 且 `line_no` 精确、该行不在 `GET /trades`；同内容重复的全零行也只记 `INVALID_AMOUNT`（判定先于 `DUPLICATE_IN_FILE`）。
@@ -537,7 +538,7 @@
   - `drawdown`（收益回撤，布尔）：回合内按数量加权的平均卖出价 < 区间最高收盘 × 95%（**严格**）；区间为「首笔买入日（含）至末笔卖出日（不含）」，即排除卖出当日。
   - `intraday_t`（日内做T，布尔）：同一交易日内先部分卖出（卖出数量严格小于卖出前持仓）再买入同一证券。
   - `swing_t`（波段做T，布尔）：回合内部分卖出后在更晚交易日再买入；同一笔卖出当日已被买入配对的（日内做T）不重复计入。
-  - `intraday_rebalance_out` / `intraday_rebalance_in`（日内调仓卖出/买入，布尔）：回合内先卖出当前证券、同日再买入其它证券 / 先卖出其它证券、同日再买入当前证券。判定范围为**当前用户同日全部流水、不按账户切分**（退化口径：所有账户合并为一条时间线），但对手方只认**真实二级市场证券成交**（2026-11-12 收紧）：`CASH` 资金行（转账/费用/利息/红利税补缴）、公司行动（分红/送转/配股）、新股申购都不算「买入/卖出其它证券」（2026-11-15 起货基已按普通持仓处理，其申赎计入对手方）；只判方向与全局行序，不要求金额匹配（清仓换股仍计为调仓卖出）。
+  - `intraday_rebalance_out` / `intraday_rebalance_in`（日内调仓卖出/买入，布尔）：回合内先卖出当前证券、同日再买入其它证券 / 先卖出其它证券、同日再买入当前证券。判定范围为**当前用户同日全部流水、不按账户切分**（退化口径：所有账户合并为一条时间线），但对手方只认**真实二级市场证券成交**（2026-11-12 收紧）：`CASH` 资金行（转账/费用/利息/红利税补缴）、公司行动（分红/送转/配股）、新股申购都不算「买入/卖出其它证券」（2026-11-15 起货基不再单独占「货基余额」字段：资产口径把货基份额按 1.0000 折算进现金、不进 FIFO；但其申赎仍计入对手方）；只判方向与全局行序，不要求金额匹配（清仓换股仍计为调仓卖出）。
   - `sold_too_early`（别名）= `stop_loss_sold_early > 0 或 profit_sold_early > 0`；`reason_missing`/`horizon_pending`/`corporate_action` 三个别名口径不变。
   - 账单级旗标（即时抄底/短期抄底/短期卖飞）在洞察读路径内联重算，行情回看比账单最早交易日多取 45 天，与账单旗标月度构建同口径。
 - 盈亏 × 持有期（2026-11-10，additive）：`summary.holding_by_pnl{flat_tolerance_display, classes[]}` 为「持有期分布」图表数据源。`classes[]` **恒定三条**、顺序 `loss → flat → win`，每项 `code`(`loss|flat|win`)/`label`(亏损/保本/盈利)/`count`/`avg_holding_trading_days`(一位小数串或 null)/`avg_holding_trading_days_x10`(交易日 × 10 的定点整数，供图表直接用；与展示串同源)。**盈亏判定与「保本」容差在后端**：`|pnl| ≤ flat_tolerance_display`（常量 `stock_core.insights.aggregate.PNL_FLAT_TOLERANCE_UNITS`，默认 100.00 元，边界含在内）即保本；前端不得重算分类或容差。无样本的类别仍返回（`count=0`、均值为 `null`，不输出 0）；`Σcount` 恒等于 `summary.swing.closed`。
@@ -594,6 +595,17 @@
 - 幂等：`Idempotency-Key` 重放返回缓存 body（`Idempotency-Replayed: true`）；请求指纹含规范化后的 `scope+months`。
 - 口径：`DEFINITION_VERSION` 不升；重建范围只覆盖所选月份（区间外月份保留旧指纹，仍会出现在 API-095 `stale_months[]`）；不改写偏好本身（阈值仍走 API-096）。
 - 错误码：VALIDATION_ERROR(422)、JOB_ALREADY_RUNNING(409)、IDEMPOTENCY_KEY_REUSED(422)、IDEMPOTENCY_IN_PROGRESS(409)、INSUFFICIENT_SCOPE(403)、RATE_LIMITED(429)。
+
+#### API-110 POST /settings/reset-bill-data（2026-11-19 重置账单数据）
+
+- 用途：清空**本人** `ledger` 与 `review` schema 的业务数据（账单/历史/隔离行/对账/汇总规则/导入批次与模板/回合/净值/资产/指标/旗标/理由/前瞻收益），用于从头重导；operationId `resetBillData`。
+- 请求：无 body；header `Idempotency-Key`（必填 16~128）；需 write scope；admin 调用 403 `ADMIN_CANNOT_READ_TRADES`。
+- 响应 200：`{deleted:{<table>:<行数>,...}, total}`，`deleted` 只列实际删除行数 > 0 的表；无数据时为 `{}` + `total=0`。
+- 删除顺序：先子表后父表（`metric_dependency`→`metric_result`、`round_fill`→`round`、`trade_history`→`trade`），单事务内完成，任一失败整体回滚。
+- 不可撤销：前端必须二次确认；服务端不提供备份/恢复。
+- 幂等：`Idempotency-Key` 重放返回首次删除计数（`Idempotency-Replayed: true`）。
+- 审计：`audit_log(action="settings.reset_bill_data", meta={deleted,total})`。
+- 错误码：VALIDATION_ERROR(422)、IDEMPOTENCY_KEY_REUSED(422)、IDEMPOTENCY_IN_PROGRESS(409)、INSUFFICIENT_SCOPE(403)、ADMIN_CANNOT_READ_TRADES(403)。
 
 
 ## §3 错误码总表
@@ -805,6 +817,7 @@ data: {"job_id":"job_01J9Z6","status":"succeeded","result_ref":"/api/v1/reports/
 | API-055 | settings_get（已实现） | 200 含四组偏好生效值 + version/ETag；无行返回默认视图且 `updated_at=null`；`If-None-Match` → 304；只读 | fx_settings | P0 |
 | API-096 | settings_patch（已实现） | 200 + ETag；If-Match 必填/非法 422；CAS 冲突 409；未知键/只读键/空 body 422；无变更不 bump；幂等重放；审计仅在有变更时写入；跨用户互不影响 | fx_settings | P0 |
 | API-097 | settings_trade_flags_rebuild（已实现） | 202 + Location；Idempotency-Key 必填；months 格式/上限/scope 冲突 422；同参复用 X-Job-Reused；异参 409；重放幂等；重建后行指纹为当前 flags_hash；跨用户互不影响 | fx_settings | P1 |
+| API-110 | settings_reset_bill_data（已实现） | 200 含 deleted/total；Idempotency-Key 必填/非法 422；重放幂等；仅清本人 ledger/review 数据且跨用户互不影响；admin 403 | fx_settings | P1 |
 | API-056 | settings_benchmark_switch | 200；GET /nav 的 benchmark_id 随之变化 | fx_base | P1 |
 | API-057 | settings_privacy_llm_off | 200；LLM 关闭后 chat fallback=true | fx_llm_off | P1 |
 | API-058 | settings_behavior_rules_effect | 200；触发后 alerts 增加对应 rule_code | fx_alert | P1 |

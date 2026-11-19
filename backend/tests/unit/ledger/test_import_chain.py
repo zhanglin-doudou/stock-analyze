@@ -28,6 +28,7 @@ def _row(
     *,
     day: date = D1,
     side: str = "buy",
+    quantity_units: int = 100,
 ) -> ParsedRow:
     return ParsedRow(
         line_no=line_no,
@@ -35,7 +36,7 @@ def _row(
         security_code="600001",
         security_name="测试",
         side=side,
-        quantity_units=100,
+        quantity_units=quantity_units,
         price_units=10_000,
         amount_units=amount_units,
         commission_units=0,
@@ -228,3 +229,38 @@ def test_append_seam_internal_break_stays_quarantine_only() -> None:
     assert [item.line_no for item in walk.quarantined] == [2]
 
     _verify_append_seam(walk, previous=previous, rows=rows)  # 不应抛错
+
+
+def test_walk_chain_verifies_zero_amount_rows_like_any_other() -> None:
+    """链核对不设零金额豁免：带余额的行一律按普通行核对。
+
+    全零金额行（真实案例：2026-10-27 940018 红利发放，金额 0、407.6 份、资金余额
+    列 0）在解析层已按 INVALID_AMOUNT 隔离、不会到达这里；本用例只锁死链层语义——
+    万一占位 0.00 漏到链上，也必须当场暴露断链，而不是被放行成期末锚点。
+    """
+    rows = [
+        _row(1, 10_115, 10_115, side="sell"),
+        _row(2, 0, 0, quantity_units=4_076_000, side="unknown"),
+    ]
+    walk = walk_chain(rows, start_balance_units=0, epsilon_units=0)
+
+    assert [row.line_no for row in walk.accepted] == [1]
+    assert [item.line_no for item in walk.quarantined] == [2]
+    item = walk.quarantined[0]
+    assert item.reason_code == QuarantineReason.RECONCILIATION_BREAK.value
+    assert item.raw["_chain_expected_units"] == "10115"
+    assert item.raw["_chain_actual_units"] == "0"
+    assert item.raw["_chain_delta"] == "-101.15"
+    assert item.raw["_chain_counterpart"] == "第 1 行"
+
+
+def test_head_retry_does_not_prefer_placeholder_zero_amount_rows() -> None:
+    """首行若带余额（即便金额为 0），仍按最早候选作锚点，由链核对决定去留。"""
+    rows = [
+        _row(1, 0, 9_900, side="unknown"),
+        _row(2, -100, 9_800),
+    ]
+    walk = walk_chain_with_head_retry(rows, epsilon_units=0)
+
+    assert [row.line_no for row in walk.accepted] == [1, 2]
+    assert walk.quarantined == []

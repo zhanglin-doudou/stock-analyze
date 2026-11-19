@@ -29,6 +29,10 @@ from stock_platform.jobs import JobQueue
 from stock_platform.obs import get_logger
 from stock_platform.outbox import publish
 
+from stock_ledger.application.cash_leg import (
+    attribute_cash_legs_from_db,
+    is_real_security,
+)
 from stock_ledger.application.chain import (
     ChainMode,
     apply_multi_chain_plan,
@@ -54,6 +58,7 @@ from stock_ledger.repositories.imports import ImportBatchRepository, ImportPrevi
 from stock_ledger.repositories.quarantine import QuarantineRepository
 from stock_ledger.repositories.rules import rule_summary_code
 from stock_ledger.repositories.trades import TradeRepository, TradeRow
+from stock_ledger.template_presets import system_template_by_id
 
 log = get_logger("stock_ledger.imports")
 
@@ -108,6 +113,30 @@ def _requested_range(params: dict[str, Any]) -> tuple[date | None, date | None]:
             errors=[FieldError("range", "invalid", "range.from 不能晚于 range.to")],
         )
     return start, end
+
+
+# 卖出缺数量/单价兜底：华泰资管转让的货基赎回只落资金腿（有金额、无数量、无单价）。
+# 货基单位净值恒 1.000000；金额 scale=2、数量 scale=4，反推数量 = |金额| × 100。
+SELL_FILL_PRICE_UNITS = 1_000_000
+SELL_FILL_QTY_MULTIPLIER = 100
+
+
+def fill_sell_quantity_units(row: TradeRow) -> None:
+    """落库前归一：真实证券的卖出只有资金变更、没有数量/单价时，按货基 1 元净值补数量。
+
+    仅在 `category=sell`、`amount_units != 0`、`quantity_units == 0`、
+    `price_units == 0` 且证券代码是真实 6 位代码时生效；伪代码（`CASH`/空）的资金腿
+    走 `cash_leg` 的份额腿配对与货基兜底，不再事后补成 CASH 货基。
+    """
+    if (
+        (row.category or "").strip().lower() == "sell"
+        and row.amount_units != 0
+        and row.quantity_units == 0
+        and row.price_units == 0
+        and is_real_security(row.security_code)
+    ):
+        row.quantity_units = abs(row.amount_units) * SELL_FILL_QTY_MULTIPLIER
+        row.price_units = SELL_FILL_PRICE_UNITS
 
 
 def _parsed_to_trade_row(parsed: ParsedRow, batch_id: str) -> TradeRow:
@@ -427,6 +456,10 @@ async def commit_batch(
             matched_rule = rules_by_id.get(str(rule_id)) if rule_id else None
             trade_row.summary_code = rule_summary_code(matched_rule) if matched_rule else None
             to_insert.append(trade_row)
+        # 落库前归一：只有金额的资金腿先配对同日份额腿，再按货基持仓/现金兜底。
+        to_insert = await attribute_cash_legs_from_db(session, user_id, to_insert)
+        for trade_row in to_insert:
+            fill_sell_quantity_units(trade_row)
         inserted = await trade_repo.insert_many(user_id, to_insert)
 
         # 批次警告/假设与 preview 对齐：未知摘要也要打 UNKNOWN_SUMMARY 并留行号明细。
@@ -497,7 +530,44 @@ async def commit_batch(
         types_modified_existing = 0
         if not legacy and finished.revoked_at is None and not covered:
             template_repo = ImportTemplateRepository(session)
+            # 套用系统预设时复制预设的全部类型（不只是本文件出现的）：
+            # 否则增量账单里首次出现的类型在下次导入时命不中已保存的模板。
+            preset = system_template_by_id(str(template_id)) if template_id else None
+            memory_resolutions = list(type_resolutions)
+            if preset is not None:
+                known_keys = {str(item.get("type_key")) for item in memory_resolutions}
+                for preset_type in preset.bill_types:
+                    if preset_type.type_key in known_keys:
+                        continue
+                    memory_resolutions.append(
+                        {
+                            "type_key": preset_type.type_key,
+                            "type_label": preset_type.type_key,
+                            "category": preset_type.category,
+                            "discard": preset_type.discarded,
+                            "source": "template",
+                        }
+                    )
+            types_written, types_modified_existing = await ImportBillTypeRepository(
+                session
+            ).upsert_many(
+                user_id,
+                memory_resolutions,
+                batch_id=finished.id,
+                broker=broker,
+            )
             if signature and mapping_items:
+                # 类型先落库拿到 id，再按界面顺序（含废弃）整体覆盖模板引用；
+                # 套用系统预设时 memory_resolutions 已补齐预设全部类型，
+                # 增量账单里新出现的类型无需再次确认。
+                type_rows = await ImportBillTypeRepository(session).by_keys(
+                    user_id, [str(item["type_key"]) for item in memory_resolutions]
+                )
+                bill_type_ids = [
+                    type_rows[key].id
+                    for item in memory_resolutions
+                    if (key := str(item.get("type_key"))) in type_rows
+                ]
                 template = await template_repo.upsert(
                     user_id,
                     broker=broker,
@@ -508,17 +578,10 @@ async def commit_batch(
                     ignored=ignored_columns,
                     origin_batch_id=finished.id,
                     last_batch_id=finished.id,
+                    bill_type_ids=bill_type_ids,
                 )
                 finished.template_id = template.id
                 templates_written = 1
-            types_written, types_modified_existing = await ImportBillTypeRepository(
-                session
-            ).upsert_many(
-                user_id,
-                type_resolutions,
-                batch_id=finished.id,
-                broker=broker,
-            )
 
         # 历史类型被改动分类/废弃 → 影响已解析流水的 category，触发全量 reclassify 订正。
         # 仅当本批次真正改了历史类型才触发；新增类型或未改动的复用不触发。
@@ -618,6 +681,9 @@ async def revoke_batch_now(
     removed = await trade_repo.soft_delete_by_batch(
         user_id, batch_id, at=clock.now(), only_version_1=True
     )
+    revisions_removed = await trade_repo.soft_delete_revisions_for_batch(
+        user_id, batch_id, at=clock.now()
+    )
     batch = await batch_repo.revoke(user_id, batch_id, reason=reason, at=clock.now())
 
     # 类型记忆：只删本批次新增/修改的（复用的旧类型保留，保护其他批次）。
@@ -650,6 +716,7 @@ async def revoke_batch_now(
         payload={
             "batch_id": batch.id,
             "removed_trades": removed,
+            "revisions_removed": revisions_removed,
             "reason": reason,
             "mapping_deleted": mapping_deleted,
             "types_deleted": types_deleted,
@@ -661,7 +728,11 @@ async def revoke_batch_now(
         actor_id=actor_id or user_id,
         target_type="import_batch",
         target_id=batch.id,
-        meta={"removed_trades": removed, "reason": reason},
+        meta={
+            "removed_trades": removed,
+            "revisions_removed": revisions_removed,
+            "reason": reason,
+        },
         request_id=request_id,
         source="api",
     )
@@ -684,6 +755,7 @@ async def revoke_batch_now(
         "status": batch.status,
         "revoked": True,
         "removed_trades": removed,
+        "revisions_removed": revisions_removed,
         "revoked_at": batch.revoked_at,
         "mapping_revoked": {
             "mapping_deleted": mapping_deleted,
