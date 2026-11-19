@@ -59,6 +59,7 @@ Tailwind 工具类在任何页面可用，但必须带 `tw-` 前缀：
 | `input.tsx` | `Input`, `Textarea` |
 | `label.tsx` | `Label` |
 | `badge.tsx` | `Badge`, `badgeVariants` |
+| `tag.tsx` | `Tag`, `tagVariants`（内置 normal/danger/warning/green，支持 `count` 数字徽标） |
 | `card.tsx` | `Card`, `CardHeader`, `CardTitle`, `CardDescription`, `CardContent`, `CardFooter` |
 | `table.tsx` | `Table`, `TableHeader`, `TableBody`, `TableFooter`, `TableRow`, `TableHead`, `TableCell`, `TableCaption` |
 | `select.tsx` | `Select*` |

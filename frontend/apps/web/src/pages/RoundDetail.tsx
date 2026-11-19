@@ -26,6 +26,7 @@ import { Icon } from "../ui/icons";
 import { FlagGlossary } from "../ui/FlagGlossary";
 import { StaleFlagsNotice } from "../ui/StaleFlagsNotice";
 import { TradeFlagGlossary } from "../ui/TradeFlagGlossary";
+import { Tag, type TagProps } from "@/components/ui/tag";
 import "./detail.css";
 import { roundStatusLabel } from "./Rounds";
 
@@ -97,14 +98,25 @@ function flagLabel(flag: string): string {
   return FLAG_LABELS[flag] ?? flag;
 }
 
-/** 计数型状态在 chips 里带 ×N；其余旗标只显示文案（数值全部由后端给出）。 */
+/** 计数型状态带 ×N 数字徽标；其余旗标只显示文案（数值全部由后端给出）。 */
 const COUNT_FLAGS = new Set(["bottom_buy", "stop_loss_sold_early", "profit_sold_early"]);
 
-function flagText(flag: string, counts?: Record<string, number>): string {
+/** 回合旗标语义色：正向行为 green，风险/卖飞 warning；未收录的用中性。 */
+type TagColor = NonNullable<TagProps["color"]>;
+const FLAG_TONES: Record<string, TagColor> = {
+  bottom_buy: "green",
+  swing_t: "green",
+  intraday_t: "green",
+  intraday_rebalance_in: "green",
+  stop_loss_sold_early: "warning",
+  profit_sold_early: "warning",
+  drawdown: "warning",
+  intraday_rebalance_out: "warning",
+};
+
+function flagCount(flag: string, counts?: Record<string, number>): number | undefined {
   const count = counts?.[flag];
-  return COUNT_FLAGS.has(flag) && typeof count === "number"
-    ? `${flagLabel(flag)}×${count}`
-    : flagLabel(flag);
+  return COUNT_FLAGS.has(flag) && typeof count === "number" ? count : undefined;
 }
 
 function statusLabel(status: string): string {
@@ -425,17 +437,17 @@ export function RoundDetail() {
           const flags = trade.trade_flags ?? [];
           if (!flags.length) return null;
           return (
-            <span className="chips">
+            <span className="tw-inline-flex tw-flex-wrap tw-items-center tw-gap-1">
               {flags.map((flag) => (
-                <span
+                <Tag
                   key={flag.code}
-                  className={flag.status === "hit" ? "chip" : "chip chip-muted"}
+                  color={flag.lookahead ? "warning" : flag.status === "hit" ? "green" : "normal"}
                   title={flag.label_en}
                 >
                   {flag.label_zh}
                   {flag.status === "hit" ? "" : `：${flag.status_label}`}
                   {flag.lookahead_label ? ` · ${flag.lookahead_label}` : ""}
-                </span>
+                </Tag>
               ))}
             </span>
           );
@@ -644,11 +656,15 @@ export function RoundDetail() {
                 <p>
                   旗标：
                   {insight.flags?.length ? (
-                    <span className="chips">
+                    <span className="tw-inline-flex tw-flex-wrap tw-items-center tw-gap-1">
                       {insight.flags.map((flag) => (
-                        <span key={flag} className="chip">
-                          {flagText(flag, insight.status_counts)}
-                        </span>
+                        <Tag
+                          key={flag}
+                          color={FLAG_TONES[flag] ?? "normal"}
+                          count={flagCount(flag, insight.status_counts)}
+                        >
+                          {flagLabel(flag)}
+                        </Tag>
                       ))}
                     </span>
                   ) : (

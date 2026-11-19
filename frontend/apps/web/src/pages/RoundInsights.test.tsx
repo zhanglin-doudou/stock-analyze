@@ -459,7 +459,8 @@ describe("RoundInsights 回合洞察页", () => {
     renderPage();
 
     // 当前页 items 有 bottom_buy×2，但 summary 计数为 0 → 证明前端不做累加。
-    expect(await screen.findByText("抄底×2")).toBeTruthy();
+    const badge = await screen.findByText("×2");
+    expect(badge.parentElement?.textContent).toBe("抄底×2");
     expect(screen.getByTestId("flag-round-charts").textContent).toContain(
       "没有任何回合命中旗标",
     );

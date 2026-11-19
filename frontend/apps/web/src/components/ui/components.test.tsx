@@ -22,6 +22,7 @@ import {
   TabsContent,
   TabsList,
   TabsTrigger,
+  Tag,
   Tooltip,
   TooltipContent,
   TooltipTrigger,
@@ -44,6 +45,21 @@ describe("UI 包装组件", () => {
     expect(screen.getByRole("button", { name: "保存" })).toBeTruthy();
     expect(screen.getByRole("textbox", { name: "证券代码" })).toBeTruthy();
     expect(screen.getByText("已完成")).toBeTruthy();
+  });
+
+  it("Tag 内置色调与数字徽标：色调落 tokens、计数原样透出", () => {
+    render(
+      <div>
+        <Tag color="green" count={2}>
+          抄底
+        </Tag>
+        <Tag color="warning">收益回撤</Tag>
+      </div>,
+    );
+    const counted = screen.getByText("抄底");
+    expect(counted.textContent).toBe("抄底×2");
+    expect(counted.className).toContain("tw-bg-ok-soft");
+    expect(screen.getByText("收益回撤").className).toContain("tw-bg-warn-soft");
   });
 
   it("cn 能用项目语义类覆盖默认字号/圆角", () => {
