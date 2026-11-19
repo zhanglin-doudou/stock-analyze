@@ -226,6 +226,10 @@ def compute_xirr(cashflows: list[CashflowPoint]) -> int:
 
     算法：二分法。NPV(x) = Σ CF_i / (1+x)^((d_i-d_0)/365)。
     NPV 单调递减 → 二分唯一解。区间 [-0.99, 10] 覆盖常规收益率。
+
+    折现因子按「天」递推：每轮迭代只做一次非整数幂运算算出 ``(1+x)^(-1/365)``，
+    再逐日连乘得到各点的折现因子。逐点直接求 ``(1+x)^years`` 会让每轮迭代付出
+    与现金流点数成正比的 Decimal 幂开销（1300+ 点 × 50+ 轮 ≈ 3.4s/次）。
     """
     if not cashflows:
         return 0
@@ -241,12 +245,20 @@ def compute_xirr(cashflows: list[CashflowPoint]) -> int:
         if cashflows[i].trade_date < cashflows[i - 1].trade_date:
             raise ValueError("cashflows 必须按 date 升序")
 
+    # 预计算天偏移与金额：二分每轮都要重算 NPV，避免重复做日期减法/除法。
+    offsets = [(cf.trade_date - d0).days for cf in cashflows]
+    amounts = [_to_decimal(cf.amount_units, _SCALE_MONEY) for cf in cashflows]
+
     def npv(rate: Decimal) -> Decimal:
+        step = (Decimal(1) + rate) ** (Decimal(-1) / Decimal(365))
         total = Decimal(0)
-        for cf in cashflows:
-            years = Decimal((cf.trade_date - d0).days) / Decimal(365)
-            amount = _to_decimal(cf.amount_units, _SCALE_MONEY)
-            total += amount / ((Decimal(1) + rate) ** years)
+        factor = Decimal(1)
+        day_prev = 0
+        for offset, amount in zip(offsets, amounts, strict=True):
+            while day_prev < offset:
+                factor *= step
+                day_prev += 1
+            total += amount * factor
         return total
 
     low, high = _XIRR_LOW, _XIRR_HIGH
