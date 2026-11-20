@@ -13,6 +13,12 @@ import type {
   Attribution,
   BatchList,
   BillDataResetOut,
+  ChatConversationOut,
+  ChatMessageIn,
+  ChatMessageOut,
+  ChatReplayOut,
+  ChatSessionOut,
+  ChatTraceOut,
   CommitImportBody,
   CreateTokenBody,
   DashboardOut,
@@ -980,6 +986,46 @@ export function createClient(options: ClientOptions) {
     },
   };
 
+  const chat = {
+    /** API-077：确保单会话存在（首次 201；已存在 200）。 */
+    ensureSession() {
+      return send<ChatSessionOut>({ path: "/chat/sessions", method: "POST" }).then((r) => r.data);
+    },
+    /** API-078：发送消息；后端会落工具/LLM 调用并返回 citations/status。 */
+    sendMessage(sessionId: string, body: ChatMessageIn) {
+      return send<ChatMessageOut>({
+        path: `/chat/sessions/${encodeURIComponent(sessionId)}/messages`,
+        method: "POST",
+        body,
+      }).then((r) => r.data);
+    },
+    /** API-112：单会话消息（分页）。 */
+    getConversation(query: { limit?: number; before_id?: string } = {}) {
+      return send<ChatConversationOut>({
+        path: "/chat/conversation",
+        query: { limit: query.limit, before_id: query.before_id },
+      }).then((r) => r.data);
+    },
+    /** API-113：单轮回放轨迹。 */
+    getTrace(turnId: string) {
+      return send<ChatTraceOut>({
+        path: `/chat/turns/${encodeURIComponent(turnId)}/trace`,
+      }).then((r) => r.data);
+    },
+    /** API-114：回放（deterministic/llm/full）。 */
+    replay(turnId: string, mode: "deterministic" | "llm" | "full" = "deterministic") {
+      return send<ChatReplayOut>({
+        path: `/chat/turns/${encodeURIComponent(turnId)}/replay`,
+        method: "POST",
+        body: { mode },
+      }).then((r) => r.data);
+    },
+    /** API-115：清空当前单会话。 */
+    deleteConversation() {
+      return send<void>({ path: "/chat/conversation", method: "DELETE" }).then((r) => r.data);
+    },
+  };
+
   const attribution = {
     /** API-036：五因子归因（纯读；blocked/degraded 仍 200，文案随 Accept-Language）。 */
     get(query: GetAttributionQuery) {
@@ -1060,7 +1106,7 @@ export function createClient(options: ClientOptions) {
     },
   };
 
-  return { auth, tokens, settings, imports, jobs, trades, rounds, nav, assets, dashboard, sectors, attribution, metrics: metricsApi, ops, request: send };
+  return { auth, tokens, settings, imports, jobs, trades, rounds, nav, assets, dashboard, sectors, attribution, chat, metrics: metricsApi, ops, request: send };
 }
 
 export type ApiClient = ReturnType<typeof createClient>;

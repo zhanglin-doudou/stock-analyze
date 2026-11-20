@@ -81,7 +81,7 @@
 - **进度**：原始 55 项中 30 项完成、2 项部分完成（约 56%）；剩余 25 项（含 2 项收尾；二期 6 + 三期 12 + 交付 7），约 40 人日，占最初 96 人日基线约 42%。
 - **端点**：API-Catalog 登记 114 个；已实现 85 个（`/api/v1/openapi.json` 自引用端点按已实现计；含助手 API-077/078/112~115）；未实现 29 个——二期 9 个（报告 4、导出 2、设置基准/隐私 2、选股诊断 1）+ 三期 20 个。
 - **超期交付**：Period2-21（API-107~111，超卖人工修订 + 账单数据治理）为初始任务表外加项，已于 2026-11-15~19 交付，未计入上表“原始任务”；估时约 2.5 人日。
-- **Period3-07 进展（2026-11-20）**：后端 Chat-00~08 已落地（迁移 0020、GLM provider、10 工具、上下文/压缩、语义理解、LangGraph、API-077/078/112~115、回放）；前端 P3 与完整验收未做，仍按未完成计。
+- **Period3-07 进展（2026-11-20）**：Chat-00~09 已落地（迁移 0020、GLM provider、10 工具、上下文/压缩、语义理解、LangGraph、API-077/078/112~115、回放）；前端悬浮窗与问答历史已接入 assistant-ui。
 - **门禁状态**：`make api-check` 通过（需先补齐 API-107~109 的 Catalog 登记）；`make gate-endpoint` / 契约测试的硬编码计数已随 110/79 同步；`make gate-golden-structure` 绿，`make gate-golden`（approval）仍红 23 项。
 - **未开始**：交付阶段全部；三期除 Period3-07 后端外未开始（Period3-07 前端 P3 与完整验收待做）；`verify-p2` 仍未提供，二期验收用 `test-p2` + `test-metrics` + 各 gate 替代并显式 SKIP。
 
@@ -248,7 +248,7 @@ make verify-p3
 | **Period3-04** | 报告分享 | 签名分享链接、匿名受限读取、撤销、过期 | Period2-09 | API-043~045 验收；匿名只能看该报告；撤销后 410 | 1 |
 | **Period3-05** | 审计 | `audit_log` 全写操作留痕、本人/管理员双视图、admin 无明细 | Period1-07/Period1-10 | API-065/066 验收；跨用户不可见 | 1.5 |
 | **Period3-06** | 管理端 | `/admin/system/status`、备份触发/列表/校验、恢复演练端点（不读明细） | Period3-05 | API-067~070 验收；admin 读 trades → 403 | 2 |
-| **Period3-07** | 对话子系统（**后端已落地 2026-11-20**：GLM-4.7-Flash、单会话、全量入库回放、10 轮/160K 压缩、语义理解与指代；前端 P3 未做） | `ChatQueryFacade` + 10 工具（含资产表、流水/回合旗标）、`QueryUnderstanding`、`ContextManager`、`AnswerComposer`、`OutputValidator`、GLM provider、`chat_turn/tool_call/llm_call` 回放；方案见 [完整开发设计](architecture/2026-11-20-intelligent-assistant-design.md) | Period2-06 | API-077/078 + 112~115 验收；`LLM_PROVIDER=none` 仍可答；GLM 故障降级原因；跨用户 404 | 后端约 12.5 + 前端 3（P3） |
+| **Period3-07** | 对话子系统（**前后端已落地 2026-11-20**：GLM-4.7-Flash、单会话、全量入库回放、10 轮/160K 压缩、语义理解与指代；前端悬浮窗 + 问答历史） | `ChatQueryFacade` + 10 工具（含资产表、流水/回合旗标）、`QueryUnderstanding`、`ContextManager`、`AnswerComposer`、`OutputValidator`、GLM provider、`chat_turn/tool_call/llm_call` 回放；方案见 [完整开发设计](architecture/2026-11-20-intelligent-assistant-design.md) | Period2-06 | API-077/078 + 112~115 验收；`LLM_PROVIDER=none` 仍可答；GLM 故障降级原因；跨用户 404 | 后端约 12.5 + 前端 3（P3） |
 | **Period3-08** | 归因增强 | Brinson-Fachler（配置/选择/交互）+ Carino 多期链接 + 行业偏离 | Period2-08/17 | 三效应之和与区间超额 ≤1bp；期初权重 BoP（R1） | 2 |
 | **Period3-09** | 限流 | 按用户/PAT 令牌桶（PG 计数）、`429+Retry-After+X-RateLimit-*`、并发任务上限 | Period1-11 | 第 N+1 次 429；同参重算返回同 `job_id` | 1.5 |
 | **Period3-10** | 性能 | 索引复核、连接池算式、必要处分区、查询计划审查、`make load-test` 脚本 | Period2-14 | 看板 50 并发 p95 ≤300ms；导入 5000 行任务 ≤30s；全量重算 ≤60s | 2 |

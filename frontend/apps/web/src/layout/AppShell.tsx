@@ -1,4 +1,4 @@
-import { Suspense, useEffect, useRef, useState } from "react";
+import { Suspense, lazy, useEffect, useRef, useState } from "react";
 import { Link, Outlet, useLocation, useNavigate } from "react-router-dom";
 import { clearSession } from "../store/session";
 import { clearSettingsCache, saveSettings, syncAppearance } from "../data/settings";
@@ -16,6 +16,10 @@ import {
 } from "./navigation";
 import { useMediaQuery } from "./useMediaQuery";
 import "./app-shell.css";
+
+const StarAssistant = lazy(() =>
+  import("../assistant/StarAssistant").then((module) => ({ default: module.StarAssistant })),
+);
 
 interface SubLinkProps {
   item: NavItem;
@@ -421,6 +425,9 @@ export function AppShell() {
           </Suspense>
         </main>
       </div>
+      <Suspense fallback={null}>
+        <StarAssistant />
+      </Suspense>
     </div>
   );
 }

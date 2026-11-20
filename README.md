@@ -11,7 +11,7 @@
 > - **Period2-19 用户偏好配置**：**P0 + P1-1 + P1-2 + P1-3 已交付（2026-11-13）**——迁移 `0014_user_setting_preferences`、`GET /settings`（API-055）与 `PATCH /settings`（API-096）、`POST /settings/trade-flags/rebuild`（API-097）；账单旗标阈值/窗口参数化并带 `flags_hash` 过期识别与「立即重算」、看板/回合 stale 横幅；概念过滤 `off/hide/exclude` 接入 API-087（additive `concept.filters`/`filtered_*`/条件 ETag 与 `Cache-Control`）。设计见 [2026-11-11-user-preferences.md](docs/architecture/2026-11-11-user-preferences.md)。
 > - **Period2-20 导入映射重构（2026-11-13）**：迁移 `0015_import_mapping_v2`，两阶段导入确认（列映射 API-098 → 账单类型 API-099 → 提交 API-011）、预览刷新 API-106、列映射模板 API-100/101、管理员列规则 API-102~105；追加平安证券预设 `sys:pingan`、券商模板锁定与预设类型复制。v2 由请求头 `X-Import-Flow: v2` 显式开启，旧客户端保持 legacy 严格 422 行为。
 > - **2026-11-15~19 增量（未在原 DEV-PLAN 任务表内）**：超卖卖出人工修订 API-107~109（注入资金腿+买入腿、可撤回、重算回合/资产）；账单数据治理 API-110（重置本人账单数据）与 API-111（旗标重建状态/未覆盖原因）；前端 Tailwind + Radix 组件层**全局化**（取代导入页 H-1 限定域）；行情 `sync-market` 改增量同步并输出未到当日证券；货基口径收口至 2.4、送股/转增并入 `rights`。
-> - **智能分析助手后端（2026-11-20，P3 前端未做）**：迁移 `0020_chat_assistant`（单会话/消息/轮次/工具/LLM 调用 5 表 + RLS）；GLM-4.7-Flash provider；`ChatQueryFacade` 10 个只读工具（含资产表、流水/回合旗标 + 顶层解释）；10 轮/160K 压缩；语义理解/指代；LangGraph 单轮编排；API-077/078/112~115；回放 deterministic/llm/full。设计见 [完整开发设计](docs/architecture/2026-11-20-intelligent-assistant-design.md)。
+> - **智能分析助手（2026-11-20，前后端已落地）**：迁移 `0020_chat_assistant`（单会话/消息/轮次/工具/LLM 调用 5 表 + RLS）；GLM-4.7-Flash provider；`ChatQueryFacade` 10 个只读工具（含资产表、流水/回合旗标 + 顶层解释）；10 轮/160K 压缩；语义理解/指代；LangGraph 单轮编排；API-077/078/112~115；回放 deterministic/llm/full；前端悬浮窗「星星助手」+ 数据菜单「问答历史」已接入 assistant-ui。设计见 [完整开发设计](docs/architecture/2026-11-20-intelligent-assistant-design.md)。
 > - **二期剩余（6 项）**：月报（2-09，含归因同源 09b）、导出（2-10）、设置基准/隐私 API-056/057（2-11 收尾）、报告/导出前端页（2-13）、`verify-p2` 与越权全量（2-14）、前端零口径 ESLint 门禁（2-15）。`/reports`、`/exports` 仍是占位入口，验收按缺失清单 SKIP，不伪造数据。
 > - **三期 / 交付**：均未开始。
 > - **进度口径**：原始规划 55 项任务中，30 项完成、2 项部分完成（2-11 设置收尾、2-15 零口径门禁基础规则）、23 项未开始；Period3-07 后端已落地但前端/完整验收未完成，暂不计入完成。按 DEV-PLAN 估时剩余约 **40 人日**（二期 9 + 三期 23 + 交付 8），约占最初 96 人日基线的 **42%**。端点：API-Catalog 登记 114 个，已实现 85 个，未实现 29 个（集中在二期暂停项与三期）。详见 [DEV-PLAN §0.6](docs/DEV-PLAN-v2.md#06-2026-11-19-进度快照)。
@@ -42,7 +42,7 @@
 - **板块数据**：同花顺 THS 行业（扁平一级，互斥，Σ权重=1，分母 `E_map`）+ 概念板块（THS，多归属，不可加总）；`GET /sectors/overview`（集中度 HHI/TopK/主动权重/概念暴露 + `caveat`）、`GET /sectors`（公共目录树）；Dashboard 子块 + `/sectors` 详情页（行业一级、概念警示）；公共缓存落 `market.sector*`，replay 夹具 `fixtures/market/sectors.json`。
 - **用户偏好**：`/settings` 配置账单贴近阈值/追涨止损阈值/短线窗口、市场时段偏好与概念过滤；保存偏好**不会自动重算**历史账单旗标——新偏好写入独立 `flags_hash`，旧行由 `stale_months` 标为过期，需在设置页点「立即重算」（API-097）重建；API-111 提供「是否需要重建 + 未覆盖月份/原因」的状态查询；概念过滤在读路径生效（`off` 严格零变化，`hide/exclude` 只裁剪行/TopN 并显式披露 `filters`/`filtered_*`）；前端只渲染后端结论。
 - **数据治理**：设置页支持重置本人账单数据（API-110，不可撤销、需二次确认），清空 `ledger`/`review` 业务数据（含导入批次/模板/列规则、回合/资产/指标/旗标等）以便从头重导；保留账号、用户偏好与审计。
-- **智能分析助手（后端）**：单会话问答；GLM-4.7-Flash 语义理解/指代；10 个只读工具覆盖资产表、流水/回合旗标及解释；10 轮窗口 + 160K 压缩；工具/LLM 调用入库并可回放；前端 P3 未做。
+- **智能分析助手（后端）**：单会话问答；GLM-4.7-Flash 语义理解/指代；10 个只读工具覆盖资产表、流水/回合旗标及解释；10 轮窗口 + 160K 压缩；工具/LLM 调用入库并可回放；前端悬浮窗与问答历史已接入 assistant-ui。
 - **质量与契约**：OpenAPI 快照 → `api-check` → 前端 SDK；标度整数零 float；RLS/越权/端点/租户/金标门禁；pytest/vitest。
 
 ## 技术栈

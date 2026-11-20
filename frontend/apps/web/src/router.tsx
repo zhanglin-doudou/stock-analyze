@@ -45,6 +45,9 @@ const MetricsCatalog = lazy(() =>
 const Import = lazy(() => import("./pages/Import").then((m) => ({ default: m.Import })));
 const Imports = lazy(() => import("./pages/Imports").then((m) => ({ default: m.Imports })));
 const Settings = lazy(() => import("./pages/Settings").then((m) => ({ default: m.Settings })));
+const ChatHistory = lazy(() =>
+  import("./pages/ChatHistory").then((m) => ({ default: m.ChatHistory })),
+);
 
 /** 路由表（导出供测试用 memory router 复放；顺序即匹配优先级）。 */
 export const appRoutes: RouteObject[] = [
@@ -73,6 +76,7 @@ export const appRoutes: RouteObject[] = [
       { path: "metrics/:metricId", element: <MetricDetail /> },
       { path: "import", element: <Import /> },
       { path: "imports", element: <Imports /> },
+      { path: "chat/history", element: <ChatHistory /> },
       {
         path: "reports",
         element: (

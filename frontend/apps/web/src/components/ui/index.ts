@@ -9,6 +9,7 @@
  * 导出到本文件，再允许业务使用。
  */
 export * from "./alert-dialog";
+export * from "./assistant-dialog";
 export * from "./badge";
 export * from "./button";
 export * from "./card";
