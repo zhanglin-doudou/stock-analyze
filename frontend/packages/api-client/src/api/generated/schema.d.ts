@@ -251,6 +251,110 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/chat/conversation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Conversation
+         * @description API-112：单会话 + 分页消息。
+         */
+        get: operations["getChatConversation"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete Conversation
+         * @description API-115：清空对话（软删消息，保留回放数据）。
+         */
+        delete: operations["deleteChatConversation"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/chat/sessions": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Session
+         * @description API-077：确保当前用户单会话存在（首次 201，已存在 200）。
+         */
+        post: operations["createChatSession"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/chat/sessions/{session_id}/messages": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send Message
+         * @description API-078：发消息；工具/LLM 过程落库。
+         */
+        post: operations["sendChatMessage"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/chat/turns/{turn_id}/replay": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Replay Turn
+         * @description API-114：回放（deterministic/llm/full）。
+         */
+        post: operations["replayChatTurn"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/chat/turns/{turn_id}/trace": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Trace
+         * @description API-113：完整回放轨迹。
+         */
+        get: operations["getChatTrace"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/dashboard": {
         parameters: {
             query?: never;
@@ -2223,6 +2327,243 @@ export interface components {
             realized_pnl: string;
             /** Residual */
             residual: string;
+        };
+        /** ChatCitationOut */
+        ChatCitationOut: {
+            /** Citation Id */
+            citation_id: string;
+            /** Data As Of */
+            data_as_of?: string | null;
+            /** Definition Version */
+            definition_version?: string | null;
+            /** Label */
+            label: string;
+            /** Number */
+            number: number;
+            /** Source Endpoint */
+            source_endpoint: string;
+            /** Source Params */
+            source_params?: {
+                [key: string]: unknown;
+            };
+            /** Value */
+            value: string;
+        };
+        /** ChatClaimOut */
+        ChatClaimOut: {
+            /** Citation Ids */
+            citation_ids?: string[];
+            /** Claim Id */
+            claim_id: string;
+            /** Text */
+            text: string;
+        };
+        /** ChatContextIn */
+        ChatContextIn: {
+            /** Period */
+            period?: string | null;
+            /** Round Id */
+            round_id?: string | null;
+            /** Security Code */
+            security_code?: string | null;
+        };
+        /** ChatContextUsageOut */
+        ChatContextUsageOut: {
+            /** Actual Completion Tokens */
+            actual_completion_tokens?: number | null;
+            /** Actual Prompt Tokens */
+            actual_prompt_tokens?: number | null;
+            /**
+             * Compressed
+             * @default false
+             */
+            compressed: boolean;
+            /** Compression Steps */
+            compression_steps?: string[];
+            /**
+             * Context Truncated
+             * @default false
+             */
+            context_truncated: boolean;
+            /** Estimated Input Tokens */
+            estimated_input_tokens: number;
+            /** Included Turns */
+            included_turns: number;
+            /**
+             * Summary Version
+             * @default 0
+             */
+            summary_version: number;
+            /** Window Turns */
+            window_turns: number;
+        };
+        /** ChatConversationOut */
+        ChatConversationOut: {
+            /** Conversation Id */
+            conversation_id: string;
+            /** Messages */
+            messages?: components["schemas"]["ChatHistoryMessageOut"][];
+            /** Next Cursor */
+            next_cursor?: string | null;
+            /** Summary */
+            summary: string;
+            /** Title */
+            title: string;
+            /** Turn Count */
+            turn_count: number;
+            /** Window Turns */
+            window_turns: number;
+        };
+        /** ChatHistoryMessageOut */
+        ChatHistoryMessageOut: {
+            /** Content */
+            content: string;
+            /** Content Json */
+            content_json?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Message Id */
+            message_id: string;
+            /**
+             * Role
+             * @enum {string}
+             */
+            role: "user" | "assistant";
+            /** Status */
+            status: string;
+            /** Turn Id */
+            turn_id?: string | null;
+        };
+        /** ChatMessageIn */
+        ChatMessageIn: {
+            context?: components["schemas"]["ChatContextIn"] | null;
+            /** Message */
+            message: string;
+        };
+        /** ChatMessageOut */
+        ChatMessageOut: {
+            /** Answer */
+            answer: string;
+            /**
+             * Answer Format
+             * @default markdown
+             * @enum {string}
+             */
+            answer_format: "markdown" | "text";
+            /** Citations */
+            citations?: components["schemas"]["ChatCitationOut"][];
+            /** Claims */
+            claims?: components["schemas"]["ChatClaimOut"][];
+            context_usage?: components["schemas"]["ChatContextUsageOut"] | null;
+            /** Conversation Id */
+            conversation_id: string;
+            /** Degrade Message */
+            degrade_message?: string | null;
+            /** Degrade Reason */
+            degrade_reason?: string | null;
+            /**
+             * Fallback
+             * @default false
+             */
+            fallback: boolean;
+            /**
+             * Llm Used
+             * @default false
+             */
+            llm_used: boolean;
+            /** Message Id */
+            message_id: string;
+            /**
+             * Retryable
+             * @default false
+             */
+            retryable: boolean;
+            /** Status */
+            status: string;
+            /** Timings */
+            timings?: {
+                [key: string]: unknown;
+            };
+            /** Turn Id */
+            turn_id: string;
+            /** Understanding */
+            understanding?: {
+                [key: string]: unknown;
+            };
+            /** What To Do */
+            what_to_do?: string | null;
+        };
+        /** ChatReplayIn */
+        ChatReplayIn: {
+            /**
+             * Mode
+             * @default deterministic
+             * @enum {string}
+             */
+            mode: "deterministic" | "llm" | "full";
+            /**
+             * Persist
+             * @default false
+             */
+            persist: boolean;
+        };
+        /** ChatReplayOut */
+        ChatReplayOut: {
+            /** Diffs */
+            diffs?: {
+                [key: string]: unknown;
+            }[];
+            /** Error */
+            error?: string | null;
+            /** Match */
+            match: boolean;
+            /** Mode */
+            mode: string;
+            /** Replayed */
+            replayed?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Status
+             * @default ok
+             * @enum {string}
+             */
+            status: "ok" | "failed";
+        };
+        /** ChatSessionOut */
+        ChatSessionOut: {
+            /** Conversation Id */
+            conversation_id: string;
+            /** Created */
+            created: boolean;
+            /** Title */
+            title: string;
+            /** Window Turns */
+            window_turns: number;
+        };
+        /** ChatTraceOut */
+        ChatTraceOut: {
+            /** Answer */
+            answer?: {
+                [key: string]: unknown;
+            };
+            /** Llm Calls */
+            llm_calls?: {
+                [key: string]: unknown;
+            }[];
+            /** Tool Calls */
+            tool_calls?: {
+                [key: string]: unknown;
+            }[];
+            /** Turn */
+            turn: {
+                [key: string]: unknown;
+            };
         };
         /** ConceptExcludedOut */
         ConceptExcludedOut: {
@@ -6550,6 +6891,400 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getChatConversation: {
+        parameters: {
+            query?: {
+                limit?: number;
+                before_id?: string | null;
+            };
+            header?: {
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatConversationOut"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    deleteChatConversation: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    createChatSession: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatSessionOut"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    sendChatMessage: {
+        parameters: {
+            query?: never;
+            header?: {
+                "Idempotency-Key"?: string | null;
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path: {
+                session_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChatMessageIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatMessageOut"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 资源状态冲突 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 请求过于频繁 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 依赖服务不可用 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    replayChatTurn: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path: {
+                turn_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ChatReplayIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatReplayOut"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 依赖服务不可用 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getChatTrace: {
+        parameters: {
+            query?: never;
+            header?: {
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path: {
+                turn_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatTraceOut"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                     "application/problem+json": components["schemas"]["Error"];
                 };
             };

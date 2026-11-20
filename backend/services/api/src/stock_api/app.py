@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from stock_contracts.clock import Clock, SystemClock
 from stock_contracts.errors import ApiError
+from stock_delivery.chat.provider import build_provider
 from stock_ledger.market import create_market_source
 from stock_platform.config import Settings, get_settings
 from stock_platform.db import Database
@@ -36,6 +37,7 @@ from stock_api.routers import (
     assets,
     attribution,
     auth,
+    chat,
     dashboard,
     imports,
     jobs,
@@ -97,6 +99,7 @@ def build_state(settings: Settings, clock: Clock | None = None) -> AppState:
         market_data=market_data,
         sector_data=sector_data,
         object_store=LocalObjectStore(settings.data_dir / "objects"),
+        llm=build_provider(settings),
     )
 
 
@@ -147,6 +150,7 @@ def create_app(settings: Settings | None = None, *, clock: Clock | None = None) 
         sectors,
         settings_api,
         attribution,
+        chat,
     ):
         app.include_router(module.router, prefix=API_PREFIX)
     # 探针/根路由按容器惯例不带前缀（/healthz、/readyz、/version、/metrics、/）

@@ -1,0 +1,42 @@
+from __future__ import annotations
+
+from datetime import date
+
+import pytest
+from stock_contracts.chat.dto import Citation, Claim
+from stock_delivery.chat.validator import validate
+
+pytestmark = pytest.mark.no_db
+
+
+def _citation() -> Citation:
+    return Citation(
+        citation_id="c1_1",
+        label="收益",
+        value_display="-1,234.56",
+        source_endpoint="GET /api/v1/dashboard",
+        definition_version="1.0",
+        data_as_of=date(2026, 11, 18),
+        number=1,
+    )
+
+
+def test_valid_answer_with_marker_and_number() -> None:
+    result = validate(
+        answer="本月收益 -1,234.56 元 [[1]]",
+        claims=[Claim(claim_id="k1", text="本月收益 -1,234.56 元", citation_ids=("c1_1",))],
+        citations=[_citation()],
+        allow_tokens=["2026-11"],
+    )
+    assert result.ok, result.errors
+
+
+def test_unknown_number_and_banned_advice_rejected() -> None:
+    result = validate(
+        answer="建议买入，目标价 99 元 [[1]]",
+        claims=[],
+        citations=[_citation()],
+    )
+    assert not result.ok
+    assert any(item.startswith("unknown_number") for item in result.errors)
+    assert "banned_advice" in result.errors

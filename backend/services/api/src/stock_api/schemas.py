@@ -2354,3 +2354,112 @@ class SettingsPatchIn(StrictModel):
     bill_flags: BillFlagsPatch | None = None
     market_sessions: MarketSessionsPatch | None = None
     concept_filters: ConceptFiltersPatch | None = None
+
+
+# ── 智能分析助手（API-077/078/112~115）──────────────────────
+class ChatSessionOut(BaseModel):
+    conversation_id: str
+    created: bool
+    title: str
+    window_turns: int
+
+
+class ChatContextIn(StrictModel):
+    period: str | None = Field(default=None, max_length=40)
+    round_id: str | None = Field(default=None, max_length=40)
+    security_code: str | None = Field(default=None, max_length=16)
+
+
+class ChatMessageIn(StrictModel):
+    message: str = Field(min_length=1, max_length=2000)
+    context: ChatContextIn | None = None
+
+
+class ChatCitationOut(BaseModel):
+    number: int
+    citation_id: str
+    label: str
+    value: str
+    source_endpoint: str
+    source_params: dict[str, Any] = Field(default_factory=dict)
+    definition_version: str | None = None
+    data_as_of: str | None = None
+
+
+class ChatClaimOut(BaseModel):
+    claim_id: str
+    text: str
+    citation_ids: list[str] = Field(default_factory=list)
+
+
+class ChatContextUsageOut(BaseModel):
+    window_turns: int
+    included_turns: int
+    estimated_input_tokens: int
+    actual_prompt_tokens: int | None = None
+    actual_completion_tokens: int | None = None
+    compressed: bool = False
+    context_truncated: bool = False
+    summary_version: int = 0
+    compression_steps: list[str] = Field(default_factory=list)
+
+
+class ChatMessageOut(BaseModel):
+    conversation_id: str
+    turn_id: str
+    message_id: str
+    answer: str
+    answer_format: Literal["markdown", "text"] = "markdown"
+    citations: list[ChatCitationOut] = Field(default_factory=list)
+    claims: list[ChatClaimOut] = Field(default_factory=list)
+    status: str
+    degrade_reason: str | None = None
+    degrade_message: str | None = None
+    what_to_do: str | None = None
+    retryable: bool = False
+    llm_used: bool = False
+    fallback: bool = False
+    understanding: dict[str, Any] = Field(default_factory=dict)
+    context_usage: ChatContextUsageOut | None = None
+    timings: dict[str, Any] = Field(default_factory=dict)
+
+
+class ChatHistoryMessageOut(BaseModel):
+    message_id: str
+    turn_id: str | None = None
+    role: Literal["user", "assistant"]
+    content: str
+    content_json: dict[str, Any] | None = None
+    status: str
+    created_at: datetime
+
+
+class ChatConversationOut(BaseModel):
+    conversation_id: str
+    title: str
+    summary: str
+    turn_count: int
+    window_turns: int
+    messages: list[ChatHistoryMessageOut] = Field(default_factory=list)
+    next_cursor: str | None = None
+
+
+class ChatTraceOut(BaseModel):
+    turn: dict[str, Any]
+    tool_calls: list[dict[str, Any]] = Field(default_factory=list)
+    llm_calls: list[dict[str, Any]] = Field(default_factory=list)
+    answer: dict[str, Any] = Field(default_factory=dict)
+
+
+class ChatReplayIn(StrictModel):
+    mode: Literal["deterministic", "llm", "full"] = "deterministic"
+    persist: bool = False
+
+
+class ChatReplayOut(BaseModel):
+    mode: str
+    match: bool
+    diffs: list[dict[str, Any]] = Field(default_factory=list)
+    replayed: dict[str, Any] = Field(default_factory=dict)
+    status: Literal["ok", "failed"] = "ok"
+    error: str | None = None

@@ -20,7 +20,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession
 from stock_contracts.errors import ErrorCode
 from stock_ledger.models import ImportBatch, ImportPreview, ImportTemplate, SummaryRule, Trade
-from stock_platform.models import ApiToken, Job, JobEvent
+from stock_platform.models import ApiToken, ChatConversation, ChatTurn, Job, JobEvent
 from stock_review.application.assets import ASSET_DEFINITION_VERSION
 
 pytestmark = [pytest.mark.isolation, pytest.mark.api]
@@ -200,6 +200,30 @@ async def _seed_rule(engine: AsyncEngine, *, user_id: uuid.UUID) -> str:
     return rule_id
 
 
+async def _seed_chat(engine: AsyncEngine, *, user_id: uuid.UUID) -> tuple[str, str]:
+    """直插一条对话 + 一轮问答；用于 chat 资源级 404 用例。"""
+    conversation_id = f"cnv_{uuid.uuid4().hex[:12]}"
+    turn_id = f"trn_{uuid.uuid4().hex[:12]}"
+    async with AsyncSession(engine) as session:
+        session.add(
+            ChatConversation(
+                id=conversation_id,
+                user_id=user_id,
+                title="越权探针",
+            )
+        )
+        session.add(
+            ChatTurn(
+                id=turn_id,
+                conversation_id=conversation_id,
+                user_id=user_id,
+                question="probe",
+            )
+        )
+        await session.commit()
+    return conversation_id, turn_id
+
+
 async def _seed_round(engine: AsyncEngine, *, user_id: uuid.UUID) -> str:
     """直插一条 owner 的回合（owner 绕过 RLS；走 raw SQL 以避免测试耦合 review 包内部）。"""
     round_id = f"rnd_{uuid.uuid4().hex[:12]}"
@@ -274,6 +298,14 @@ RESOURCE_MATRIX: list[tuple[str, str]] = [
     ("put", "/imports/previews/{preview_id}/mapping"),
     ("put", "/imports/previews/{preview_id}/types"),
     ("delete", "/imports/templates/{template_id}"),
+    # 2026-11-15（API-107~109）：超卖人工修订
+    ("get", "/trades/{trade_id}/oversell-revision"),
+    ("put", "/trades/{trade_id}/oversell-revision"),
+    ("delete", "/trades/{trade_id}/oversell-revision"),
+    # 2026-11-20（API-078/113/114）：助手资源级端点
+    ("post", "/chat/sessions/{session_id}/messages"),
+    ("get", "/chat/turns/{turn_id}/trace"),
+    ("post", "/chat/turns/{turn_id}/replay"),
 ]
 
 #: 业务数据端点：admin 一律 403（运维角色不碰明细）
@@ -319,6 +351,19 @@ ADMIN_FORBIDDEN: list[tuple[str, str]] = [
     ("put", "/imports/previews/{preview_id}/types"),
     ("get", "/imports/templates"),
     ("delete", "/imports/templates/{template_id}"),
+    # 2026-11-15（API-107~111）：超卖修订与账单数据治理
+    ("get", "/trades/{trade_id}/oversell-revision"),
+    ("put", "/trades/{trade_id}/oversell-revision"),
+    ("delete", "/trades/{trade_id}/oversell-revision"),
+    ("get", "/settings/trade-flags/status"),
+    ("post", "/settings/reset-bill-data"),
+    # 2026-11-20（API-077/078/112~115）：助手
+    ("post", "/chat/sessions"),
+    ("post", "/chat/sessions/{session_id}/messages"),
+    ("get", "/chat/conversation"),
+    ("delete", "/chat/conversation"),
+    ("get", "/chat/turns/{turn_id}/trace"),
+    ("post", "/chat/turns/{turn_id}/replay"),
 ]
 
 #: 列表型端点：A/B 各自造数据，B 的列表不得包含 A 的行（跨租户列表隔离）
@@ -424,6 +469,19 @@ UNAUTHENTICATED_MATRIX: list[tuple[str, str]] = [
     ("post", "/admin/import-column-rules"),
     ("patch", "/admin/import-column-rules/{rule_id}"),
     ("delete", "/admin/import-column-rules/{rule_id}"),
+    # 2026-11-15（API-107~111）
+    ("get", "/trades/{trade_id}/oversell-revision"),
+    ("put", "/trades/{trade_id}/oversell-revision"),
+    ("delete", "/trades/{trade_id}/oversell-revision"),
+    ("get", "/settings/trade-flags/status"),
+    ("post", "/settings/reset-bill-data"),
+    # 2026-11-20（API-077/078/112~115）
+    ("post", "/chat/sessions"),
+    ("post", "/chat/sessions/{session_id}/messages"),
+    ("get", "/chat/conversation"),
+    ("delete", "/chat/conversation"),
+    ("get", "/chat/turns/{turn_id}/trace"),
+    ("post", "/chat/turns/{turn_id}/replay"),
 ]
 
 #: 路径参数占位值（只用于越权/401 用例；资源不存在时恰好也走 404 分支）。
@@ -437,6 +495,8 @@ _PLACEHOLDERS = {
     "metric_id": "perf.placeholder",
     "preview_id": "prv_01J9Z6PLACEHOLDER",
     "template_id": "imt_01J9Z6PLACEHOLDER",
+    "session_id": "cnv_01J9Z6PLACEHOLDER",
+    "turn_id": "trn_01J9Z6PLACEHOLDER",
 }
 
 #: 必填 query 参数的端点（矩阵里的通用请求需要补最小合法 query）。
@@ -516,6 +576,14 @@ def _unauth_kwargs(method: str, template: str) -> dict[str, Any]:
     elif template == "/admin/import-column-rules/{rule_id}" and method == "patch":
         kwargs["headers"] = {"If-Match": "1"}
         kwargs["json"] = {"enabled": False}
+    elif template == "/chat/sessions/{session_id}/messages":
+        kwargs["json"] = {"message": "probe"}
+    elif template == "/chat/turns/{turn_id}/replay":
+        kwargs["json"] = {"mode": "deterministic"}
+    elif template == "/trades/{trade_id}/oversell-revision" and method == "put":
+        kwargs["json"] = {"cost": "1.00"}
+    elif template == "/settings/reset-bill-data":
+        kwargs["headers"] = {"Idempotency-Key": "unauth-probe-" + "x" * 20}
     return kwargs
 
 
@@ -551,6 +619,9 @@ async def test_cross_account_returns_404(
         "preview_id": await _seed_preview(owner_engine, user_id=owner.user_id),
         "template_id": await _seed_template(owner_engine, user_id=owner.user_id),
     }
+    ids["session_id"], ids["turn_id"] = await _seed_chat(
+        owner_engine, user_id=owner.user_id
+    )
     headers = dict(intruder.headers)
     json_body: dict[str, Any] | None = None
     if method == "patch":
@@ -566,6 +637,12 @@ async def test_cross_account_returns_404(
     elif template == "/imports/previews/{preview_id}/types":
         headers["If-Match"] = "1"
         json_body = {"resolutions": []}
+    elif template == "/chat/sessions/{session_id}/messages":
+        json_body = {"message": "跨租户越权尝试"}
+    elif template == "/chat/turns/{turn_id}/replay":
+        json_body = {"mode": "deterministic"}
+    elif template == "/trades/{trade_id}/oversell-revision" and method == "put":
+        json_body = {"cost": "1.00"}
     elif method == "put":
         # 2026-11-05（API-090）：理由写入需通过 body 校验才能抵达资源归属判定
         json_body = {"reason_code": "plan_build"}
@@ -699,10 +776,18 @@ async def test_admin_forbidden_on_business_data(
     method: str,
     template: str,
 ) -> None:
-    url = api_prefix + template + _REQUIRED_QUERY.get(template, "")
+    url = api_prefix + _fill(template) + _REQUIRED_QUERY.get(template, "")
     headers = dict(admin.headers)
     json_body: dict[str, Any] | None = None
-    if template == "/imports/previews/{preview_id}/mapping":
+    if template == "/chat/sessions/{session_id}/messages":
+        json_body = {"message": "admin probe"}
+    elif template == "/chat/turns/{turn_id}/replay":
+        json_body = {"mode": "deterministic"}
+    elif template == "/trades/{trade_id}/oversell-revision" and method == "put":
+        json_body = {"cost": "1.00"}
+    elif template == "/settings/reset-bill-data":
+        headers["Idempotency-Key"] = "admin-probe-" + "x" * 20
+    elif template == "/imports/previews/{preview_id}/mapping":
         headers["If-Match"] = "1"
         json_body = {"items": [], "ignored": [], "acknowledge_unmapped": False}
     elif template == "/imports/previews/{preview_id}/types":

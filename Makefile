@@ -41,6 +41,7 @@ help:
 	@echo "  make test-core      core 内核单测 + 覆盖门禁"
 	@echo "  make test-review    Period2 review 域单测 + rebuild/资产表增量集成测试"
 	@echo "  make test-p2        Period2-01/02 全量断言（fifo/review/API/越权/契约）"
+	@echo "  make test-chat      智能分析助手单测 + API 验收"
 	@echo "  make test-metrics   07 指标全套（core 单测 + golden + oracle 三方 + 契约 kit）"
 	@echo "  make test-perf      Pf-10 纯函数 microbench（≤2× 基线或 0.5ms）"
 	@echo "  make test-api       API 验收套件（一期 + 二期已实现端点）"
@@ -261,6 +262,10 @@ test-metrics:
 .PHONY: test-perf
 test-perf:
 	@$(UV) pytest backend/tests/perf -q
+
+.PHONY: test-chat
+test-chat:
+	@$(UV) pytest backend/tests/unit/delivery/chat backend/tests/api/test_chat.py -q
 
 .PHONY: test-p2
 test-p2:

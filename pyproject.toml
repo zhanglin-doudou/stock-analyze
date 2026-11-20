@@ -49,6 +49,7 @@ dev = [
     "import-linter>=2.1",
     "types-pyyaml",
     "mutmut>=3.2,<4",
+    "respx>=0.22,<1",
 ]
 
 [tool.pytest.ini_options]

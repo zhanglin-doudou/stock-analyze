@@ -1493,6 +1493,97 @@ OPERATION_META: dict[str, dict[str, Any]] = {
             "ADMIN_CANNOT_READ_TRADES",
         ],
     },
+    "createChatSession": {
+        "api_id": "API-077",
+        "scope": "write",
+        "idempotent": True,
+        "async": False,
+        "error_codes": [
+            "VALIDATION_ERROR",
+            "TOKEN_EXPIRED",
+            "TOKEN_REVOKED",
+            "MULTIPLE_CREDENTIALS",
+            "INSUFFICIENT_SCOPE",
+            "ADMIN_CANNOT_READ_TRADES",
+        ],
+    },
+    "sendChatMessage": {
+        "api_id": "API-078",
+        "scope": "write",
+        "idempotent": True,
+        "async": False,
+        "error_codes": [
+            "NOT_FOUND",
+            "MESSAGE_TOO_LONG",
+            "VALIDATION_ERROR",
+            "RATE_LIMITED",
+            "LLM_UNAVAILABLE",
+            "IDEMPOTENCY_KEY_REUSED",
+            "IDEMPOTENCY_IN_PROGRESS",
+            "TOKEN_EXPIRED",
+            "TOKEN_REVOKED",
+            "MULTIPLE_CREDENTIALS",
+            "INSUFFICIENT_SCOPE",
+            "ADMIN_CANNOT_READ_TRADES",
+        ],
+    },
+    "getChatConversation": {
+        "api_id": "API-112",
+        "scope": "read",
+        "idempotent": False,
+        "async": False,
+        "error_codes": [
+            "NOT_FOUND",
+            "TOKEN_EXPIRED",
+            "TOKEN_REVOKED",
+            "MULTIPLE_CREDENTIALS",
+            "INSUFFICIENT_SCOPE",
+            "ADMIN_CANNOT_READ_TRADES",
+        ],
+    },
+    "getChatTrace": {
+        "api_id": "API-113",
+        "scope": "read",
+        "idempotent": False,
+        "async": False,
+        "error_codes": [
+            "NOT_FOUND",
+            "TOKEN_EXPIRED",
+            "TOKEN_REVOKED",
+            "MULTIPLE_CREDENTIALS",
+            "INSUFFICIENT_SCOPE",
+            "ADMIN_CANNOT_READ_TRADES",
+        ],
+    },
+    "replayChatTurn": {
+        "api_id": "API-114",
+        "scope": "write",
+        "idempotent": False,
+        "async": False,
+        "error_codes": [
+            "NOT_FOUND",
+            "VALIDATION_ERROR",
+            "LLM_UNAVAILABLE",
+            "TOKEN_EXPIRED",
+            "TOKEN_REVOKED",
+            "MULTIPLE_CREDENTIALS",
+            "INSUFFICIENT_SCOPE",
+            "ADMIN_CANNOT_READ_TRADES",
+        ],
+    },
+    "deleteChatConversation": {
+        "api_id": "API-115",
+        "scope": "write",
+        "idempotent": True,
+        "async": False,
+        "error_codes": [
+            "TOKEN_EXPIRED",
+            "TOKEN_REVOKED",
+            "MULTIPLE_CREDENTIALS",
+            "INSUFFICIENT_SCOPE",
+            "ADMIN_CANNOT_READ_TRADES",
+        ],
+    },
     "getSettings": {
         "api_id": "API-055",
         "scope": "read",
@@ -2639,6 +2730,103 @@ EXAMPLE_OVERRIDES: dict[str, dict[str, Any]] = {
                     "kind": "filter_alias",
                 },
             ],
+        }
+    },
+    # 2026-11-20（API-077/078/112~115）：智能分析助手。
+    "createChatSession": {
+        "200": {
+            "conversation_id": "cnv_" + _ID_SUFFIX,
+            "created": False,
+            "title": "我的复盘",
+            "window_turns": 10,
+        }
+    },
+    "sendChatMessage": {
+        "200": {
+            "conversation_id": "cnv_" + _ID_SUFFIX,
+            "turn_id": "trn_" + _ID_SUFFIX,
+            "message_id": "msg_" + _ID_SUFFIX,
+            "answer": "本月已实现收益 -1,234.56 元。[[1]]",
+            "answer_format": "markdown",
+            "citations": [
+                {
+                    "number": 1,
+                    "citation_id": "c1_1",
+                    "label": "本月收益",
+                    "value": "-1234.56",
+                    "source_endpoint": "GET /api/v1/dashboard",
+                    "source_params": {"period": "2026-11"},
+                    "definition_version": "1.0",
+                    "data_as_of": _DATE,
+                }
+            ],
+            "claims": [
+                {"claim_id": "k1", "text": "本月已实现收益 -1,234.56 元", "citation_ids": ["c1_1"]}
+            ],
+            "status": "ok",
+            "degrade_reason": None,
+            "degrade_message": None,
+            "what_to_do": None,
+            "retryable": False,
+            "llm_used": True,
+            "fallback": False,
+            "understanding": {"intents": ["portfolio"], "resolved_query": "本月赚了多少"},
+            "context_usage": {
+                "window_turns": 10,
+                "included_turns": 2,
+                "estimated_input_tokens": 1200,
+                "actual_prompt_tokens": 1100,
+                "actual_completion_tokens": 120,
+                "compressed": False,
+                "context_truncated": False,
+                "summary_version": 0,
+                "compression_steps": [],
+            },
+            "timings": {"total_ms": 3200},
+        }
+    },
+    "getChatConversation": {
+        "200": {
+            "conversation_id": "cnv_" + _ID_SUFFIX,
+            "title": "我的复盘",
+            "summary": "",
+            "turn_count": 1,
+            "window_turns": 10,
+            "messages": [
+                {
+                    "message_id": "msg_" + _ID_SUFFIX,
+                    "turn_id": "trn_" + _ID_SUFFIX,
+                    "role": "user",
+                    "content": "本月赚了多少？",
+                    "content_json": None,
+                    "status": "ok",
+                    "created_at": _DATETIME,
+                }
+            ],
+            "next_cursor": None,
+        }
+    },
+    "getChatTrace": {
+        "200": {
+            "turn": {
+                "id": "trn_" + _ID_SUFFIX,
+                "question": "本月赚了多少？",
+                "resolved_query": "本月赚了多少？",
+                "status": "ok",
+            },
+            "tool_calls": [],
+            "llm_calls": [],
+            "answer": {"answer_markdown": "本月已实现收益 -1,234.56 元。"},
+        }
+    },
+    "replayChatTurn": {
+        "200": {
+            "mode": "deterministic",
+            "match": True,
+            "diffs": [],
+            "replayed": {},
+            "status": "ok",
+            "error": None,
         }
     },
     # 2026-11-05（API-094）：同步 200 与转作业 202 两条路径。

@@ -356,10 +356,174 @@ class SchemaVersion(Base):
     app_version: Mapped[str] = mapped_column(String(32), nullable=False)
 
 
+class ChatConversation(Base, TimestampMixin):
+    """每用户唯一的一条对话（2026-11-20 助手设计）。"""
+
+    __tablename__ = "chat_conversation"
+    __table_args__ = (
+        UniqueConstraint("user_id", name="uq_chat_conversation_user"),
+        {"schema": SCHEMA},
+    )
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey(f"{SCHEMA}.user.id", ondelete="CASCADE"), nullable=False
+    )
+    title: Mapped[str] = mapped_column(String(80), nullable=False, default="我的复盘")
+    summary: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    summary_tokens: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    summary_message_id: Mapped[str | None] = mapped_column(String(40))
+    summary_version: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    focus: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    window_turns: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=10)
+    turn_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ChatMessage(Base):
+    """对话消息（单会话；软删由 deleted_at 控制）。"""
+
+    __tablename__ = "chat_message"
+    __table_args__ = (
+        CheckConstraint("role in ('user','assistant')", name="ck_chat_message_role"),
+        Index("ix_chat_message_conversation_at", "conversation_id", "created_at"),
+        Index("ix_chat_message_turn", "turn_id"),
+        Index("ix_chat_message_user_at", "user_id", "created_at"),
+        {"schema": SCHEMA},
+    )
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    conversation_id: Mapped[str] = mapped_column(
+        String(40),
+        ForeignKey(f"{SCHEMA}.chat_conversation.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey(f"{SCHEMA}.user.id", ondelete="CASCADE"), nullable=False
+    )
+    turn_id: Mapped[str | None] = mapped_column(String(40))
+    role: Mapped[str] = mapped_column(String(16), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False, default="")
+    content_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    token_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="ok")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ChatTurn(Base):
+    """一轮问答的审计主记录。"""
+
+    __tablename__ = "chat_turn"
+    __table_args__ = (
+        Index("ix_chat_turn_conversation_at", "conversation_id", "created_at"),
+        Index("ix_chat_turn_user_at", "user_id", "created_at"),
+        {"schema": SCHEMA},
+    )
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    conversation_id: Mapped[str] = mapped_column(
+        String(40),
+        ForeignKey(f"{SCHEMA}.chat_conversation.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey(f"{SCHEMA}.user.id", ondelete="CASCADE"), nullable=False
+    )
+    user_message_id: Mapped[str | None] = mapped_column(String(40))
+    assistant_message_id: Mapped[str | None] = mapped_column(String(40))
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    resolved_query: Mapped[str | None] = mapped_column(Text)
+    understanding: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    context_manifest: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
+    status: Mapped[str] = mapped_column(String(24), nullable=False, default="ok")
+    degrade_reason: Mapped[str | None] = mapped_column(String(40))
+    llm_used: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    fallback: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    latency_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class ChatToolCall(Base):
+    """工具调用原始参数/结果，用于回放。"""
+
+    __tablename__ = "chat_tool_call"
+    __table_args__ = (
+        Index("ix_chat_tool_call_turn_seq", "turn_id", "seq"),
+        Index("ix_chat_tool_call_user_at", "user_id", "created_at"),
+        {"schema": SCHEMA},
+    )
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    turn_id: Mapped[str] = mapped_column(
+        String(40), ForeignKey(f"{SCHEMA}.chat_turn.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey(f"{SCHEMA}.user.id", ondelete="CASCADE"), nullable=False
+    )
+    seq: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    tool_name: Mapped[str] = mapped_column(String(40), nullable=False)
+    args: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    result: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    status: Mapped[str] = mapped_column(String(24), nullable=False)
+    error_code: Mapped[str | None] = mapped_column(String(40))
+    row_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    result_bytes: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    latency_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class ChatLlmCall(Base):
+    """LLM 调用原始请求/响应，用于回放；不存 API key。"""
+
+    __tablename__ = "chat_llm_call"
+    __table_args__ = (
+        Index("ix_chat_llm_call_turn_seq", "turn_id", "seq"),
+        Index("ix_chat_llm_call_user_at", "user_id", "created_at"),
+        Index("ix_chat_llm_call_purpose_at", "purpose", "created_at"),
+        {"schema": SCHEMA},
+    )
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    turn_id: Mapped[str] = mapped_column(
+        String(40), ForeignKey(f"{SCHEMA}.chat_turn.id", ondelete="CASCADE"), nullable=False
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey(f"{SCHEMA}.user.id", ondelete="CASCADE"), nullable=False
+    )
+    seq: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    purpose: Mapped[str] = mapped_column(String(24), nullable=False)
+    provider: Mapped[str] = mapped_column(String(24), nullable=False)
+    model: Mapped[str] = mapped_column(String(80), nullable=False)
+    prompt_version: Mapped[str | None] = mapped_column(String(40))
+    request: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    response: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    prompt_tokens: Mapped[int | None] = mapped_column(Integer)
+    completion_tokens: Mapped[int | None] = mapped_column(Integer)
+    total_tokens: Mapped[int | None] = mapped_column(Integer)
+    latency_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    status: Mapped[str] = mapped_column(String(24), nullable=False)
+    error_code: Mapped[str | None] = mapped_column(String(40))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 __all__ = [
     "ApiToken",
     "AuditLog",
     "BackupRun",
+    "ChatConversation",
+    "ChatLlmCall",
+    "ChatMessage",
+    "ChatToolCall",
+    "ChatTurn",
     "ConfigRelease",
     "IdempotencyKey",
     "Job",

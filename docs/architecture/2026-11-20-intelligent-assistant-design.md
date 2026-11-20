@@ -1,6 +1,6 @@
 # 智能分析助手 · 完整开发设计 v1.0
 
-> 状态：**设计定稿（2026-11-20）**，待实现；前端排到优先级 P3（不是 Period3），先做后端基建与端点。
+> 状态：**设计定稿（2026-11-20）**；后端 Chat-00~08 已按本设计落地，前端排到优先级 P3（不是 Period3），尚未实现。
 > 需求基线：[PRD-v2 FR-D7](../prd/PRD-v2.md)、[DEV-PLAN Period3-07](../DEV-PLAN-v2.md)、[ADR-0022](v2/ADR.md)、[API-Catalog API-077/078](v2/API-Catalog.md)。
 > 本设计取代 [2026-11-19 调研稿](2026-11-19-intelligent-assistant-research.md) 中的 L0/L1 隐私分层与“不做历史端点”结论；调研稿的其他分析保留参考价值。
 > 已拍板：GLM-4.7-Flash 免费版验证、单会话、对话/工具/LLM 调用全量入库可回放、滑动窗口 10 轮 + 200K 的 80% 压缩、语义理解与指代替换、业务数据可全量使用、不做 RAG、LLM 故障输出降级原因与服务不可用提示。
@@ -171,10 +171,7 @@ backend/
 │       ├── validator.py                # 数字白名单/引用/禁建议词
 │       ├── provider.py                 # ChatOpenAI(GLM)/FakeProvider
 │       ├── replay.py                   # deterministic/llm/full
-│       └── prompts/
-│           ├── understand.v1.md
-│           ├── answer.v1.md
-│           └── compress.v1.md
+│       └── prompts.py                  # understand/answer/compress v1 常量（改则升版本）
 ├── services/api/src/stock_api/
 │   ├── routers/chat.py                 # API-077/078/112~115
 │   ├── schemas.py                      # 追加 chat schemas
@@ -805,7 +802,7 @@ llm = ChatOpenAI(
 |---|---|---|
 | `deterministic` | 用存储的 understanding + 工具参数重跑工具，重新组装模板答案；不调 LLM | 验证数据/工具/组装是否漂移 |
 | `llm` | 用存储的 answer request 重新调用 GLM，比较回答 | 验证模型输出稳定性/回归 |
-| `full` | 用**存储的** understanding request 重跑理解，再跑 tools + 存储的 answer request | 端到端复现（最贵；不按当前上下文重新理解） |
+| `full` | 用**存储的** understanding 结果 + 工具参数重跑 tools + 存储的 answer request | 端到端复现（最贵；不按当前上下文重新理解） |
 
 响应：
 
