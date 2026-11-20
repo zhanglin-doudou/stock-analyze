@@ -1658,6 +1658,11 @@ class _FakeQueue:
     ) -> None:
         self.progress_calls.append((percent, stage))
 
+    async def progress_committed(
+        self, user_id: Any, job_id: str, *, percent: int, stage: str, message: str | None
+    ) -> None:
+        self.progress_calls.append((percent, stage))
+
     async def is_cancel_requested(self, session: Any, job_id: str) -> bool:
         return self._cancel
 

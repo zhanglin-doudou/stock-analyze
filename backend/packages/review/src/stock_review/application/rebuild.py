@@ -499,7 +499,7 @@ async def rebuild_rounds_job(
             )
         period_start, period_end = parse_period(period, today=clock.today())
 
-    await queue.progress(session, job_id, percent=10, stage="recomputing", message=None)
+    await queue.progress_committed(user_id, job_id, percent=10, stage="recomputing", message=None)
     if await queue.is_cancel_requested(session, job_id):
         await queue.finish(session, job_id, status=JobStatus.CANCELLED, result={"cancelled": True})
         return {"job_id": job_id, "cancelled": True}

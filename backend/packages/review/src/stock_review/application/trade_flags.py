@@ -179,7 +179,7 @@ async def rebuild_trade_flags_job(
 
     total_trades = 0
     total_rows = 0
-    await queue.progress(session, job_id, percent=1, stage="trade_flags", message=None)
+    await queue.progress_committed(user_id, job_id, percent=1, stage="trade_flags", message=None)
     for index, month in enumerate(months, start=1):
         if await queue.is_cancel_requested(session, job_id):
             await queue.finish(
@@ -200,7 +200,9 @@ async def rebuild_trade_flags_job(
         total_trades += built.trades
         total_rows += built.rows
         percent = min(95, 5 + index * 90 // len(months))
-        await queue.progress(session, job_id, percent=percent, stage="trade_flags", message=month)
+        await queue.progress_committed(
+            user_id, job_id, percent=percent, stage="trade_flags", message=month
+        )
 
     logger.info(
         "trade_flags.rebuild_done",

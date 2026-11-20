@@ -1716,16 +1716,16 @@ async def build_assets_job(
     params: dict[str, Any] = dict(job.get("params") or {})
     mode = str(params.get("mode") or "auto")
 
-    await queue.progress(session, job_id, percent=10, stage="recomputing", message=None)
+    await queue.progress_committed(user_id, job_id, percent=10, stage="recomputing", message=None)
     if await queue.is_cancel_requested(session, job_id):
         await queue.finish(session, job_id, status=JobStatus.CANCELLED, result={"cancelled": True})
         return {"job_id": job_id, "cancelled": True}
 
-    await queue.progress(session, job_id, percent=80, stage="writing", message=None)
+    await queue.progress_committed(user_id, job_id, percent=80, stage="writing", message=None)
     summary = await build_assets(
         session, user_id=user_id, clock=clock, market_data=market_data, mode=mode
     )
-    await queue.progress(session, job_id, percent=100, stage="finalizing", message=None)
+    await queue.progress_committed(user_id, job_id, percent=100, stage="finalizing", message=None)
 
     payload: dict[str, Any] = {
         "mode": summary.mode,
