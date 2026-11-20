@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   getConversation: vi.fn(),
   getTrace: vi.fn(),
   replay: vi.fn(),
+  deleteConversation: vi.fn(),
 }));
 
 vi.mock("../client", () => ({
@@ -17,6 +18,7 @@ vi.mock("../client", () => ({
       getConversation: mocks.getConversation,
       getTrace: mocks.getTrace,
       replay: mocks.replay,
+      deleteConversation: mocks.deleteConversation,
     },
   },
 }));
@@ -63,6 +65,7 @@ describe("ChatHistory", () => {
       llm_calls: [],
     });
     mocks.replay.mockResolvedValue({ match: true, diffs: [] });
+    mocks.deleteConversation.mockResolvedValue(undefined);
   });
 
   it("列出问答轮次并展示轨迹与确定性回放", async () => {
@@ -77,5 +80,21 @@ describe("ChatHistory", () => {
     await user.click(screen.getByRole("button", { name: "回放（确定性）" }));
     expect(await screen.findByText("回放结果与原始回答一致。")).toBeTruthy();
     expect(mocks.replay).toHaveBeenCalledWith("trn_test", "deterministic");
+  });
+
+  it("清空问答历史需要二次确认", async () => {
+    const user = userEvent.setup();
+    render(
+      <MemoryRouter>
+        <ChatHistory />
+      </MemoryRouter>,
+    );
+    await screen.findAllByText("本月赚了多少？");
+    await user.click(screen.getByRole("button", { name: "清空问答历史" }));
+    expect(await screen.findByText("确认清空问答历史？")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "确认清空" }));
+    expect(await screen.findByText("问答历史已清空。")).toBeTruthy();
+    expect(mocks.deleteConversation).toHaveBeenCalledTimes(1);
+    expect(screen.getByText(/还没有问答记录/)).toBeTruthy();
   });
 });

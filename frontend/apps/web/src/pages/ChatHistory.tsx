@@ -6,6 +6,18 @@ import type {
   ChatHistoryMessageOut,
 } from "@sa/api-client";
 import { api } from "../client";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import { Button } from "@/components/ui/button";
 import { ProblemView } from "../ui/Problem";
 import "./chat-history.css";
 
@@ -134,6 +146,10 @@ export function ChatHistory() {
   const [replay, setReplay] = useState<ChatReplayOut | null>(null);
   const [replayError, setReplayError] = useState<unknown>(null);
   const [replayLoading, setReplayLoading] = useState(false);
+  const [clearOpen, setClearOpen] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const [clearError, setClearError] = useState<unknown>(null);
+  const [notice, setNotice] = useState("");
 
   const turns = useMemo(() => (conversation ? buildTurns(conversation) : []), [conversation]);
 
@@ -184,6 +200,24 @@ export function ChatHistory() {
     };
   }, [selectedTurn]);
 
+  async function clearHistory() {
+    setClearing(true);
+    setClearError(null);
+    try {
+      await api.chat.deleteConversation();
+      setConversation(null);
+      setSelectedTurn(null);
+      setTrace(null);
+      setReplay(null);
+      setNotice("问答历史已清空。");
+      setClearOpen(false);
+    } catch (err) {
+      setClearError(err);
+    } finally {
+      setClearing(false);
+    }
+  }
+
   async function runReplay() {
     if (!selectedTurn) return;
     setReplayLoading(true);
@@ -208,7 +242,49 @@ export function ChatHistory() {
             每次提问都会保存理解、工具调用、模型调用和最终回答；可以在这里逐轮回看并做确定性回放。
           </p>
         </div>
+        <div className="chat-history-actions">
+          <AlertDialog open={clearOpen} onOpenChange={setClearOpen}>
+            <AlertDialogTrigger asChild>
+              <Button
+                variant="outline"
+                size="sm"
+                className="tw-border-danger tw-text-danger hover:tw-bg-danger-soft"
+                disabled={clearing || turns.length === 0}
+              >
+                清空问答历史
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>确认清空问答历史？</AlertDialogTitle>
+                <AlertDialogDescription>
+                  清空后当前会话与历史轮次将不再显示，且无法恢复。请确认是否继续。
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>取消</AlertDialogCancel>
+                <AlertDialogAction
+                  className="tw-bg-destructive tw-text-destructive-foreground hover:tw-opacity-90"
+                  disabled={clearing}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    void clearHistory();
+                  }}
+                >
+                  {clearing ? "清空中…" : "确认清空"}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+        </div>
       </header>
+
+      {notice ? (
+        <p className="chat-history-notice" role="status">
+          {notice}
+        </p>
+      ) : null}
+      <ProblemView error={clearError} />
 
       {loading ? <p className="muted">加载中…</p> : null}
       <ProblemView error={error} />

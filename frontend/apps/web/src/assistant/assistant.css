@@ -141,6 +141,9 @@
   line-height: 1.6;
   word-break: break-word;
 }
+.sa-message-bubble > p {
+  margin: 0;
+}
 .sa-message[data-role="user"] .sa-message-bubble {
   background: var(--accent);
   color: var(--accent-contrast);

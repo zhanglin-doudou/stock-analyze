@@ -31,3 +31,13 @@
 .chat-history-status.is-degraded { border-color: var(--warn); background: var(--warn-soft); color: var(--warn); }
 .chat-history-status.is-blocked { border-color: var(--status-blocked); background: var(--status-blocked-soft); color: var(--status-blocked); }
 .chat-history-status.is-ok { border-color: var(--status-ok); background: var(--status-ok-soft); color: var(--status-ok); }
+.chat-history-actions { display: flex; justify-content: flex-end; align-items: center; }
+.chat-history-notice {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--status-ok);
+  border-radius: var(--r-sm);
+  background: var(--status-ok-soft);
+  color: var(--status-ok);
+  font-size: 12.5px;
+}
