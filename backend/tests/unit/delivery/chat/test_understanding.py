@@ -41,4 +41,22 @@ def test_low_quality_model_output_falls_back_instead_of_clarifying() -> None:
     )
     assert result.needs_clarification is False
     assert result.period is not None and result.period.value == "2026-11"
-    assert result.intents[0].value == "performance"
+    assert result.intents[0].value == "portfolio"
+
+
+def test_profit_question_routes_to_portfolio_assets() -> None:
+    service = UnderstandingService(FakeProvider(), FrozenClock(datetime(2026, 11, 20, tzinfo=UTC)))
+    result = service.fallback_understanding("本月赚了多少？", {})
+    assert result.intents[0].value == "portfolio"
+    assert result.period is not None and result.period.value == "2026-11"
+
+
+def test_explicit_portfolio_intent_overrides_model_performance() -> None:
+    service = UnderstandingService(FakeProvider(), FrozenClock(datetime(2026, 11, 20, tzinfo=UTC)))
+    result = service.parse(
+        '{"intents":["performance"],"confidence":0.9,"period":{"kind":"month","value":"2026-11"},'
+        '"entities":[],"resolved_query":"本月赚了多少","needs_clarification":false}',
+        question="本月赚了多少？",
+        focus={},
+    )
+    assert result.intents[0].value == "portfolio"

@@ -55,6 +55,30 @@ _FIXED: tuple[tuple[tuple[str, ...], Intent], ...] = (
 )
 _PRONOUNS = ("它", "这个", "那个", "那笔", "这只", "那只", "该股", "该回合")
 
+# “赚了多少 / 赚了还是亏了”问的是资产表的累计收益，不是指标页的收益率。
+_PORTFOLIO_PATTERNS = (
+    "赚了多少",
+    "赚了还是亏了",
+    "赚还是亏",
+    "是赚是亏",
+    "赚了没",
+    "亏了没",
+    "总收益",
+    "累计收益",
+    "累计盈亏",
+    "盈利多少",
+    "亏损多少",
+)
+
+
+def _explicit_intents(question: str) -> tuple[Intent, ...] | None:
+    if not any(pattern in question for pattern in _PORTFOLIO_PATTERNS):
+        return None
+    intents: list[Intent] = [Intent.PORTFOLIO]
+    if "收益率" in question or "胜率" in question or "回撤" in question:
+        intents.append(Intent.PERFORMANCE)
+    return tuple(intents)
+
 
 class UnderstandingService:
     def __init__(self, llm: LlmProvider, clock: Clock) -> None:
@@ -101,7 +125,11 @@ class UnderstandingService:
         # 这种“结构化失败”不能直接当成低置信度澄清，否则每个问题都只回“请补充”。
         if raw.confidence <= 0.0 or not raw.resolved_query.strip():
             return self._fallback(question, focus)
-        intents = tuple(_intent(value) for value in raw.intents[:2]) or (Intent.UNKNOWN,)
+        intents = (
+            _explicit_intents(question)
+            or tuple(_intent(value) for value in raw.intents[:2])
+            or (Intent.UNKNOWN,)
+        )
         entities = tuple(_entity(item) for item in raw.entities)
         needs_clarification = raw.needs_clarification or raw.confidence < 0.6
         resolved_query = raw.resolved_query.strip() or question
@@ -120,7 +148,7 @@ class UnderstandingService:
         )
 
     def _fallback(self, question: str, focus: Mapping[str, Any]) -> Understanding:
-        intents = tuple(
+        intents = _explicit_intents(question) or tuple(
             intent for words, intent in _FIXED if any(word in question for word in words)
         )
         if not intents:
