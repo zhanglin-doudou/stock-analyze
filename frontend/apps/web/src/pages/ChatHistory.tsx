@@ -18,6 +18,8 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
+import { formatChatTime } from "../lib/datetime";
+import { LoadingState } from "../components/ui/spinner";
 import { ProblemView } from "../ui/Problem";
 import "./chat-history.css";
 
@@ -28,17 +30,6 @@ type TurnRow = {
   status: string;
   createdAt: string;
 };
-
-function formatTime(value: string): string {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return new Intl.DateTimeFormat("zh-CN", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  }).format(date);
-}
 
 function buildTurns(conversation: ChatConversationOut): TurnRow[] {
   const byTurn = new Map<string, TurnRow>();
@@ -286,7 +277,7 @@ export function ChatHistory() {
       ) : null}
       <ProblemView error={clearError} />
 
-      {loading ? <p className="muted">加载中…</p> : null}
+      {loading ? <LoadingState label="加载中…" /> : null}
       <ProblemView error={error} />
       {!loading && !error && turns.length === 0 ? (
         <div className="chat-history-card chat-history-empty">
@@ -311,7 +302,7 @@ export function ChatHistory() {
                   <span className={`chat-history-status ${statusClass(turn.status)}`}>
                     {statusLabel(turn.status)}
                   </span>
-                  <span>{formatTime(turn.createdAt)}</span>
+                  <span>{formatChatTime(turn.createdAt)}</span>
                 </div>
               </button>
             ))}
@@ -331,7 +322,7 @@ export function ChatHistory() {
                     disabled={replayLoading}
                     onClick={() => void runReplay()}
                   >
-                    {replayLoading ? "回放中…" : "回放（确定性）"}
+                    {replayLoading ? <LoadingState label="回放中…" /> : "回放（确定性）"}
                   </button>
                 </div>
                 <div className="chat-detail-answer">{selected.answer || "（无回答）"}</div>
@@ -349,7 +340,7 @@ export function ChatHistory() {
 
                 <div className="chat-detail-section">
                   <h3>回放轨迹</h3>
-                  {traceLoading ? <p className="muted">加载轨迹中…</p> : null}
+                  {traceLoading ? <LoadingState label="加载轨迹中…" /> : null}
                   <ProblemView error={traceError} />
                   {trace ? <TraceSection trace={trace} /> : null}
                 </div>

@@ -1,0 +1,39 @@
+/* Radix Themes Spinner 的最小样式（避免引入 796KB 的整包 themes.css）。 */
+.rt-Spinner {
+  display: block;
+  position: relative;
+  width: 16px;
+  height: 16px;
+  opacity: 0.7;
+}
+.rt-SpinnerLeaf {
+  position: absolute;
+  top: 0;
+  left: calc(50% - 12.5% / 2);
+  width: 12.5%;
+  height: 100%;
+  animation: rt-spinner-leaf-fade 800ms linear infinite;
+}
+.rt-SpinnerLeaf::before {
+  content: "";
+  display: block;
+  width: 100%;
+  height: 30%;
+  border-radius: 1px;
+  background-color: currentColor;
+}
+.rt-SpinnerLeaf:where(:nth-child(1)) { transform: rotate(0deg); animation-delay: -800ms; }
+.rt-SpinnerLeaf:where(:nth-child(2)) { transform: rotate(45deg); animation-delay: -700ms; }
+.rt-SpinnerLeaf:where(:nth-child(3)) { transform: rotate(90deg); animation-delay: -600ms; }
+.rt-SpinnerLeaf:where(:nth-child(4)) { transform: rotate(135deg); animation-delay: -500ms; }
+.rt-SpinnerLeaf:where(:nth-child(5)) { transform: rotate(180deg); animation-delay: -400ms; }
+.rt-SpinnerLeaf:where(:nth-child(6)) { transform: rotate(225deg); animation-delay: -300ms; }
+.rt-SpinnerLeaf:where(:nth-child(7)) { transform: rotate(270deg); animation-delay: -200ms; }
+.rt-SpinnerLeaf:where(:nth-child(8)) { transform: rotate(315deg); animation-delay: -100ms; }
+@keyframes rt-spinner-leaf-fade {
+  from { opacity: 1; }
+  to { opacity: 0.25; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rt-SpinnerLeaf { animation-duration: 0.01ms; }
+}

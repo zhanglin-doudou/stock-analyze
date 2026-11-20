@@ -13,11 +13,17 @@ import type { ThreadMessageLike } from "@assistant-ui/react";
 import { api } from "../client";
 import { Icon } from "../ui/icons";
 import { AssistantSessionProvider, AssistantThread, toInitialMessages } from "./AssistantRuntime";
+import { LoadingState } from "../components/ui/spinner";
 import "./assistant.css";
 
 type BootState =
   | { status: "idle" | "loading" }
-  | { status: "ready"; sessionId: string; initialMessages: ThreadMessageLike[] }
+  | {
+      status: "ready";
+      sessionId: string;
+      initialMessages: ThreadMessageLike[];
+      nextCursor: string | null;
+    }
   | { status: "error"; message: string };
 
 export function StarAssistant() {
@@ -31,12 +37,13 @@ export function StarAssistant() {
     void (async () => {
       try {
         const session = await api.chat.ensureSession();
-        const conversation = await api.chat.getConversation({ limit: 100 });
+        const conversation = await api.chat.getConversation({ limit: 8 });
         if (!cancelled) {
           setBoot({
             status: "ready",
             sessionId: session.conversation_id,
             initialMessages: toInitialMessages(conversation),
+            nextCursor: conversation.next_cursor ?? null,
           });
         }
       } catch (err) {
@@ -94,15 +101,15 @@ export function StarAssistant() {
 
           {boot.status === "ready" ? (
             <AssistantSessionProvider sessionId={boot.sessionId} initialMessages={boot.initialMessages}>
-              <AssistantThread />
+              <AssistantThread initialCursor={boot.nextCursor} />
             </AssistantSessionProvider>
           ) : boot.status === "error" ? (
             <div className="sa-assistant-error" role="alert">
               {boot.message}
             </div>
           ) : (
-            <div className="sa-assistant-empty" aria-live="polite">
-              正在准备你的对话…
+            <div className="sa-assistant-empty">
+              <LoadingState label="正在准备你的对话…" />
             </div>
           )}
       </AssistantDialogContent>

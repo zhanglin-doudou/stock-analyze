@@ -132,9 +132,12 @@
 .sa-suggestion:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 
 .sa-message { display: flex; margin-bottom: 14px; }
+.sa-message-stack { display: flex; flex-direction: column; max-width: 88%; }
+.sa-message[data-role="user"] .sa-message-stack { align-items: flex-end; }
+.sa-message-time { margin-top: 4px; color: var(--faint); font-size: 10.5px; }
 .sa-message[data-role="user"] { justify-content: flex-end; }
 .sa-message-bubble {
-  max-width: 88%;
+  max-width: 100%;
   border-radius: var(--r-md);
   padding: 10px 12px;
   font-size: 13px;
@@ -219,3 +222,27 @@
   font-size: 12.5px;
   line-height: 1.5;
 }
+
+.sa-load-earlier {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  justify-content: center;
+  padding: 2px 0 10px;
+  background: linear-gradient(180deg, var(--surface-raised) 70%, transparent);
+}
+.sa-load-earlier-button {
+  min-height: 30px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-pill);
+  background: var(--surface);
+  color: var(--text-2);
+  padding: 5px 12px;
+  font: 500 12px/1.2 var(--font-ui);
+  cursor: pointer;
+}
+.sa-load-earlier-button:hover { border-color: var(--accent); background: var(--accent-soft); color: var(--text); }
+.sa-load-earlier-button:disabled { cursor: wait; opacity: 0.75; }
+.sa-load-earlier-button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.sa-load-earlier-error { display: block; margin-top: 4px; color: var(--danger); font-size: 11px; }

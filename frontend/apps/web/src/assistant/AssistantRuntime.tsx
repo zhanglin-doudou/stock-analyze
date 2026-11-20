@@ -1,19 +1,24 @@
-import { useMemo, type ReactNode } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import {
   AssistantRuntimeProvider,
   useLocalRuntime,
   type ChatModelAdapter,
-  type ThreadMessageLike,
 } from "@assistant-ui/react";
 import { MarkdownTextPrimitive } from "@assistant-ui/react-markdown";
 import {
   ComposerPrimitive,
   MessagePrimitive,
   ThreadPrimitive,
+  useAui,
+  useAuiState,
+  type ThreadMessage,
+  type ThreadMessageLike,
 } from "@assistant-ui/react";
 import remarkGfm from "remark-gfm";
 import { isApiProblemError, type ChatConversationOut, type ChatMessageOut } from "@sa/api-client";
 import { api } from "../client";
+import { formatChatTime } from "../lib/datetime";
+import { LoadingState } from "../components/ui/spinner";
 import { parseSse } from "./sse";
 import "./assistant.css";
 
@@ -134,20 +139,84 @@ export function createChatAdapter(sessionId: string): ChatModelAdapter {
   };
 }
 
+function toThreadMessageLike(message: ThreadMessage): ThreadMessageLike {
+  return {
+    id: message.id,
+    role: message.role,
+    content: message.content as ThreadMessageLike["content"],
+    createdAt: message.createdAt,
+    status: message.status,
+  };
+}
+
+function LoadEarlier({ initialCursor }: { initialCursor: string | null }) {
+  const aui = useAui();
+  const current = useAuiState((state) => state.thread.messages);
+  const [cursor, setCursor] = useState(initialCursor);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  if (!cursor) return null;
+
+  async function load() {
+    setLoading(true);
+    setError(null);
+    try {
+      const data = await api.chat.getConversation({ limit: 8, before_id: cursor ?? undefined });
+      const older = toInitialMessages(data);
+      aui.thread.reset([...older, ...current.map(toThreadMessageLike)]);
+      setCursor(data.next_cursor ?? null);
+    } catch {
+      setError("加载失败，请重试。");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  return (
+    <div className="sa-load-earlier">
+      <button
+        type="button"
+        className="sa-load-earlier-button"
+        onClick={() => void load()}
+        disabled={loading}
+        aria-busy={loading}
+      >
+        {loading ? <LoadingState label="加载更多…" /> : "加载更多"}
+      </button>
+      {error ? (
+        <span className="sa-load-earlier-error" role="alert">
+          {error}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+function MessageTimestamp() {
+  const createdAt = useAuiState((state) => state.message.createdAt);
+  return <time className="sa-message-time">{formatChatTime(createdAt)}</time>;
+}
+
 function ChatMessage() {
   return (
     <MessagePrimitive.Root>
       <MessagePrimitive.If user>
         <div className="sa-message" data-role="user">
-          <div className="sa-message-bubble">
-            <MessagePrimitive.Parts />
+          <div className="sa-message-stack">
+            <div className="sa-message-bubble">
+              <MessagePrimitive.Parts />
+            </div>
+            <MessageTimestamp />
           </div>
         </div>
       </MessagePrimitive.If>
       <MessagePrimitive.If assistant>
         <div className="sa-message" data-role="assistant">
-          <div className="sa-message-bubble">
-            <MessagePrimitive.Parts components={{ Text: MarkdownText }} />
+          <div className="sa-message-stack">
+            <div className="sa-message-bubble">
+              <MessagePrimitive.Parts components={{ Text: MarkdownText }} />
+            </div>
+            <MessageTimestamp />
           </div>
         </div>
       </MessagePrimitive.If>
@@ -155,10 +224,11 @@ function ChatMessage() {
   );
 }
 
-export function AssistantThread() {
+export function AssistantThread({ initialCursor }: { initialCursor: string | null }) {
   return (
     <ThreadPrimitive.Root className="sa-assistant-thread">
       <ThreadPrimitive.Viewport className="sa-assistant-viewport" autoScroll>
+        <LoadEarlier initialCursor={initialCursor} />
         <ThreadPrimitive.Empty>
           <div className="sa-assistant-empty">
             <div>
@@ -187,7 +257,7 @@ export function AssistantThread() {
         </ThreadPrimitive.Empty>
         <ThreadPrimitive.Messages>{() => <ChatMessage />}</ThreadPrimitive.Messages>
         <ThreadPrimitive.If running>
-          <div className="sa-message-meta">星星正在看数据…</div>
+          <LoadingState label="星星正在看数据…" className="sa-thinking" />
         </ThreadPrimitive.If>
       </ThreadPrimitive.Viewport>
       <ComposerPrimitive.Root className="sa-assistant-composer">

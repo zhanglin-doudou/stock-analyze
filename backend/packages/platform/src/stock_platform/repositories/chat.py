@@ -9,7 +9,7 @@ from __future__ import annotations
 import uuid
 from typing import Any
 
-from sqlalchemy import func, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from stock_platform.ids import new_id
@@ -127,13 +127,24 @@ class ChatRepository:
             .limit(limit)
         )
         if before_id:
-            pivot = await self.session.scalar(
-                select(ChatMessage.created_at).where(
-                    ChatMessage.id == before_id, ChatMessage.user_id == user_id
+            pivot = (
+                await self.session.execute(
+                    select(ChatMessage.created_at, ChatMessage.id).where(
+                        ChatMessage.id == before_id, ChatMessage.user_id == user_id
+                    )
                 )
-            )
+            ).first()
             if pivot is not None:
-                stmt = stmt.where(ChatMessage.created_at < pivot)
+                # created_at 在同一轮内可能完全相同，必须用 id 做稳定游标。
+                stmt = stmt.where(
+                    or_(
+                        ChatMessage.created_at < pivot.created_at,
+                        and_(
+                            ChatMessage.created_at == pivot.created_at,
+                            ChatMessage.id < pivot.id,
+                        ),
+                    )
+                )
         rows = list(await self.session.scalars(stmt))
         return [_message_dict(row) for row in reversed(rows)]
 

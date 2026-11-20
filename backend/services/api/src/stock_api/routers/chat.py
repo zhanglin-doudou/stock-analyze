@@ -232,14 +232,19 @@ async def get_conversation(
         if conversation is None:
             raise ApiError(ErrorCode.NOT_FOUND, detail="尚无对话，请先创建")
         messages = await repo.list_messages(
-            user_id, str(conversation["id"]), limit=limit, before_id=before_id
+            user_id, str(conversation["id"]), limit=limit + 1, before_id=before_id
         )
+    has_more = len(messages) > limit
+    if has_more:
+        messages = messages[-limit:]
+    next_cursor = str(messages[0]["id"]) if has_more else None
     return ChatConversationOut(
         conversation_id=str(conversation["id"]),
         title=str(conversation["title"]),
         summary=str(conversation["summary"]),
         turn_count=int(conversation["turn_count"]),
         window_turns=int(conversation["window_turns"]),
+        next_cursor=next_cursor,
         messages=[
             ChatHistoryMessageOut(
                 message_id=str(item["id"]),

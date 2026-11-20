@@ -21,6 +21,7 @@ export * from "./label";
 export * from "./popover";
 export * from "./portal";
 export * from "./select";
+export * from "./spinner";
 export * from "./switch";
 export * from "./table";
 export * from "./tabs";
