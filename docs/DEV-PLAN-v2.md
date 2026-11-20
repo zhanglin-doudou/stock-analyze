@@ -247,7 +247,7 @@ make verify-p3
 | **Period3-04** | 报告分享 | 签名分享链接、匿名受限读取、撤销、过期 | Period2-09 | API-043~045 验收；匿名只能看该报告；撤销后 410 | 1 |
 | **Period3-05** | 审计 | `audit_log` 全写操作留痕、本人/管理员双视图、admin 无明细 | Period1-07/Period1-10 | API-065/066 验收；跨用户不可见 | 1.5 |
 | **Period3-06** | 管理端 | `/admin/system/status`、备份触发/列表/校验、恢复演练端点（不读明细） | Period3-05 | API-067~070 验收；admin 读 trades → 403 | 2 |
-| **Period3-07** | 对话子系统 | `ToolGateway` 白名单、`ResponseComposer` 本地填值、`EgressGuard` 出站断言、Provider 适配、模板降级、`chat` 端点、`llm_call` 留痕 | Period2-06 | API-077/078 验收；`LLM_PROVIDER=none` 仍答金额；构造含金额上下文 → 出站被拦（测试钩子） | 3 |
+| **Period3-07** | 对话子系统（**设计定稿 2026-11-20**：GLM-4.7-Flash、单会话、全量入库回放、10 轮/160K 压缩、语义理解与指代；前端 P3） | `ChatQueryFacade` + 10 工具（含资产表、流水/回合旗标）、`QueryUnderstanding`、`ContextManager`、`AnswerComposer`、`OutputValidator`、GLM provider、`chat_turn/tool_call/llm_call` 回放；方案见 [完整开发设计](architecture/2026-11-20-intelligent-assistant-design.md) | Period2-06 | API-077/078 + 112~115 验收；`LLM_PROVIDER=none` 仍可答；GLM 故障降级原因；跨用户 404 | 后端约 12.5 + 前端 3（P3） |
 | **Period3-08** | 归因增强 | Brinson-Fachler（配置/选择/交互）+ Carino 多期链接 + 行业偏离 | Period2-08/17 | 三效应之和与区间超额 ≤1bp；期初权重 BoP（R1） | 2 |
 | **Period3-09** | 限流 | 按用户/PAT 令牌桶（PG 计数）、`429+Retry-After+X-RateLimit-*`、并发任务上限 | Period1-11 | 第 N+1 次 429；同参重算返回同 `job_id` | 1.5 |
 | **Period3-10** | 性能 | 索引复核、连接池算式、必要处分区、查询计划审查、`make load-test` 脚本 | Period2-14 | 看板 50 并发 p95 ≤300ms；导入 5000 行任务 ≤30s；全量重算 ≤60s | 2 |

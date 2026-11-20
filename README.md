@@ -325,6 +325,7 @@ STOCK_DB_PORT=5433 make test-p2     # 显式指向 Docker 库（不改 .env 的 
 ## 文档索引
 
 - 架构图：[运行时架构（交互版）](docs/architecture/diagrams/stock-analyze-runtime.html) · [SVG](docs/architecture/diagrams/stock-analyze-runtime.svg) · [图规格 JSON](docs/architecture/diagrams/stock-analyze-runtime.spec.json)
+- [智能分析助手完整开发设计（2026-11-20，待实现）](docs/architecture/2026-11-20-intelligent-assistant-design.md) · [调研稿（已被取代）](docs/architecture/2026-11-19-intelligent-assistant-research.md)
 - [Dashboard 设计（Period2-12）](docs/architecture/2026-10-28-dashboard.md)
 - [五因子归因设计（Period2-08，已交付）](docs/architecture/2026-11-02-five-factor-attribution.md) · [交叉评审](docs/reviews/2026-11-02-DevDesign-Review-five-factor-attribution.md)
 - [板块数据接入设计（2026-10-31，API-087/088）](docs/architecture/2026-10-31-sector-data.md)
