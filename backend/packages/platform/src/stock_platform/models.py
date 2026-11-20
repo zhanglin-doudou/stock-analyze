@@ -406,7 +406,7 @@ class ChatMessage(Base):
     content: Mapped[str] = mapped_column(Text, nullable=False, default="")
     content_json: Mapped[dict[str, Any] | None] = mapped_column(JSONB)
     token_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
-    status: Mapped[str] = mapped_column(String(16), nullable=False, default="ok")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, default="ok")
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

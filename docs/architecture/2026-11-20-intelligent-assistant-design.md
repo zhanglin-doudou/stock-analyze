@@ -246,12 +246,12 @@ app = graph.compile()  # 不传 checkpointer
 | `LLM_PROVIDER` | `none`（本地/CI）；验证环境 `glm` | 已有字段，扩展 `glm` 实现 |
 | `GLM_BASE_URL` | `https://open.bigmodel.cn/api/paas/v4` | 已在本地 `.env` 配置；可换代理/兼容网关 |
 | `GLM_API_KEY` | 空 | 已在本地 `.env` 配置；只从环境/密钥注入，禁止入库/日志 |
-| `GLM_MODEL` | `glm-4.7-flash` | 已在本地 `.env` 配置；免费验证模型 |
+| `GLM_MODEL` | `glm-4.7-flash` | 已在本地 `.env` 配置；免费验证模型；`glm-4-flash` 也已实测可用 |
 | `LLM_TIMEOUT_SECONDS` | `60` | 总超时；连接 5s；免费模型冷启动可能 >30s |
 | `LLM_MAX_OUTPUT_TOKENS` | `4096` | 回答上限；理解 2048 |
 | `LLM_TEMPERATURE` | `0.2` | 低温度，减少漂移 |
 | `LLM_THINKING` | `disabled` | 免费验证优先低延迟；复杂问题可切 `enabled` |
-| `LLM_CONTEXT_WINDOW_TOKENS` | `200000` | GLM-4.7-Flash 上下文 |
+| `LLM_CONTEXT_WINDOW_TOKENS` | `200000` | GLM-4.7-Flash 上下文；`glm-4-flash` 按实际模型能力使用 |
 | `LLM_CONTEXT_COMPRESS_RATIO` | `0.8` | 160K 触发压缩 |
 | `LLM_HISTORY_TURNS` | `10` | 滑动窗口默认轮数 |
 | `LLM_MAX_CONCURRENCY` | `2` | 每副本并发；免费额度下先保守 |
@@ -267,7 +267,7 @@ app = graph.compile()  # 不传 checkpointer
 ```bash
 LLM_PROVIDER=none
 GLM_BASE_URL=https://open.bigmodel.cn/api/paas/v4
-GLM_MODEL=glm-4.7-flash
+GLM_MODEL=glm-4.7-flash  # 也可用 glm-4-flash（已实测 200）
 GLM_API_KEY=
 LLM_TIMEOUT_SECONDS=60
 LLM_MAX_OUTPUT_TOKENS=4096
@@ -656,7 +656,7 @@ llm = ChatOpenAI(
 
 ## 7. 数据模型与迁移
 
-### 7.1 迁移 `0020_chat_assistant`
+### 7.1 迁移 `0020_chat_assistant` / `0021_chat_message_status_width`
 
 全部落 `platform` schema，启用 RLS（`user_id` 策略，和现有租户表一致）。金额字段不存在，token/延迟用 `Integer/BigInteger`。
 

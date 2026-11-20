@@ -151,3 +151,36 @@ async def test_chat_stream_sse(client: httpx.AsyncClient, user, app) -> None:
     assert isinstance(message, dict)
     assert message["turn_id"]
     assert message["answer"]
+
+
+async def test_chat_needs_clarification_persists(client: httpx.AsyncClient, user, app) -> None:
+    """状态 `needs_clarification` 必须能写入 32 宽的状态列（0021 回归）。"""
+    from stock_delivery.chat.provider import FakeProvider
+
+    app.state.sa.settings.llm_provider = "glm"
+    app.state.sa.settings.glm_api_key = "test"
+    app.state.sa.llm = FakeProvider(
+        [
+            json.dumps(
+                {
+                    "intents": ["unknown"],
+                    "confidence": 0.4,
+                    "period": {"kind": "none"},
+                    "entities": [],
+                    "resolved_query": "它怎么了",
+                    "needs_clarification": True,
+                    "clarification": "你指的是哪只证券？",
+                }
+            )
+        ]
+    )
+    conversation = await _session(client, user.headers)
+    resp = await client.post(
+        f"/api/v1/chat/sessions/{conversation['conversation_id']}/messages",
+        headers=user.headers,
+        json={"message": "它怎么了"},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["status"] == "needs_clarification"
+    assert body["answer"] == "你指的是哪只证券？"

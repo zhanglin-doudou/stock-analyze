@@ -234,8 +234,26 @@ class ChatRuntime:
                 )
                 for index, item in enumerate(parsed.get("claims") or [])
             )
+            answer_markdown = sanitize(str(parsed.get("answer_markdown") or ""))
+            if not answer_markdown.strip() and claims:
+                # 小模型偶尔只填 claims 不填 answer_markdown；仅在有实质 claim 时兜底。
+                useful = [claim for claim in claims if claim.text.strip() != self.question.strip()]
+                if useful:
+                    number_of = {
+                        citation.citation_id: citation.number for citation in self._citations
+                    }
+                    answer_markdown = "\n".join(
+                        claim.text.strip()
+                        + "".join(
+                            f"[[{number_of[cid]}]]"
+                            for cid in claim.citation_ids
+                            if cid in number_of
+                        )
+                        for claim in useful
+                        if claim.text.strip()
+                    )
             draft = AnswerDraft(
-                answer_markdown=sanitize(str(parsed.get("answer_markdown") or "")),
+                answer_markdown=answer_markdown,
                 claims=claims,
                 used_citations=tuple(parsed.get("used_citations") or ()),
                 confidence=parsed.get("confidence") or "medium",

@@ -30,6 +30,7 @@ ANSWER_SYSTEM = """你是个人交易复盘分析助手。根据给出的证据�
 4. 若 status=blocked，不输出资产类数值，只说明阻断原因和修复动作。
 5. 若 status=degraded，必须说明数据缺口/样本不足/口径。
 6. 只输出 Markdown 文本，不允许 HTML、图片、外链。
+7. `answer_markdown` 必须是非空完整回答；`claims` 只是结构化摘要，不能替代 `answer_markdown`。
 输出 JSON：
 {"answer_markdown":"","claims":[{"claim_id":"k1","text":"","citation_ids":["c1"]}],
  "used_citations":["c1"],"confidence":"high|medium|low","followups":[]}
