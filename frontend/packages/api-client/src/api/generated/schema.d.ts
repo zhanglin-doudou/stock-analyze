@@ -307,6 +307,9 @@ export interface paths {
         /**
          * Send Message
          * @description API-078：发消息；工具/LLM 过程落库。
+         *
+         *     `Accept: text/event-stream` 时返回 SSE（meta/delta/done）；默认仍返回 JSON，
+         *     供回放、测试和旧客户端使用。
          */
         post: operations["sendChatMessage"];
         delete?: never;

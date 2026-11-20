@@ -132,7 +132,7 @@
 | API-075 | GET | `/api/v1/openapi.json` | 契约快照 | A2 | 公开 | — | 同步 | P0 | 200 |
 | API-076 | GET | `/api/v1/errors` | 机器可读错误码表 | A2 | 公开 | — | 同步 | P1 | 200 |
 | API-077 | POST | `/chat/sessions` | 确保单会话存在（首次 201，已存在 200） | D7 | write | 支持 | 同步 | P1 | 201 |
-| API-078 | POST | `/chat/sessions/{session_id}/messages` | 提问（语义理解 + 工具取数 + 可选 LLM 措辞） | D7 | write | 支持 | 同步 | P1 | 200 |
+| API-078 | POST | `/chat/sessions/{session_id}/messages` | 提问（语义理解 + 工具取数 + 可选 LLM 措辞；JSON/SSE 内容协商） | D7 | write | 支持 | 同步 | P1 | 200 |
 | API-112 | GET | `/chat/conversation` | 单会话元数据 + 分页消息 | D7 | read | — | 同步 | P1 | 200 |
 | API-113 | GET | `/chat/turns/{turn_id}/trace` | 单轮完整回放轨迹（理解/工具/LLM） | D7 | read | — | 同步 | P1 | 200 |
 | API-114 | POST | `/chat/turns/{turn_id}/replay` | 回放（deterministic/llm/full） | D7 | write | — | 同步 | P1 | 200 |
@@ -494,9 +494,10 @@
 #### API-078 POST /chat/sessions/{session_id}/messages
 - 用途：复盘问答（工具取数 + 金额后端填充 + 出站守卫）；FR-D7；认证：write；幂等：支持；同步。
 - 请求：path `session_id`；body `message`(必填,1~2000) / `context{period?,round_id?}`；头 `Idempotency-Key`(推荐)。
-- 响应 200：`conversation_id` / `turn_id` / `message_id` / `answer` / `answer_format` / `citations[]{number,citation_id,label,value,source_endpoint,source_params,definition_version,data_as_of}` / `claims[]{claim_id,text,citation_ids}` / `status` / `degrade_reason` / `degrade_message` / `what_to_do` / `retryable` / `llm_used` / `fallback` / `understanding` / `context_usage` / `timings`。
+- 响应 200（JSON）：`conversation_id` / `turn_id` / `message_id` / `answer` / `answer_format` / `citations[]{number,citation_id,label,value,source_endpoint,source_params,definition_version,data_as_of}` / `claims[]{claim_id,text,citation_ids}` / `status` / `degrade_reason` / `degrade_message` / `what_to_do` / `retryable` / `llm_used` / `fallback` / `understanding` / `context_usage` / `timings`。
+- SSE 变体：同一路径请求头 `Accept: text/event-stream` 时返回 `text/event-stream`，事件依次 `meta`（turn_id/status/llm_used/degrade_reason）→ `delta`（`{"text": "分片"}`，可多次）→ `done`（`{"message": ChatMessageOut}`）；错误发生在流建立前仍走 RFC 7807，流内异常发 `error` 事件。前端按 delta 增量渲染，done 用完整消息补充 citations/来源。
 - 错误码：NOT_FOUND(404)、MESSAGE_TOO_LONG(422)、VALIDATION_ERROR(422)、RATE_LIMITED(429)、QUOTA_EXCEEDED(429)、LLM_UNAVAILABLE(503)、IDEMPOTENCY_*(409/422)。
-- 验收断言：① 200 且 answer 非空；② 回答中每个金额都能在 citations 找到来源，且 source_endpoint 可调用返回一致值；③ LLM 关闭（`llm_provider=none`）时金额类问题仍 200 且 answer 金额正确（fallback==true）；④ 出站守卫：测试钩子捕获的出站 payload 不含金额/股东账号；⑤ 跨用户 session → 404；⑥ 同 `Idempotency-Key` 重放返回同一 `turn_id`，不重复调用工具/LLM；⑦ LLM 故障时 `degrade_reason` 非空且模板数字仍正确。
+- 验收断言：① 200 且 answer 非空；② 回答中每个金额都能在 citations 找到来源，且 source_endpoint 可调用返回一致值；③ LLM 关闭（`llm_provider=none`）时金额类问题仍 200 且 answer 金额正确（fallback==true）；④ 出站守卫：测试钩子捕获的出站 payload 不含金额/股东账号；⑤ 跨用户 session → 404；⑥ 同 `Idempotency-Key` 重放返回同一 `turn_id`，不重复调用工具/LLM；⑦ LLM 故障时 `degrade_reason` 非空且模板数字仍正确；⑧ `Accept: text/event-stream` 返回 meta/delta/done，done.message.answer 与 JSON 版本一致。
 
 #### API-112 GET /chat/conversation
 - 用途：读取当前用户唯一对话与分页消息；FR-D7；认证 read；operationId `getChatConversation`。

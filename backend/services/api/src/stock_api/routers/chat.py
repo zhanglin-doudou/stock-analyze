@@ -8,9 +8,11 @@ from __future__ import annotations
 
 import hashlib
 import json
+from collections.abc import Iterator
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, Query, Request, Response
+from fastapi.responses import StreamingResponse
 from stock_contracts.chat.enums import ToolName
 from stock_contracts.errors import ApiError, ErrorCode
 from stock_delivery.chat.graph import build_graph
@@ -73,8 +75,12 @@ async def send_message(
     request: Request,
     ctx: Annotated[TenantContext, Depends(get_tenant)],
     idempotency_key: Annotated[str | None, Header(alias="Idempotency-Key")] = None,
-) -> ChatMessageOut:
-    """API-078：发消息；工具/LLM 过程落库。"""
+) -> ChatMessageOut | StreamingResponse:
+    """API-078：发消息；工具/LLM 过程落库。
+
+    `Accept: text/event-stream` 时返回 SSE（meta/delta/done）；默认仍返回 JSON，
+    供回放、测试和旧客户端使用。
+    """
     ctx.forbid_admin_trades()
     user_id = ctx.require_write()
     state = get_state(request)
@@ -136,7 +142,8 @@ async def send_message(
             )
             if cached is not None:
                 body = state.idempotency.payload_of(cached) or {}
-                return ChatMessageOut.model_validate(body)
+                cached_result = ChatMessageOut.model_validate(body)
+                return _stream_or_json(cached_result, request)
 
         turn = await repo.create_turn(
             user_id=user_id,
@@ -202,7 +209,7 @@ async def send_message(
                 status_code=200,
                 body=result.model_dump(mode="json"),
             )
-    return result
+    return _stream_or_json(result, request)
 
 
 @router.get(
@@ -373,6 +380,48 @@ async def delete_conversation(
     async with state.db.session(user_id=user_id, begin=True) as session:
         await ChatRepository(session).reset_conversation(user_id=user_id)
     return Response(status_code=204)
+
+
+def _wants_sse(request: Request) -> bool:
+    accept = request.headers.get("accept", "").lower()
+    return "text/event-stream" in accept
+
+
+def _stream_or_json(result: ChatMessageOut, request: Request) -> ChatMessageOut | StreamingResponse:
+    if not _wants_sse(request):
+        return result
+    return StreamingResponse(
+        _sse_events(result),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
+
+
+def _sse_event(event: str, data: dict[str, Any]) -> str:
+    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+
+
+def _sse_events(result: ChatMessageOut) -> Iterator[str]:
+    yield _sse_event(
+        "meta",
+        {
+            "turn_id": result.turn_id,
+            "conversation_id": result.conversation_id,
+            "status": result.status,
+            "llm_used": result.llm_used,
+            "fallback": result.fallback,
+            "degrade_reason": result.degrade_reason,
+            "degrade_message": result.degrade_message,
+        },
+    )
+    text = result.answer or ""
+    for offset in range(0, len(text), 48):
+        yield _sse_event("delta", {"text": text[offset : offset + 48]})
+    yield _sse_event("done", {"message": result.model_dump(mode="json")})
 
 
 def _strip_latency(value: Any) -> Any:

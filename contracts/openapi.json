@@ -15841,7 +15841,7 @@
     },
     "/api/v1/chat/sessions/{session_id}/messages": {
       "post": {
-        "description": "API-078：发消息；工具/LLM 过程落库。",
+        "description": "API-078：发消息；工具/LLM 过程落库。\n\n`Accept: text/event-stream` 时返回 SSE（meta/delta/done）；默认仍返回 JSON，\n供回放、测试和旧客户端使用。",
         "operationId": "sendChatMessage",
         "parameters": [
           {

@@ -28,7 +28,7 @@
 - 多会话、会话列表、会话切换。
 - RAG、向量库、文档切片、知识库。
 - 模型自主调用任意工具 / 自动写 SQL / 代码执行。
-- 流式输出（V1 同步 200；P3 前端再做 SSE）。
+- 流式输出：API-078 默认 JSON；前端使用 `Accept: text/event-stream` 的 SSE 变体增量显示（meta/delta/done）。
 - 前端页面（P3）。
 - 投资建议、买卖推荐、收益预测。
 
@@ -696,7 +696,7 @@ llm = ChatOpenAI(
 | API | 方法/路径 | 说明 |
 |---|---|---|
 | API-077 | `POST /chat/sessions` | 确保单会话存在；首次 201，已存在 200；返回 `conversation_id` |
-| API-078 | `POST /chat/sessions/{session_id}/messages` | 发消息；200；幂等键；`session_id` 即唯一 `conversation_id` |
+| API-078 | `POST /chat/sessions/{session_id}/messages` | 发消息；默认 JSON；`Accept: text/event-stream` 时 SSE（meta/delta/done）；幂等键；`session_id` 即唯一 `conversation_id` |
 | API-112 | `GET /chat/conversation` | 单会话元数据 + 分页消息 + `context_usage` |
 | API-113 | `GET /chat/turns/{turn_id}/trace` | 完整回放轨迹：understanding/tool_calls/llm_calls/answer |
 | API-114 | `POST /chat/turns/{turn_id}/replay` | 回放：`deterministic|llm|full`；返回 diff |
@@ -716,7 +716,7 @@ llm = ChatOpenAI(
 }
 ```
 
-响应 200：
+响应 200（默认 JSON）：
 
 ```json
 {
@@ -746,6 +746,21 @@ llm = ChatOpenAI(
   "timings": {"understand_ms": 800, "tools_ms": 250, "llm_ms": 3200, "total_ms": 4300}
 }
 ```
+
+SSE 变体（前端默认）：请求带 `Accept: text/event-stream`，服务端仍先完成工具/模型与持久化，再推送：
+
+```text
+event: meta
+data: {"turn_id":"trn_...","status":"ok","llm_used":true,"fallback":false}
+
+event: delta
+data: {"text":"本月……"}
+
+event: done
+data: {"message":{...ChatMessageOut...}}
+```
+
+`delta` 可多次；`done` 携带完整消息供前端补充 citations/来源。流建立前的校验/限流错误仍返回 RFC 7807。
 
 错误：
 
@@ -922,7 +937,7 @@ make api-coverage
 - 输入：2000 字上限、发送中禁用、429/503 按 RFC 7807 展示 `user_message/what_to_do`。
 - 零口径：只渲染 `answer`/`citations[].value`/`display`，不做算术、不拼结论。
 - 回放/轨迹入口 P3 可放在“调试/详情”抽屉，仅本人可见；默认不暴露给普通用户。
-- 流式 SSE 不在 P3 首批；先同步 200，后续再加。
+- 已接入 SSE：悬浮窗通过 `POST /chat/sessions/{session_id}/messages` + `Accept: text/event-stream` 增量显示；同一路径仍保留 JSON 响应供回放/测试/旧客户端。
 
 
 ---

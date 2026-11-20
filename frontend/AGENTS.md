@@ -153,7 +153,7 @@ export default defineConfig({
 | `apps/web/src/layout/OnboardingGate.tsx` | 根路径账单门（无导入 → `/import?welcome=1`） |
 | `apps/web/src/layout/useMediaQuery.ts` | 侧栏展开/紧凑的行为断点 hook（视觉仍由 CSS media query 负责） |
 | `apps/web/src/ui/icons.tsx` | Phase 1b 自研线性图标集（不引图标库；含星星助手/问答历史） |
-| `apps/web/src/assistant/` | 星星助手悬浮窗（assistant-ui runtime + primitives + tokens-only 样式） |
+| `apps/web/src/assistant/` | 星星助手悬浮窗（assistant-ui runtime + primitives + SSE 增量显示 + tokens-only 样式） |
 | `apps/web/src/components/ui/assistant-dialog.tsx` | 悬浮窗 Radix Dialog 包装（Radix 边界内） |
 | `apps/web/src/ui/` | 通用组件（Cursor 游标、Problem 错误态、DataTable 表格；旧 Table.tsx 已移除） |
 | `apps/web/src/theme/theme.test.ts` | 偏好回落/持久化/根属性测试 |

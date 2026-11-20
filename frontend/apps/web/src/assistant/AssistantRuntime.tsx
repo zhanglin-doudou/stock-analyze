@@ -14,6 +14,7 @@ import {
 import remarkGfm from "remark-gfm";
 import { isApiProblemError, type ChatConversationOut, type ChatMessageOut } from "@sa/api-client";
 import { api } from "../client";
+import { parseSse } from "./sse";
 import "./assistant.css";
 
 function MarkdownText() {
@@ -77,20 +78,53 @@ function renderAnswer(data: ChatMessageOut): string {
 
 export function createChatAdapter(sessionId: string): ChatModelAdapter {
   return {
-    async run({ messages }) {
+    async *run({ messages, abortSignal }) {
       const lastUser = [...messages].reverse().find((message) => message.role === "user");
       const prompt = lastUser ? messageText(lastUser).trim() : "";
       if (!prompt) {
-        return { content: [{ type: "text", text: "请先输入一个问题。" }] };
+        yield { content: [{ type: "text" as const, text: "请先输入一个问题。" }] };
+        return;
       }
       try {
-        const data = await api.chat.sendMessage(sessionId, { message: prompt });
-        return { content: [{ type: "text", text: renderAnswer(data) }] };
+        const response = await api.chat.streamMessage(
+          sessionId,
+          { message: prompt },
+          { signal: abortSignal },
+        );
+        const contentType = response.headers.get("content-type") ?? "";
+        if (!contentType.includes("text/event-stream")) {
+          const data = (await response.json()) as ChatMessageOut;
+          yield { content: [{ type: "text" as const, text: renderAnswer(data) }] };
+          return;
+        }
+
+        let text = "";
+        for await (const event of parseSse(response)) {
+          if (event.event === "delta") {
+            const delta = (event.data as { text?: string }).text ?? "";
+            if (!delta) continue;
+            text += delta;
+            yield { content: [{ type: "text" as const, text }] };
+          } else if (event.event === "done") {
+            const message = (event.data as { message?: ChatMessageOut }).message;
+            if (message) {
+              yield { content: [{ type: "text" as const, text: renderAnswer(message) }] };
+            }
+            return;
+          } else if (event.event === "error") {
+            const problem = event.data as { user_message?: string; what_to_do?: string };
+            throw new Error(
+              `${problem.user_message ?? "模型服务暂不可用"}${problem.what_to_do ? ` ${problem.what_to_do}` : ""}`,
+            );
+          }
+        }
       } catch (err) {
         const message = isApiProblemError(err)
           ? `${err.user_message}${err.what_to_do ? ` ${err.what_to_do}` : ""}`
-          : "星星助手暂时不可用，请稍后重试。";
-        return { content: [{ type: "text", text: `> ⚠ ${message}` }] };
+          : err instanceof Error
+            ? err.message
+            : "星星助手暂时不可用，请稍后重试。";
+        yield { content: [{ type: "text" as const, text: `> ⚠ ${message}` }] };
       }
     },
   };

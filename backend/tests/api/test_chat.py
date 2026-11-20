@@ -120,3 +120,34 @@ async def test_chat_llm_path_with_fake_provider(client: httpx.AsyncClient, user,
     body = resp.json()
     assert body["llm_used"] is True
     assert body["fallback"] is False
+
+
+async def test_chat_stream_sse(client: httpx.AsyncClient, user, app) -> None:
+    """API-078 的 SSE 变体：meta/delta/done 事件完整，done 带最终消息。"""
+    app.state.sa.settings.llm_provider = "none"
+    conversation = await _session(client, user.headers)
+    events: list[tuple[str, dict[str, object]]] = []
+    async with client.stream(
+        "POST",
+        f"/api/v1/chat/sessions/{conversation['conversation_id']}/messages",
+        headers={**user.headers, "Accept": "text/event-stream"},
+        json={"message": "数据可信吗？"},
+    ) as resp:
+        assert resp.status_code == 200, await resp.aread()
+        assert "text/event-stream" in (resp.headers.get("content-type") or "")
+        event_name = ""
+        async for line in resp.aiter_lines():
+            if line.startswith("event: "):
+                event_name = line[7:]
+            elif line.startswith("data: "):
+                events.append((event_name, json.loads(line[6:])))
+
+    names = [name for name, _ in events]
+    assert names[0] == "meta"
+    assert "delta" in names
+    assert names[-1] == "done"
+    done = next(data for name, data in events if name == "done")
+    message = done["message"]
+    assert isinstance(message, dict)
+    assert message["turn_id"]
+    assert message["answer"]

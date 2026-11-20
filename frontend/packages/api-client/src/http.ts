@@ -303,6 +303,7 @@ export interface RequestOptions {
   query?: Query;
   body?: unknown;
   formData?: FormData;
+  signal?: AbortSignal;
   headers?: Record<string, string>;
   omitAuth?: boolean;
   /** true 时忽略 baseUrl，按根路径（/healthz 等）请求。 */
@@ -481,7 +482,7 @@ export function createClient(options: ClientOptions) {
   ): Promise<{ data: T; headers: Headers }> {
     let res: Response;
     try {
-      res = await fetchImpl(url, { method: req.method ?? "GET", headers, body });
+      res = await fetchImpl(url, { method: req.method ?? "GET", headers, body, signal: req.signal });
     } catch (err) {
       throw new ApiProblemError(networkProblem(err instanceof Error ? err.message : String(err)));
     }
@@ -493,6 +494,40 @@ export function createClient(options: ClientOptions) {
     if (res.status === 401 && !retried && REFRESHABLE_CODES.has(problem.code)) {
       const refreshed = await doRefresh();
       if (refreshed) return send<T>(req, true);
+    }
+    if (res.status === 401) options.onUnauthorized?.();
+    throw new ApiProblemError(problem);
+  }
+
+  async function stream(req: RequestOptions, retried = false): Promise<Response> {
+    const url = buildUrl(req.root ? rootBase() : baseUrl, req.path, req.query);
+    const headers = new Headers(req.headers);
+    headers.set("Accept", req.accept ?? "text/event-stream");
+    const token = getToken();
+    if (!req.omitAuth && token.access) headers.set("Authorization", `Bearer ${token.access}`);
+    if (req.ifMatch) headers.set("If-Match", req.ifMatch);
+    if (req.idempotencyKey) headers.set("Idempotency-Key", req.idempotencyKey);
+
+    let body: BodyInit | undefined;
+    if (req.formData) {
+      body = req.formData;
+    } else if (req.body !== undefined) {
+      headers.set("Content-Type", "application/json");
+      body = JSON.stringify(req.body);
+    }
+
+    let res: Response;
+    try {
+      res = await fetchImpl(url, { method: req.method ?? "GET", headers, body, signal: req.signal });
+    } catch (err) {
+      throw new ApiProblemError(networkProblem(err instanceof Error ? err.message : String(err)));
+    }
+    if (res.ok) return res;
+
+    const problem = await readProblem(res);
+    if (res.status === 401 && !retried && REFRESHABLE_CODES.has(problem.code)) {
+      const refreshed = await doRefresh();
+      if (refreshed) return stream(req, true);
     }
     if (res.status === 401) options.onUnauthorized?.();
     throw new ApiProblemError(problem);
@@ -991,13 +1026,23 @@ export function createClient(options: ClientOptions) {
     ensureSession() {
       return send<ChatSessionOut>({ path: "/chat/sessions", method: "POST" }).then((r) => r.data);
     },
-    /** API-078：发送消息；后端会落工具/LLM 调用并返回 citations/status。 */
+    /** API-078：发送消息；默认 JSON（回放/测试/旧客户端）。 */
     sendMessage(sessionId: string, body: ChatMessageIn) {
       return send<ChatMessageOut>({
         path: `/chat/sessions/${encodeURIComponent(sessionId)}/messages`,
         method: "POST",
         body,
       }).then((r) => r.data);
+    },
+    /** API-078 的 SSE 变体：返回原始 event-stream Response，由调用方逐事件读取。 */
+    streamMessage(sessionId: string, body: ChatMessageIn, opts: { signal?: AbortSignal } = {}) {
+      return stream({
+        path: `/chat/sessions/${encodeURIComponent(sessionId)}/messages`,
+        method: "POST",
+        body,
+        signal: opts.signal,
+        accept: "text/event-stream",
+      });
     },
     /** API-112：单会话消息（分页）。 */
     getConversation(query: { limit?: number; before_id?: string } = {}) {
