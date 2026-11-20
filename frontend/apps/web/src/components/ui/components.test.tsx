@@ -23,6 +23,7 @@ import {
   TabsList,
   TabsTrigger,
   Tag,
+  HintTooltip,
   Tooltip,
   TooltipContent,
   TooltipTrigger,
@@ -139,6 +140,18 @@ describe("UI 包装组件", () => {
     );
     await user.click(screen.getByRole("button", { name: "筛选" }));
     expect(await screen.findByText("筛选内容")).toBeTruthy();
+  });
+
+  it("HintTooltip：键盘聚焦触发区后显示主题色说明", async () => {
+    const user = userEvent.setup();
+    render(
+      <HintTooltip content="因子释义" label="释义">
+        <span>ⓘ</span>
+      </HintTooltip>,
+    );
+    await user.tab();
+    expect(await screen.findByRole("tooltip")).toBeTruthy();
+    expect(screen.getByText("因子释义")).toBeTruthy();
   });
 
   it("Tooltip hover 后暴露 tooltip 文案", async () => {

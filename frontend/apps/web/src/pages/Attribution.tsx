@@ -18,6 +18,7 @@ import { latestCompletedMonth } from '../lib/date';
 import { ProblemView } from '../ui/Problem';
 import { displayValue, signTone } from '../ui/format';
 import { SAMPLE_STATUS_LABELS, dataStatusLabel } from '../ui/status';
+import { HintTooltip } from '@/components/ui/tooltip';
 import './dashboard.css';
 import './attribution.css';
 import '../ui/filter-bar.css';
@@ -251,13 +252,21 @@ function FactorRow({
       <strong className="attr-factor-name">
         {factor.name}
         {info ? (
-          <span
-            className="attr-info"
-            title={`${info.definition}数据来源：${info.source}`}
-            aria-label={`${factor.name}释义`}
+          <HintTooltip
+            label={`${factor.name}释义`}
+            content={
+              <>
+                {info.definition}
+                <span className="tw-block tw-text-micro tw-opacity-80">
+                  数据来源：{info.source}
+                </span>
+              </>
+            }
           >
-            ⓘ
-          </span>
+            <span className="attr-info" aria-hidden="true">
+              ⓘ
+            </span>
+          </HintTooltip>
         ) : null}
       </strong>
       <span className="attr-factor-amount num">

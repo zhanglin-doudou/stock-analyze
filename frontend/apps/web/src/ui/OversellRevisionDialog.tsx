@@ -251,7 +251,7 @@ export function OversellRevisionDialog({
 
       <p className="muted">
         提交后会在该卖出当日、排在卖出之前插入「资金划转 + 无费用买入」两条流水并自动重算回合；
-        资产表请在全部补录完成后到资产表页点「更新资产表」统一重算。
+        资产表请在全部补录完成后右上角点「更新资产表」统一重算。
       </p>
     </dialog>
   );

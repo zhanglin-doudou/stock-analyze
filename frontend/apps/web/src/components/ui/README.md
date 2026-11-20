@@ -69,7 +69,7 @@ Tailwind 工具类在任何页面可用，但必须带 `tw-` 前缀：
 | `dialog.tsx` | `Dialog*` |
 | `alert-dialog.tsx` | `AlertDialog*` |
 | `dropdown-menu.tsx` | `DropdownMenu*` |
-| `tooltip.tsx` | `Tooltip*`（自带 Provider） |
+| `tooltip.tsx` | `Tooltip*`（自带 Provider）、`HintTooltip`（通用说明 tooltip，可聚焦触发区） |
 | `popover.tsx` | `Popover*` |
 | `portal.ts` | `PortalContainerContext`, `usePortalContainer` |
 | `index.ts` | 统一出口（仅测试/文档/整套消费；页面按子模块导入） |

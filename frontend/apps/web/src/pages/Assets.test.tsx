@@ -561,13 +561,16 @@ describe("Assets 资产表页", () => {
     expect(screen.getByText("-0.61%").className).toBe("money money-neg");
     expect(screen.getByText("-620.00").className).toBe("money money-neg");
 
-    // blocked 行：数值列「—」+ 阻断 badge（status_reason 作为 title）
+    // blocked 行：数值列「—」+ 阻断 badge（status_reason 走主题色 tooltip）
     // 注意状态筛选项里也有「阻断 / 降级 / 正常」文案，按 badge 类名定位表格里的徽标。
     const blockedBadge = screen
       .getAllByText("阻断")
       .find((element) => element.className.includes("badge-blocked"));
     expect(blockedBadge).toBeTruthy();
-    expect(blockedBadge!.getAttribute("title")).toBe("缺少 600519 行情");
+    const blockedTrigger = blockedBadge!.parentElement!;
+    expect(blockedTrigger.getAttribute("aria-label")).toBe("阻断原因");
+    fireEvent.focus(blockedTrigger);
+    expect((await screen.findByRole("tooltip")).textContent).toBe("缺少 600519 行情");
     expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(8);
 
     // degraded badge
