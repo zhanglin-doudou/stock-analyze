@@ -174,6 +174,12 @@ function LoadEarlier({ initialCursor }: { initialCursor: string | null }) {
 
   return (
     <div className="sa-load-earlier">
+      {error ? (
+        <span className="sa-load-earlier-error" role="alert">
+          {error}
+        </span>
+      ) : null}
+      {loading ? <LoadingState /> :
       <button
         type="button"
         className="sa-load-earlier-button"
@@ -181,13 +187,8 @@ function LoadEarlier({ initialCursor }: { initialCursor: string | null }) {
         disabled={loading}
         aria-busy={loading}
       >
-        {loading ? <LoadingState label="加载更多…" /> : "加载更多"}
-      </button>
-      {error ? (
-        <span className="sa-load-earlier-error" role="alert">
-          {error}
-        </span>
-      ) : null}
+        加载更多
+      </button>}
     </div>
   );
 }

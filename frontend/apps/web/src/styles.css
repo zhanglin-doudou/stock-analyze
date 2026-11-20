@@ -32,6 +32,9 @@ h3 {
   font-size: 14px;
   margin: 12px 0 6px;
 }
+summary {
+  cursor: pointer;
+}
 
 .muted {
   color: var(--muted);

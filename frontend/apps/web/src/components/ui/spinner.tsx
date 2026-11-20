@@ -10,17 +10,17 @@ export interface SpinnerProps extends React.ComponentPropsWithoutRef<typeof Radi
 
 /** Radix Themes Spinner 的项目封装：统一 tokens 化颜色/尺寸与 a11y。 */
 export const Spinner = React.forwardRef<HTMLSpanElement, SpinnerProps>(
-  ({ className, label = "加载中", ...props }, ref) => (
+  ({ className, label, ...props }, ref) => (
     <span role="status" aria-live="polite" aria-busy="true" className="tw-inline-flex">
-      <RadixSpinner ref={ref} className={cn("tw-shrink-0", className)} {...props} />
-      <span className="tw-sr-only">{label}</span>
+      <RadixSpinner ref={ref} className={cn("tw-shrink-0 tw-text-primary", className)} {...props} />
+      {label && <span className="tw-sr-only">{label}</span>}
     </span>
   ),
 );
 Spinner.displayName = "Spinner";
 
 export function LoadingState({
-  label = "加载中…",
+  label,
   className,
 }: {
   label?: string;
