@@ -123,7 +123,7 @@ class ChatRepository:
                 ChatMessage.conversation_id == conversation_id,
                 ChatMessage.deleted_at.is_(None),
             )
-            .order_by(ChatMessage.created_at.desc())
+            .order_by(ChatMessage.created_at.desc(), ChatMessage.id.desc())
             .limit(limit)
         )
         if before_id:
@@ -157,7 +157,7 @@ class ChatRepository:
                     ChatTurn.user_id == user_id,
                     ChatTurn.conversation_id == conversation_id,
                 )
-                .order_by(ChatTurn.created_at.desc())
+                .order_by(ChatTurn.created_at.desc(), ChatTurn.id.desc())
                 .limit(limit)
             )
         )

@@ -97,6 +97,10 @@ class UnderstandingService:
     def _normalize(
         self, raw: _UnderstandingIn, *, question: str, focus: Mapping[str, Any]
     ) -> Understanding:
+        # glm-4-flash 等小模型会返回 confidence=0、resolved_query="" 但 intents 正确；
+        # 这种“结构化失败”不能直接当成低置信度澄清，否则每个问题都只回“请补充”。
+        if raw.confidence <= 0.0 or not raw.resolved_query.strip():
+            return self._fallback(question, focus)
         intents = tuple(_intent(value) for value in raw.intents[:2]) or (Intent.UNKNOWN,)
         entities = tuple(_entity(item) for item in raw.entities)
         needs_clarification = raw.needs_clarification or raw.confidence < 0.6

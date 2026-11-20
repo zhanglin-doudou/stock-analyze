@@ -29,3 +29,16 @@ async def test_parse_resolves_focus_entity() -> None:
     )
     assert result.entities[0].resolved_id == "rnd_1"
     assert result.needs_clarification is False
+
+
+def test_low_quality_model_output_falls_back_instead_of_clarifying() -> None:
+    service = UnderstandingService(FakeProvider(), FrozenClock(datetime(2026, 11, 20, tzinfo=UTC)))
+    result = service.parse(
+        '{"intents":["performance"],"confidence":0.0,"period":{"kind":"month","value":null},'
+        '"entities":[],"resolved_query":"","needs_clarification":false}',
+        question="本月赚了多少？",
+        focus={},
+    )
+    assert result.needs_clarification is False
+    assert result.period is not None and result.period.value == "2026-11"
+    assert result.intents[0].value == "performance"

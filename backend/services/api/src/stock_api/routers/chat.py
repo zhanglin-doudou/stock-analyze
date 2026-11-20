@@ -6,9 +6,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import json
-from collections.abc import Iterator
+from collections.abc import AsyncIterator
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, Query, Request, Response
@@ -405,7 +406,7 @@ def _sse_event(event: str, data: dict[str, Any]) -> str:
     return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
-def _sse_events(result: ChatMessageOut) -> Iterator[str]:
+async def _sse_events(result: ChatMessageOut) -> AsyncIterator[str]:
     yield _sse_event(
         "meta",
         {
@@ -421,6 +422,8 @@ def _sse_events(result: ChatMessageOut) -> Iterator[str]:
     text = result.answer or ""
     for offset in range(0, len(text), 48):
         yield _sse_event("delta", {"text": text[offset : offset + 48]})
+        # 让 ASGI 有机会按 chunk flush，前端才能看到增量而不是一帧全量。
+        await asyncio.sleep(0.02)
     yield _sse_event("done", {"message": result.model_dump(mode="json")})
 
 

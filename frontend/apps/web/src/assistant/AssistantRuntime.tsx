@@ -31,7 +31,11 @@ function messageText(message: ThreadMessageLike): string {
 }
 
 export function toInitialMessages(conversation: ChatConversationOut): ThreadMessageLike[] {
-  return (conversation.messages ?? [])
+  return [...(conversation.messages ?? [])]
+    .sort((left, right) => {
+      const byTime = Date.parse(left.created_at) - Date.parse(right.created_at);
+      return byTime !== 0 ? byTime : left.message_id.localeCompare(right.message_id);
+    })
     .filter((message) => message.content.trim().length > 0)
     .map((message) => ({
       id: message.message_id,
