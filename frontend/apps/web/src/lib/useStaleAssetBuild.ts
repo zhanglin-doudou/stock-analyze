@@ -43,6 +43,18 @@ export interface UseStaleAssetBuildOptions {
  */
 const autoBuildSubmissions = new Map<string, Promise<string | null>>();
 
+/** `missing`（从未构建）的流水探测在途结果：只缓存进行中的请求，settle 即删。
+ *
+ * 不缓存否定结果：用户稍后导入流水再回到页面时应能重新触发自动构建。
+ */
+const missingProbes = new Map<string, Promise<boolean>>();
+
+/** 有任意一条流水才认为「该建资产表了」；空账户不自动开工。 */
+async function hasAnyTrade(): Promise<boolean> {
+  const page = await api.trades.list({ limit: 1 });
+  return page.items.length > 0;
+}
+
 /** 一次 stale 代次的指纹：只用后端只读字段，前端不做 staleness 计算。
  *
  *  刻意**不含** `last_built_at`：no-op 构建（流水/行情/水位线都没变）也会刷新该时间，
@@ -62,6 +74,7 @@ export function staleFingerprint(build: AssetBuildState): string {
 /** 测试专用：清空模块级触发守卫（用例之间需要干净的 stale 代次）。 */
 export function resetAutoBuildGuard(): void {
   autoBuildSubmissions.clear();
+  missingProbes.clear();
 }
 
 /** job failed 且后端未给出 7807 错误体时，用错误码兜底渲染。 */
@@ -99,7 +112,9 @@ function missingMarketProblem(res: AssetBuildFailed): Problem {
  * 资产表 stale 自动构建（前端检测 + 显式触发）。
  *
  * 时序：`build.state == "stale"` → effect 内 `POST /assets/build{mode:auto}`（带
- * Idempotency-Key）→ 交给 `<JobProgress>` 收尾（SSE 为主、失效后低频兜底轮询）→
+ * Idempotency-Key）；`build.state == "missing"`（从未构建）先 `GET /trades?limit=1`
+ * 探一次流水：有流水才自动 POST，空账户保持显式入口。
+ * 交给 `<JobProgress>` 收尾（SSE 为主、失效后低频兜底轮询）→
  * succeeded 调 `onRefresh()`；失败转手动重试。
  * 本 hook 只做编排与去重，不发起轮询：终态订阅与兜底都在 JobProgress 内。
  * 判定与文案全部来自后端。
@@ -220,32 +235,61 @@ export function useStaleAssetBuild({
     if (staleFingerprint(build) !== failedKey) setFailedKey(null);
   }, [build, failedKey]);
 
-  // 前端检测 + 显式触发：只在读到后端 stale 时 POST（不在渲染期触发）。
+  // 前端检测 + 显式触发：只在读到后端 stale（或 missing 且有流水）时 POST。
+  // `missing`（从未构建）先探一次流水：有流水说明该建了 → 自动构建；空账户不自动开工，
+  // 保留空态与「请到资产页构建」提示。
   // 同一 stale 指纹共用模块级 Promise：StrictMode 双挂载、跨页并发挂载都只发一次 POST。
   useEffect(() => {
-    if (!build || !["stale", "missing"].includes(build.state)) return;
+    if (!build) return;
+    if (build.state !== "stale" && build.state !== "missing") return;
     if (activeJobId || submitting) return;
 
     const fingerprint = staleFingerprint(build);
-    let submission = autoBuildSubmissions.get(fingerprint);
-    if (!submission) {
-      // 先同步占位再 await：并发挂载的第二个实例只复用同一 Promise，不会二次 POST。
-      setSubmitting(true);
-      submission = postBuild("auto");
-      autoBuildSubmissions.set(fingerprint, submission);
-      void submission.finally(() => setSubmitting(false));
+    let cancelled = false;
+
+    const startBuild = (): void => {
+      let submission = autoBuildSubmissions.get(fingerprint);
+      if (!submission) {
+        // 先同步占位再 await：并发挂载的第二个实例只复用同一 Promise，不会二次 POST。
+        setSubmitting(true);
+        submission = postBuild("auto");
+        autoBuildSubmissions.set(fingerprint, submission);
+        void submission.finally(() => setSubmitting(false));
+      }
+
+      void submission.then((jobId) => {
+        if (cancelled) return;
+        if (!jobId) {
+          setFailedKey(currentKey());
+          return;
+        }
+        if (handledJobRef.current === jobId) return;
+        setActiveJobId((current) => current ?? jobId);
+      });
+    };
+
+    if (build.state === "stale") {
+      startBuild();
+    } else {
+      let probe = missingProbes.get(fingerprint);
+      if (!probe) {
+        probe = hasAnyTrade();
+        missingProbes.set(fingerprint, probe);
+        const settle = (): void => {
+          missingProbes.delete(fingerprint);
+        };
+        void probe.then(settle, settle);
+      }
+      void probe.then(
+        (hasTrade) => {
+          if (!cancelled && hasTrade) startBuild();
+        },
+        () => {
+          // 探测失败按「无流水」处理：不自动构建，页面照常展示空态。
+        },
+      );
     }
 
-    let cancelled = false;
-    void submission.then((jobId) => {
-      if (cancelled) return;
-      if (!jobId) {
-        setFailedKey(currentKey());
-        return;
-      }
-      if (handledJobRef.current === jobId) return;
-      setActiveJobId((current) => current ?? jobId);
-    });
     return () => {
       cancelled = true;
     };

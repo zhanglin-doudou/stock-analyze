@@ -48,7 +48,8 @@ describe("router / Layout（FT-09 导航与登录保护）", () => {
       </MemoryRouter>,
     );
 
-    expect(await screen.findByRole("heading", { name: "回合洞察" })).toBeTruthy();
+    // 页面是 lazy chunk：首次动态 import 在 jsdom + 冷缓存下可能超过 findBy 默认 1s。
+    expect(await screen.findByRole("heading", { name: "回合洞察" }, { timeout: 5000 })).toBeTruthy();
     // 面包屑/标题不能被“回合详情”前缀规则误伤。
     expect(pageMeta("/rounds/insights").title).toBe("回合洞察");
     // 菜单激活：回合洞察命中自身，不把「回合」也高亮。
