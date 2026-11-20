@@ -37,6 +37,11 @@ DEV_PASSWORD = "1234"
 
 # 需要清空的业务表（不含 platform.schema_version，避免破坏“启动即校验”）。
 _PLATFORM_TABLES = (
+    "chat_tool_call",
+    "chat_llm_call",
+    "chat_turn",
+    "chat_message",
+    "chat_conversation",
     "user",
     "refresh_token",
     "api_token",

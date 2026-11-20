@@ -1036,6 +1036,8 @@ CREATE INDEX ix_import_batch_user_signature ON ledger.import_batch (user_id, sig
 
 ### 8.1 技术选型与既有决策冲突（H-1）
 
+> **2026-11-19 更新**：H-1 的“仅 `/import` 限定域”已被全站 UI 全局化决议取代，见 [`2026-11-19-frontend-ui-globalization.md`](2026-11-19-frontend-ui-globalization.md)。本节保留 2026-11-13 的原始决策与理由，但不再代表当前实现；`features/import/import.css` 与 `#import-portal[data-import-ui]` 已移除。
+
 原前端选型（[02-design-research.md §208-209](../reviews/2026-10-28-frontend-refactor/02-design-research.md)）明确：
 
 > 「不引入：Tailwind、ECharts/Recharts/Chart.js、AG Grid、任何全量 UI 库。」

@@ -71,7 +71,7 @@ async def rebuild_period_job(
         return False
 
     # 阶段①：rounds（period = 脏窗口；受影响证券全历史重建）
-    await queue.progress(session, job_id, percent=10, stage="rounds", message=None)
+    await queue.progress_committed(user_id, job_id, percent=10, stage="rounds", message=None)
     if await cancel_checkpoint():
         return {"job_id": job_id, "cancelled": True}
     rounds = await rebuild_rounds_for_user(
@@ -84,7 +84,7 @@ async def rebuild_period_job(
     )
 
     # 阶段②：assets（auto 增量；指纹/水位线无变化 → no-op）
-    await queue.progress(session, job_id, percent=40, stage="assets", message=None)
+    await queue.progress_committed(user_id, job_id, percent=40, stage="assets", message=None)
     if await cancel_checkpoint():
         return {"job_id": job_id, "cancelled": True}
     assets = await build_assets(
@@ -92,7 +92,7 @@ async def rebuild_period_job(
     )
 
     # 阶段③：nav（消费同事务 asset_daily）
-    await queue.progress(session, job_id, percent=60, stage="nav", message=None)
+    await queue.progress_committed(user_id, job_id, percent=60, stage="nav", message=None)
     if await cancel_checkpoint():
         return {"job_id": job_id, "cancelled": True}
     nav = await compute_and_store_nav(
@@ -105,7 +105,7 @@ async def rebuild_period_job(
     )
 
     # 阶段④：metrics（默认核心 10；状态矩阵由引擎评估，blocked/stale 不硬算）
-    await queue.progress(session, job_id, percent=85, stage="metrics", message=None)
+    await queue.progress_committed(user_id, job_id, percent=85, stage="metrics", message=None)
     if await cancel_checkpoint():
         return {"job_id": job_id, "cancelled": True}
     batch = await batch_metrics(

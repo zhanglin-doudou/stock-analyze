@@ -391,7 +391,7 @@ async def test_api_084_happy_path_two_sections(
     # 期初资金 = 桥接 initial_cash + initial_open_cost（04-01 转入日反推期初现金 0）。
     assert asset["initial_capital"] == "0.00"
     assert asset["initial_capital_display"] == "0.00"
-    # 年化 TWR：资产表有效日收益复利累计后按自然日年化（非空且为定点/百分比串）。
+    # 峰值成本 CAGR：按总收益/峰值转入成本与首末自然日复利年化，返回定点/百分比串。
     assert asset["annualized_return"] is not None
     assert _RATIO_RE.match(asset["annualized_return"])
     assert asset["annualized_return_pct"] is not None

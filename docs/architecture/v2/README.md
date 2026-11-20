@@ -3,6 +3,7 @@
 > 需求基线：[PRD-v2.md](../../prd/PRD-v2.md)（v2.0，28 FR + 15 NFR）
 > 文档包版本：**2.1** ｜ 日期：2026-10-23 ｜ 共 6 份、约 3350 行
 > 状态：**现行**。v1 包（[`../v1/README.md`](../v1/README.md)）为历史基线，已被本包取代。
+> 数字复核：**2026-11-19**（端点/错误码/验收矩阵随 API-Catalog 同步；其余架构正文未改）。
 
 ---
 
@@ -15,7 +16,7 @@
 | PostgreSQL | Architecture-v2 §9；Reliability §4（参数/PITR）；ADR-0014/0018 |
 | 前后端分离（React / Python） | Architecture-v2 §6/§12；Testing §7（前端测试与零口径）；ADR-0016/0021 |
 | 重后轻前 | Architecture-v2 §12、§11（口径只在后端）；ADR-0021 |
-| **优先 API 可验收** | **[API-Catalog](API-Catalog.md)**（78 端点 + 验收矩阵）；Architecture-v2 §2/§2.3；Testing §5 |
+| **优先 API 可验收** | **[API-Catalog](API-Catalog.md)**（114 端点 + 验收矩阵）；Architecture-v2 §2/§2.3；Testing §5 |
 | Monorepo | Architecture-v2 §6；Extensibility §7/§8；ADR 见 §6 |
 
 ---
@@ -25,7 +26,7 @@
 | 文档 | 行数 | 职责 | 最先读哪节 |
 |---|---|---|---|
 | [../Architecture-v2.md](../../Architecture-v2.md) | 951 | **主文档**：驱动力、**可验收 API 清单（先行）**、服务级质量属性、C4、Monorepo 双栈、PG 多租户、队列、指标引擎、前端架构、安全、部署迁移、28+15 追溯矩阵 | §0.2、§2、§19 |
-| [API-Catalog.md](API-Catalog.md) | 600 | **可验收 API 目录**：总则、88 个端点总表、34 个详细契约、47 个错误码、16 个 Schema、异步/SSE、验收矩阵 88/88、契约治理、FR→API 追溯 28/28 | §1、§6、§8 |
+| [API-Catalog.md](API-Catalog.md) | 1024 | **可验收 API 目录**：总则、114 个端点总表、71 个详细契约小节、63 个错误码、16 个 Schema、异步/SSE、验收矩阵 114/114、契约治理、FR→API 追溯 28/28 | §1、§6、§8 |
 | [Reliability.md](Reliability.md) | 506 | 服务级高可用：8 条 SLO 与错误预算、故障域与 15 个单点、优雅停机与滚动发布、expand-contract、PG/PITR、队列可靠性、20 行 FMEA、8×10 降级矩阵、容量、告警、SOP-1~10、12 项演练 | §1、§3、§7 |
 | [Testing.md](Testing.md) | 548 | 测试与门禁：两类新增高危缺陷、分层覆盖率（含端点/越权硬门禁）、12 类套件、**20 行越权矩阵 + RLS 直连 8 项**、API 验收套件、契约三件套、前端测试与零口径断言、确定性、CI 四段、性能 | §2、§4、§5 |
 | [Extensibility.md](Extensibility.md) | 506 | 可扩展性：X-1~X-8 判据、EP-1~EP-12、指标注册表 v2、**租户演进路径**、**API 兼容治理**、前端扩展、版本化矩阵、9 项反扩展、四个作业单 | §2、§4、§5 |
@@ -61,7 +62,7 @@
 | 后端分层 | `services/api → application → domain ← infrastructure`（core 纯计算） |
 | 数据 | PG 三业务 schema：`ledger` / `review` / `platform` + 1 个公共缓存 schema `market`；44 张表（36 张业务表：ledger 8 / review 11 / platform 17 + 8 张公共缓存表：行情 `market.daily_bar` / `market.pull_range` + 板块 `market.sector` / `sector_member` / `benchmark_member` / `sector_bar` / `sector_pull_range` / `sector_sync_state`）；RLS 双层隔离 |
 | 队列 | PG `platform.job` + `FOR UPDATE SKIP LOCKED`（无 Redis/Kafka） |
-| **端点** | **88 个**（API-001~088），28/28 FR 覆盖，验收矩阵 88/88；详细契约 34 个；错误码 47 个 |
+| **端点** | **114 个**（API-001~115，API-089 预留不计数；已实现 85 个），28/28 FR 覆盖，验收矩阵 114/114；详细契约小节 70 个；错误码 63 个 |
 | 错误码 | ≥30 个（机器可读 `/api/v1/errors`） |
 | ADR | v2 新增 14 条（0013~0026），取代 v1 的 0001/0006/0007/0008 |
 | 扩展点 | 12 个（EP-1~EP-12） |

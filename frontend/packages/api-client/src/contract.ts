@@ -40,6 +40,14 @@ type FieldsPresent<T, K extends PropertyKey> = Exclude<K, keyof T> extends never
 // ── generated 原始别名（名字 = OpenAPI schema 名，便于对照契约） ──────────
 
 /** RFC 7807 错误体（OpenAPI schema 名 `Error`）。 */
+export type ChatSessionOut = ApiSchemas["ChatSessionOut"];
+export type ChatMessageIn = ApiSchemas["ChatMessageIn"];
+export type ChatMessageOut = ApiSchemas["ChatMessageOut"];
+export type ChatConversationOut = ApiSchemas["ChatConversationOut"];
+export type ChatHistoryMessageOut = ApiSchemas["ChatHistoryMessageOut"];
+export type ChatTraceOut = ApiSchemas["ChatTraceOut"];
+export type ChatReplayOut = ApiSchemas["ChatReplayOut"];
+
 export type ErrorDocument = ApiSchemas["Error"];
 export type ProblemFieldError = NonNullable<ErrorDocument["errors"]>[number];
 export type ErrorCatalogOut = ApiSchemas["ErrorCatalogOut"];
@@ -134,6 +142,10 @@ export type TradeFlagRebuildIn = ApiSchemas["TradeFlagRebuildIn"];
 export type TradeFlagRebuildAccepted = ApiSchemas["TradeFlagRebuildAccepted"];
 // 2026-11-19：重置本人账单数据（API-110）
 export type BillDataResetOut = ApiSchemas["BillDataResetOut"];
+// 2026-11-19：账单旗标重建状态（API-111）
+export type TradeFlagRebuildStatusOut = ApiSchemas["TradeFlagRebuildStatusOut"];
+export type TradeFlagRebuildReasonOut = ApiSchemas["TradeFlagRebuildReasonOut"];
+export type TradeFlagCountOut = ApiSchemas["TradeFlagCountOut"];
 
 // Period2-03：净值与收益（API-032）
 export type NavOut = ApiSchemas["NavOut"];

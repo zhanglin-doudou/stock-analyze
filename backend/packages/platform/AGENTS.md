@@ -50,6 +50,14 @@ await queue.emit(session, job_id, event_type="progress", payload={"progress": 50
 ```
 **关键实现细节**：`emit()` 开头必须 `await session.flush()`——autoflush=False 时，`max(seq)` 读不到本事务里未 flush 的事件，连续 emit 会算出同一个 seq 撞唯一约束。
 
+**进度上报必须用 `progress_committed()`**（2026-11-20）：
+
+```python
+await queue.progress_committed(user_id, job_id, percent=10, stage="recomputing", message=None)
+```
+
+worker 把整个 handler 包在**一个长事务**里，`progress()` 只 flush 不提交——进度事件要等任务结束才可见（前端表现为 SSE 全部帧同一时刻到达），且主事务持有 job 行锁会阻塞心跳续租与取消。`progress_committed()` 用**另开连接**（app 池 + RLS 租户上下文）在 stage 边界独立提交：进度立即可见、心跳/取消不再被挡；`UPDATE job` 先拿行锁再算 `seq`，与 `finish()`/`fail_or_retry()` 串行，不会撞 `uq_job_event_seq`。进度是 best-effort，业务数据仍只由 handler 主事务提交，终态以 done/error 为准。
+
 ### 4. 单飞上锁：`kind + scope_key` 部分唯一索引
 
 迁移 `0001_phase1` 里 job 表有唯一索引：

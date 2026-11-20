@@ -13,6 +13,12 @@ import type {
   Attribution,
   BatchList,
   BillDataResetOut,
+  ChatConversationOut,
+  ChatMessageIn,
+  ChatMessageOut,
+  ChatReplayOut,
+  ChatSessionOut,
+  ChatTraceOut,
   CommitImportBody,
   CreateTokenBody,
   DashboardOut,
@@ -67,6 +73,7 @@ import type {
   TokenList,
   TradeFlagRebuildAccepted,
   TradeFlagRebuildIn,
+  TradeFlagRebuildStatusOut,
   TradeHistoryPage,
   TradeMutationOut,
   TradeMutationResult,
@@ -296,6 +303,7 @@ export interface RequestOptions {
   query?: Query;
   body?: unknown;
   formData?: FormData;
+  signal?: AbortSignal;
   headers?: Record<string, string>;
   omitAuth?: boolean;
   /** true 时忽略 baseUrl，按根路径（/healthz 等）请求。 */
@@ -474,7 +482,7 @@ export function createClient(options: ClientOptions) {
   ): Promise<{ data: T; headers: Headers }> {
     let res: Response;
     try {
-      res = await fetchImpl(url, { method: req.method ?? "GET", headers, body });
+      res = await fetchImpl(url, { method: req.method ?? "GET", headers, body, signal: req.signal });
     } catch (err) {
       throw new ApiProblemError(networkProblem(err instanceof Error ? err.message : String(err)));
     }
@@ -486,6 +494,40 @@ export function createClient(options: ClientOptions) {
     if (res.status === 401 && !retried && REFRESHABLE_CODES.has(problem.code)) {
       const refreshed = await doRefresh();
       if (refreshed) return send<T>(req, true);
+    }
+    if (res.status === 401) options.onUnauthorized?.();
+    throw new ApiProblemError(problem);
+  }
+
+  async function stream(req: RequestOptions, retried = false): Promise<Response> {
+    const url = buildUrl(req.root ? rootBase() : baseUrl, req.path, req.query);
+    const headers = new Headers(req.headers);
+    headers.set("Accept", req.accept ?? "text/event-stream");
+    const token = getToken();
+    if (!req.omitAuth && token.access) headers.set("Authorization", `Bearer ${token.access}`);
+    if (req.ifMatch) headers.set("If-Match", req.ifMatch);
+    if (req.idempotencyKey) headers.set("Idempotency-Key", req.idempotencyKey);
+
+    let body: BodyInit | undefined;
+    if (req.formData) {
+      body = req.formData;
+    } else if (req.body !== undefined) {
+      headers.set("Content-Type", "application/json");
+      body = JSON.stringify(req.body);
+    }
+
+    let res: Response;
+    try {
+      res = await fetchImpl(url, { method: req.method ?? "GET", headers, body, signal: req.signal });
+    } catch (err) {
+      throw new ApiProblemError(networkProblem(err instanceof Error ? err.message : String(err)));
+    }
+    if (res.ok) return res;
+
+    const problem = await readProblem(res);
+    if (res.status === 401 && !retried && REFRESHABLE_CODES.has(problem.code)) {
+      const refreshed = await doRefresh();
+      if (refreshed) return stream(req, true);
     }
     if (res.status === 401) options.onUnauthorized?.();
     throw new ApiProblemError(problem);
@@ -541,6 +583,12 @@ export function createClient(options: ClientOptions) {
         idempotencyKey: opts.idempotencyKey,
       });
       return { settings: r.data, etag: r.headers.get("ETag") };
+    },
+    /** API-111：账单旗标是否需要重建 + 库内旗标统计（纯读）。 */
+    tradeFlagRebuildStatus() {
+      return send<TradeFlagRebuildStatusOut>({
+        path: "/settings/trade-flags/status",
+      }).then((r) => r.data);
     },
     /** API-097：按当前生效阈值重建账单旗标（异步 202；同 scope 在途单飞复用）。 */
     rebuildTradeFlags(body: TradeFlagRebuildIn, idempotencyKey: string) {
@@ -973,6 +1021,56 @@ export function createClient(options: ClientOptions) {
     },
   };
 
+  const chat = {
+    /** API-077：确保单会话存在（首次 201；已存在 200）。 */
+    ensureSession() {
+      return send<ChatSessionOut>({ path: "/chat/sessions", method: "POST" }).then((r) => r.data);
+    },
+    /** API-078：发送消息；默认 JSON（回放/测试/旧客户端）。 */
+    sendMessage(sessionId: string, body: ChatMessageIn) {
+      return send<ChatMessageOut>({
+        path: `/chat/sessions/${encodeURIComponent(sessionId)}/messages`,
+        method: "POST",
+        body,
+      }).then((r) => r.data);
+    },
+    /** API-078 的 SSE 变体：返回原始 event-stream Response，由调用方逐事件读取。 */
+    streamMessage(sessionId: string, body: ChatMessageIn, opts: { signal?: AbortSignal } = {}) {
+      return stream({
+        path: `/chat/sessions/${encodeURIComponent(sessionId)}/messages`,
+        method: "POST",
+        body,
+        signal: opts.signal,
+        accept: "text/event-stream",
+      });
+    },
+    /** API-112：单会话消息（分页）。 */
+    getConversation(query: { limit?: number; before_id?: string } = {}) {
+      return send<ChatConversationOut>({
+        path: "/chat/conversation",
+        query: { limit: query.limit, before_id: query.before_id },
+      }).then((r) => r.data);
+    },
+    /** API-113：单轮回放轨迹。 */
+    getTrace(turnId: string) {
+      return send<ChatTraceOut>({
+        path: `/chat/turns/${encodeURIComponent(turnId)}/trace`,
+      }).then((r) => r.data);
+    },
+    /** API-114：回放（deterministic/llm/full）。 */
+    replay(turnId: string, mode: "deterministic" | "llm" | "full" = "deterministic") {
+      return send<ChatReplayOut>({
+        path: `/chat/turns/${encodeURIComponent(turnId)}/replay`,
+        method: "POST",
+        body: { mode },
+      }).then((r) => r.data);
+    },
+    /** API-115：清空当前单会话。 */
+    deleteConversation() {
+      return send<void>({ path: "/chat/conversation", method: "DELETE" }).then((r) => r.data);
+    },
+  };
+
   const attribution = {
     /** API-036：五因子归因（纯读；blocked/degraded 仍 200，文案随 Accept-Language）。 */
     get(query: GetAttributionQuery) {
@@ -1053,7 +1151,7 @@ export function createClient(options: ClientOptions) {
     },
   };
 
-  return { auth, tokens, settings, imports, jobs, trades, rounds, nav, assets, dashboard, sectors, attribution, metrics: metricsApi, ops, request: send };
+  return { auth, tokens, settings, imports, jobs, trades, rounds, nav, assets, dashboard, sectors, attribution, chat, metrics: metricsApi, ops, request: send };
 }
 
 export type ApiClient = ReturnType<typeof createClient>;

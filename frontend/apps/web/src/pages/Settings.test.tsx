@@ -425,7 +425,10 @@ describe("Settings（偏好四组，API-055/096）", () => {
     fireEvent.click(screen.getByTestId("settings-rebuild"));
 
     await waitFor(() =>
-      expect(rebuildTradeFlags).toHaveBeenCalledWith({ scope: "all" }, expect.any(String)),
+      expect(rebuildTradeFlags).toHaveBeenCalledWith(
+        { scope: "all", mode: "full" },
+        expect.any(String),
+      ),
     );
     expect(await screen.findByTestId("settings-rebuild-done")).toBeTruthy();
     await waitFor(() => expect(getSettings).toHaveBeenCalledTimes(2));

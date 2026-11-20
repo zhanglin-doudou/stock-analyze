@@ -941,10 +941,14 @@ class TradeFlagRebuildIn(StrictModel):
 
     `scope=months` 必须给 `months`（`YYYY-MM`，去重后 ≤120）；`scope=all` 覆盖首笔交易月
     到最近交易月（服务端最多取最近 120 个月）。
+
+    `mode=full`（缺省，兼容旧调用）按 scope 全时段覆盖；`mode=auto` 仅支持 `scope=all`：
+    口径版本缺失/存在旧版本行时全时段重建，否则只更新待算且未来行情已覆盖的月份。
     """
 
     scope: Literal["all", "months"] = "all"
     months: list[str] = Field(default_factory=list)
+    mode: Literal["auto", "full"] = "full"
 
 
 class TradeFlagRebuildAccepted(StrictModel):
@@ -954,6 +958,43 @@ class TradeFlagRebuildAccepted(StrictModel):
     type: Literal["rebuild_trade_flags"] = "rebuild_trade_flags"
     status: Literal["pending"] = "pending"
     links: JobLinks
+
+
+class TradeFlagRebuildReasonOut(StrictModel):
+    """API-111：需要重建的原因（`code` 稳定，`message` 可直接展示）。"""
+
+    code: str
+    message: str
+
+
+class TradeFlagCountOut(StrictModel):
+    """API-111：单个旗标代码在库内的行数。"""
+
+    code: str
+    label_zh: str
+    count: int
+
+
+class TradeFlagRebuildStatusOut(StrictModel):
+    """API-111：账单旗标重建状态（是否需要重建 + 库内旗标统计）。"""
+
+    needs_rebuild: bool
+    reasons: list[TradeFlagRebuildReasonOut]
+    definition_version: str
+    flags_hash: str
+    has_bill_data: bool
+    bill_count: int
+    current_flag_rows: int
+    legacy_flag_rows: int
+    pending_count: int
+    pending_covered_count: int
+    pending_months: list[str]
+    uncovered_count: int
+    uncovered_months: list[str]
+    market_as_of: date | None
+    flag_kinds: int
+    flag_total: int
+    flags: list[TradeFlagCountOut]
 
 
 class BillDataResetOut(StrictModel):
@@ -1106,6 +1147,8 @@ class DashboardAssetOverviewOut(StrictModel):
 
     `max_invested_cost` 语义为**资金划转峰值转入成本**（累计净转入的峰值），
     `max_cost_return_pct` = 总收益 / 峰值转入成本（字段名保留以兼容旧客户端）。
+    `annualized_return` 为峰值成本 CAGR：
+    `(1 + 总收益 / 峰值转入成本) ** (365 / 首末自然日数) - 1`。
     """
 
     status: DashboardStatus
@@ -1123,7 +1166,7 @@ class DashboardAssetOverviewOut(StrictModel):
     bill_end_date: date | None = None
     initial_capital: str | None = None
     initial_capital_display: str | None = None
-    # 全历史年化 TWR（时间加权；scale=8 小数串 + 两位百分比展示）。
+    # 全历史峰值成本 CAGR（scale=8 小数串 + 两位百分比展示）。
     annualized_return: str | None = None
     annualized_return_pct: str | None = None
     # 后端已格式化的展示串（千分位金额）；前端优先使用，raw 保留兼容。
@@ -2313,3 +2356,112 @@ class SettingsPatchIn(StrictModel):
     bill_flags: BillFlagsPatch | None = None
     market_sessions: MarketSessionsPatch | None = None
     concept_filters: ConceptFiltersPatch | None = None
+
+
+# ── 智能分析助手（API-077/078/112~115）──────────────────────
+class ChatSessionOut(BaseModel):
+    conversation_id: str
+    created: bool
+    title: str
+    window_turns: int
+
+
+class ChatContextIn(StrictModel):
+    period: str | None = Field(default=None, max_length=40)
+    round_id: str | None = Field(default=None, max_length=40)
+    security_code: str | None = Field(default=None, max_length=16)
+
+
+class ChatMessageIn(StrictModel):
+    message: str = Field(min_length=1, max_length=2000)
+    context: ChatContextIn | None = None
+
+
+class ChatCitationOut(BaseModel):
+    number: int
+    citation_id: str
+    label: str
+    value: str
+    source_endpoint: str
+    source_params: dict[str, Any] = Field(default_factory=dict)
+    definition_version: str | None = None
+    data_as_of: str | None = None
+
+
+class ChatClaimOut(BaseModel):
+    claim_id: str
+    text: str
+    citation_ids: list[str] = Field(default_factory=list)
+
+
+class ChatContextUsageOut(BaseModel):
+    window_turns: int
+    included_turns: int
+    estimated_input_tokens: int
+    actual_prompt_tokens: int | None = None
+    actual_completion_tokens: int | None = None
+    compressed: bool = False
+    context_truncated: bool = False
+    summary_version: int = 0
+    compression_steps: list[str] = Field(default_factory=list)
+
+
+class ChatMessageOut(BaseModel):
+    conversation_id: str
+    turn_id: str
+    message_id: str
+    answer: str
+    answer_format: Literal["markdown", "text"] = "markdown"
+    citations: list[ChatCitationOut] = Field(default_factory=list)
+    claims: list[ChatClaimOut] = Field(default_factory=list)
+    status: str
+    degrade_reason: str | None = None
+    degrade_message: str | None = None
+    what_to_do: str | None = None
+    retryable: bool = False
+    llm_used: bool = False
+    fallback: bool = False
+    understanding: dict[str, Any] = Field(default_factory=dict)
+    context_usage: ChatContextUsageOut | None = None
+    timings: dict[str, Any] = Field(default_factory=dict)
+
+
+class ChatHistoryMessageOut(BaseModel):
+    message_id: str
+    turn_id: str | None = None
+    role: Literal["user", "assistant"]
+    content: str
+    content_json: dict[str, Any] | None = None
+    status: str
+    created_at: datetime
+
+
+class ChatConversationOut(BaseModel):
+    conversation_id: str
+    title: str
+    summary: str
+    turn_count: int
+    window_turns: int
+    messages: list[ChatHistoryMessageOut] = Field(default_factory=list)
+    next_cursor: str | None = None
+
+
+class ChatTraceOut(BaseModel):
+    turn: dict[str, Any]
+    tool_calls: list[dict[str, Any]] = Field(default_factory=list)
+    llm_calls: list[dict[str, Any]] = Field(default_factory=list)
+    answer: dict[str, Any] = Field(default_factory=dict)
+
+
+class ChatReplayIn(StrictModel):
+    mode: Literal["deterministic", "llm", "full"] = "deterministic"
+    persist: bool = False
+
+
+class ChatReplayOut(BaseModel):
+    mode: str
+    match: bool
+    diffs: list[dict[str, Any]] = Field(default_factory=list)
+    replayed: dict[str, Any] = Field(default_factory=dict)
+    status: Literal["ok", "failed"] = "ok"
+    error: str | None = None

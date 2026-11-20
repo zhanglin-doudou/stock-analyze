@@ -385,9 +385,9 @@ export function Settings() {
     setRebuildDone(false);
     setRebuildProgress(0);
     try {
-      // scope=all：按首末交易月逐月重建（后端截断最近 120 个月）。
+      // scope=all + mode=full：按首末交易月逐月覆盖重建（后端截断最近 120 个月）。
       const accepted = await api.settings.rebuildTradeFlags(
-        { scope: "all" },
+        { scope: "all", mode: "full" },
         newIdempotencyKey(),
       );
       setRebuildJobId(accepted.job_id);

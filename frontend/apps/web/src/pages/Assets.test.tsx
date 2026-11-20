@@ -14,6 +14,7 @@ import {
   type OversellRevisionOut,
   type Problem,
   type Round,
+  type TradePage,
 } from "@sa/api-client";
 import { Assets } from "./Assets";
 import assetsSource from "./Assets.tsx?raw";
@@ -35,6 +36,7 @@ vi.mock("../client", () => ({
       list: vi.fn(),
     },
     trades: {
+      list: vi.fn(),
       oversellRevision: vi.fn(),
       putOversellRevision: vi.fn(),
       deleteOversellRevision: vi.fn(),
@@ -49,6 +51,7 @@ const getJob = vi.mocked(api.jobs.get);
 const jobEvents = vi.mocked(api.jobs.events);
 const listRounds = vi.mocked(api.rounds.list);
 const getRevision = vi.mocked(api.trades.oversellRevision);
+const listTrades = vi.mocked(api.trades.list);
 
 function makeBuild(overrides: Partial<AssetBuildState> = {}): AssetBuildState {
   return {
@@ -263,6 +266,13 @@ beforeEach(() => {
   buildAssets.mockResolvedValue(accepted());
   jobEvents.mockImplementation(() => noEvents());
   listRounds.mockResolvedValue({ items: [], next_cursor: null, has_more: false });
+  listTrades.mockResolvedValue({
+    items: [],
+    next_cursor: null,
+    has_more: false,
+    meta: { data_as_of: "2026-09-30" },
+    etag: null,
+  });
 });
 
 afterEach(cleanup);
@@ -277,6 +287,33 @@ describe("Assets 资产表页", () => {
     expect(await screen.findByText(/还没有资产记录/)).toBeTruthy();
     const importLinks = screen.getAllByRole("link", { name: "导入账单" });
     expect(importLinks[0].getAttribute("href")).toBe("/import");
+    expect(buildAssets).not.toHaveBeenCalled();
+  });
+
+  it("FT-01a missing + 有流水 → 自动构建一次（不走显式按钮）", async () => {
+    listAssets.mockResolvedValue(missingPage());
+    listTrades.mockResolvedValue({
+      items: [{ trade_id: "t-1" } as unknown as TradePage["items"][number]],
+      next_cursor: null,
+      has_more: false,
+      meta: { data_as_of: "2026-09-30" },
+      etag: null,
+    });
+
+    renderPage();
+
+    await waitFor(() => expect(buildAssets).toHaveBeenCalledTimes(1));
+    expect(buildAssets.mock.calls[0][0]).toEqual({ mode: "auto" });
+    expect(listTrades).toHaveBeenCalledWith({ limit: 1 });
+  });
+
+  it("FT-01b missing + 无流水 → 不自动构建，保留显式入口", async () => {
+    listAssets.mockResolvedValue(missingPage());
+
+    renderPage();
+
+    expect(await screen.findByText(/还没有资产记录/)).toBeTruthy();
+    await waitFor(() => expect(listTrades).toHaveBeenCalled());
     expect(buildAssets).not.toHaveBeenCalled();
   });
 
@@ -561,13 +598,16 @@ describe("Assets 资产表页", () => {
     expect(screen.getByText("-0.61%").className).toBe("money money-neg");
     expect(screen.getByText("-620.00").className).toBe("money money-neg");
 
-    // blocked 行：数值列「—」+ 阻断 badge（status_reason 作为 title）
+    // blocked 行：数值列「—」+ 阻断 badge（status_reason 走主题色 tooltip）
     // 注意状态筛选项里也有「阻断 / 降级 / 正常」文案，按 badge 类名定位表格里的徽标。
     const blockedBadge = screen
       .getAllByText("阻断")
       .find((element) => element.className.includes("badge-blocked"));
     expect(blockedBadge).toBeTruthy();
-    expect(blockedBadge!.getAttribute("title")).toBe("缺少 600519 行情");
+    const blockedTrigger = blockedBadge!.parentElement!;
+    expect(blockedTrigger.getAttribute("aria-label")).toBe("阻断原因");
+    fireEvent.focus(blockedTrigger);
+    expect((await screen.findByRole("tooltip")).textContent).toBe("缺少 600519 行情");
     expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(8);
 
     // degraded badge

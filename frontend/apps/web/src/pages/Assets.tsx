@@ -16,6 +16,7 @@ import { OversellRevisionDialog } from "../ui/OversellRevisionDialog";
 import { PeriodInput } from "../ui/PeriodInput";
 import { ProblemView } from "../ui/Problem";
 import { DataTable, type DataTableColumn } from "../ui/DataTable";
+import { HintTooltip } from "@/components/ui/tooltip";
 
 const PAGE_LIMIT = 50;
 
@@ -26,7 +27,7 @@ interface AssetFilters {
   sort: "trade_date" | "-trade_date";
 }
 
-const EMPTY_FILTERS: AssetFilters = { period: "", status: "", sort: "trade_date" };
+const EMPTY_FILTERS: AssetFilters = { period: "", status: "", sort: "-trade_date" };
 
 const SORT_LABELS: Record<AssetFilters["sort"], string> = {
   trade_date: "正序（旧 → 新）",
@@ -148,12 +149,12 @@ function BuildSummary({ page }: BuildSummaryProps): ReactElement {
       {build.session_notice === "sync_pending" ? (
         <p className="notice-warn" data-testid="assets-session-notice">
           当日已收盘但行情尚未同步——请先在终端运行 make sync-market
-          同步行情数据，再点「更新资产表」。
+          同步行情数据，再右上角点「更新资产表」。
         </p>
       ) : null}
       {build.last_status === "degraded" ? (
         <div className="notice-warn" data-testid="assets-degraded">
-          <p>部分日期存在阻断/降级，修复数据后点「更新资产表」即可重算。</p>
+          <p>部分日期存在阻断/降级，修复数据后右上角点「更新资产表」即可重算。</p>
           {build.status_reason ? <p className="muted">{build.status_reason}</p> : null}
         </div>
       ) : null}
@@ -360,11 +361,17 @@ export function Assets() {
       priority: 1,
       render: (row) => {
         const oversells = oversellByDate.get(row.date) ?? [];
+        const label = assetStatusLabel(row.status);
+        const badge = <span className={`badge badge-${row.status}`}>{label}</span>;
         return (
           <span className="assets-status">
-            <span className={`badge badge-${row.status}`} title={row.status_reason ?? undefined}>
-              {assetStatusLabel(row.status)}
-            </span>
+            {row.status_reason ? (
+              <HintTooltip content={row.status_reason} label={`${label}原因`}>
+                {badge}
+              </HintTooltip>
+            ) : (
+              badge
+            )}
             {oversells.map((item) => (
               <button
                 key={item.round_id}
@@ -480,8 +487,8 @@ export function Assets() {
 
       {autoFiltered ? (
         <p className="notice-warn" data-testid="assets-auto-filter">
-          资产表当前整体状态为非正常（{assetStatusLabel(filters.status)}），已自动按该状态筛选；
-          修复数据或补录成本后点「更新资产表」即可重算。
+          资产表当前整体状态为非正常（{build?.last_status ? assetStatusLabel(build?.last_status) : ''}），已自动按该状态筛选；
+          修复数据或补录成本后右上角点「更新资产表」即可重算。
         </p>
       ) : null}
 

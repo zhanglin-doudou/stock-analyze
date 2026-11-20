@@ -17,6 +17,7 @@ import { PeriodInput } from "../ui/PeriodInput";
 import { ProblemView } from "../ui/Problem";
 import { StaleFlagsNotice } from "../ui/StaleFlagsNotice";
 import { DataTable, type DataTableColumn } from "../ui/DataTable";
+import { Tag, type TagProps } from "@/components/ui/tag";
 import { HoldingCharts } from "./rounds/HoldingCharts";
 import { RoundFlagCharts } from "./rounds/RoundFlagCharts";
 
@@ -151,14 +152,25 @@ function flagLabel(flag: string): string {
   return FLAG_LABELS[flag] ?? flag;
 }
 
-/** 计数型状态在 chips 里带 ×N；其余旗标只显示文案（数值全部由后端给出）。 */
+/** 计数型状态带 ×N 数字徽标；其余旗标只显示文案（数值全部由后端给出）。 */
 const COUNT_FLAGS = new Set(["bottom_buy", "stop_loss_sold_early", "profit_sold_early"]);
 
-function flagText(flag: string, counts?: Record<string, number>): string {
+/** 回合旗标语义色：正向行为 green，风险/卖飞 warning；未收录的用中性。 */
+type TagColor = NonNullable<TagProps["color"]>;
+const FLAG_TONES: Record<string, TagColor> = {
+  bottom_buy: "green",
+  swing_t: "green",
+  intraday_t: "green",
+  intraday_rebalance_in: "green",
+  stop_loss_sold_early: "warning",
+  profit_sold_early: "warning",
+  drawdown: "warning",
+  intraday_rebalance_out: "warning",
+};
+
+function flagCount(flag: string, counts?: Record<string, number>): number | undefined {
   const count = counts?.[flag];
-  return COUNT_FLAGS.has(flag) && typeof count === "number"
-    ? `${flagLabel(flag)}×${count}`
-    : flagLabel(flag);
+  return COUNT_FLAGS.has(flag) && typeof count === "number" ? count : undefined;
 }
 
 /** 回合洞察（/rounds/insights）：事后统计，只渲染后端产出字符串（前端零口径）。 */
@@ -340,12 +352,11 @@ export function RoundInsights() {
       priority: 3,
       render: (row) =>
         row.flags?.length ? (
-          <span className="chips">
-            {row.flags.map((item, index) => (
-              <span key={item} className="chip">
-                {flagText(item, row.status_counts)}
-                {index + 1 !== row.flags?.length && <span>, </span>}
-              </span>
+          <span className="tw-inline-flex tw-flex-wrap tw-items-center tw-gap-1">
+            {row.flags.map((item) => (
+              <Tag key={item} color={FLAG_TONES[item] ?? "normal"} count={flagCount(item, row.status_counts)}>
+                {flagLabel(item)}
+              </Tag>
             ))}
           </span>
         ) : (

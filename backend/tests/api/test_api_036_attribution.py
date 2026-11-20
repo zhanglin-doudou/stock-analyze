@@ -87,7 +87,7 @@ async def test_api_036_blocked_empty_account(attr_client: Any, account_factory: 
     assert body["ratio_basis"] == "amount/total_pnl"
     assert body["period"] == "2026-06"
     assert body["status"] == "blocked"
-    assert body["definition_version"] == "1.0"
+    assert body["definition_version"] == "1.1"
     assert body["total_pnl_basis"] == "asset_daily_mtm"
     assert body["ratio_na_reason"] is None
     # blocked 缺省语义（§6.3 冻结）：金额/覆盖整键省略，不输出 0 冒充

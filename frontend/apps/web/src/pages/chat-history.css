@@ -1,0 +1,43 @@
+.chat-history { display: flex; flex-direction: column; gap: 18px; }
+.chat-history-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.chat-history-title { margin: 0; font-size: 26px; letter-spacing: -0.02em; }
+.chat-history-sub { margin: 6px 0 0; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.chat-history-grid { display: grid; grid-template-columns: minmax(260px, 0.8fr) minmax(0, 1.6fr); gap: 16px; align-items: start; }
+@media (max-width: 900px) { .chat-history-grid { grid-template-columns: 1fr; } }
+.chat-history-card { border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface-raised); box-shadow: var(--shadow-1); overflow: hidden; }
+.chat-history-list { max-height: calc(100dvh - 220px); overflow-y: auto; }
+.chat-history-list-head { padding: 12px 14px; border-bottom: 1px solid var(--line); color: var(--muted); font-size: 12px; }
+.chat-turn-button { display: block; width: 100%; border: 0; border-bottom: 1px solid var(--line); background: transparent; color: var(--text); padding: 12px 14px; text-align: left; cursor: pointer; }
+.chat-turn-button:hover { background: var(--surface); }
+.chat-turn-button.is-active { background: var(--accent-soft); box-shadow: inset 3px 0 0 var(--accent); }
+.chat-turn-question { font-size: 13px; font-weight: 600; line-height: 1.45; }
+.chat-turn-preview { margin-top: 4px; color: var(--muted); font-size: 12px; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.chat-turn-meta { margin-top: 6px; display: flex; gap: 8px; align-items: center; color: var(--faint); font-size: 10.5px; }
+.chat-history-detail { padding: 18px; }
+.chat-detail-question { font-size: 18px; line-height: 1.5; margin: 0 0 8px; }
+.chat-detail-answer { white-space: pre-wrap; font-size: 13px; line-height: 1.7; color: var(--text-2); background: var(--surface); border: 1px solid var(--line); border-radius: var(--r-md); padding: 12px 14px; }
+.chat-detail-actions { display: flex; gap: 8px; margin: 12px 0 16px; flex-wrap: wrap; }
+.chat-detail-section { margin-top: 14px; }
+.chat-detail-section h3 { margin: 0 0 8px; font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
+.chat-detail-pre { margin: 0; max-height: 280px; overflow: auto; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--r-sm); background: var(--surface); color: var(--text-2); font: 11.5px/1.55 var(--font-mono); }
+.chat-trace-row { display: flex; gap: 8px; align-items: baseline; padding: 7px 0; border-bottom: 1px dashed var(--line); font-size: 12px; }
+.chat-trace-row:last-child { border-bottom: 0; }
+.chat-trace-key { color: var(--muted); min-width: 90px; }
+.chat-trace-value { color: var(--text-2); word-break: break-word; }
+.chat-replay-ok { color: var(--status-ok); font-size: 12px; }
+.chat-replay-diff { margin-top: 8px; border-left: 3px solid var(--warn); background: var(--warn-soft); padding: 8px 10px; font-size: 12px; line-height: 1.5; }
+.chat-history-empty { padding: 36px 20px; text-align: center; color: var(--muted); font-size: 13px; line-height: 1.7; }
+.chat-history-status { display: inline-flex; align-items: center; gap: 5px; padding: 2px 7px; border-radius: var(--r-pill); font-size: 10.5px; border: 1px solid var(--line); color: var(--muted); }
+.chat-history-status.is-degraded { border-color: var(--warn); background: var(--warn-soft); color: var(--warn); }
+.chat-history-status.is-blocked { border-color: var(--status-blocked); background: var(--status-blocked-soft); color: var(--status-blocked); }
+.chat-history-status.is-ok { border-color: var(--status-ok); background: var(--status-ok-soft); color: var(--status-ok); }
+.chat-history-actions { display: flex; justify-content: flex-end; align-items: center; }
+.chat-history-notice {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--status-ok);
+  border-radius: var(--r-sm);
+  background: var(--status-ok-soft);
+  color: var(--status-ok);
+  font-size: 12.5px;
+}

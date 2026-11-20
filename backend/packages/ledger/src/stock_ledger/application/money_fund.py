@@ -244,7 +244,7 @@ def _forward_shares(
             if increased[key]:
                 oversells.append(
                     MoneyFundOversell(
-                        trade_id=row.id,
+                        trade_id=str(getattr(row, "id", None) or getattr(row, "dedupe_key", None) or ""),
                         trade_date=row.trade_date,
                         security_code=key,
                         quantity_units=still,

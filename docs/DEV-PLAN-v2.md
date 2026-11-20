@@ -3,9 +3,9 @@
 > **命名约定**：期次写全称 `Period1/Period2/Period3`，期次任务 ID 为 `Period1-01`；优先级仍可简写 `P0/P1/P2/P3`。
 
 
-> 依据：[PRD-v2.md](prd/PRD-v2.md)（28 FR + 15 NFR）｜[Architecture-v2.md](Architecture-v2.md)｜[API-Catalog.md](architecture/v2/API-Catalog.md)（105 端点：88 个基础端点 + 17 个扩展登记；API-089 预留不计数）
+> 依据：[PRD-v2.md](prd/PRD-v2.md)（28 FR + 15 NFR）｜[Architecture-v2.md](Architecture-v2.md)｜[API-Catalog.md](architecture/v2/API-Catalog.md)（110 个登记端点：API-001~111，API-089 预留不计数；其中 79 个已实现）
 > 编排原则：**本地可验证优先，部署与交付最后做**。
-> 估时口径：1 名资深全栈 + AI 编码辅助；1 人日 = 6 小时有效开发。总计 **≈ 102.0–105.5 人日**（Period2-08 已交付，按 8.0~11.5 计；单线程约 20 周；并行轨道可压到 ≈ 13–15 周）。
+> 估时口径：1 名资深全栈 + AI 编码辅助；1 人日 = 6 小时有效开发。最初基线 **96 人日**（附录 C）；截至 2026-11-19 未完成约 **40 人日**（二期 9 + 三期 23 + 交付 8），约占最初基线 **42%**。
 
 ---
 
@@ -66,6 +66,25 @@
 - [ ] 本期新增/变更端点：契约快照已更新、示例与错误码齐全、TS client 已重生成
 - [ ] `docs/` 中受影响文档已同步（端点/口径/门禁）
 
+### 0.6 2026-11-19 进度快照
+
+> 口径：以代码、`contracts/openapi.json` 与 `make api-check` 为准；任务完成度按 §2/§3/§4 的原始任务行统计。历史估时基线仍为 96 人日，追加任务（Period2-18~21 等）不回算旧基线。
+
+| 阶段 | 原始任务 | 已完成 | 部分完成 | 未完成 | 未完成估时 |
+|---|---|---|---|---|---|
+| 一期 | 16 | 16 | 0 | 0 | 0 |
+| 二期 | 20（Period2-01~20） | 14 | 2（2-11：API-055/096/097 已交付，056/057 待做；2-15：基础数值门禁已有，完整规则待补） | 4（2-09/10/13/14） | 9.0 |
+| 三期 | 12 | 0 | 0 | 12 | 23.0 |
+| 交付 | 7 | 0 | 0 | 7 | 8.0 |
+| **合计** | **55** | **30** | **2** | **23 + 2 部分** | **40.0** |
+
+- **进度**：原始 55 项中 30 项完成、2 项部分完成（约 56%）；剩余 25 项（含 2 项收尾；二期 6 + 三期 12 + 交付 7），约 40 人日，占最初 96 人日基线约 42%。
+- **端点**：API-Catalog 登记 114 个；已实现 85 个（`/api/v1/openapi.json` 自引用端点按已实现计；含助手 API-077/078/112~115）；未实现 29 个——二期 9 个（报告 4、导出 2、设置基准/隐私 2、选股诊断 1）+ 三期 20 个。
+- **超期交付**：Period2-21（API-107~111，超卖人工修订 + 账单数据治理）为初始任务表外加项，已于 2026-11-15~19 交付，未计入上表“原始任务”；估时约 2.5 人日。
+- **Period3-07 进展（2026-11-20）**：Chat-00~09 已落地（迁移 0020/0021、GLM provider、10 工具、上下文/压缩、语义理解、LangGraph、API-077/078/112~115、回放）；前端悬浮窗与问答历史已接入 assistant-ui。
+- **门禁状态**：`make api-check` 通过（需先补齐 API-107~109 的 Catalog 登记）；`make gate-endpoint` / 契约测试的硬编码计数已随 110/79 同步；`make gate-golden-structure` 绿，`make gate-golden`（approval）仍红 23 项。
+- **未开始**：交付阶段全部；三期除 Period3-07 后端外未开始（Period3-07 前端 P3 与完整验收待做）；`verify-p2` 仍未提供，二期验收用 `test-p2` + `test-metrics` + 各 gate 替代并显式 SKIP。
+
 ---
 
 ## 1. 总体路线
@@ -88,7 +107,7 @@ verify-p1     verify-p2     verify-p3     smoke+drill
 
 ## 2. 一期：跑通、看得见、可断言（≈29 人日）
 
-**目标**：本地 `make dev` 之后，浏览器能注册登录、上传真实账单、看到流水、撤销导入；`make verify-p1` 全绿；88 个端点里一期的 30 个有完整验收。
+**目标**：本地 `make dev` 之后，浏览器能注册登录、上传真实账单、看到流水、撤销导入；`make verify-p1` 全绿；110 个登记端点里一期的 30 个有完整验收。
 
 ### 2.1 验收剧本（5 分钟）
 
@@ -115,7 +134,7 @@ open http://localhost:5173
 | **Period1-01** | Monorepo 骨架与工具链 | `backend/`(uv workspace: contracts/core/ledger/review/delivery/platform + services/api,worker)、`frontend/`(pnpm: apps/web + packages/api-client)、`Makefile`、ruff/mypy/eslint/tsc、import-linter 基线 | — | `make lint && make typecheck` 零错误；`import-linter` 分层契约通过 | 1.5 |
 | **Period1-02** | 本地环境编排 | `infra/compose/docker-compose.dev.yml`（仅 PG）、`.env.example`、`make dev/db-up/db-reset` | Period1-01 | `make db-up` 后 `psql` 可连；`make db-reset` 可重建 | 1 |
 | **Period1-03** | DB schema + 迁移 + 多租户隔离 | Alembic 多 schema 基线（`platform`/`ledger`/`review`）、`user/refresh_token/api_token/job/import_batch/trade/quarantine_row/summary_rule/reconciliation`、RLS 策略 `tenant_isolation`、应用角色（非 owner、无 BYPASSRLS） | Period1-02 | `make migrate` 幂等；`make test-rls`：未设 `app.user_id` 读租户表返回 0 行 | 2.5 |
-| **Period1-04** | contracts + core 值对象 | `contracts`：错误码枚举（47 个 seed）、常量（`EPS_AMT/EPS_R/EPS_CUM/A`）、DTO 基座；`core`：标度整数 `Money/Qty/Price/Ratio`、`Clock` 端口、确定性随机 | Period1-01 | `make test-core`：标度整数属性测试（往返/舍入/溢出）+ core 覆盖 100% | 2 |
+| **Period1-04** | contracts + core 值对象 | `contracts`：错误码枚举（当前 63 个）、常量（`EPS_AMT/EPS_R/EPS_CUM/A`）、DTO 基座；`core`：标度整数 `Money/Qty/Price/Ratio`、`Clock` 端口、确定性随机 | Period1-01 | `make test-core`：标度整数属性测试（往返/舍入/溢出）+ core 覆盖 100% | 2 |
 | **Period1-05** | API 骨架 | FastAPI 装配根、中间件链（request_id→认证→租户→限流占位）、RFC7807 错误处理（`user_message/what_to_do` 必填）、`/healthz` `/readyz` `/version` `/api/v1/errors`、`/api/v1/openapi.json`、`GET /` 占位 | Period1-03/Period1-04 | `curl /readyz` 含 `db:ok, schema_version`；迁移滞后时 503；`/version` 与 openapi `info.version` 一致 | 1.5 |
 | **Period1-06** | 契约链路 | OpenAPI 快照生成与提交、`make api-check`（示例/错误码/operationId 完整性）、`openapi-typescript` 生成 `packages/api-client`、契约 diff 门禁 | Period1-05 | `make api-check` 退出码 0；故意删示例 → 非 0（元测试）；`make sdk` 后 git diff=0 | 1.5 |
 | **Period1-07** | 认证与 PAT | 注册/登录/刷新（轮换+复用检测）/登出/me、Argon2id、PAT 创建（明文一次）/列表/撤销、登录失败限速 | Period1-05/Period1-06 | API-001~005、007~009 验收全绿；refresh 复用 → 401；PAT 撤销 → 401 | 2.5 |
@@ -180,16 +199,17 @@ open http://localhost:5173/dashboard
 | **Period2-12** | 前端看板与下钻 | 五卡（净值/四数字/费用/行为/最赚最亏）、状态徽标（ok/stale/blocked）、下钻抽屉、回合列表与详情、对账横幅、可信度标签 | Period2-06 | 浏览器走查 §3.1 第 1–2、4 步；`blocked` 卡片不渲染数值（快照断言） | 3 |
 | **Period2-13** | 前端报告与导出页 | 报告列表/预览/下载、导出任务与下载、空态与失败态 | Period2-09 | 浏览器走查 §3.1 第 3 步 | 1.5 |
 | **Period2-14** | 二期验收与越权全量 | 二期端点验收补齐、**受保护端点越权用例 100%**、golden 回归、`make verify-p2` | 全部 P2 | `make verify-p2` 全绿；`make test-isolation` 覆盖全部受保护端点 | 2 |
-| **Period2-15** | 前端零口径门禁 | ESLint 自定义规则（禁算术/禁结论拼接/禁裸 fetch/禁裸术语）+ AST 断言 | Period2-12 | 故意在页面算一次 `a-b` → `make lint` 失败 | 1 |
+| **Period2-15** | 前端零口径门禁（**部分完成**：数值转换门禁已有） | 已有 `parseFloat/parseInt/Number/toFixed` ESLint 规则 + `charts/zero-caliber.test.ts` 全 src 扫描；**待补**：禁算术、禁结论拼接、禁裸 fetch、禁裸术语与 AST 断言 | Period2-12 | 已有规则可拦截数值转换；完整验收「页面算一次 `a-b` → `make lint` 失败」尚未满足 | 1 |
 | **Period2-16** | 资产表（每日资产快照） | `review.asset_daily/asset_build_state` + 迁移 0006、共享估值原语（`valuation.py`）、增量构建（变更指纹 + 水位线 + 45 天安全窗）、`GET /assets`、`POST /assets/build`、worker 行情装配、`docs/DATABASE.md` | Period2-03 | API-081/082 验收；增量结果与全量逐行相等；`GET /assets` 分页/过滤/blocked 显式 null、`build` 摘要齐全；门禁 82/82 | 2.5 |
 | **Period2-17** | 板块数据底座与看板 | 迁移 `0011_market_sectors` + `market` 6 表、`SectorDataSource` 端口 + akshare/replay 源 + `make sync-sectors`、`stock_core/sector/*` 纯函数（`E_map` 分母 / HHI / 概念暴露）、`GET /sectors/overview`（API-087）+ `GET /sectors`（API-088）、Dashboard 板块子块 + `/sectors` 页面（三级下钻/概念警示） | Period2-07/16 | `make sync-sectors ARGS='--dry-run'` 通过；API-087/088 验收（happy/越权/错误码）；行业 Σweight≈1、Σactive≈0，概念 `Σexposure>1` 带 `caveat`；Dashboard `[data-board]` 恰 2 个 + `links.sectors` | 2.5 |
 | **Period2-18** | FIFO 回合洞察增强（已交付 2026-11-05） | 迁移 `0012_review_round_insights`（理由/前瞻缓存）、`stock_core/insights/*`（真实日历、B0~B3、分类、聚合）、`stock_review/insights/*`、API-090~094、`/rounds/insights` 页与详情洞察区块、归因容差行 | Period2-02 | core 单测 41；API/契约/隔离 166；`pnpm -r test` 146；`api-check` 通过；未覆盖：202 >5000 笔分支（构造方式见验收记录） | 3 |
 | **Period2-19** | 用户偏好配置（**已交付 2026-11-13**：P0 + P1-1 + P1-2 + P1-3） | 迁移 `0014_user_setting_preferences`（7 列/6 CHECK + `trade_flag.flags_hash`）、`stock_contracts/preferences`、`stock_core/preferences`、`GET /settings`（API-055）+ `PATCH /settings`（API-096）+ `POST /settings/trade-flags/rebuild`（API-097）、审计与幂等；P1-1：`TradeFlagConfig` 参数化判定、文案模板、`flags_hash` 过滤与 `stale_months`、CLI 逐用户偏好；P1-2：worker `rebuild_trade_flags` + 设置页「立即重算」+ 看板/回合 stale 横幅；P1-3：概念过滤 `off/hide/exclude`（API-087 additive `filters`/`filtered_*`/条件 ETag 与 `Cache-Control`）+ 前端披露 | Period2-03 | `make test-core`（100%）；API-055/096/097 验收；API-087 过滤验收；`make api-check`；迁移升级/回滚可重放 | 2 |
-| **Period2-20** | 券商无关导入映射（**已实现并完成自动验收 2026-11-13**；手工验收 SKIP） | [设计](architecture/2026-11-13-import-mapping-refactor.md)与[交叉评审](reviews/2026-11-13-DevDesign-Review-import-mapping-refactor.md)、迁移 `0015_import_mapping_v2`、列/类型两阶段确认、用户模板、多列 `other_fee`、origin/增量撤销、API-098~106、`/import` 限定域 Tailwind + shadcn 向导 | Period1-09/10 | `test-p2` 1714、`test-metrics` 1121、隔离 144、RLS 12、前端 273 通过；静态/契约/金标/构建/预算门禁全绿；175 行金标新旧链路结果一致；偏差与手工 SKIP 见设计附录 E | — |
+| **Period2-20** | 券商无关导入映射（**已实现并完成自动验收 2026-11-13**；手工验收 SKIP） | [设计](architecture/2026-11-13-import-mapping-refactor.md)与[交叉评审](reviews/2026-11-13-DevDesign-Review-import-mapping-refactor.md)、迁移 `0015_import_mapping_v2`、列/类型两阶段确认、用户模板、多列 `other_fee`、origin/增量撤销、API-098~106、`/import` Tailwind + shadcn 向导（2026-11-19 起 Tailwind 已全局化） | Period1-09/10 | `test-p2` 1714、`test-metrics` 1121、隔离 144、RLS 12、前端 273 通过；静态/契约/金标/构建/预算门禁全绿；175 行金标新旧链路结果一致；偏差与手工 SKIP 见设计附录 E | — |
+| **Period2-21** | 超卖人工修订与账单数据治理（**已交付 2026-11-15~19；初始任务表外加项**） | 超卖卖出人工修订 API-107~109（查询未配对数量 → 补录成本/打新开关 → 注入资金腿+买入腿 → 撤回；重算回合/资产，注入行带 `revision_of`）；账单数据治理 API-110（重置本人 `ledger`/`review` 数据，不可撤销）与 API-111（旗标重建状态：`NO_CURRENT_FLAGS`/`INCOMPLETE_COVERAGE`/`PENDING_MARKET_COVERED`）；设置页重置入口与旗标更新 Modal | Period2-02/17 | `test_api_107_109_oversell_revision.py`、`test_api_110_reset_bill_data.py`、`test_api_111_trade_flags_status.py` 通过；`make api-check` / `make test-isolation` 覆盖 | 2.5 |
 
 ### 3.3 二期不做
 
-Brinson 多期链接、日志/趋势/提醒、分享、对话、限流实装、审计查询、管理端备份、生产镜像。
+Brinson 多期链接、日志/趋势/提醒、分享、对话、限流实装、审计查询、管理端备份、生产镜像。报告/导出/`verify-p2`/零口径 ESLint 门禁目前**暂停**，恢复后按 Period2-09/10/13/14/15 执行。
 
 ### 3.4 二期风险
 
@@ -228,7 +248,7 @@ make verify-p3
 | **Period3-04** | 报告分享 | 签名分享链接、匿名受限读取、撤销、过期 | Period2-09 | API-043~045 验收；匿名只能看该报告；撤销后 410 | 1 |
 | **Period3-05** | 审计 | `audit_log` 全写操作留痕、本人/管理员双视图、admin 无明细 | Period1-07/Period1-10 | API-065/066 验收；跨用户不可见 | 1.5 |
 | **Period3-06** | 管理端 | `/admin/system/status`、备份触发/列表/校验、恢复演练端点（不读明细） | Period3-05 | API-067~070 验收；admin 读 trades → 403 | 2 |
-| **Period3-07** | 对话子系统 | `ToolGateway` 白名单、`ResponseComposer` 本地填值、`EgressGuard` 出站断言、Provider 适配、模板降级、`chat` 端点、`llm_call` 留痕 | Period2-06 | API-077/078 验收；`LLM_PROVIDER=none` 仍答金额；构造含金额上下文 → 出站被拦（测试钩子） | 3 |
+| **Period3-07** | 对话子系统（**前后端已落地 2026-11-20**：GLM-4.7-Flash / GLM-4-Flash、单会话、全量入库回放、10 轮/160K 压缩、语义理解与指代；前端悬浮窗 + 问答历史） | `ChatQueryFacade` + 10 工具（含资产表、流水/回合旗标）、`QueryUnderstanding`、`ContextManager`、`AnswerComposer`、`OutputValidator`、GLM provider、`chat_turn/tool_call/llm_call` 回放；方案见 [完整开发设计](architecture/2026-11-20-intelligent-assistant-design.md) | Period2-06 | API-077/078 + 112~115 验收；`LLM_PROVIDER=none` 仍可答；GLM 故障降级原因；跨用户 404 | 后端约 12.5 + 前端 3（P3） |
 | **Period3-08** | 归因增强 | Brinson-Fachler（配置/选择/交互）+ Carino 多期链接 + 行业偏离 | Period2-08/17 | 三效应之和与区间超额 ≤1bp；期初权重 BoP（R1） | 2 |
 | **Period3-09** | 限流 | 按用户/PAT 令牌桶（PG 计数）、`429+Retry-After+X-RateLimit-*`、并发任务上限 | Period1-11 | 第 N+1 次 429；同参重算返回同 `job_id` | 1.5 |
 | **Period3-10** | 性能 | 索引复核、连接池算式、必要处分区、查询计划审查、`make load-test` 脚本 | Period2-14 | 看板 50 并发 p95 ≤300ms；导入 5000 行任务 ≤30s；全量重算 ≤60s | 2 |
@@ -313,7 +333,7 @@ make verify-p3
 
 ## 附录 A：端点与需求覆盖
 
-### A.1 端点 → 期次/任务（88/88 已排期；扩展端点按下列表登记，API-089 预留不实现）
+### A.1 端点 → 期次/任务（110/110 已排期；API-089 预留不实现）
 
 | 端点 | 期次 | 任务 | 端点 | 期次 | 任务 |
 |---|---|---|---|---|---|
@@ -356,6 +376,8 @@ make verify-p3
 | API-073 | 一 | Period1-05 | API-074 | 三 | Period3-11 |
 | API-075 | 一 | Period1-06 | API-076 | 一 | Period1-05 |
 | API-077 | 三 | Period3-07 | API-078 | 三 | Period3-07 |
+| API-112 | 三 | Period3-07 | API-113 | 三 | Period3-07 |
+| API-114 | 三 | Period3-07 | API-115 | 三 | Period3-07 |
 | API-079 | 二 | Period2-06 | API-080 | 一 | Period1-12 |
 | API-081 | 二 | Period2-16 | API-082 | 二 | Period2-16 |
 | API-083 | 二 | Period2-07 | API-084 | 二 | Period2-12 |
@@ -369,13 +391,18 @@ make verify-p3
 | API-101 | 二 | Period2-20 | API-102 | 二 | Period2-20 |
 | API-103 | 二 | Period2-20 | API-104 | 二 | Period2-20 |
 | API-105 | 二 | Period2-20 | API-106 | 二 | Period2-20 |
+| API-107 | 二 | Period2-21 | API-108 | 二 | Period2-21 |
+| API-109 | 二 | Period2-21 | API-110 | 二 | Period2-21 |
+| API-111 | 二 | Period2-21 | | | |
+
+> **实现状态（2026-11-19）**：API-107~111 已实现，归属 **Period2-21**（超卖人工修订 + 账单数据治理）；其中 API-107~109 于 2026-11-15 交付，API-110/111 于 2026-11-19 交付。
 
 > **实现状态（2026-11-13）**：API-098~106 已实现，归属 **Period2-20**（券商无关导入映射）；自动验收结果与实现偏差见[设计附录 E](architecture/2026-11-13-import-mapping-refactor.md)。
 
 > **实现状态（2026-11-13）**：API-055（GET /settings）+ API-096（PATCH /settings）+ API-097（POST /settings/trade-flags/rebuild）已实现，归属 **Period2-19**（用户偏好 P0/P1）。
 
 > **实现状态（2026-11-05）**：API-090~094（回合洞察/理由/前瞻/刷新）已实现并验收，归属 **Period2-18**；API-089 预留不实现。
-> 校验：`make api-coverage` 当前输出 L1 3/4、L2 6/6、L3 5/5、L4 5/5、L5 6/6、其他 36/67；本表与 [API-Catalog §1](architecture/v2/API-Catalog.md) 的 API-090~094 已对齐。
+> 校验：本表与 [API-Catalog §1](architecture/v2/API-Catalog.md) 已对齐；端点覆盖率以 `make api-coverage` 实时输出为准。
 
 ### A.2 FR → 期次/主任务（28/28）
 
@@ -394,14 +421,14 @@ make verify-p3
 | FR-A3 | 一 | Period3-09 | API-028、API-038、API-039、API-059、API-061、API-067 |
 | FR-A4 | 一 | Period3-05 | API-065、API-066 |
 | FR-R1 | 一 | Period2-02 | API-029、API-030 |
-| FR-R2 | 一 | Period2-01/Period2-02 | API-027~031、API-062~064 |
+| FR-R2 | 一 | Period2-01/Period2-02 | API-027~031、API-062~064、API-107~109 |
 | FR-R3 | 一 | Period2-03 | API-032 |
 | FR-R4 | 二 | Period2-07 | API-033、API-038 |
 | FR-R5 | 二 | Period2-03/Period2-07 | API-033、API-056、API-079 |
 | FR-R6 | 二 | Period2-07 | API-033 |
 | FR-R7 | 二 | Period2-08 | API-036 |
 | FR-R8 | 二 | Period2-05/Period2-06 | API-033、API-034、API-052、API-079 |
-| FR-D1 | 二 | Period1-15/Period2-12/Period2-13/Period2-17 | 全部读端点（API-005、029、032、033、036、040、047、055、087、088 等） |
+| FR-D1 | 二 | Period1-15/Period2-12/Period2-13/Period2-17 | 全部读端点（API-005、029、032、033、036、040、047、055、087、088、110、111 等） |
 | FR-D2 | 二 | Period2-09 | API-039~042、API-062 |
 | FR-D3 | 二 | Period2-06 | API-033~035 |
 | FR-D4 | 三 | Period3-01 | API-046~051 |
@@ -432,7 +459,9 @@ make verify-p3
 | 阶段 | 人日 | 主要交付 |
 |---|---|---|
 | 一期 | 29.0 | 多租户 + 导入 + 队列 + 契约 + 前端骨架 + 30 个端点 |
-| 二期 | 36.0 | 口径全链 + 四问 + 归因 + 月报 + 导出 + 板块 + ~37 个端点 |
+| 二期 | 36.0（初始基线；追加任务另计） | 口径全链 + 四问 + 归因 + 月报 + 导出 + 板块 + 端点数持续扩展 |
 | 三期 | 23.0 | 闭环 + 趋势 + 提醒 + 分享 + 对话 + 审计 + 限流 + 性能 + 审计 |
 | 交付 | 8.0 | 镜像 + nginx + 迁移 + 备份恢复 + 安全 + CI/CD + 文档 |
-| **合计** | **96.0** | 88 个基础端点 + 17 个扩展登记（API-090~106）+ 28/28 FR + 本地可验证 → 上云可交付 |
+| **合计** | **96.0（初始基线）** | 110 个登记端点（API-001~111，API-089 预留）+ 28/28 FR + 本地可验证 → 上云可交付 |
+
+> 2026-11-19 复核：任务表在初始 96 人日之外追加了 Period2-18~21 等任务，逐行估时已不等于 96；**未完成项估时仍为 40 人日**（二期 9 + 三期 23 + 交付 8，见 §0.6）。

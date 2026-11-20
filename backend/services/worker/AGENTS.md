@@ -67,11 +67,12 @@ class WorkerRunner:
     def __init__(self, settings, ...):
         self.db = Database(self.settings, role="app")        # 数据面：handler 用，受 RLS
         self.queue_db = Database(self.settings, role="owner")  # 控制面：claim/reap/heartbeat
-        self.queue = JobQueue(self.queue_db, self.clock)
+        self.queue = JobQueue(self.db, self.clock)  # JobQueue 持数据面池：progress_committed 要另开 RLS 会话
 ```
 
 - **handler 绝不能用 owner**：`_execute` 内必须 `self.db.tenant_tx(user_id)`，否则业务表漏隔离。
 - owner 只用于 JobQueue 的 claim/reap/heartbeat；dispose 时两个池都要释放。
+- 进度上报用 `queue.progress_committed(user_id, job_id, ...)`（独立短事务，SSE 立即可见）；**不要**用 `queue.progress(session, ...)`——handler 主事务未提交前进度不可见，且会把心跳/取消挡住。
 - 新增任何跨租户查询前先问：它属于控制面（owner）还是数据面（app）？
 
 ### 6. 新任务类型 = 新 handler + 新 JobQueue 注册

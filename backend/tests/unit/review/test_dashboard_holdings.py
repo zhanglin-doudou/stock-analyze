@@ -15,7 +15,7 @@ from decimal import Decimal
 from stock_ledger.models import Trade
 from stock_platform.ports import Bar, MarketCapabilities, Quote
 from stock_review.application.dashboard import (
-    _annualized_xirr,
+    _annualized_cagr,
     _drawdown_segments,
     _first_cash_gap,
     _holdings_at,
@@ -307,30 +307,46 @@ def _asset_row(
     )
 
 
-def test_annualized_xirr_follows_total_profit_sign() -> None:
-    """总收益为负时年化必须为负：小资金期正收益不能盖过大资金期亏损（TWR 会失真）。"""
+def test_annualized_cagr_uses_peak_cost_and_compounding() -> None:
+    """两年资产相对峰值成本翻倍 → CAGR = sqrt(2)-1，而非简单年化 50%。"""
     series = [
-        _asset_row(
-            date(2020, 1, 2), status="ok", daily_return_units=0, total_assets_units=200, cashflow_units=100, prev_total_assets_units=100
-        ),
-        _asset_row(
-            date(2020, 6, 1), status="ok", daily_return_units=0, total_assets_units=250, prev_total_assets_units=200
-        ),
-        _asset_row(
-            date(2021, 1, 4), status="ok", daily_return_units=0, total_assets_units=1200, cashflow_units=1000, prev_total_assets_units=250
-        ),
-        _asset_row(
-            date(2022, 1, 4), status="ok", daily_return_units=0, total_assets_units=1100, prev_total_assets_units=1200
-        ),
+        _asset_row(date(2021, 1, 1), status="ok", daily_return_units=0),
+        _asset_row(date(2023, 1, 1), status="ok", daily_return_units=0),
     ]
-    assert _annualized_xirr(series) is not None
-    assert _annualized_xirr(series) < 0
+
+    assert _annualized_cagr(series, total_profit_units=10000, peak_cost_units=10000) == 41421356
 
 
-def test_annualized_xirr_requires_two_valid_days() -> None:
-    assert _annualized_xirr([]) is None
+def test_annualized_cagr_supports_loss_and_zero_growth() -> None:
+    series = [
+        _asset_row(date(2019, 1, 1), status="ok", daily_return_units=0),
+        _asset_row(date(2020, 1, 1), status="ok", daily_return_units=0),
+    ]
+
+    assert _annualized_cagr(series, total_profit_units=-5000, peak_cost_units=10000) == -50000000
+    assert _annualized_cagr(series, total_profit_units=0, peak_cost_units=10000) == 0
+    assert _annualized_cagr(series, total_profit_units=-10000, peak_cost_units=10000) == -100000000
+    assert _annualized_cagr(series, total_profit_units=-10001, peak_cost_units=10000) is None
+
+
+def test_annualized_cagr_requires_valid_period_and_positive_peak_cost() -> None:
+    row = _asset_row(date(2020, 1, 2), status="ok", daily_return_units=0)
+    assert _annualized_cagr([], total_profit_units=100, peak_cost_units=100) is None
+    assert _annualized_cagr([row], total_profit_units=100, peak_cost_units=100) is None
     assert (
-        _annualized_xirr([_asset_row(date(2020, 1, 2), status="ok", daily_return_units=0)])
+        _annualized_cagr(
+            [row, _asset_row(date(2021, 1, 2), status="ok", daily_return_units=0)],
+            total_profit_units=100,
+            peak_cost_units=0,
+        )
+        is None
+    )
+    assert (
+        _annualized_cagr(
+            [row, _asset_row(date(2021, 1, 2), status="ok", daily_return_units=0)],
+            total_profit_units=None,
+            peak_cost_units=100,
+        )
         is None
     )
 

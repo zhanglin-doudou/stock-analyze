@@ -217,8 +217,8 @@ async def reclassify_user(
             quarantined += 1
         if index % 25 == 0:
             percent = min(90, 5 + int(index / total * 85))
-            await queue.progress(
-                session, job_id, percent=percent, stage="recomputing", message=None
+            await queue.progress_committed(
+                user_id, job_id, percent=percent, stage="recomputing", message=None
             )
 
     backfilled = await _backfill_resolved(user_id, rules_repo, trade_repo, quarantine_repo)

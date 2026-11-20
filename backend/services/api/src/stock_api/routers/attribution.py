@@ -52,7 +52,7 @@ _FIELD_LABELS: dict[str, str] = {
 _BUCKET_LABELS: dict[str, str] = {
     "corporate_action_pnl": "公司行动",
     "unattributed_price_pnl": "未归因标的损益",
-    "dividend_without_position": "无持仓分红",
+    "dividend_without_position": "税后股息净额（含红利税）",
     "interest": "利息",
     "ipo_pnl": "打新收益",
     "other_cashflow": "其他现金流",
@@ -61,7 +61,7 @@ _BUCKET_LABELS: dict[str, str] = {
 _BUCKET_LABELS_EN: dict[str, str] = {
     "corporate_action_pnl": "Corporate actions",
     "unattributed_price_pnl": "Unattributed symbol P&L",
-    "dividend_without_position": "Dividends without position",
+    "dividend_without_position": "Net dividends after tax (incl. WHT)",
     "interest": "Interest",
     "ipo_pnl": "New-share (IPO) P&L",
     "other_cashflow": "Other cash flows",

@@ -2,6 +2,7 @@
 
 > 状态：**v0.2 — 已完成交叉评审并关闭 P0（3 名独立评审，记录见 [交叉评审](../reviews/2026-10-28-DevDesign-Review-dashboard.md)）；待人工拍板 A 类口径；本阶段只出文档，不写生产代码、不改 API/数据库**
 > 日期：2026-10-28 ｜ 作者：AI（Team Lead）
+> **2026-11-19 复核**：本文件是 Period2-12 的设计/验收快照；其中「G8 22 个 COVERAGE 骨架 + fee_breakeven」已细化为 **approval 红 23 项**（structure 已绿），`API-Catalog` 头已更新为 **110 端点 / 79 已实现**；其余暂停项不变：2-09/10/11-056/057/13/14 未完成，2-15 仅有数值转换基础门禁、完整规则待补。
 > 需求来源：用户本轮诉求（Dashboard 两板块 + 未完成验收入口预留/缺失清单）；`docs/DEV-PLAN-v2.md` §3.1/Period2-12；`docs/prd/PRD-v2.md` FR-D1；`docs/architecture/v2/API-Catalog.md` API-027/029/032/033/081/083；`docs/architecture/v2/Testing.md` §7。
 > 事实基线（2026-10-28）：
 > - 前端**没有** `Dashboard` 页面；`/` 目前重定向 `/trades`（`frontend/apps/web/src/router.tsx`）。
@@ -101,7 +102,7 @@
 | H8 | 最大回撤时间段 + 回撤收益率 | `history_overview.max_drawdown.{from,to,duration_days,mdd_pct}` | 最大回撤区间/幅度 | `kpi-max-drawdown` | 全历史 asset_daily 日收益（D-05） |
 | A8 | 账单起止时间 | `asset_overview.bill_start_date` → `bill_end_date` | 账单 起始 → 截止 | `kpi-bill-range` | 全历史流水首/末交易日（D-20） |
 | A9 | 初始资金 | `asset_overview.initial_capital` | 初始资金 | `kpi-initial-capital` | 桥接期初现金 + 期初持仓成本（D-20） |
-| A10 | 年化收益率 | `asset_overview.annualized_return_pct` | 年化收益率 | `kpi-annualized-return` | 全历史年化 XIRR（D-21） |
+| A10 | 年化收益率（CAGR） | `asset_overview.annualized_return_pct` | 年化收益率（CAGR） | `kpi-annualized-return` | 全历史峰值成本复合年化（D-21，2026-11-20 修订） |
 
 **额外展示（不计入 15 项，但页面/旧验收需要）**：`total_assets`、`closed_round_count`、`flat_count/win_bar_pct...`、`max_profit_round`、`top_rounds/bottom_rounds`、`recovery_days/censored`、`legacy_period`、`missing[]`、`status/data_as_of`。**A8/A9/A10 为评审后追加的用户字段（原 15 项之外，A8/A9 展示于「总资产」下方一行、A10 展示于「总费用消耗」之后）**；这些字段的产生和验收单独列在 §7/§8；DASH-01 只断言上表 15 行 + A8/A9/A10 + 额外字段不缺失/类型正确。
 
@@ -157,7 +158,7 @@
 | `total_fees` | 全历史 `fee_breakdown(trades_until_A)` 的 `fee_amount`（佣金+印花税+其他费+独立费用行；货基按现金等价物剔除） | CNY 2 位 | 无流水 → `"0.00"`；**不存在"费用列缺失"状态**（三列 NOT NULL default 0），若解析警告缺列则 `degraded` |
 | `bill_start_date` / `bill_end_date` | 全历史流水的首/末 `trade_date`（D-20；流水一次加载至 `today`） | date | 无流水 → null（`DASHBOARD_BILL_RANGE_MISSING`） |
 | `initial_capital` | `B.initial_cash + B.initial_open_cost`（桥接期初资金，D-20；与 `total_profit` 同源） | CNY 2 位 | B blocked → null（`DASHBOARD_INITIAL_CAPITAL_MISSING`）；A 缺失/blocked → null |
-| `annualized_return_pct` | **全历史年化 XIRR**（D-21）：以 `asset_daily` 期初锚点（首行 `prev_total`）+ 各日外部现金流 + 期末总资产解 XIRR（scale=8，与 `/nav` 的 `mwr` 同源）；保证与 `total_profit` 同向 | `"12.34%"`（raw `annualized_return` scale=8） | 有效观测 < 2 或无有效现金流 → null（`DASHBOARD_ANNUALIZED_RETURN_UNAVAILABLE`）；A 缺失/blocked → null |
+| `annualized_return_pct` | **全历史峰值成本 CAGR**（D-21，2026-11-20 修订）：`CAGR = (1 + 总收益 / 峰值转入成本)^(365 / 首末有效资产日自然日数) - 1`；`total_profit` 与 `max_invested_cost` 同源于本表，raw scale=8 | `"12.34%"`（raw `annualized_return` scale=8） | 有效观测 < 2、首末日期相同、峰值转入成本 ≤ 0 或增长系数 < 0 → null（`DASHBOARD_ANNUALIZED_RETURN_UNAVAILABLE`）；A 缺失/blocked → null |
 | `weight_pct`（持仓行） | `holding.market_value / Σholdings.market_value` | `"100.00%"` | 无持仓/总市值 0 → null；行内权重和≈100%（按后端 2 位舍入容差 `n×0.5bp`） |
 | `settlement_status` / `reconciliation` | 对账横幅数据（API-026） | 对象 | 无对账数据 → 隐藏 |
 
@@ -243,7 +244,7 @@
   "legacy_period": "2026-06",
   "status": "ok",
   "definition_version": "1.0",
-  "dashboard_version": "1.0",
+  "dashboard_version": "1.1",
   "inputs_hash": "sha256:…",
   "assumptions": {"calendar": "weekday_proxy", "benchmark_id": "hs300_tr"},
   "missing": [],
@@ -595,7 +596,7 @@ printf 'SKIP: %s\n' "${SKIPS[@]}"
 | 层 | 文件 | 用例 |
 |---|---|---|
 | 纯函数 | `backend/tests/unit/core/test_drawdown_window.py` | 无回撤/V 形/单调下跌/未恢复/blocked/异常收益 |
-| 应用 | `backend/tests/unit/review/test_dashboard_application.py` | 15 字段、总收益公式、桥接期初资金（A9）、账单起止（A8）、年化 TWR（A10）、资金划转峰值转入成本、盈亏占比、Top3（持仓时长；交易次数按流水 buy/sell + 个股累计收益/总费用）、缺失状态、禁写库 |
+| 应用 | `backend/tests/unit/review/test_dashboard_holdings.py` | 15 字段、总收益公式、桥接期初资金（A9）、账单起止（A8）、峰值成本 CAGR（A10）、资金划转峰值转入成本、盈亏占比、Top3（持仓时长；交易次数按流水 buy/sell + 个股累计收益/总费用）、缺失状态、禁写库 |
 | API | `backend/tests/api/test_dashboard.py` | 200/字段格式（含账单起止/初始资金、交易次数买卖拆分+个股收益/费用）、空数据 200 missing、blocked 200、**无 token 401、admin 403、B 列表型 200 且无 A 数据**（不是跨租户 404）、无敏感字段、op coverage ≥3 |
 | 隔离 | `backend/tests/isolation/test_isolation_matrix.py` | `LIST_ISOLATION_MATRIX`（B 200 无 A）、`ADMIN_FORBIDDEN`（403）、`UNAUTHENTICATED_MATRIX`（401）；gate-tenant |
 | 契约 | `make api-snapshot/api-check/sdk` + `backend/tests/contract/test_openapi_contract.py` | API-084 在 `OPERATION_META`、422/401/403 错误码、example；契约 operation 数 50→51（或同步集合）；`gate_endpoint_coverage` 84/30 |
@@ -699,6 +700,6 @@ printf 'SKIP: %s\n' "${SKIPS[@]}"
 | D-14 | 持仓成本/估值来源 | 与 asset_daily 同成本模型；短窗行情 + `holdings_at` | FIFO 全历史回放 | 性能/一致性 |
 | D-15 | 性能 | 单次加载 + DB 聚合；300ms 目标；50k 夹具后续 | 物化/cache/降低夹具 | 是否允许缓存 |
 | D-20 | 账单起止 + 初始资金 + 交易次数 Top3 口径 | 「总资产」下方展示全历史流水首/末交易日 + 桥接期初资金（`initial_cash + initial_open_cost`，与总收益同源）；交易次数按**流水 buy/sell 行数**分别计数，Top3 每行展示该股**全部回合 pnl**（含 open 已实现、剔除 data_error）与**总费用金额**（不做费率）；无流水/无锚点 → `null` + `DASHBOARD_BILL_RANGE_MISSING` / `DASHBOARD_INITIAL_CAPITAL_MISSING` | ① 初始资金=期初现金（遗漏期初持仓成本）；② 交易次数按 Round 行数；③ 展示费率分母（用户改为展示总费用） | 影响 A8/A9 展示口径与 Top3 排序/字段 |
-| D-21 | 年化收益率口径 | **全历史年化 XIRR**（资金加权，与 `/nav` 的 `mwr` 同源）：以资产表期初锚点、各日外部现金流与期末总资产求解，保证与 `total_profit` 同向；展示于「总费用消耗」之后 | ① 简单年化（总收益/初始资金）；② 全历史年化 TWR（与资金规模无关，可能出现总收益为负而年化为正） | 影响 A10 数值与展示 |
+| D-21 | 年化收益率口径 | **2026-11-20 修订为全历史峰值成本 CAGR**：`(1 + total_profit / max_invested_cost)^(365 / 首末有效资产日自然日数) - 1`；与 A9 共用总收益和峰值转入成本，前端标题标识「年化收益率（CAGR）」并以 tooltip 展示公式 | ① 简单年化（总收益/峰值成本×365/天数）；② 全历史年化 XIRR（资金加权，受现金流时点影响）；③ 全历史年化 TWR | 影响 A10 数值与展示；本次由 XIRR 改为 CAGR |
 
 > 若人工未在实现前排板：按推荐实现；涉及口径的 D-01/D-02/D-03/D-05/D-11/D-14 必须在 golden/验收前确认，否则只做占位不出数。**评审 P0 已在本 v0.2 文档修订；P0 关闭条件见交叉评审记录。**

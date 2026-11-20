@@ -477,7 +477,8 @@ describe("RoundDetail 回合详情页", () => {
     expect(await screen.findByText("买卖流水与事后表现")).toBeTruthy();
     expect(screen.getByText("事后标注")).toBeTruthy();
     expect(screen.getByText("业绩超预期")).toBeTruthy();
-    expect(screen.getByText("抄底×2")).toBeTruthy();
+    const bottomBuy = screen.getByText("×2");
+    expect(bottomBuy.parentElement?.textContent).toBe("抄底×2");
     expect(screen.getByText("收益回撤")).toBeTruthy();
     expect(screen.getByText("买入后相对基准（20 日）")).toBeTruthy();
     expect(screen.getAllByText("-1.10%").length).toBeGreaterThan(0);

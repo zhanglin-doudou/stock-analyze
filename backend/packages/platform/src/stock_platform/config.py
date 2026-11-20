@@ -111,7 +111,47 @@ class Settings(BaseSettings):
 
     # 指标引擎：无风险利率（C-24，D-14）
     rf_annual: Decimal = Field(RF_ANNUAL_DEFAULT, alias="RF_ANNUAL")
+
+    # ── 智能分析助手（2026-11-20）──────────────────────────
+    # GLM 免费版：key/base/model 由本地 .env 注入；禁止打印/入库。
     llm_provider: Literal["none", "glm", "local"] = Field("none", alias="LLM_PROVIDER")
+    glm_api_key: str | None = Field(None, alias="GLM_API_KEY", repr=False)
+    glm_base_url: str = Field(
+        "https://open.bigmodel.cn/api/paas/v4", alias="GLM_BASE_URL"
+    )
+    glm_model: str = Field("glm-4.7-flash", alias="GLM_MODEL")
+    llm_timeout_seconds: float = Field(60.0, alias="LLM_TIMEOUT_SECONDS")
+    llm_max_output_tokens: int = Field(4096, alias="LLM_MAX_OUTPUT_TOKENS")
+    llm_understanding_max_tokens: int = Field(
+        2048, alias="LLM_UNDERSTANDING_MAX_TOKENS"
+    )
+    llm_temperature: float = Field(0.2, alias="LLM_TEMPERATURE")
+    llm_thinking: Literal["disabled", "enabled"] = Field(
+        "disabled", alias="LLM_THINKING"
+    )
+    llm_context_window_tokens: int = Field(200_000, alias="LLM_CONTEXT_WINDOW_TOKENS")
+    llm_context_compress_ratio: float = Field(
+        0.8, alias="LLM_CONTEXT_COMPRESS_RATIO"
+    )
+    llm_history_turns: int = Field(10, alias="LLM_HISTORY_TURNS")
+    llm_max_concurrency: int = Field(2, alias="LLM_MAX_CONCURRENCY")
+    llm_retry_on_429: int = Field(2, alias="LLM_RETRY_ON_429")
+    llm_retry_backoff_seconds: float = Field(
+        2.0, alias="LLM_RETRY_BACKOFF_SECONDS"
+    )
+    llm_daily_token_budget: int | None = Field(None, alias="LLM_DAILY_TOKEN_BUDGET")
+    llm_token_estimator: Literal["approx", "tiktoken"] = Field(
+        "approx", alias="LLM_TOKEN_ESTIMATOR"
+    )
+    chat_rpm: int = Field(3, alias="CHAT_RPM")
+    chat_daily_turns: int = Field(50, alias="CHAT_DAILY_TURNS")
+    chat_retention_days: int = Field(180, alias="CHAT_RETENTION_DAYS")
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def llm_enabled(self) -> bool:
+        """显式开关：none/local 不调用远端；glm 必须有 key。"""
+        return self.llm_provider == "glm" and bool(self.glm_api_key)
 
     # ── 运维 ──────────────────────────────────────────────
     readyz_timeout_seconds: float = Field(2.0, alias="STOCK_READYZ_TIMEOUT_SECONDS")

@@ -38,7 +38,9 @@ export type IconName =
   | "focus"
   | "theme"
   | "dot"
-  | "copy";
+  | "copy"
+  | "star"
+  | "chat";
 
 const PATHS: Record<IconName, ReactNode> = {
   /* ── 一级分组 ─────────────────────────────── */
@@ -202,6 +204,15 @@ const PATHS: Record<IconName, ReactNode> = {
     <>
       <rect x="9" y="9" width="11.5" height="11.5" rx="2" />
       <path d="M15 6.5V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h1.5" />
+    </>
+  ),
+  // 星星助手：五角星（区别于「核心」四角星）
+  star: <path d="M12 3.2l2.7 5.5 6.1.9-4.4 4.3 1 6.1-5.4-2.9-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z" />,
+  // 问答历史：对话气泡（区别于「导入记录」的档案盒）
+  chat: (
+    <>
+      <path d="M4 5.5h16v10.2H9l-4.5 3.4v-3.4H4z" />
+      <path d="M8 9h8M8 12h5" />
     </>
   ),
 };

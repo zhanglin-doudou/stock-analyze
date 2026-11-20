@@ -248,7 +248,7 @@ async def commit_batch(
             )
 
         preview = await preview_repo.by_id(user_id, preview_id, now=clock.now())
-        await queue.progress(session, job_id, percent=5, stage="parsing", message=None)
+        await queue.progress_committed(user_id, job_id, percent=5, stage="parsing", message=None)
 
         adopted_id = params.get("batch_id")
         batch = await batch_repo.by_id(user_id, str(adopted_id)) if adopted_id is not None else None
@@ -330,7 +330,7 @@ async def commit_batch(
             )
             return {"job_id": job_id, "cancelled": True}
 
-        await queue.progress(session, job_id, percent=35, stage="writing", message=None)
+        await queue.progress_committed(user_id, job_id, percent=35, stage="writing", message=None)
 
         if batch is not None:
             # 收养 API-011 同步创建的 PENDING 批次；快照字段保持提交时原值。
@@ -492,7 +492,9 @@ async def commit_batch(
         if quarantine_payloads:
             await QuarantineRepository(session).add_many(user_id, quarantine_payloads)
 
-        await queue.progress(session, job_id, percent=85, stage="finalizing", message=None)
+        await queue.progress_committed(
+            user_id, job_id, percent=85, stage="finalizing", message=None
+        )
         coverage_from = replace_from if replace_from is not None else bill_from
         coverage_to = replace_to if replace_to is not None else bill_to
         ranges: dict[str, Any] = (
@@ -775,7 +777,7 @@ async def revoke_batch(
     reason = str(params.get("reason") or "user_request")
     try:
         savepoint = await session.begin_nested()
-        await queue.progress(session, job_id, percent=20, stage="writing", message=None)
+        await queue.progress_committed(user_id, job_id, percent=20, stage="writing", message=None)
         outcome = await revoke_batch_now(
             session, user_id=user_id, batch_id=batch_id, clock=clock, reason=reason
         )

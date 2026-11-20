@@ -11,10 +11,11 @@ from datetime import timedelta
 from typing import Any
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, text
 from stock_contracts.clock import FrozenClock
 from stock_contracts.enums import JobStatus
 from stock_contracts.errors import ApiError, ErrorCode
+from stock_platform.config import Settings
 from stock_platform.db import Database
 from stock_platform.jobs import LEASE_SECONDS, JobQueue
 from stock_platform.models import Job, JobEvent
@@ -59,6 +60,30 @@ async def _events(db: Database, job_id: str) -> list[JobEvent]:
             select(JobEvent).where(JobEvent.job_id == job_id).order_by(JobEvent.seq)
         )
         return list(rows)
+
+
+async def test_progress_committed_visible_before_business_tx_commits(
+    db: Database, settings: Settings, user_id: uuid.UUID, clock: FrozenClock
+) -> None:
+    """进度用独立短事务提交：handler 主事务未提交时，SSE 侧（另开连接）已能读到。"""
+    app_db = Database(settings, role="app")
+    queue = JobQueue(app_db, clock)
+    try:
+        job_id, _reused = await _enqueue(db, queue, user_id)
+        async with app_db.tenant_tx(user_id) as business:
+            await business.execute(text("select 1"))  # 主事务保持打开（模拟长任务）
+            await queue.progress_committed(
+                user_id, job_id, percent=10, stage="recomputing", message=None
+            )
+            # 事件与进度立刻可见，不依赖 business 提交。
+            events = await _events(db, job_id)
+            assert [event.type for event in events][-1] == "progress"
+            assert events[-1].seq == events[-2].seq + 1
+            job = await _load(db, queue, job_id)
+            assert job.progress == 10
+            assert job.stage == "recomputing"
+    finally:
+        await app_db.dispose()
 
 
 # ── 单飞：同参复用 / 异参 409 ───────────────────────────────

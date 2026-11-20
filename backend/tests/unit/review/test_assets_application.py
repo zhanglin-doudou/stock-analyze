@@ -20,6 +20,7 @@ from stock_review.application.assets import (
     MISSING_PRICE_PREFIX,
     MISSING_QUOTE_HINT,
     OVERSELL_REASON,
+    STALE_QUOTE_REASON_PREFIX,
     _ratio_units,
     _session_notice,
     align_to_trading_day,
@@ -163,6 +164,7 @@ def _trade(
     category: str,
     amount_units: int,
     security_code: str = "600519",
+    security_name: str | None = None,
     quantity_units: int = 0,
     price_units: int = 0,
     cash_balance_units: int | None = None,
@@ -175,7 +177,7 @@ def _trade(
         batch_id=None,
         trade_date=trade_date,
         security_code=security_code,
-        security_name=security_code,
+        security_name=security_name or security_code,
         side=side,
         quantity_units=quantity_units,
         price_units=price_units,
@@ -811,6 +813,35 @@ def test_uncovered_market_degraded_only_when_holding() -> None:
     ]
     cash_result = _run(pure_cash, date(2026, 1, 1), date(2026, 1, 3), as_of=date(2026, 1, 1))
     assert all(row["status"] == "ok" for row in cash_result.rows)
+
+
+def test_stale_quote_on_data_as_of_day_degrades_with_code_and_name() -> None:
+    """data_as_of 当天：持仓股缺当日行情但有更早收盘 → 该日 degraded 且透出代码+名称。"""
+    trades = [
+        _trade(
+            trade_date=date(2026, 1, 2),
+            category="other",
+            amount_units=0,
+            cash_balance_units=cents("100000.00"),
+            line_no=1,
+        ),
+        _trade(
+            trade_date=date(2026, 1, 2),
+            category="buy",
+            security_name="贵州茅台",
+            amount_units=-cents("1000.00"),
+            quantity_units=shares("100"),
+            price_units=price("10.00"),
+            line_no=2,
+        ),
+    ]
+    ladder = _ladder(_bar("600519", date(2026, 1, 2), "10.00"))
+    result = _run(trades, date(2026, 1, 2), date(2026, 1, 5), ladder=ladder, as_of=date(2026, 1, 5))
+
+    assert _row(result, date(2026, 1, 2))["status"] == "ok"
+    stale = _row(result, date(2026, 1, 5))
+    assert stale["status"] == "degraded"
+    assert stale["status_reason"] == f"{STALE_QUOTE_REASON_PREFIX}：600519 贵州茅台"
 
 
 def test_fifo_error_only_degrades_days_with_problem_holdings() -> None:

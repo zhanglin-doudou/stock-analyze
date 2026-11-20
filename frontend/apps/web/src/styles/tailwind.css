@@ -1,0 +1,44 @@
+/*
+ * 全局 Tailwind 入口（2026-11-19 UI 全局化）。
+ *
+ * - 只由 `src/main.tsx` 引入一次，所有路由共享；
+ * - `preflight:false`，因此这里补一层**只作用于 `tw-` 类元素**的最小 reset：
+ *   1) Tailwind 的 border 工具类只写 width，需要 solid/border-color 兜底；
+ *   2) 原生表单控件继承项目字体；
+ *   3) `tw-` 容器内的标题/段落去掉 UA 外边距（组件内布局由工具类决定）。
+ * - 不复刻完整 preflight：既有 14 个页面依赖 UA 排版，不能被全局重置。
+ * - 选择器全部包在 `:where()` 里（特异性 0），既有 class 规则始终优先。
+ */
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :where([class^="tw-"], [class*=" tw-"]),
+  :where([class^="tw-"], [class*=" tw-"])::before,
+  :where([class^="tw-"], [class*=" tw-"])::after {
+    border-width: 0;
+    border-style: solid;
+    border-color: var(--line);
+  }
+
+  :where([class^="tw-"], [class*=" tw-"]) :where(button, input, optgroup, select, textarea) {
+    font: inherit;
+    color: inherit;
+    letter-spacing: inherit;
+  }
+
+  :where([class^="tw-"], [class*=" tw-"]) :where(h1, h2, h3, h4, h5, h6, p, ol, ul, label) {
+    margin: 0;
+  }
+}
+
+/* 与 tokens.css 的 --dur:0ms 对齐：Radix 浮层动画遵守减少动效偏好。 */
+@media (prefers-reduced-motion: reduce) {
+  :where([class^="tw-"], [class*=" tw-"]) {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

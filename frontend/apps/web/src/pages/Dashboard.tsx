@@ -13,6 +13,7 @@ import { api } from "../client";
 import { useJobCompletion } from "../lib/useJobCompletion";
 import { useStaleAssetBuild } from "../lib/useStaleAssetBuild";
 import { TrendChart } from "../charts/TrendChart";
+import { HintTooltip } from "@/components/ui/tooltip";
 import { SectorBlock } from "./dashboard/SectorBlock";
 import { TradeFlagCharts } from "./dashboard/TradeFlagCharts";
 import { ProblemView } from "../ui/Problem";
@@ -68,15 +69,25 @@ function Kpi({
   value,
   testId,
   hint,
+  labelTooltip,
 }: {
   label: string;
   value: string | null | undefined;
   testId: string;
   hint?: ReactNode;
+  labelTooltip?: string;
 }): ReactElement {
   return (
     <div className="dash-kpi" data-testid={testId}>
-      <span className="dash-kpi-label">{label}</span>
+      <span className="dash-kpi-label">
+        {labelTooltip ? (
+          <HintTooltip content={labelTooltip} label={`${label}算法`}>
+            {label}
+          </HintTooltip>
+        ) : (
+          label
+        )}
+      </span>
       <Value value={value} />
       {hint ? <span className="dash-kpi-hint">{hint}</span> : null}
     </div>
@@ -320,7 +331,7 @@ export function Dashboard(): ReactElement {
           全历史 · 数据截至 <i className="danger-text">{data.data_as_of ?? "—"}</i> · 行情来自系统缓存（仅收盘后同步，盘中不拉取实时行情）· 口径：{data.definition_version}
         </div>
         <h1 className="dash-title">看板</h1>
-        <p className="dash-sub"><h3>先看清自己，再看清市场。</h3>所有数值均为后端口径，本页只做呈现与下钻。各类分析已剔除货币基金等固定收益相关交易。</p>
+        <div className="dash-sub"><h3>先看清自己，再看清市场。</h3>所有数值均为后端口径，本页只做呈现与下钻。各类分析已剔除货币基金等固定收益相关交易。</div>
         <div className="dash-head-meta" data-testid="dashboard-meta">
           <span>
             构建状态 <StatusBadge status={data.build_state} kind="build" />
@@ -469,8 +480,9 @@ export function Dashboard(): ReactElement {
             testId="kpi-total-fees"
           />
           <Kpi
-            label="年化收益率"
+            label="年化收益率（CAGR）"
             value={asset.annualized_return_pct}
+            labelTooltip="CAGR = (1 + 总收益 ÷ 资金划转峰值转入成本)^(365 ÷ 首末自然日数) − 1，全历史复合年化"
             testId="kpi-annualized-return"
           />
         </div>

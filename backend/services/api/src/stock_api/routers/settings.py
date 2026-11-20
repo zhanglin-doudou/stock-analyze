@@ -54,8 +54,9 @@ from stock_review.models import (
     TradeForwardReturn,
     TradeReason,
 )
+from stock_review.trade_flags import load_flag_config, trade_flag_rebuild_status
 
-from stock_api.deps import get_state, get_tenant
+from stock_api.deps import get_market_data, get_state, get_tenant
 from stock_api.routing import StrictQueryRoute
 from stock_api.schemas import (
     AppearancePrefsOut,
@@ -67,8 +68,11 @@ from stock_api.schemas import (
     MarketSessionsPrefsOut,
     SettingsOut,
     SettingsPatchIn,
+    TradeFlagCountOut,
     TradeFlagRebuildAccepted,
     TradeFlagRebuildIn,
+    TradeFlagRebuildReasonOut,
+    TradeFlagRebuildStatusOut,
 )
 
 router = APIRouter(tags=["settings"], route_class=StrictQueryRoute)
@@ -338,6 +342,54 @@ async def patch_settings(
     return out
 
 
+@router.get(
+    "/settings/trade-flags/status",
+    response_model=TradeFlagRebuildStatusOut,
+    operation_id="getTradeFlagRebuildStatus",
+)
+async def get_trade_flag_rebuild_status(
+    request: Request,
+    ctx: Annotated[TenantContext, Depends(get_tenant)],
+) -> TradeFlagRebuildStatusOut:
+    """API-111：账单旗标是否需要重建 + 库内旗标统计（纯读）。"""
+    ctx.forbid_admin_trades()
+    user_id = ctx.require_user()
+    state = get_state(request)
+    async with state.db.session(user_id=user_id, begin=True) as session:
+        _, flags_hash = await load_flag_config(session, user_id)
+        status = await trade_flag_rebuild_status(
+            session,
+            user_id,
+            market_data=get_market_data(request),
+            flags_hash=flags_hash,
+        )
+    return TradeFlagRebuildStatusOut(
+        needs_rebuild=status.needs_rebuild,
+        reasons=[
+            TradeFlagRebuildReasonOut(code=item.code, message=item.message)
+            for item in status.reasons
+        ],
+        definition_version=status.definition_version,
+        flags_hash=status.flags_hash,
+        has_bill_data=status.has_bill_data,
+        bill_count=status.bill_count,
+        current_flag_rows=status.current_flag_rows,
+        legacy_flag_rows=status.legacy_flag_rows,
+        pending_count=status.pending_count,
+        pending_covered_count=status.pending_covered_count,
+        pending_months=list(status.pending_months),
+        uncovered_count=status.uncovered_count,
+        uncovered_months=list(status.uncovered_months),
+        market_as_of=status.market_as_of,
+        flag_kinds=status.flag_kinds,
+        flag_total=status.flag_total,
+        flags=[
+            TradeFlagCountOut(code=item.code, label_zh=item.label_zh, count=item.count)
+            for item in status.flags
+        ],
+    )
+
+
 def _normalized_months(scope: str, raw: list[str]) -> list[str]:
     """校验并规范化重建范围：`months` 去重排序、`YYYY-MM`、≤120；`all` 不接受 months。"""
     if scope == "all":
@@ -403,13 +455,19 @@ async def rebuild_trade_flags(
             ErrorCode.VALIDATION_ERROR,
             errors=[FieldError("Idempotency-Key", "required", "该操作必须携带幂等键(16~128)")],
         )
+    if payload.mode == "auto" and payload.scope != "all":
+        raise ApiError(
+            ErrorCode.VALIDATION_ERROR,
+            detail="mode=auto 仅支持 scope=all",
+            errors=[FieldError("mode", "invalid", "自动更新只能覆盖全部历史月份")],
+        )
     months = _normalized_months(payload.scope, payload.months)
     request_hash = hashlib.sha256(
         canonical_json(
             {
                 "method": "POST",
                 "path": "/settings/trade-flags/rebuild",
-                "body": {"scope": payload.scope, "months": months},
+                "body": {"scope": payload.scope, "months": months, "mode": payload.mode},
             }
         ).encode("utf-8")
     ).hexdigest()
@@ -450,7 +508,7 @@ async def rebuild_trade_flags(
             kind="rebuild_trade_flags",
             user_id=user_id,
             scope_key=f"{user_id}:trade_flags",
-            params={"scope": payload.scope, "months": months},
+            params={"scope": payload.scope, "months": months, "mode": payload.mode},
         )
         accepted = TradeFlagRebuildAccepted(
             job_id=job_id,

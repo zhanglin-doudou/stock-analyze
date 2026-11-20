@@ -263,6 +263,30 @@ class JobQueue:
             session, job_id, "progress", {"progress": percent, "stage": stage, "message": message}
         )
 
+    async def progress_committed(
+        self,
+        user_id: uuid.UUID,
+        job_id: str,
+        *,
+        percent: int,
+        stage: str,
+        message: str | None = None,
+    ) -> None:
+        """独立短事务上报进度（只在 stage 边界调用），提交后 SSE 立即可见。
+
+        为什么不用 `progress()`：worker 把整个 handler 包在一个长事务里，`emit()` 只
+        `flush` 不提交，进度事件要等任务结束、主事务提交后一次性可见（前端表现为所有
+        SSE 帧同一时刻到达，取消/续租也被主事务的行锁挡住）。
+
+        实现要点：
+        - 另开一条连接（同一 app 池 + RLS 租户上下文），不共享 handler 的会话；
+        - 先 `UPDATE job` 拿行锁、再在 `emit()` 里算 `seq`，与 `finish()`/`fail_or_retry()`
+          串行，避免 `uq_job_event_seq` 冲突；
+        - 进度是 best-effort：业务数据仍只由 handler 主事务提交，终态以 done/error 为准。
+        """
+        async with self._db.tenant_tx(user_id) as session:
+            await self.progress(session, job_id, percent=percent, stage=stage, message=message)
+
     async def request_cancel(self, session: AsyncSession, job_id: str) -> JobStatus | None:
         """请求取消：PENDING 直接终态 cancelled（立即可见）；RUNNING 仅置 flag。
 

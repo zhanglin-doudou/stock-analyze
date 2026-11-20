@@ -46,6 +46,28 @@
   box-shadow: var(--focus-ring);
 }
 
+/* 文本入口：更新账单旗标（弹窗触发）。 */
+.tfc-text-btn {
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: var(--fs-sm);
+  cursor: pointer;
+  transition: color var(--dur) var(--ease);
+  text-decoration: underline;
+}
+
+.tfc-text-btn:hover {
+  color: var(--accent);
+}
+
+.tfc-text-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
 .tfc-basis,
 .tfc-unbuilt {
   margin: var(--s2) 0 0;

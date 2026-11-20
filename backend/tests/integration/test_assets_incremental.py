@@ -40,6 +40,7 @@ from stock_review.application.assets import (
     MISSING_QUOTE_FINAL_REASON,
     MISSING_QUOTE_HINT,
     OVERSELL_REASON,
+    STALE_QUOTE_REASON_PREFIX,
     AssetBuildSummary,
     build_assets,
     build_assets_job,
@@ -860,6 +861,18 @@ async def test_build_pulls_missing_quotes_once_and_fills_blocked_rows(
                 close_units=price("12.40"),
                 return_units=0,
             ),
+            Bar(
+                symbol="600519",
+                trade_date=date(2026, 6, 30),
+                close_units=price("1700.00"),
+                return_units=0,
+            ),
+            Bar(
+                symbol="000001",
+                trade_date=date(2026, 6, 30),
+                close_units=price("12.40"),
+                return_units=0,
+            ),
         ],
     )
 
@@ -883,6 +896,130 @@ async def test_build_pulls_missing_quotes_once_and_fills_blocked_rows(
     assert state is not None
     assert state.last_status == "ok"
     assert state.status_reason is None
+
+
+async def test_build_degrades_data_as_of_day_when_held_quote_is_stale(
+    owner_engine: AsyncEngine, app_db: Database
+) -> None:
+    """data_as_of 当天：持仓股缺当日行情但有更早收盘 → 该日 degraded，原因带代码+名称。"""
+    user_id = await _insert_user(owner_engine)
+    await _seed_two_missing_symbols(owner_engine, user_id)
+    market = _PullableMarket(
+        as_of=date(2026, 6, 30),
+        upstream=[
+            Bar(
+                symbol="600519",
+                trade_date=date(2026, 6, 24),
+                close_units=price("1700.00"),
+                return_units=0,
+            ),
+            Bar(
+                symbol="000001",
+                trade_date=date(2026, 6, 25),
+                close_units=price("12.40"),
+                return_units=0,
+            ),
+        ],
+    )
+
+    await _build(app_db, user_id, market)
+
+    rows = await _rows(app_db, user_id)
+    last = rows[-1]
+    assert last.trade_date == date(2026, 6, 30)
+    assert last.status == "degraded"
+    reason = str(last.status_reason)
+    assert reason.startswith(STALE_QUOTE_REASON_PREFIX)
+    assert "600519" in reason
+    assert "000001" in reason
+    # 陈旧标的各定向补拉一次：最近收盘次日 ~ as_of。
+    assert market.pull_calls[-2:] == [
+        ("000001", date(2026, 6, 26), date(2026, 6, 30)),
+        ("600519", date(2026, 6, 25), date(2026, 6, 30)),
+    ]
+    # 补拉后仍非最新 → 整体状态 stale（不是 current），原因透传代码+名称。
+    async with app_db.tenant_tx(user_id) as session:
+        _, _, build = await list_assets(
+            session,
+            user_id=user_id,
+            clock=CLOCK,
+            market_data=market,
+            limit=10,
+            cursor=None,
+            date_from=None,
+            date_to=None,
+            status=None,
+        )
+    assert build.state == "stale"
+    assert build.last_status == "degraded"
+    assert STALE_QUOTE_REASON_PREFIX in str(build.status_reason)
+
+
+async def test_build_pulls_stale_quotes_and_recovers_current(
+    owner_engine: AsyncEngine, app_db: Database
+) -> None:
+    """as_of 当天行情不是最新 → 构建内定向补拉一次，补齐后该日 ok、状态 current。"""
+    user_id = await _insert_user(owner_engine)
+    await _seed_two_missing_symbols(owner_engine, user_id)
+    market = _PullableMarket(
+        as_of=date(2026, 6, 30),
+        upstream=[
+            Bar(
+                symbol="600519",
+                trade_date=date(2026, 6, 30),
+                close_units=price("1700.00"),
+                return_units=0,
+            ),
+            Bar(
+                symbol="000001",
+                trade_date=date(2026, 6, 30),
+                close_units=price("12.40"),
+                return_units=0,
+            ),
+        ],
+    )
+    # 更早收盘已在本地缓存（不算缺行情）；只有 as_of 当天缺失 → 走陈旧补拉。
+    market.cache.extend(
+        [
+            Bar(
+                symbol="600519",
+                trade_date=date(2026, 6, 24),
+                close_units=price("1700.00"),
+                return_units=0,
+            ),
+            Bar(
+                symbol="000001",
+                trade_date=date(2026, 6, 25),
+                close_units=price("12.40"),
+                return_units=0,
+            ),
+        ]
+    )
+
+    summary = await _build(app_db, user_id, market)
+
+    assert summary.status == "ok"
+    assert market.pull_calls == [
+        ("000001", date(2026, 6, 26), date(2026, 6, 30)),
+        ("600519", date(2026, 6, 25), date(2026, 6, 30)),
+    ]
+    rows = await _rows(app_db, user_id)
+    assert rows[-1].trade_date == date(2026, 6, 30)
+    assert rows[-1].status == "ok"
+    async with app_db.tenant_tx(user_id) as session:
+        _, _, build = await list_assets(
+            session,
+            user_id=user_id,
+            clock=CLOCK,
+            market_data=market,
+            limit=10,
+            cursor=None,
+            date_from=None,
+            date_to=None,
+            status=None,
+        )
+    assert build.state == "current"
+    assert build.status_reason is None
 
 
 async def test_build_shows_support_hint_when_pull_still_missing(
@@ -911,14 +1048,15 @@ async def test_build_shows_support_hint_when_pull_still_missing(
     assert state.status_reason == MISSING_QUOTE_FINAL_REASON
 
 
-async def test_no_pull_when_previous_close_covers_suspension(
+async def test_pull_once_when_previous_close_covers_suspension(
     owner_engine: AsyncEngine, app_db: Database
 ) -> None:
-    """IT-19 边界：只有更早的收盘（停牌/无新行情）不算缺行情，不触发补拉。"""
+    """IT-19 边界：有更早收盘（停牌/无新行情）不算缺行情，但 as_of 当天仍是
+    「行情不是最新」→ 只补拉一次（不循环），行不 blocked、整体状态 stale。"""
     user_id = await _insert_user(owner_engine)
     await _seed_baseline(owner_engine, user_id)
     # 只有 2026-02-27 的一根 bar：之后一直没有新行情（停牌/未更新），按「最近收盘」
-    # 估值即可，不算缺行情，不触发补拉。
+    # 估值即可；但 as_of（06-30）当天 bar 缺失，需要定向补拉一次并显式降级。
     market = _PullableMarket(
         as_of=date(2026, 6, 30),
         upstream=[],
@@ -933,9 +1071,13 @@ async def test_no_pull_when_previous_close_covers_suspension(
     )
     await _build(app_db, user_id, market)
 
-    assert market.pull_calls == []
+    assert market.pull_calls == [("600519", date(2026, 2, 28), date(2026, 6, 30))]
     rows = await _rows(app_db, user_id)
     assert rows and not any(row.status == "blocked" for row in rows)
+    last = rows[-1]
+    assert last.trade_date == date(2026, 6, 30)
+    assert last.status == "degraded"
+    assert str(last.status_reason).startswith(STALE_QUOTE_REASON_PREFIX)
 
 
 # ── IT-11：end 回退 → 全量 ────────────────────────────────
@@ -1513,6 +1655,11 @@ class _FakeQueue:
 
     async def progress(
         self, session: Any, job_id: str, *, percent: int, stage: str, message: str | None
+    ) -> None:
+        self.progress_calls.append((percent, stage))
+
+    async def progress_committed(
+        self, user_id: Any, job_id: str, *, percent: int, stage: str, message: str | None
     ) -> None:
         self.progress_calls.append((percent, stage))
 

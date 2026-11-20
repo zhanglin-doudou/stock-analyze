@@ -400,6 +400,8 @@ await repo.update_state_cas(                       # WHERE version=:expected
 
 **不做的事**：不因 `date > as_of`（行情尾部未同步）而补拉 —— 该情形由 `session_notice=sync_pending` 提示，且收盘后上游当日 bar 可能尚未生成，补拉会造成误报。补拉不改变「读路径只读缓存」：`GET /assets`、看板等读端点仍然只读 `market.daily_bar`。
 
+**补充（2.9，2026-11-20）：`data_as_of` 当天行情不是最新**。持仓标的当日 bar 缺失但更早有收盘（可估值）时，行级 degraded（原因带「代码+名称 行情不是最新」），并在**缺行情补拉重算之后**再定向补拉一次：区间 = 最近收盘次日 ~ `as_of`（`_pull_stale_quotes`，每标的至多一次、失败只记 `assets.stale_quotes_pull_failed`）。补齐则当行恢复 `ok`；仍陈旧则把同一原因写入 `state.status_reason`，`build.state` 判为 `stale`（§7.1 第 8 条）；`state.status_reason` 含该原因时构建不再走 no-op，会在下次构建重试补拉。
+
 ---
 
 ## 7. API 契约
@@ -460,7 +462,8 @@ await repo.update_state_cas(                       # WHERE version=:expected
   5. 当前指纹 `(count, Σversion, max(updated_at))`（**含软删**）与 state 不一致 → `stale`；
   6. 当前行情覆盖日 > `state.data_as_of` → `stale`（`has_new_market_data=true`）。覆盖日与构建同口径：live+缓存读 `market.daily_bar` 最大交易日（`≤ clock.today()`），其余用端口 `as_of`——**不能用端口 `as_of` 直接比**，它是进程内近似值（API 未读过行情时退化为业务今天，会与 worker 持久化的覆盖日不一致，导致「一直待更新」）；
   7. `clock.today()` 的**下一个工作日** > `state.last_built_through` → `stale`（有新工作日；周六/周日不判 stale）；
-  8. 否则 `current`。
+  8. `state.status_reason` 含「行情不是最新」（`data_as_of` 当天持仓标的当日 bar 缺失，构建内已定向补拉一次仍未补齐）→ `stale`；
+  9. 否则 `current`。
 - 错误：401 `TOKEN_EXPIRED`（现状不返回 `WWW-Authenticate`，见 §11）；admin 403；400 `INVALID_CURSOR`/`UNKNOWN_QUERY_PARAM`/`INVALID_SORT_FIELD`；422 `INVALID_PERIOD`（from>to）/`VALIDATION_ERROR`（status 非法、日期格式由 FastAPI 解析失败）。
 
 ### 7.2 `POST /assets/build`（API-082，`buildAssets`）
@@ -631,7 +634,7 @@ await repo.update_state_cas(                       # WHERE version=:expected
 | IT-16 | worker 行情 | replay 模式 WorkerRunner 可完成 build_assets；live 分支需 akshare（标记 live 用例） |
 | IT-17 | as_of 前进修复 degraded | 先在有持仓且 date > as_of 时构建（末段 degraded）→ 推进 as_of（end 不变）→ auto：窗口重算，末段变 ok，结果与 full 相等 |
 | IT-18 | blocked 后修复 | 缺行情 build → 补行情 → auto：blocked 行变 ok，结果与 full 相等 |
-| IT-19 | 缺行情自愈 | 桩行情可补拉：断言每只缺失标的只补拉一次、区间 = 首日−45 天 ~ 末日，补拉后行 ok；上游无数据 → 不重试，`state.status_reason` = 最终提示、行级原因带同一后缀；只有更早收盘（停牌）→ 不触发补拉 |
+| IT-19 | 缺行情自愈 | 桩行情可补拉：断言每只缺失标的只补拉一次、区间 = 首日−45 天 ~ 末日，补拉后行 ok；上游无数据 → 不重试，`state.status_reason` = 最终提示、行级原因带同一后缀；只有更早收盘（停牌）→ 走陈旧补拉一次（区间 = 最近收盘次日 ~ as_of），仍陈旧则行 degraded + `build.state=stale` |
 
 ### 9.5 前端测试（FT）
 | ID | 场景 | 断言 |
