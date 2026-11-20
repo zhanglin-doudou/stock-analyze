@@ -13,6 +13,7 @@ import { api } from "../client";
 import { useJobCompletion } from "../lib/useJobCompletion";
 import { useStaleAssetBuild } from "../lib/useStaleAssetBuild";
 import { TrendChart } from "../charts/TrendChart";
+import { HintTooltip } from "@/components/ui/tooltip";
 import { SectorBlock } from "./dashboard/SectorBlock";
 import { TradeFlagCharts } from "./dashboard/TradeFlagCharts";
 import { ProblemView } from "../ui/Problem";
@@ -68,15 +69,25 @@ function Kpi({
   value,
   testId,
   hint,
+  labelTooltip,
 }: {
   label: string;
   value: string | null | undefined;
   testId: string;
   hint?: ReactNode;
+  labelTooltip?: string;
 }): ReactElement {
   return (
     <div className="dash-kpi" data-testid={testId}>
-      <span className="dash-kpi-label">{label}</span>
+      <span className="dash-kpi-label">
+        {labelTooltip ? (
+          <HintTooltip content={labelTooltip} label={`${label}算法`}>
+            {label}
+          </HintTooltip>
+        ) : (
+          label
+        )}
+      </span>
       <Value value={value} />
       {hint ? <span className="dash-kpi-hint">{hint}</span> : null}
     </div>
@@ -469,8 +480,9 @@ export function Dashboard(): ReactElement {
             testId="kpi-total-fees"
           />
           <Kpi
-            label="年化收益率"
+            label="年化收益率（CAGR）"
             value={asset.annualized_return_pct}
+            labelTooltip="CAGR = (1 + 总收益 ÷ 资金划转峰值转入成本)^(365 ÷ 首末自然日数) − 1，全历史复合年化"
             testId="kpi-annualized-return"
           />
         </div>

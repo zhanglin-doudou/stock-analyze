@@ -2607,6 +2607,8 @@ export interface components {
          *
          *     `max_invested_cost` 语义为**资金划转峰值转入成本**（累计净转入的峰值），
          *     `max_cost_return_pct` = 总收益 / 峰值转入成本（字段名保留以兼容旧客户端）。
+         *     `annualized_return` 为峰值成本 CAGR：
+         *     `(1 + 总收益 / 峰值转入成本) ** (365 / 首末自然日数) - 1`。
          */
         DashboardAssetOverviewOut: {
             /** Annualized Return */

@@ -18,11 +18,12 @@ import json
 import uuid
 from dataclasses import dataclass, field
 from datetime import date, timedelta
+from decimal import ROUND_HALF_UP, Decimal, localcontext
 from typing import TYPE_CHECKING, cast
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from stock_contracts.clock import Clock
-from stock_core.nav import CashflowPoint, compute_xirr
+from stock_contracts.constants import SCALE_RATIO
 from stock_core.stats.drawdown import DrawdownFamily, drawdown_family
 from stock_core.values import Money
 from stock_ledger.models import Trade
@@ -65,7 +66,7 @@ if TYPE_CHECKING:
 
 log = get_logger("stock_review.dashboard")
 
-DASHBOARD_VERSION = "1.0"
+DASHBOARD_VERSION = "1.1"
 MDD_MIN_OBS = 60
 
 STATUS_BLOCKED = "blocked"
@@ -175,7 +176,7 @@ class DashboardAssetOverview:
     bill_start_date: date | None
     bill_end_date: date | None
     initial_capital_units: int | None
-    # 全历史年化 TWR（最长连续有效段复利累计后按自然日年化；scale=8）。
+    # 全历史峰值成本 CAGR（scale=8）。
     annualized_return_ratio_units: int | None
 
 
@@ -549,30 +550,35 @@ def _max_drawdown(
     )
 
 
-def _annualized_xirr(series: list[AssetDaily]) -> int | None:
-    """全历史年化 XIRR（资金加权，与 ``total_profit`` 同向）。
+def _annualized_cagr(
+    series: list[AssetDaily],
+    total_profit_units: int | None,
+    peak_cost_units: int | None,
+) -> int | None:
+    """全历史峰值成本复合年化（CAGR，scale=8）。
 
-    与 `/nav` 的 ``mwr`` 同口径：期初按首行 ``prev_total_assets_units``（锚点）计投入，
-    区间内外部现金流按投资人方向取负，期末总资产作为终值。blocked 行没有有效估值，
-    跳过。有效观测 < 2 或无现金流 → None（不伪造 0）。
-
-    不用 TWR：TWR 是时间加权、与资金规模无关，小资金期的正收益会覆盖大资金期的
-    亏损，出现「总收益为负、年化为正」的误导。
+    ``CAGR = (1 + 总收益 / 峰值转入成本) ** (365 / 首末自然日数) - 1``。
+    首个有效资产日为收益起点；无完整区间或峰值成本不为正时不可计算。
     """
     rows = [row for row in series if row.status in {"ok", "degraded"}]
-    if len(rows) < 2:
+    if (
+        len(rows) < 2
+        or total_profit_units is None
+        or peak_cost_units is None
+        or peak_cost_units <= 0
+    ):
         return None
-    flows: list[CashflowPoint] = []
-    for idx, row in enumerate(rows):
-        amount = -(row.cashflow_units or 0)
-        if idx == 0:
-            amount -= row.prev_total_assets_units or 0
-        flows.append(CashflowPoint(row.trade_date, amount))
-    last = rows[-1]
-    flows[-1] = CashflowPoint(last.trade_date, flows[-1].amount_units + last.total_assets_units)
-    if not any(point.amount_units for point in flows):
+    days = (rows[-1].trade_date - rows[0].trade_date).days
+    if days <= 0:
         return None
-    return compute_xirr(flows)
+
+    with localcontext() as ctx:
+        ctx.prec = 50
+        growth = Decimal(peak_cost_units + total_profit_units) / Decimal(peak_cost_units)
+        if growth < 0:
+            return None
+        annualized = growth ** (Decimal(365) / Decimal(days)) - Decimal(1)
+        return int(annualized.scaleb(SCALE_RATIO).to_integral_value(rounding=ROUND_HALF_UP))
 
 
 async def build_dashboard(
@@ -831,8 +837,10 @@ async def build_dashboard(
             )
         )
 
-    # 全历史年化 TWR：资产表有效日收益复利累计后按自然日年化（正确处理出入金）。
-    annualized_return_units = None if asset_blocked else _annualized_xirr(series)
+    # 全历史峰值成本 CAGR：(1 + 总收益/峰值转入成本)^(365/自然日数) - 1。
+    annualized_return_units = (
+        None if asset_blocked else _annualized_cagr(series, total_profit_units, max_invested)
+    )
     if annualized_return_units is None:
         missing.append(
             DashboardMissing(

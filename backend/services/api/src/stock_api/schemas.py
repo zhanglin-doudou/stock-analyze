@@ -1147,6 +1147,8 @@ class DashboardAssetOverviewOut(StrictModel):
 
     `max_invested_cost` 语义为**资金划转峰值转入成本**（累计净转入的峰值），
     `max_cost_return_pct` = 总收益 / 峰值转入成本（字段名保留以兼容旧客户端）。
+    `annualized_return` 为峰值成本 CAGR：
+    `(1 + 总收益 / 峰值转入成本) ** (365 / 首末自然日数) - 1`。
     """
 
     status: DashboardStatus
@@ -1164,7 +1166,7 @@ class DashboardAssetOverviewOut(StrictModel):
     bill_end_date: date | None = None
     initial_capital: str | None = None
     initial_capital_display: str | None = None
-    # 全历史年化 TWR（时间加权；scale=8 小数串 + 两位百分比展示）。
+    # 全历史峰值成本 CAGR（scale=8 小数串 + 两位百分比展示）。
     annualized_return: str | None = None
     annualized_return_pct: str | None = None
     # 后端已格式化的展示串（千分位金额）；前端优先使用，raw 保留兼容。

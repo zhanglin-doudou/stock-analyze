@@ -2770,7 +2770,7 @@
       },
       "DashboardAssetOverviewOut": {
         "additionalProperties": false,
-        "description": "资产概览：当前快照（最新资产日）+ 峰值转入成本/总收益/费用。\n\n`max_invested_cost` 语义为**资金划转峰值转入成本**（累计净转入的峰值），\n`max_cost_return_pct` = 总收益 / 峰值转入成本（字段名保留以兼容旧客户端）。",
+        "description": "资产概览：当前快照（最新资产日）+ 峰值转入成本/总收益/费用。\n\n`max_invested_cost` 语义为**资金划转峰值转入成本**（累计净转入的峰值），\n`max_cost_return_pct` = 总收益 / 峰值转入成本（字段名保留以兼容旧客户端）。\n`annualized_return` 为峰值成本 CAGR：\n`(1 + 总收益 / 峰值转入成本) ** (365 / 首末自然日数) - 1`。",
         "properties": {
           "annualized_return": {
             "anyOf": [

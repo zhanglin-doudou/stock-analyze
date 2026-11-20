@@ -938,6 +938,7 @@ describe("Dashboard 看板", () => {
     expect(screen.getByTestId("kpi-bill-range").textContent).toContain("2026-04-01");
     expect(screen.getByTestId("kpi-bill-range").textContent).toContain("2026-06-30");
     expect(screen.getByTestId("kpi-initial-capital").textContent).toContain("100,000.00");
+    expect(screen.getByTestId("kpi-annualized-return").textContent).toContain("年化收益率（CAGR）");
     expect(screen.getByTestId("kpi-annualized-return").textContent).toContain("1.23%");
 
     expect(screen.getByTestId("dashboard-meta").textContent).toContain("最新");
