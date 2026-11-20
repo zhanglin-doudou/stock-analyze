@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import hashlib
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
@@ -109,7 +109,9 @@ log = get_logger("stock_review.assets")
 #      场内代码与登记账号代码并存而被拆成两份、互相误判超卖。口径变化，bump 触发全量重建。
 # 2.8：行情覆盖日（data_as_of）当天，持仓股缺当日行情但更早有收盘（同步失败/晚发布）
 #      → 该日 degraded，原因透出「代码+名称 行情不是最新」；口径变化，bump 触发全量重建。
-ASSET_DEFINITION_VERSION = "2.8"
+# 2.9：同一情形下构建内对陈旧标的定向补拉一次（最近收盘次日 ~ 当日）；补拉后仍陈旧时
+#      构建整体状态为 stale（而非 current），state 原因带代码+名称，便于前端提示重试。
+ASSET_DEFINITION_VERSION = "2.9"
 # 安全窗：每次有新数据/脏流水/行情 as_of 变化时重算最近 45 天。
 SAFETY_DAYS = 45
 # 水位线重叠窗：PG `now()` = 事务开始时间，覆盖「长事务晚提交」竞态。
@@ -220,6 +222,11 @@ class _DailyValuations:
     # 缺行情（`blocked` 行）的标的 → (首个受影响日期, 最后一个受影响日期)。
     # 只有当日持仓非零且「当日及之前无任何收盘价」的标的才计入；空表示没有 blocked 行。
     missing_quotes: dict[str, tuple[date, date]]
+    # 行情覆盖日当天「行情不是最新」的持仓标的 → 最近一根收盘日期；补拉区间为
+    # 「最近收盘次日 ~ 构建 as_of」（as_of 由调用方传入，构建内定向补拉一次）。
+    stale_quotes: dict[str, date] = field(default_factory=dict)
+    # 上述标的的行级原因文案（代码 + 名称），用于构建后把 state 标 stale 并透出原因。
+    stale_quote_reason: str | None = None
 
 
 def _asset_id(user_id: uuid.UUID, trade_date: date) -> str:
@@ -288,25 +295,31 @@ def _row_status_reason(
     return "；".join(reasons)[:_REASON_MAX] if reasons else None
 
 
-def _stale_quote_reason(
+def _stale_quote_symbols(
     holdings: dict[str, int],
     ladder: dict[str, list[tuple[date, int]]],
     trade_date: date,
+) -> dict[str, date]:
+    """覆盖日当天「最新行情不是当日」的持仓标的 → 最近一根收盘日期。
+
+    仅对需行情的品种（A 股/场内基金）生效：有更早收盘说明可以估值（不阻断），
+    但当日行情缺失（同步失败/上游晚发布），必须显式降级并尝试补拉。
+    """
+    stale: dict[str, date] = {}
+    for symbol, qty in holdings.items():
+        if qty == 0 or not needs_quote(symbol):
+            continue
+        entries = ladder.get(symbol) or []
+        if entries and entries[-1][0] < trade_date:
+            stale[symbol] = entries[-1][0]
+    return stale
+
+
+def _stale_quote_reason(
+    stale: dict[str, date],
     names: dict[str, str],
 ) -> str | None:
-    """覆盖日当天「最新行情不是当日」的持仓标的 → 行级原因（代码 + 名称）。
-
-    仅对需行情的品种（A 股/场内基金）生效：有更早收盘价说明可以估值（不阻断），
-    但当日行情缺失（同步失败/上游晚发布），必须显式降级提示，避免按旧价静默估值。
-    """
-    stale = [
-        symbol
-        for symbol, qty in holdings.items()
-        if qty != 0
-        and needs_quote(symbol)
-        and (entries := ladder.get(symbol) or [])
-        and entries[-1][0] < trade_date
-    ]
+    """行级原因文案：代码 + 名称（按代码排序）；无陈旧标的返回 None。"""
     if not stale:
         return None
     items = [
@@ -397,6 +410,8 @@ def compute_daily_valuations(
     prior_total: int | None = None
     rows: list[dict[str, object]] = []
     missing_quotes: dict[str, tuple[date, date]] = {}
+    stale_quote_map: dict[str, date] = {}
+    stale_reason: str | None = None
     window_started = False
     # 周末不写行，但周末发生的资金划转仍需计入下一交易日的当日现金流。
     pending_cashflow = 0
@@ -519,12 +534,14 @@ def compute_daily_valuations(
         unrealized_pnl_units = market_value_units - holding_cost_units
         uncovered = cursor_date > as_of and nonzero_holdings > 0
         # 行情覆盖日（data_as_of）当天：个别标的当日 bar 缺失（同步失败/晚发布）时，
-        # 虽可用更早收盘估值，但必须显式降级，避免「最后一个同步行情日」静默按旧价。
-        stale_quotes = (
-            _stale_quote_reason(holdings, ladder, cursor_date, quote_names)
-            if cursor_date == as_of
-            else None
+        # 虽可用更早收盘估值，但必须显式降级并尝试补拉，避免「最后一个同步行情日」静默按旧价。
+        stale_today = (
+            _stale_quote_symbols(holdings, ladder, cursor_date) if cursor_date == as_of else {}
         )
+        stale_quotes = _stale_quote_reason(stale_today, quote_names)
+        if stale_today:
+            stale_quote_map.update(stale_today)
+            stale_reason = stale_quotes
         # FIFO 异常只影响持有问题代码的那些天；对无 FIFO 问题代码持仓的其他天不降级。
         fifo_error_today = any(code in fifo_error_codes for code in holdings)
         # 超卖：当日有卖出数量超过可用持仓 → 该日降级并提示人工补录成本（修订后重算恢复）。
@@ -599,6 +616,8 @@ def compute_daily_valuations(
         global_blocked=False,
         global_reason=None,
         missing_quotes=missing_quotes,
+        stale_quotes=stale_quote_map,
+        stale_quote_reason=stale_reason,
     )
 
 
@@ -971,6 +990,41 @@ async def _pull_missing_quotes(
     return tuple(pulled), tuple(failed)
 
 
+async def _pull_stale_quotes(
+    market_data: SyncableMarketSource,
+    stale: dict[str, date],
+    target: date,
+) -> tuple[tuple[str, ...], tuple[str, ...]]:
+    """对 data_as_of 当天行情不是最新的标的定向补拉一次（最近收盘次日 ~ `target`）。
+
+    与缺行情补拉同样「每标的至多一次、不重试、单标的失败不影响其余」；
+    `sync_daily_bars` 内部只补真实缺口，停牌/退市标的不会产生无意义的上游请求。
+    """
+    pulled: list[str] = []
+    failed: list[str] = []
+    for symbol, last_bar in sorted(stale.items()):
+        start = last_bar + timedelta(days=1)
+        if start > target:
+            continue
+        pulled.append(symbol)
+        try:
+            _bars, symbol_failed = await market_data.sync_daily_bars([symbol], start, target)
+        except ApiError as exc:
+            failed.append(symbol)
+            log.warning(
+                "assets.stale_quotes_pull_failed",
+                symbol=symbol,
+                start=start.isoformat(),
+                end=target.isoformat(),
+                code=str(exc.code),
+                error=exc.detail,
+            )
+            continue
+        if symbol_failed:
+            failed.append(symbol)
+    return tuple(pulled), tuple(failed)
+
+
 async def build_assets(
     session: AsyncSession,
     *,
@@ -1077,6 +1131,13 @@ async def build_assets(
     # 窗口无法保证全部重算；且行情补齐可能只补到已被全局 market_as_of 覆盖的日期
     # （market_as_of 不变 → 看起来无变化）。因此只要表里还有 blocked 行，就必须全量重建。
     had_blocked = state is not None and await repo.has_blocked_rows(user_id)
+    # 上一次构建在 data_as_of 当天留下「行情不是最新」的降级行：不能走 no-op，
+    # 必须再进入一次增量以重试补拉（同步失败/上游晚发布时每次构建都尝试一次）。
+    stale_quotes_pending = bool(
+        state is not None
+        and state.status_reason
+        and STALE_QUOTE_REASON_PREFIX in state.status_reason
+    )
 
     # 3) 全量判定（§6.2）：任何无法安全定位的变更都收敛到全量。
     full = (
@@ -1122,7 +1183,12 @@ async def build_assets(
             rebuild_from = start
         else:
             dirty_date = min((trade.trade_date for trade in dirty_rows), default=None)
-            if end == last and not market_changed and dirty_date is None:
+            if (
+                end == last
+                and not market_changed
+                and dirty_date is None
+                and not stale_quotes_pending
+            ):
                 # no-op：只记录“本次检查”，不动数据/水位线/指纹。
                 await repo.update_state_cas(
                     user_id,
@@ -1231,20 +1297,40 @@ async def build_assets(
     # 7b) 缺行情自愈（设计 §6.5）：先按 blocked 行定位「缺的标的 + 缺失日期区间」，向
     #     可补拉的行情源（live + 本地缓存）**补拉一次**，再用补拉后的行情重算一次。
     #     只补拉一次、不循环不递归；补拉后仍缺则 blocked 行与 state 原因给出最终提示。
-    if valuations.missing_quotes and isinstance(market_data, SyncableMarketSource):
-        quotes_pull_attempted = True
-        pulled, pull_failed = await _pull_missing_quotes(market_data, valuations.missing_quotes)
-        log.info(
-            "assets.quotes_pull",
-            user_id=str(user_id),
-            symbols=pulled,
-            failed=pull_failed,
-        )
-        if pulled:
-            ladder, market_causes = await load_prices(market_data, symbols, price_from, end)
-            # 补拉可能推进行情覆盖日：重算 as_of，避免把刚补齐的日期仍按「未覆盖」降级。
-            market_as_of = await _market_as_of(session, market_data, clock)
-            valuations = _valuate()
+    # 7c) data_as_of 当天「行情不是最新」的持仓标的（同步失败/晚发布）同样定向补拉一次，
+    #     区间为最近收盘次日 ~ as_of；放在缺行情补拉重算之后，确保本轮新出现的陈旧标的
+    #     也被覆盖；补拉成功则该日行恢复 ok，仍陈旧则由 state 原因与 `_build_state_view`
+    #     判为 stale。
+    if isinstance(market_data, SyncableMarketSource):
+        if valuations.missing_quotes:
+            quotes_pull_attempted = True
+            pulled, pull_failed = await _pull_missing_quotes(market_data, valuations.missing_quotes)
+            log.info(
+                "assets.quotes_pull",
+                user_id=str(user_id),
+                symbols=pulled,
+                failed=pull_failed,
+            )
+            if pulled:
+                ladder, market_causes = await load_prices(market_data, symbols, price_from, end)
+                # 补拉可能推进行情覆盖日：重算 as_of，避免把刚补齐的日期仍按「未覆盖」降级。
+                market_as_of = await _market_as_of(session, market_data, clock)
+                valuations = _valuate()
+        if valuations.stale_quotes:
+            quotes_pull_attempted = True
+            pulled_stale, stale_failed = await _pull_stale_quotes(
+                market_data, valuations.stale_quotes, market_as_of
+            )
+            log.info(
+                "assets.stale_quotes_pull",
+                user_id=str(user_id),
+                symbols=pulled_stale,
+                failed=stale_failed,
+            )
+            if pulled_stale:
+                ladder, market_causes = await load_prices(market_data, symbols, price_from, end)
+                market_as_of = await _market_as_of(session, market_data, clock)
+                valuations = _valuate()
 
     build_mode = BUILD_MODE_FULL if full else BUILD_MODE_INCREMENTAL
 
@@ -1315,6 +1401,14 @@ async def build_assets(
             if state_reason
             else MISSING_QUOTE_FINAL_REASON
         )
+    if valuations.stale_quote_reason:
+        # data_as_of 当天仍有持仓标的行情不是最新（补拉失败/上游未发布）：state 原因透出
+        # 代码+名称；`_build_state_view` 据此把整体状态判为 stale 而不是 current。
+        state_reason = (
+            f"{state_reason}；{valuations.stale_quote_reason}"
+            if state_reason
+            else valuations.stale_quote_reason
+        )[:_REASON_MAX]
 
     # 监控点：每次构建都打 INFO 摘要；出现阻断/降级行再打 WARNING，附原因聚合与
     # 行情失败类别，无需复现即可从日志/告警直接定位（如退市标的缺口拉取失败）。
@@ -1525,6 +1619,10 @@ async def _build_state_view(
         return base
     # 7) 有新的已收盘工作日（按 data_ready_after 口径）；周末/未就绪当日不判 stale。
     if valuation_end(clock, data_ready_after=data_ready_after) > state.last_built_through:
+        base.state = STATE_STALE
+    # 8) data_as_of 当天持仓行情不是最新（补拉失败/上游晚发布）：行情未收敛到当日，
+    #    整体状态为 stale 而不是 current（行级已 degraded 且原因带代码+名称）。
+    if state.status_reason and STALE_QUOTE_REASON_PREFIX in state.status_reason:
         base.state = STATE_STALE
     return base
 
