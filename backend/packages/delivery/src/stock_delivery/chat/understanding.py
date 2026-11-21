@@ -13,8 +13,11 @@ from pydantic import BaseModel, Field, ValidationError
 from stock_contracts.chat.dto import PeriodSpec, ResolvedEntity, Understanding
 from stock_contracts.chat.enums import Intent
 from stock_contracts.clock import Clock
+from stock_platform.obs import get_logger
 
 from .provider import LlmError, LlmProvider
+
+log = get_logger("stock_delivery.chat.understanding")
 
 
 class _PeriodIn(BaseModel):
@@ -127,6 +130,24 @@ class UnderstandingService:
             raw = json.loads(repair_json(content))
         if not isinstance(raw, dict):
             raise ValueError("understanding 不是 JSON object")
+        intents = raw.get("intents")
+        if isinstance(intents, list) and any(not isinstance(item, str) for item in intents):
+            repaired: list[str] = []
+            for item in intents:
+                if isinstance(item, str):
+                    repaired.append(item)
+                elif isinstance(item, dict):
+                    name = item.get("name") or item.get("intent") or item.get("type")
+                    if isinstance(name, str) and name:
+                        repaired.append(name)
+            log.error(
+                "chat.llm.bad_response",
+                purpose="understanding",
+                error="intents 不是字符串数组，已按 name 规范化",
+                recovered=True,
+                raw_intents=intents[:4],
+            )
+            raw = {**raw, "intents": repaired}
         return _UnderstandingIn.model_validate(raw)
 
     def _normalize(

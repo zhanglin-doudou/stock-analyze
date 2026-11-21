@@ -183,7 +183,7 @@ async def test_invalid_understanding_json_falls_back_without_500(settings) -> No
     settings.glm_api_key = "test"
     provider = FakeProvider(
         [
-            '{"intents":[{"name":"trades"}],"confidence":0.9}',
+            '{"intents":"trades","confidence":0.9}',
             json.dumps(
                 {
                     "answer_markdown": "本月收益 -1,234.56 元 [[1]]",
