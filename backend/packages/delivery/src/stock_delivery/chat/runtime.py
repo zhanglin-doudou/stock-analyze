@@ -12,6 +12,7 @@ from datetime import date, datetime
 from enum import Enum
 from typing import Any
 
+from pydantic import ValidationError
 from stock_contracts.chat.dto import (
     AnswerDraft,
     Citation,
@@ -123,9 +124,7 @@ class ChatRuntime:
                 max_tokens=self.settings.llm_understanding_max_tokens,
                 json_mode=True,
             )
-            understanding = self.understanding_service.parse(
-                result.content, question=self.question, focus=self._bundle.focus
-            )
+            # 先记录成功调用：即使模型输出形状不合法，trace 也应能看到这次调用。
             self._record_llm(
                 "understanding",
                 result,
@@ -133,6 +132,9 @@ class ChatRuntime:
                 status="ok",
             )
             self._llm_used = True
+            understanding = self.understanding_service.parse(
+                result.content, question=self.question, focus=self._bundle.focus
+            )
             self._understanding = understanding
             return {"understanding": to_jsonable(understanding)}
         except LlmError as exc:
@@ -145,6 +147,22 @@ class ChatRuntime:
             return {
                 "understanding": to_jsonable(understanding),
                 "degrade_reason": exc.reason.value,
+            }
+        except (json.JSONDecodeError, ValidationError, ValueError, TypeError) as exc:
+            log.error(
+                "chat.llm.bad_response",
+                purpose="understanding",
+                model=self.settings.glm_model,
+                error=str(exc)[:300],
+            )
+            self._degrade_reason = DegradeReason.LLM_BAD_RESPONSE
+            understanding = self.understanding_service.fallback_understanding(
+                self.question, self._bundle.focus
+            )
+            self._understanding = understanding
+            return {
+                "understanding": to_jsonable(understanding),
+                "degrade_reason": DegradeReason.LLM_BAD_RESPONSE.value,
             }
 
     def route_after_understand(self, state: ChatState) -> str:
