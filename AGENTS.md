@@ -201,6 +201,7 @@ make sync-sector-bars ARGS='--start 2026-04-01'   # 只回填行业指数日线�
 | core（纯计算 / Scaled 族 / 零 I/O 零时间） | `backend/packages/core/AGENTS.md` |
 | platform（DB / 配置 / JobQueue / 幂等 / TenantContext / 板块数据源） | `backend/packages/platform/AGENTS.md` |
 | ledger（模型 / 解析器 / application / 仓储） | `backend/packages/ledger/AGENTS.md` |
+| delivery.chat（固定图 / 理解 / 上下文 / LLM / 校验 / SSE 边界） | `backend/packages/delivery/src/stock_delivery/chat/AGENTS.md` |
 | api（router / schema / deps / middlewares） | `backend/services/api/AGENTS.md` |
 | worker（job handler / 心跳 / 租约 / 单飞） | `backend/services/worker/AGENTS.md` |
 | frontend（api-client / web / 零口径） | `frontend/AGENTS.md` |
