@@ -5,6 +5,7 @@ from __future__ import annotations
 import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, field
+from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from stock_contracts.chat.dto import Citation
@@ -38,7 +39,19 @@ def sanitize(text: str) -> str:
 
 
 def normalize_number(value: str) -> str:
-    return value.replace(",", "").replace("元", "").removesuffix("%").strip()
+    """把后端定点字符串与模型自然表述归一为同一数字。
+
+    后端常给 ``215.300000`` / ``78000.00``，模型会写 ``215.30`` / ``78000``；
+    如果按原字符串比较会被误判为 unknown_number。
+    """
+    cleaned = value.replace(",", "").replace("元", "").removesuffix("%").strip()
+    try:
+        number = Decimal(cleaned)
+    except InvalidOperation:
+        return cleaned
+    if number == number.to_integral_value():
+        return str(int(number))
+    return format(number.normalize(), "f")
 
 
 def validate(

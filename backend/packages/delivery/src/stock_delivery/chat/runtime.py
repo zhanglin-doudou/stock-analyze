@@ -355,6 +355,14 @@ class ChatRuntime:
             and not self._understanding.needs_clarification
         )
         if can_retry:
+            log.error(
+                "chat.llm.validation_failed",
+                purpose="answer",
+                model=self.settings.glm_model,
+                errors=result.errors[:8],
+                retry_count=retries,
+                will_retry=True,
+            )
             return {"validation_errors": result.errors, "retry_count": 1}
         log.error(
             "chat.llm.validation_failed",
@@ -362,6 +370,7 @@ class ChatRuntime:
             model=self.settings.glm_model,
             errors=result.errors[:8],
             retry_count=retries,
+            will_retry=False,
         )
         return {
             "validation_errors": result.errors,
@@ -615,14 +624,14 @@ def _tools_for(understanding: Understanding) -> list[tuple[ToolName, dict[str, A
     tools: list[tuple[ToolName, dict[str, Any]]] = []
     for intent in understanding.intents[:2]:
         if intent in {Intent.ASSETS, Intent.PORTFOLIO}:
-            tools.append((ToolName.ASSETS_QUERY, {**args, "limit": 30}))
+            tools.append((ToolName.ASSETS_QUERY, {**args, "limit": 1000}))
             tools.append((ToolName.PORTFOLIO_SNAPSHOT, {}))
         elif intent is Intent.PERFORMANCE:
             tools.append((ToolName.PERFORMANCE_METRICS, {**args}))
         elif intent is Intent.ATTRIBUTION:
             tools.append((ToolName.ATTRIBUTION_SUMMARY, {**args}))
         elif intent is Intent.ROUNDS:
-            round_args: dict[str, Any] = {**args, "limit": 20}
+            round_args: dict[str, Any] = {**args, "limit": 1000}
             if any(
                 word in understanding.resolved_query for word in ("亏损最多", "亏得最多", "最亏")
             ):
@@ -636,9 +645,9 @@ def _tools_for(understanding: Understanding) -> list[tuple[ToolName, dict[str, A
             if round_id:
                 tools.append((ToolName.ROUND_DETAIL, {"round_id": round_id}))
             else:
-                tools.append((ToolName.ROUNDS_QUERY, {**args, "limit": 20}))
+                tools.append((ToolName.ROUNDS_QUERY, {**args, "limit": 1000}))
         elif intent is Intent.TRADES:
-            tools.append((ToolName.TRADES_QUERY, {**args, "limit": 50}))
+            tools.append((ToolName.TRADES_QUERY, {**args, "limit": 1000}))
         elif intent is Intent.NAV:
             tools.append((ToolName.NAV_SUMMARY, {**args}))
         elif intent is Intent.SECTORS:

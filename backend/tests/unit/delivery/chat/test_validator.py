@@ -40,3 +40,31 @@ def test_unknown_number_and_banned_advice_rejected() -> None:
     assert not result.ok
     assert any(item.startswith("unknown_number") for item in result.errors)
     assert "banned_advice" in result.errors
+
+
+def test_number_precision_is_normalized() -> None:
+    citation = Citation(
+        citation_id="c1_1",
+        label="成交价",
+        value_display="215.300000",
+        source_endpoint="GET /api/v1/trades",
+        number=1,
+    )
+    result = validate(
+        answer="成交价 215.30 元 [[1]]",
+        claims=[],
+        citations=[citation],
+    )
+    assert result.ok, result.errors
+
+
+def test_integer_and_decimal_forms_match() -> None:
+    citation = Citation(
+        citation_id="c1_1",
+        label="现金",
+        value_display="78000.00",
+        source_endpoint="GET /api/v1/dashboard",
+        number=1,
+    )
+    result = validate(answer="现金 78000 元 [[1]]", claims=[], citations=[citation])
+    assert result.ok, result.errors
