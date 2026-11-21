@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import time
@@ -18,6 +19,7 @@ from stock_contracts.chat.dto import (
     Citation,
     Claim,
     ContextUsage,
+    LlmResult,
     ToolResult,
     Understanding,
 )
@@ -115,21 +117,13 @@ class ChatRuntime:
             self._understanding = understanding
             return {"understanding": to_jsonable(understanding)}
 
-        self._llm_seq += 1
         messages = self.context_manager.understanding_messages(self._bundle, self.question)
         try:
-            result = await self.llm.complete_messages(
+            result = await self._complete_with_retry(
                 purpose="understanding",
                 messages=messages,
                 max_tokens=self.settings.llm_understanding_max_tokens,
-                json_mode=True,
-            )
-            # 先记录成功调用：即使模型输出形状不合法，trace 也应能看到这次调用。
-            self._record_llm(
-                "understanding",
-                result,
                 prompt_version="chat.understand.v1",
-                status="ok",
             )
             self._llm_used = True
             understanding = self.understanding_service.parse(
@@ -138,7 +132,6 @@ class ChatRuntime:
             self._understanding = understanding
             return {"understanding": to_jsonable(understanding)}
         except LlmError as exc:
-            self._record_llm_error("understanding", exc, prompt_version="chat.understand.v1")
             self._degrade_reason = exc.reason
             understanding = self.understanding_service.fallback_understanding(
                 self.question, self._bundle.focus
@@ -236,16 +229,15 @@ class ChatRuntime:
         user = json.dumps(evidence, ensure_ascii=False)
         if repair:
             user += "\n上次输出未通过校验：" + "; ".join(repair) + "\n请修正后重试。"
-        self._llm_seq += 1
         try:
-            result = await self.llm.complete_messages(
+            result = await self._complete_with_retry(
                 purpose="answer",
                 messages=[
                     {"role": "system", "content": ANSWER_SYSTEM},
                     {"role": "user", "content": user},
                 ],
                 max_tokens=self.settings.llm_max_output_tokens,
-                json_mode=True,
+                prompt_version="chat.answer.v1",
             )
             parsed = _parse_answer(result.content)
             claims = tuple(
@@ -297,11 +289,9 @@ class ChatRuntime:
                     answer_markdown=template_text + "\n\n" + draft.answer_markdown,
                     claims=self._template.claims + draft.claims,
                 )
-            self._record_llm("answer", result, prompt_version="chat.answer.v1", status="ok")
             self._llm_used = True
             return {"answer": to_jsonable(draft), "status": draft.status.value}
         except LlmError as exc:
-            self._record_llm_error("answer", exc, prompt_version="chat.answer.v1")
             self._degrade_reason = exc.reason
             draft = self._fallback_draft(exc.reason)
             return {
@@ -504,6 +494,54 @@ class ChatRuntime:
             if focus:
                 await self.repo.update_focus(user_id=self.user_id, focus=focus)
         return {"status": status}
+
+    # ── helpers ────────────────────────────────────────────
+    @staticmethod
+    def _retryable(exc: LlmError) -> bool:
+        """超时、429、5xx、坏响应等都重试；鉴权/未配置/内容过滤不重试。"""
+        return exc.reason not in {
+            DegradeReason.LLM_NOT_CONFIGURED,
+            DegradeReason.LLM_AUTH_FAILED,
+            DegradeReason.LLM_CONTENT_FILTER,
+        }
+
+    async def _complete_with_retry(
+        self,
+        *,
+        purpose: str,
+        messages: Sequence[Mapping[str, str]],
+        max_tokens: int,
+        prompt_version: str,
+    ) -> LlmResult:
+        """统一 LLM 重试：每次失败落 chat_llm_call，成功后落成功记录。"""
+        max_retries = max(0, int(self.settings.llm_retry_on_429))
+        for attempt in range(max_retries + 1):
+            self._llm_seq += 1
+            try:
+                result = await self.llm.complete_messages(
+                    purpose=purpose,
+                    messages=messages,
+                    max_tokens=max_tokens,
+                    json_mode=True,
+                )
+            except LlmError as exc:
+                self._record_llm_error(purpose, exc, prompt_version=prompt_version)
+                if not self._retryable(exc) or attempt >= max_retries:
+                    raise
+                delay = self.settings.llm_retry_backoff_seconds * (2**attempt)
+                log.warning(
+                    "chat.llm.retry",
+                    purpose=purpose,
+                    attempt=attempt + 1,
+                    max_attempts=max_retries,
+                    error_code=exc.reason.value,
+                    delay_seconds=delay,
+                )
+                await asyncio.sleep(delay)
+                continue
+            self._record_llm(purpose, result, prompt_version=prompt_version, status="ok")
+            return result
+        raise AssertionError("unreachable")
 
     # ── helpers ────────────────────────────────────────────
     async def _compress(self, summary: str, old: Sequence[dict[str, str]]) -> str:

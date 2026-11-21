@@ -135,6 +135,7 @@ class Settings(BaseSettings):
     )
     llm_history_turns: int = Field(10, alias="LLM_HISTORY_TURNS")
     llm_max_concurrency: int = Field(2, alias="LLM_MAX_CONCURRENCY")
+    # 兼容旧名；当前用于 understanding/answer 的所有可重试失败（超时/429/5xx/坏响应）。
     llm_retry_on_429: int = Field(2, alias="LLM_RETRY_ON_429")
     llm_retry_backoff_seconds: float = Field(
         2.0, alias="LLM_RETRY_BACKOFF_SECONDS"

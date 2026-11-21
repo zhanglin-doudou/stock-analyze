@@ -123,7 +123,9 @@ fallback → persist → END
 - `GlmProvider`：`langchain_openai.ChatOpenAI`，OpenAI-compatible `/chat/completions`。
 - `FakeProvider`：CI/单测/无网环境；禁止在 CI 调真实 GLM。
 - `build_provider(settings)`：只有 `LLM_PROVIDER=glm` 且 `GLM_API_KEY` 非空才返回 `GlmProvider`，否则 `FakeProvider`。
-- `ChatOpenAI(max_retries=0)`：**不要在 SDK 内自动重试**；429 映射为 `LLM_RATE_LIMITED`，由 runtime 降级，避免放大免费额度限制。
+- `ChatOpenAI(max_retries=0)`：**不要在 SDK 内自动重试**；runtime 的 `_complete_with_retry()` 统一处理 understanding/answer 的超时、429、5xx、坏响应。
+- 重试次数：`LLM_RETRY_ON_429`（兼容旧名，默认 2 次；即最多 3 次调用），退避 `LLM_RETRY_BACKOFF_SECONDS × 2^attempt`。
+- 不重试：`LLM_NOT_CONFIGURED` / `LLM_AUTH_FAILED` / `LLM_CONTENT_FILTER`；每次失败都写 `chat_llm_call`，最终失败再降级。
 - `json_mode=True` 时使用 `response_format={"type":"json_object"}`；`LLM_THINKING=disabled` 时传 `thinking`。
 - 请求/响应必须进入 `ChatRepository` 的 `chat_llm_call`（`request`/`response`/usage/status/error_code）。
 - `.env` 修改后 **必须重启 API**；`Settings` 在进程启动时加载，uvicorn `--reload` 不监听 `.env`。
