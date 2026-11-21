@@ -80,6 +80,10 @@ fallback → persist → END
 - “本月赚了多少 / 赚了还是亏了 / 总收益 / 累计盈亏”属于 **`PORTFOLIO`**，读资产表/Dashboard，不读指标；由 `understanding._explicit_intents()` 优先覆盖模型输出。
 - “收益率 / 胜率 / 回撤 / 夏普”才属于 `PERFORMANCE` 指标口径。
 - 每轮最多 3 个工具；`_dedupe()` 必须保留。
+- 工具参数唯一生成点是 `runtime._tools_for()`：
+  - `period` 只在 `understanding.period.value` 非空时写入 `args`；不要在各工具里另造默认区间。
+  - 意图 → 工具、`limit`、`sort`/`sort_dir` 都在这里集中约束；工具实现只读 `args`。
+  - “操作/交易/买卖/成交”必须归 `TRADES`；“本月/这个月”由 `_rule_period` 或模型 period 归一化保证有 `YYYY-MM`。
 - 工具只能只读；写操作/任务提交不属于聊天工具。
 - 工具返回 `status`、`citations`、`data_as_of`、`missing`、`error_code` 必须原样传递到回答与 trace。
 

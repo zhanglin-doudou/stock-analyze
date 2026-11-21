@@ -85,3 +85,23 @@ def test_object_shaped_intents_are_repaired_and_logged() -> None:
         item.get("event") == "chat.llm.bad_response" and item.get("recovered") is True
         for item in logs
     )
+
+
+def test_operations_question_routes_to_trades_with_period() -> None:
+    service = UnderstandingService(FakeProvider(), FrozenClock(datetime(2026, 11, 20, tzinfo=UTC)))
+    result = service.fallback_understanding("我这个月有哪些操作", {})
+    assert result.intents[0].value == "trades"
+    assert result.period is not None
+    assert result.period.value == "2026-11"
+
+
+def test_model_null_month_period_is_filled_from_question() -> None:
+    service = UnderstandingService(FakeProvider(), FrozenClock(datetime(2026, 11, 20, tzinfo=UTC)))
+    result = service.parse(
+        '{"intents":["trades"],"confidence":0.9,"period":{"kind":"month","value":null,"label":"本月"},'
+        '"entities":[],"resolved_query":"本月有哪些操作","needs_clarification":false}',
+        question="本月有哪些操作",
+        focus={},
+    )
+    assert result.period is not None
+    assert result.period.value == "2026-11"

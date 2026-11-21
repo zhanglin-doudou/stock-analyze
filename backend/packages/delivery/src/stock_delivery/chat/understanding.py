@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from datetime import date
 from typing import Any
 
@@ -49,7 +50,10 @@ _FIXED: tuple[tuple[tuple[str, ...], Intent], ...] = (
     (("为什么", "归因", "拖累", "贡献"), Intent.ATTRIBUTION),
     (("胜率", "盈亏比", "回撤", "持有", "夏普", "收益", "赚", "亏", "费用"), Intent.PERFORMANCE),
     (("最赚", "最亏", "回合", "交易次数"), Intent.ROUNDS),
-    (("流水", "交易明细", "旗标", "追涨", "卖飞", "抄底"), Intent.TRADES),
+    (
+        ("流水", "交易明细", "交易", "操作", "买卖", "成交", "旗标", "追涨", "卖飞", "抄底"),
+        Intent.TRADES,
+    ),
     (("资产", "现金", "仓位", "持仓"), Intent.ASSETS),
     (("净值", "年化", "twr", "xirr"), Intent.NAV),
     (("板块", "行业", "概念", "集中"), Intent.SECTORS),
@@ -168,10 +172,22 @@ class UnderstandingService:
         # 指代只允许从 focus 解析；没有唯一焦点就要求澄清。
         if any(token in resolved_query for token in _PRONOUNS) and not entities:
             needs_clarification = True
+        period = _period(raw.period)
+        if period is None or period.value is None:
+            rule_period = _rule_period(question, self.clock.today())
+            if rule_period.value:
+                # 模型常返回 {"kind":"month","value":null,"label":"本月"}；用规则补全，
+                # 否则 _tools_for 不会传 period，工具会退化成默认区间。
+                period = replace(
+                    period or rule_period,
+                    kind=rule_period.kind,
+                    value=rule_period.value,
+                    label=period.label if period and period.label else rule_period.label,
+                )
         return Understanding(
             intents=intents,
             confidence=max(0.0, min(1.0, raw.confidence)),
-            period=_period(raw.period),
+            period=period,
             entities=entities,
             resolved_query=resolved_query,
             needs_clarification=needs_clarification,
