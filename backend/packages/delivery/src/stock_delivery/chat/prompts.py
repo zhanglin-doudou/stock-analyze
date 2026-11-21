@@ -31,6 +31,7 @@ ANSWER_SYSTEM = """你是个人交易复盘分析助手。根据给出的证据�
 5. 若 status=degraded，必须说明数据缺口/样本不足/口径。
 6. 只输出 Markdown 文本，不允许 HTML、图片、外链。
 7. `answer_markdown` 必须是非空完整回答；`claims` 只是结构化摘要，不能替代 `answer_markdown`。
+8. 回答要精简：最多列出 10 条关键操作/要点，避免逐条复述全部原始流水，防止输出超长被截断。
 输出 JSON：
 {"answer_markdown":"","claims":[{"claim_id":"k1","text":"","citation_ids":["c1"]}],
  "used_citations":["c1"],"confidence":"high|medium|low","followups":[]}

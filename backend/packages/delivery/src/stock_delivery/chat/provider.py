@@ -130,6 +130,8 @@ class GlmProvider:
                 reason, retryable = DegradeReason.LLM_RATE_LIMITED, True
             elif status in (401, 403) or "authentication" in low or "api key" in low:
                 reason, retryable = DegradeReason.LLM_AUTH_FAILED, False
+            elif "length limit" in low or "maximum context length" in low or "truncated" in low:
+                reason, retryable = DegradeReason.LLM_BAD_RESPONSE, False
             elif "timeout" in low or "timed out" in low:
                 reason, retryable = DegradeReason.LLM_TIMEOUT, False
             elif "content" in low and "filter" in low:
@@ -154,6 +156,7 @@ class GlmProvider:
                 retryable=retryable,
                 status_code=status if isinstance(status, int) else None,
                 raw_request=raw_request,
+                raw_response={"error": text[:300]},
             ) from exc
 
         latency_ms = int((time.monotonic() - started) * 1000)

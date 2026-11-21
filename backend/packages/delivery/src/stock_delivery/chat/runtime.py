@@ -229,7 +229,7 @@ class ChatRuntime:
             "resolved_query": self._understanding.resolved_query,
             "intents": [item.value for item in self._understanding.intents],
             "status": self._template.status.value,
-            "results": state.get("results") or [],
+            "results": _compact_results_for_llm(state.get("results") or []),
             "citations": [to_jsonable(item) for item in self._citations],
         }
         repair = state.get("validation_errors") or []
@@ -718,6 +718,27 @@ def _parse_answer(content: str) -> dict[str, Any]:
     if not isinstance(parsed, dict):
         raise ValueError("answer 不是 JSON object")
     return parsed
+
+
+def _compact_results_for_llm(
+    results: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """给 LLM 的证据包瘦身：保留行数据/引用，去掉长词表，最多 10 行。"""
+    compacted: list[dict[str, Any]] = []
+    for result in results:
+        data = result.get("data")
+        if not isinstance(data, dict):
+            compacted.append(dict(result))
+            continue
+        slim = dict(data)
+        slim.pop("flag_glossary", None)
+        slim.pop("flag_config", None)
+        items = slim.get("items")
+        if isinstance(items, list) and len(items) > 10:
+            slim["items"] = items[:10]
+            slim["items_truncated_for_llm"] = True
+        compacted.append({**result, "data": slim})
+    return compacted
 
 
 def _allowed_numbers(results: Sequence[Mapping[str, Any]]) -> set[str]:

@@ -26,6 +26,14 @@ class _RateLimitedClient:
         raise RuntimeError("rate limit 1302")
 
 
+class _LengthLimitedClient:
+    async def ainvoke(self, *_args, **_kwargs):
+        raise RuntimeError(
+            "Could not parse response content as the length limit was reached "
+            "- CompletionUsage(completion_tokens=1024, prompt_tokens=13555)"
+        )
+
+
 def _provider() -> GlmProvider:
     return GlmProvider(
         Settings(
@@ -49,6 +57,16 @@ async def test_llm_success_logs_info(monkeypatch) -> None:
     assert logs[0]["status"] == "ok"
     assert logs[0]["purpose"] == "answer"
     assert logs[0]["total_tokens"] == 7
+
+
+async def test_llm_length_limit_is_bad_response(monkeypatch) -> None:
+    provider = _provider()
+    monkeypatch.setattr(provider, "_client", lambda **_kwargs: _LengthLimitedClient())
+    with pytest.raises(LlmError) as exc:
+        await provider.complete(purpose="answer", system="system", user="user", max_tokens=4096)
+    assert exc.value.reason.value == "LLM_BAD_RESPONSE"
+    assert "length limit" in str(exc.value)
+    assert exc.value.raw_response["error"]
 
 
 async def test_llm_failure_logs_error(monkeypatch) -> None:
