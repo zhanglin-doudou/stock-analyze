@@ -56,6 +56,15 @@ _FIXED: tuple[tuple[tuple[str, ...], Intent], ...] = (
 _PRONOUNS = ("它", "这个", "那个", "那笔", "这只", "那只", "该股", "该回合")
 
 # “赚了多少 / 赚了还是亏了”问的是资产表的累计收益，不是指标页的收益率。
+_ROUNDS_PATTERNS = (
+    "亏损最多",
+    "亏得最多",
+    "最亏",
+    "盈利最多",
+    "赚得最多",
+    "最赚",
+)
+
 _PORTFOLIO_PATTERNS = (
     "赚了多少",
     "赚了还是亏了",
@@ -72,6 +81,8 @@ _PORTFOLIO_PATTERNS = (
 
 
 def _explicit_intents(question: str) -> tuple[Intent, ...] | None:
+    if any(pattern in question for pattern in _ROUNDS_PATTERNS):
+        return (Intent.ROUNDS,)
     if not any(pattern in question for pattern in _PORTFOLIO_PATTERNS):
         return None
     intents: list[Intent] = [Intent.PORTFOLIO]

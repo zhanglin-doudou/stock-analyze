@@ -587,7 +587,16 @@ def _tools_for(understanding: Understanding) -> list[tuple[ToolName, dict[str, A
         elif intent is Intent.ATTRIBUTION:
             tools.append((ToolName.ATTRIBUTION_SUMMARY, {**args}))
         elif intent is Intent.ROUNDS:
-            tools.append((ToolName.ROUNDS_QUERY, {**args, "limit": 20}))
+            round_args: dict[str, Any] = {**args, "limit": 20}
+            if any(
+                word in understanding.resolved_query for word in ("亏损最多", "亏得最多", "最亏")
+            ):
+                round_args.update({"sort": "pnl", "sort_dir": "asc"})
+            elif any(
+                word in understanding.resolved_query for word in ("盈利最多", "赚得最多", "最赚")
+            ):
+                round_args.update({"sort": "pnl", "sort_dir": "desc"})
+            tools.append((ToolName.ROUNDS_QUERY, round_args))
         elif intent is Intent.ROUND_DETAIL:
             if round_id:
                 tools.append((ToolName.ROUND_DETAIL, {"round_id": round_id}))

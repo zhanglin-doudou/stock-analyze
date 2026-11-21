@@ -60,3 +60,9 @@ def test_explicit_portfolio_intent_overrides_model_performance() -> None:
         focus={},
     )
     assert result.intents[0].value == "portfolio"
+
+
+def test_top_loss_question_routes_to_rounds() -> None:
+    service = UnderstandingService(FakeProvider(), FrozenClock(datetime(2026, 11, 20, tzinfo=UTC)))
+    result = service.fallback_understanding("这个月亏损最多的股票是哪一个", {})
+    assert result.intents[0].value == "rounds"
