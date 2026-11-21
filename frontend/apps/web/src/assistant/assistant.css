@@ -18,6 +18,9 @@
   cursor: pointer;
   transition: transform var(--dur) ease, box-shadow var(--dur) ease, background var(--dur) ease;
 }
+.sa-assistant-fab[hidden] {
+  display: none;
+}
 .sa-assistant-fab:hover {
   transform: translateY(-1px);
   background: var(--accent-soft);
@@ -43,12 +46,61 @@
   width: min(440px, calc(100vw - 32px));
   height: min(680px, calc(100dvh - 48px));
   overflow: hidden;
+  overscroll-behavior: contain;
   border: 1px solid var(--line-strong);
   border-radius: var(--r-lg);
   background: var(--surface-raised);
   box-shadow: 0 24px 70px rgba(27, 29, 25, 0.2);
   animation: sa-panel-in 180ms ease-out;
 }
+.sa-assistant-docked {
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  min-width: 25%;
+  max-width: 50%;
+  height: 100dvh;
+  overflow: hidden;
+  border-left: 1px solid var(--line-strong);
+  background: var(--surface-raised);
+}
+.sa-assistant-docked:focus {
+  outline: none;
+}
+.sa-assistant-resizer {
+  position: sticky;
+  top: 0;
+  align-self: flex-start;
+  flex: 0 0 8px;
+  height: 100dvh;
+  background: var(--surface);
+  cursor: col-resize;
+  touch-action: none;
+}
+.sa-assistant-resizer::after {
+  content: "";
+  position: absolute;
+  inset: 0 3px;
+  background: var(--line-strong);
+}
+.sa-assistant-resizer:hover,
+.sa-assistant-resizer:focus-visible {
+  background: var(--accent-soft);
+  outline: none;
+}
+.sa-assistant-resizer:focus-visible::after {
+  background: var(--accent);
+}
+.sa-assistant-mode-toggle svg {
+  transition: transform var(--dur) ease;
+}
+.sa-assistant-mode-toggle[aria-pressed="true"] svg {
+  transform: rotate(180deg);
+}
+
 @keyframes sa-panel-in {
   from { opacity: 0; transform: translateY(8px) scale(0.985); }
   to { opacity: 1; transform: translateY(0) scale(1); }
@@ -105,6 +157,7 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  overscroll-behavior: contain;
   padding: 16px;
   scrollbar-width: thin;
 }
