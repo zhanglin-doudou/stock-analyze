@@ -11,9 +11,9 @@ from collections.abc import Mapping, Sequence
 from dataclasses import asdict, is_dataclass, replace
 from datetime import date, datetime
 from enum import Enum
-from typing import Any
+from typing import Any, Literal, cast
 
-from pydantic import ValidationError
+from pydantic import BaseModel, Field, ValidationError, field_validator
 from stock_contracts.chat.dto import (
     AnswerDraft,
     Citation,
@@ -270,7 +270,12 @@ class ChatRuntime:
                 answer_markdown=answer_markdown,
                 claims=claims,
                 used_citations=tuple(parsed.get("used_citations") or ()),
-                confidence=parsed.get("confidence") or "medium",
+                confidence=cast(
+                    Literal["high", "medium", "low"],
+                    parsed.get("confidence")
+                    if parsed.get("confidence") in {"high", "medium", "low"}
+                    else "medium",
+                ),
                 followups=tuple(parsed.get("followups") or ()),
                 status=self._template.status,
                 fallback=False,
@@ -330,12 +335,17 @@ class ChatRuntime:
         )
         template_text = str(self._template.answer_markdown) if self._template else ""
         numeric_answer = re.sub(r"\[\[[^\]]+\]\]", "", text)
+        warnings = list(result.warnings)
         if re.search(r"\d", template_text) and not re.search(r"\d", numeric_answer):
-            result = type(result)(
-                ok=False,
-                errors=[*result.errors, "missing_numbers"],
-            )
+            warnings.append("missing_numbers")
         if result.ok:
+            if warnings:
+                log.warning(
+                    "chat.llm.validation_warning",
+                    purpose="answer",
+                    model=self.settings.glm_model,
+                    warnings=warnings[:8],
+                )
             return {"status": answer.get("status") or ChatStatus.OK.value}
         retries = int(state.get("retry_count") or 0)
         can_retry = (
@@ -359,6 +369,7 @@ class ChatRuntime:
             purpose="answer",
             model=self.settings.glm_model,
             errors=result.errors[:8],
+            warnings=warnings[:8],
             retry_count=retries,
             will_retry=False,
         )
@@ -746,6 +757,43 @@ def _result_from_dict(data: Mapping[str, Any]) -> ToolResult:
     )
 
 
+class _ClaimIn(BaseModel):
+    claim_id: str = ""
+    text: str = ""
+    citation_ids: list[str] = Field(default_factory=list)
+
+    @field_validator("citation_ids", mode="before")
+    @classmethod
+    def _ids(cls, value: Any) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [value]
+        return [str(item) for item in value]
+
+
+class _AnswerIn(BaseModel):
+    answer_markdown: str = ""
+    claims: list[_ClaimIn] = Field(default_factory=list)
+    used_citations: list[str] = Field(default_factory=list)
+    confidence: str = "medium"
+    followups: list[str] = Field(default_factory=list)
+
+    @field_validator("answer_markdown", mode="before")
+    @classmethod
+    def _text(cls, value: Any) -> str:
+        return "" if value is None else str(value)
+
+    @field_validator("used_citations", "followups", mode="before")
+    @classmethod
+    def _strings(cls, value: Any) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [value]
+        return [str(item) for item in value]
+
+
 def _parse_answer(content: str) -> dict[str, Any]:
     try:
         parsed = json.loads(content)
@@ -755,7 +803,7 @@ def _parse_answer(content: str) -> dict[str, Any]:
         parsed = json.loads(repair_json(content))
     if not isinstance(parsed, dict):
         raise ValueError("answer 不是 JSON object")
-    return parsed
+    return _AnswerIn.model_validate(parsed).model_dump()
 
 
 def _compact_results_for_llm(

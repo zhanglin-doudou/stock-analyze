@@ -30,6 +30,7 @@ _BANNED = (
 class ValidationResult:
     ok: bool
     errors: list[str] = field(default_factory=list)
+    warnings: list[str] = field(default_factory=list)
 
 
 def sanitize(text: str) -> str:
@@ -54,6 +55,19 @@ def normalize_number(value: str) -> str:
     return format(number.normalize(), "f")
 
 
+def _is_nonfinancial_number(text: str, match: re.Match[str]) -> bool:
+    """日期/序号/计数不是财务数字，不应让整条回答 fallback。"""
+    start, end = match.span()
+    prefix = text[max(0, start - 4) : start]
+    suffix = text[end : end + 4]
+    if "第" in prefix:
+        return True
+    window = text[max(0, start - 10) : min(len(text), end + 10)]
+    if re.search(r"\d{4}-\d{1,2}-\d{1,2}", window):
+        return True
+    return any(char in suffix for char in "年月日号条笔个次只项名家位张份")
+
+
 def validate(
     *,
     answer: str,
@@ -62,19 +76,40 @@ def validate(
     allow_tokens: Iterable[str] = (),
 ) -> ValidationResult:
     errors: list[str] = []
+    warnings: list[str] = []
     clean = sanitize(answer)
     if not clean:
         errors.append("empty_answer")
     numeric_text = _MARKER.sub(" ", clean)
     allowed = {normalize_number(item.value_display) for item in citations}
     allowed |= {normalize_number(item) for item in allow_tokens}
-    for token in _NUMBER.findall(numeric_text):
+    allowed_abs: set[str] = set()
+    for item in allowed:
+        try:
+            allowed_abs.add(normalize_number(str(abs(Decimal(item)))))
+        except InvalidOperation:
+            continue
+    for match in _NUMBER.finditer(numeric_text):
+        token = match.group(0)
         normalized = normalize_number(token)
-        if normalized not in allowed:
-            errors.append(f"unknown_number:{token}")
+        if normalized in allowed:
+            continue
+        try:
+            absolute = normalize_number(str(abs(Decimal(normalized))))
+        except InvalidOperation:
+            absolute = normalized
+        if absolute in allowed_abs:
+            warnings.append(f"sign_relaxed:{token}")
+            continue
+        if _is_nonfinancial_number(numeric_text, match):
+            warnings.append(f"nonfinancial_number:{token}")
+            continue
+        errors.append(f"unknown_number:{token}")
     if any(word in clean for word in _BANNED):
         errors.append("banned_advice")
     markers = set(_MARKER.findall(clean))
+    if _NUMBER.search(numeric_text) and not markers:
+        warnings.append("missing_inline_citations")
     citation_ids = {item.citation_id for item in citations}
     citation_numbers = {str(item.number) for item in citations if item.number is not None}
     for marker in markers:
@@ -94,5 +129,5 @@ def validate(
             ids = getattr(claim, "citation_ids", ())
             claim_id = getattr(claim, "claim_id", "?")
         if _NUMBER.search(text) and not ids:
-            errors.append(f"claim_without_citation:{claim_id}")
-    return ValidationResult(ok=not errors, errors=errors[:10])
+            warnings.append(f"claim_without_citation:{claim_id}")
+    return ValidationResult(ok=not errors, errors=errors[:10], warnings=warnings[:10])

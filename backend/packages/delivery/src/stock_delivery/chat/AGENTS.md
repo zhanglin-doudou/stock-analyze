@@ -161,6 +161,9 @@ fallback → persist → END
 - 是否包含买卖建议/收益预测
 - 是否包含 HTML/脚本
 - 模板有数字时，LLM 答案不能把数字全部替换成引用标记
+- 数字分类：金额/价格/数量严格白名单；符号差异、日期/序号/计数、缺失 inline citation 记 warning，不阻断
+- `_parse_answer` 使用 `_AnswerIn` schema 校验 answer_markdown/claims/used_citations/confidence；不要退回裸 dict
+- warnings 写 `chat.llm.validation_warning`，errors 写 `chat.llm.validation_failed`
 
 失败处理：
 

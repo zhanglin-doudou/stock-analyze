@@ -68,3 +68,22 @@ def test_integer_and_decimal_forms_match() -> None:
     )
     result = validate(answer="现金 78000 元 [[1]]", claims=[], citations=[citation])
     assert result.ok, result.errors
+
+
+def test_sign_magnitude_is_warning_not_error() -> None:
+    citation = Citation(
+        citation_id="c1_1",
+        label="银行转取",
+        value_display="-78000.00",
+        source_endpoint="GET /api/v1/trades",
+        number=1,
+    )
+    result = validate(answer="银行转取 78000 元 [[1]]", claims=[], citations=[citation])
+    assert result.ok, result.errors
+    assert any(item.startswith("sign_relaxed") for item in result.warnings)
+
+
+def test_ordinals_dates_and_counts_do_not_blocks() -> None:
+    result = validate(answer="第 3 笔，11 月 17 日，共 20 笔。", claims=[], citations=[])
+    assert result.ok, result.errors
+    assert any(item.startswith("nonfinancial_number") for item in result.warnings)
