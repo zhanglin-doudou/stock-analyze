@@ -5,12 +5,12 @@ import uuid
 from datetime import UTC, date, datetime
 
 import pytest
-from stock_contracts.chat.dto import Citation, ToolResult
+from stock_contracts.chat.dto import Citation, PeriodSpec, ToolResult, Understanding
 from stock_contracts.chat.enums import ChatStatus
 from stock_contracts.clock import FrozenClock
 from stock_delivery.chat.graph import build_graph
 from stock_delivery.chat.provider import FakeProvider
-from stock_delivery.chat.runtime import ChatRuntime
+from stock_delivery.chat.runtime import ChatRuntime, _next_focus
 
 pytestmark = pytest.mark.no_db
 
@@ -292,3 +292,18 @@ async def test_timeout_retries_both_understanding_and_answer(settings) -> None:
     assert final["status"] == "ok"
     assert provider.calls == 4
     assert len(repo.llm_calls) == 4
+
+
+def test_next_focus_drops_empty_and_period_security_fields() -> None:
+    understanding = Understanding(
+        intents=(),
+        confidence=0.9,
+        period=PeriodSpec(kind="month", value="2026-11"),
+        entities=(),
+        resolved_query="本月有哪些操作",
+    )
+    focus = _next_focus(
+        {"period": "2026-10", "security_code": "", "security_name": "本月"},
+        understanding,
+    )
+    assert focus == {"period": "2026-11"}

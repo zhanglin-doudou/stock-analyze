@@ -801,13 +801,21 @@ def _allowed_numbers(results: Sequence[Mapping[str, Any]]) -> set[str]:
 
 def _next_focus(focus: Mapping[str, Any], understanding: Understanding) -> dict[str, Any]:
     out = dict(focus)
+    # 清理旧版本可能写入的空证券/期间词焦点，避免污染下一轮给模型的 focus。
+    for key in ("security_code", "security_name", "round_id", "metric_id"):
+        if not out.get(key):
+            out.pop(key, None)
+    if out.get("security_name") in {"本月", "这个月", "上个月", "今年"} and not out.get(
+        "security_code"
+    ):
+        out.pop("security_name", None)
     for entity in understanding.entities:
-        if entity.type == "security":
+        if entity.type == "security" and (entity.resolved_id or entity.resolved_name):
             out["security_code"] = entity.resolved_id
             out["security_name"] = entity.resolved_name
-        elif entity.type == "round":
+        elif entity.type == "round" and entity.resolved_id:
             out["round_id"] = entity.resolved_id
-        elif entity.type == "metric":
+        elif entity.type == "metric" and entity.resolved_id:
             out["metric_id"] = entity.resolved_id
     if understanding.period and understanding.period.value:
         out["period"] = understanding.period.value

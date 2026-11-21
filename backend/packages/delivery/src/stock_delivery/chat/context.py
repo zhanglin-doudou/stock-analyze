@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import math
 from collections.abc import Awaitable, Callable, Mapping, Sequence
 from dataclasses import dataclass
@@ -128,9 +129,15 @@ class ContextManager:
             summary_version=int(conversation.get("summary_version") or 0),
             compression_steps=tuple(steps),
         )
+        raw_focus = dict(conversation.get("focus") or {})
+        focus = {key: value for key, value in raw_focus.items() if value not in (None, "", [], {})}
+        if focus.get("security_name") in {"本月", "这个月", "上个月", "今年"} and not focus.get(
+            "security_code"
+        ):
+            focus.pop("security_name", None)
         return ContextBundle(
             summary=summary,
-            focus=dict(conversation.get("focus") or {}),
+            focus=focus,
             history=history,
             usage=usage,
         )
@@ -140,7 +147,13 @@ class ContextManager:
         if bundle.summary:
             messages.append({"role": "system", "content": f"对话摘要：{bundle.summary}"})
         if bundle.focus:
-            messages.append({"role": "system", "content": f"当前焦点：{bundle.focus}"})
+            messages.append(
+                {
+                    "role": "system",
+                    "content": "当前焦点（JSON）："
+                    + json.dumps(bundle.focus, ensure_ascii=False, sort_keys=True),
+                }
+            )
         messages.extend(bundle.history)
         messages.append({"role": "user", "content": question})
         return messages
