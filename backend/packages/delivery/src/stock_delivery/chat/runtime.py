@@ -24,6 +24,7 @@ from stock_contracts.chat.enums import ChatStatus, DegradeReason, Intent, ToolNa
 from stock_contracts.chat.ports import ChatDataPort
 from stock_contracts.clock import Clock
 from stock_platform.config import Settings
+from stock_platform.obs import get_logger
 from stock_platform.repositories.chat import ChatRepository
 
 from .composer import compose
@@ -47,6 +48,9 @@ def to_jsonable(value: Any) -> Any:
     if isinstance(value, (list, tuple)):
         return [to_jsonable(item) for item in value]
     return value
+
+
+log = get_logger("stock_delivery.chat.runtime")
 
 
 class ChatRuntime:
@@ -288,6 +292,12 @@ class ChatRuntime:
                 "status": ChatStatus.DEGRADED.value,
             }
         except (json.JSONDecodeError, ValueError) as exc:
+            log.error(
+                "chat.llm.bad_response",
+                purpose="answer",
+                model=self.settings.glm_model,
+                error=str(exc)[:300],
+            )
             self._degrade_reason = DegradeReason.LLM_BAD_RESPONSE
             draft = self._fallback_draft(DegradeReason.LLM_BAD_RESPONSE)
             return {
@@ -328,6 +338,13 @@ class ChatRuntime:
         )
         if can_retry:
             return {"validation_errors": result.errors, "retry_count": 1}
+        log.error(
+            "chat.llm.validation_failed",
+            purpose="answer",
+            model=self.settings.glm_model,
+            errors=result.errors[:8],
+            retry_count=retries,
+        )
         return {
             "validation_errors": result.errors,
             "retry_count": retries + 1,

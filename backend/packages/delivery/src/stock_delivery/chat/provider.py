@@ -145,6 +145,7 @@ class GlmProvider:
                 model=self.settings.glm_model,
                 error_code=reason.value,
                 status_code=status if isinstance(status, int) else None,
+                error=text[:300] or reason.value,
                 latency_ms=latency_ms,
             )
             raise LlmError(
