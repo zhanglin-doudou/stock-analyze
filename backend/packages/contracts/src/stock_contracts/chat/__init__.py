@@ -17,6 +17,15 @@ from stock_contracts.chat.enums import (
     DegradeReason,
     Intent,
     ToolName,
+    ToolSource,
+    ToolTrust,
+)
+from stock_contracts.chat.tools import (
+    ProviderHealth,
+    ToolCall,
+    ToolContext,
+    ToolProvider,
+    ToolSpec,
 )
 
 __all__ = [
@@ -30,8 +39,15 @@ __all__ = [
     "LlmResult",
     "MissingEntry",
     "PeriodSpec",
+    "ProviderHealth",
     "ResolvedEntity",
+    "ToolCall",
+    "ToolContext",
     "ToolName",
+    "ToolProvider",
     "ToolResult",
+    "ToolSource",
+    "ToolSpec",
+    "ToolTrust",
     "Understanding",
 ]

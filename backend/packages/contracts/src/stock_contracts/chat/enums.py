@@ -26,6 +26,16 @@ class DegradeReason(StrEnum):
     TOOL_UNAVAILABLE = "TOOL_UNAVAILABLE"
 
 
+class ToolSource(StrEnum):
+    BUILTIN = "builtin"
+    MCP = "mcp"
+
+
+class ToolTrust(StrEnum):
+    LOCAL = "local"
+    EXTERNAL = "external"
+
+
 class ToolName(StrEnum):
     ASSETS_QUERY = "assets_query"
     TRADES_QUERY = "trades_query"

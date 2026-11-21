@@ -318,6 +318,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/chat/turns/{turn_id}/events": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Turn Events
+         * @description API-116：单轮执行过程事件（owner；after_seq 增量补齐）。
+         */
+        get: operations["getChatTurnEvents"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/chat/turns/{turn_id}/replay": {
         parameters: {
             query?: never;
@@ -2417,6 +2437,26 @@ export interface components {
             /** Window Turns */
             window_turns: number;
         };
+        /** ChatEventsOut */
+        ChatEventsOut: {
+            /**
+             * Complete
+             * @default true
+             */
+            complete: boolean;
+            /** Items */
+            items?: components["schemas"]["ChatTimelineEventOut"][];
+            /**
+             * Next Seq
+             * @default 0
+             */
+            next_seq: number;
+            /**
+             * Synthetic
+             * @default false
+             */
+            synthetic: boolean;
+        };
         /** ChatHistoryMessageOut */
         ChatHistoryMessageOut: {
             /** Content */
@@ -2488,6 +2528,9 @@ export interface components {
             retryable: boolean;
             /** Status */
             status: string;
+            /** Timeline */
+            timeline?: components["schemas"]["ChatTimelineEventOut"][];
+            timeline_summary?: components["schemas"]["ChatTimelineSummaryOut"] | null;
             /** Timings */
             timings?: {
                 [key: string]: unknown;
@@ -2549,12 +2592,52 @@ export interface components {
             /** Window Turns */
             window_turns: number;
         };
+        /** ChatTimelineEventOut */
+        ChatTimelineEventOut: {
+            /**
+             * At
+             * Format: date-time
+             */
+            at: string;
+            /** Call Id */
+            call_id?: string | null;
+            /** Kind */
+            kind: string;
+            /** Payload */
+            payload?: {
+                [key: string]: unknown;
+            };
+            /** Phase */
+            phase: string;
+            /** Seq */
+            seq: number;
+            /** Step */
+            step?: number | null;
+        };
+        /** ChatTimelineSummaryOut */
+        ChatTimelineSummaryOut: {
+            /**
+             * Complete
+             * @default true
+             */
+            complete: boolean;
+            /** Events */
+            events: number;
+            /** Steps */
+            steps: number;
+            /** Tool Calls */
+            tool_calls: number;
+            /** Total Ms */
+            total_ms: number;
+        };
         /** ChatTraceOut */
         ChatTraceOut: {
             /** Answer */
             answer?: {
                 [key: string]: unknown;
             };
+            /** Events */
+            events?: components["schemas"]["ChatTimelineEventOut"][];
             /** Llm Calls */
             llm_calls?: {
                 [key: string]: unknown;
@@ -7153,6 +7236,53 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getChatTurnEvents: {
+        parameters: {
+            query?: {
+                after_seq?: number;
+                limit?: number;
+            };
+            header?: {
+                authorization?: string | null;
+                "x-api-key"?: string | null;
+            };
+            path: {
+                turn_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ChatEventsOut"];
+                };
+            };
+            /** @description 未认证或凭证无效 */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                     "application/problem+json": components["schemas"]["Error"];
                 };
             };

@@ -46,6 +46,8 @@ export type ChatMessageOut = ApiSchemas["ChatMessageOut"];
 export type ChatConversationOut = ApiSchemas["ChatConversationOut"];
 export type ChatHistoryMessageOut = ApiSchemas["ChatHistoryMessageOut"];
 export type ChatTraceOut = ApiSchemas["ChatTraceOut"];
+export type ChatEventsOut = ApiSchemas["ChatEventsOut"];
+export type ChatTimelineEventOut = ApiSchemas["ChatTimelineEventOut"];
 export type ChatReplayOut = ApiSchemas["ChatReplayOut"];
 
 export type ErrorDocument = ApiSchemas["Error"];

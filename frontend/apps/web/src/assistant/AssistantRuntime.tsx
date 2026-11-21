@@ -15,11 +15,17 @@ import {
   type ThreadMessageLike,
 } from "@assistant-ui/react";
 import remarkGfm from "remark-gfm";
-import { isApiProblemError, type ChatConversationOut, type ChatMessageOut } from "@sa/api-client";
+import {
+  isApiProblemError,
+  type ChatConversationOut,
+  type ChatMessageOut,
+  type ChatTimelineEventOut,
+} from "@sa/api-client";
 import { api } from "../client";
 import { formatChatTime } from "../lib/datetime";
 import { LoadingState } from "../components/ui/spinner";
 import { parseSse } from "./sse";
+import { ExecutionTimeline } from "./timeline";
 import "./assistant.css";
 
 function MarkdownText() {
@@ -94,6 +100,11 @@ export function createChatAdapter(sessionId: string): ChatModelAdapter {
         yield { content: [{ type: "text" as const, text: "请先输入一个问题。" }] };
         return;
       }
+      let timeline: ChatTimelineEventOut[] = [];
+      const update = (text: string) => ({
+        content: [{ type: "text" as const, text }],
+        metadata: { custom: { timeline } },
+      });
       try {
         const response = await api.chat.streamMessage(
           sessionId,
@@ -103,21 +114,29 @@ export function createChatAdapter(sessionId: string): ChatModelAdapter {
         const contentType = response.headers.get("content-type") ?? "";
         if (!contentType.includes("text/event-stream")) {
           const data = (await response.json()) as ChatMessageOut;
-          yield { content: [{ type: "text" as const, text: renderAnswer(data) }] };
+          timeline = data.timeline ?? [];
+          yield update(renderAnswer(data));
           return;
         }
 
         let text = "";
         for await (const event of parseSse(response)) {
-          if (event.event === "delta") {
+          if (event.event === "step") {
+            const next = event.data as ChatTimelineEventOut;
+            timeline = [...timeline.filter((item) => item.seq !== next.seq), next].sort(
+              (left, right) => left.seq - right.seq,
+            );
+            yield update(text);
+          } else if (event.event === "delta") {
             const delta = (event.data as { text?: string }).text ?? "";
             if (!delta) continue;
             text += delta;
-            yield { content: [{ type: "text" as const, text }] };
+            yield update(text);
           } else if (event.event === "done") {
             const message = (event.data as { message?: ChatMessageOut }).message;
             if (message) {
-              yield { content: [{ type: "text" as const, text: renderAnswer(message) }] };
+              timeline = message.timeline ?? timeline;
+              yield update(renderAnswer(message));
             }
             return;
           } else if (event.event === "error") {
@@ -133,7 +152,7 @@ export function createChatAdapter(sessionId: string): ChatModelAdapter {
           : err instanceof Error
             ? err.message
             : "星星助手暂时不可用，请稍后重试。";
-        yield { content: [{ type: "text" as const, text: `> ⚠ ${message}` }] };
+        yield update(`> ⚠ ${message}`);
       }
     },
   };
@@ -215,6 +234,7 @@ function ChatMessage() {
         <div className="sa-message" data-role="assistant">
           <div className="sa-message-stack">
             <div className="sa-message-bubble">
+              <ExecutionTimeline />
               <MessagePrimitive.Parts components={{ Text: MarkdownText }} />
             </div>
             <MessageTimestamp />

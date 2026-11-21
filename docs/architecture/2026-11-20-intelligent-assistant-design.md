@@ -1,6 +1,7 @@
 # 智能分析助手 · 完整开发设计 v1.0
 
 > 状态：**设计定稿（2026-11-20）**；后端 Chat-00~08 与前端悬浮窗/问答历史均已按本设计落地；前端使用 assistant-ui primitives + 项目 tokens。
+> 2026-11-21 后续：工具注册、MCP 对外开放/接入、执行时间线重构见 [2026-11-21-tool-platform-refactor.md](2026-11-21-tool-platform-refactor.md)；本文的工具枚举/固定图、聊天保留与删除、MCP 相关部分以新设计为准。
 > 需求基线：[PRD-v2 FR-D7](../prd/PRD-v2.md)、[DEV-PLAN Period3-07](../DEV-PLAN-v2.md)、[ADR-0022](v2/ADR.md)、[API-Catalog API-077/078](v2/API-Catalog.md)。
 > 本设计取代 [2026-11-19 调研稿](2026-11-19-intelligent-assistant-research.md) 中的 L0/L1 隐私分层与“不做历史端点”结论；调研稿的其他分析保留参考价值。
 > 已拍板：GLM-4.7-Flash 免费版验证、单会话、对话/工具/LLM 调用全量入库可回放、滑动窗口 10 轮 + 200K 的 80% 压缩、语义理解与指代替换、业务数据可全量使用、不做 RAG、LLM 故障输出降级原因与服务不可用提示。

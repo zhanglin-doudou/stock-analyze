@@ -48,7 +48,7 @@
 - ETag `W/"<version>"`（列表含查询指纹），写响应返新 ETag；`If-Match` 不匹配 → 409 `VERSION_CONFLICT`（遵循 PRD FR-L4，不采用 412）。
 - 格式：金额**定点字符串 2 位** `"1234.56"`；价格 6 位、数量 4 位；比率十进制小数；时间 ISO 8601 UTC；业务日 `YYYY-MM-DD`（Asia/Shanghai）；`blocked` 时 `value` **字段缺省**。软删默认过滤 `deleted_at NULL`，`include_deleted=true` 仅本人；注销物理级联删除，审计留事件元数据。
 
-## §1 端点总表（114 个；API-089 预留不计数；API-090~095、API-055/096/097、API-098~106、API-107~111、API-077/078/112~115 均已实现；Path 省略公共前缀 `/api/v1`，标注「根」者不在前缀下）
+## §1 端点总表（115 个；API-089 预留不计数；API-090~095、API-055/096/097、API-098~106、API-107~111、API-077/078/112~116 均已实现；Path 省略公共前缀 `/api/v1`，标注「根」者不在前缀下）
 | API-ID | Method | Path | 用途 | FR | 认证/scope | 幂等 | 同步/异步 | 优先级 | 主要成功码 |
 |---|---|---|---|---|---|---|---|---|---|
 | API-001 | POST | `/auth/register` | 注册账号 | L2 | 公开 | 支持 | 同步 | P0 | 201 |
@@ -136,7 +136,8 @@
 | API-112 | GET | `/chat/conversation` | 单会话元数据 + 分页消息 | D7 | read | — | 同步 | P1 | 200 |
 | API-113 | GET | `/chat/turns/{turn_id}/trace` | 单轮完整回放轨迹（理解/工具/LLM） | D7 | read | — | 同步 | P1 | 200 |
 | API-114 | POST | `/chat/turns/{turn_id}/replay` | 回放（deterministic/llm/full） | D7 | write | — | 同步 | P1 | 200 |
-| API-115 | DELETE | `/chat/conversation` | 清空单会话（软删消息，保留回放数据） | D7 | write | 幂等 | 同步 | P1 | 204 |
+| API-115 | DELETE | `/chat/conversation` | 用户删除单会话（硬删聊天+时间线） | D7 | write | 幂等 | 同步 | P1 | 204 |
+| API-116 | GET | `/chat/turns/{turn_id}/events` | 单轮执行过程事件（after_seq 增量） | D7 | read | — | 同步 | P1 | 200 |
 | API-079 | GET | `/metrics/{metric_id}` | 指标详情（单指标完整 MetricResult） | R5/R8/D1 | read | — | 同步 | P0 | 200 |
 | API-080 | GET | `/trades/{trade_id}` | 流水详情（含血缘与版本） | L4/L8/D1 | read | — | 同步 | P0 | 200 |
 | API-081 | GET | `/assets` | 每日资产快照列表（现金/持仓市值/成本/浮盈/日收益） | D1 | read | — | 同步 | P0 | 200 |
@@ -494,10 +495,10 @@
 #### API-078 POST /chat/sessions/{session_id}/messages
 - 用途：复盘问答（工具取数 + 金额后端填充 + 出站守卫）；FR-D7；认证：write；幂等：支持；同步。
 - 请求：path `session_id`；body `message`(必填,1~2000) / `context{period?,round_id?}`；头 `Idempotency-Key`(推荐)。
-- 响应 200（JSON）：`conversation_id` / `turn_id` / `message_id` / `answer` / `answer_format` / `citations[]{number,citation_id,label,value,source_endpoint,source_params,definition_version,data_as_of}` / `claims[]{claim_id,text,citation_ids}` / `status` / `degrade_reason` / `degrade_message` / `what_to_do` / `retryable` / `llm_used` / `fallback` / `understanding` / `context_usage` / `timings`。
-- SSE 变体：同一路径请求头 `Accept: text/event-stream` 时返回 `text/event-stream`，事件依次 `meta`（turn_id/status/llm_used/degrade_reason）→ `delta`（`{"text": "分片"}`，可多次）→ `done`（`{"message": ChatMessageOut}`）；错误发生在流建立前仍走 RFC 7807，流内异常发 `error` 事件。前端按 delta 增量渲染，done 用完整消息补充 citations/来源。
+- 响应 200（JSON）：`conversation_id` / `turn_id` / `message_id` / `answer` / `answer_format` / `citations[]{number,citation_id,label,value,source_endpoint,source_params,definition_version,data_as_of}` / `claims[]{claim_id,text,citation_ids}` / `status` / `degrade_reason` / `degrade_message` / `what_to_do` / `retryable` / `llm_used` / `fallback` / `understanding` / `context_usage` / `timeline[]{seq,kind,phase,call_id?,step?,at,payload}` / `timeline_summary{events,steps,tool_calls,total_ms,complete}` / `timings`。
+- SSE 变体：同一路径请求头 `Accept: text/event-stream` 时返回 `text/event-stream`，事件依次 `meta`（turn_id/status/llm_used/degrade_reason/timeline_version）→ `step`（执行过程事件，可多次）→ `delta`（`{"text": "分片"}`，可多次）→ `done`（`{"message": ChatMessageOut,"timeline":ChatTimelineSummaryOut}`）；错误发生在流建立前仍走 RFC 7807，流内异常发 `error` 事件。前端按 delta 增量渲染，done 用完整消息补充 citations/来源。
 - 错误码：NOT_FOUND(404)、MESSAGE_TOO_LONG(422)、VALIDATION_ERROR(422)、RATE_LIMITED(429)、QUOTA_EXCEEDED(429)、LLM_UNAVAILABLE(503)、IDEMPOTENCY_*(409/422)。
-- 验收断言：① 200 且 answer 非空；② 回答中每个金额都能在 citations 找到来源，且 source_endpoint 可调用返回一致值；③ LLM 关闭（`llm_provider=none`）时金额类问题仍 200 且 answer 金额正确（fallback==true）；④ 出站守卫：测试钩子捕获的出站 payload 不含金额/股东账号；⑤ 跨用户 session → 404；⑥ 同 `Idempotency-Key` 重放返回同一 `turn_id`，不重复调用工具/LLM；⑦ LLM 故障时 `degrade_reason` 非空且模板数字仍正确；⑧ `Accept: text/event-stream` 返回 meta/delta/done，done.message.answer 与 JSON 版本一致。
+- 验收断言：① 200 且 answer 非空；② 回答中每个金额都能在 citations 找到来源，且 source_endpoint 可调用返回一致值；③ LLM 关闭（`llm_provider=none`）时金额类问题仍 200 且 answer 金额正确（fallback==true）；④ 出站守卫：测试钩子捕获的出站 payload 不含金额/股东账号；⑤ 跨用户 session → 404；⑥ 同 `Idempotency-Key` 重放返回同一 `turn_id`，不重复调用工具/LLM；⑦ LLM 故障时 `degrade_reason` 非空且模板数字仍正确；⑧ `Accept: text/event-stream` 返回 meta/step*/delta*/done，done.message.answer 与 JSON 版本一致；step.seq 单调。
 
 #### API-112 GET /chat/conversation
 - 用途：读取当前用户唯一对话与分页消息；FR-D7；认证 read；operationId `getChatConversation`。
@@ -507,7 +508,7 @@
 
 #### API-113 GET /chat/turns/{turn_id}/trace
 - 用途：回放单轮完整轨迹；FR-D7；认证 read；operationId `getChatTrace`。
-- 响应 200：`{turn,tool_calls[]{seq,tool,args,result,status,error_code,latency_ms},llm_calls[]{seq,purpose,provider,model,prompt_version,request,response,usage,status},answer}`。
+- 响应 200：`{turn,tool_calls[]{seq,tool,args,result,status,error_code,latency_ms},llm_calls[]{seq,purpose,provider,model,prompt_version,request,response,usage,status},events[]ChatTimelineEvent,answer}`。
 - 错误码：NOT_FOUND(404)、ADMIN_CANNOT_READ_TRADES(403)、INSUFFICIENT_SCOPE(403)。
 
 #### API-114 POST /chat/turns/{turn_id}/replay
@@ -517,9 +518,16 @@
 - 错误码：NOT_FOUND(404)、VALIDATION_ERROR(422)、LLM_UNAVAILABLE(503)、ADMIN_CANNOT_READ_TRADES(403)。
 
 #### API-115 DELETE /chat/conversation
-- 用途：清空当前用户对话（软删消息，保留回放数据）；FR-D7；认证 write；幂等；operationId `deleteChatConversation`。
-- 响应 204；重复调用 204。
+- 用途：用户删除当前用户对话；硬删 `chat_conversation` 并级联删除消息/轮次/工具/LLM/时间线事件；FR-D7；认证 write；幂等；operationId `deleteChatConversation`。
+- 响应 204；重复调用 204；删除后 trace/events 404；审计只保留 `chat.conversation.delete` 元数据。
 - 错误码：TOKEN_*(401)、INSUFFICIENT_SCOPE(403)、ADMIN_CANNOT_READ_TRADES(403)。
+
+#### API-116 GET /chat/turns/{turn_id}/events
+- 用途：读取单轮执行过程时间线（P0-4）；FR-D7；认证 read；同步；operationId `getChatTurnEvents`。
+- 请求：path `turn_id`；query `after_seq`(>=0,默认 0) / `limit`(1~100,默认 100)。
+- 响应 200：`{items[]{seq,kind,phase,call_id?,step?,at,payload},next_seq,complete,synthetic}`；事件按 `seq` 升序。
+- 错误码：NOT_FOUND(404)、TOKEN_*(401)、INSUFFICIENT_SCOPE(403)、ADMIN_CANNOT_READ_TRADES(403)。
+- 验收断言：① 一次问答后 items 含 understanding/tool/answer/turn 事件且 seq 单调；② `after_seq` 只返回更大 seq；③ 跨用户/删除后 404；④ 事件超过 180 天返回空并由 trace 合成。
 
 ### 2.5 板块（2026-10-31 新增）
 #### API-087 GET /sectors/overview
@@ -922,9 +930,10 @@ data: {"job_id":"job_01J9Z6","status":"succeeded","result_ref":"/api/v1/reports/
 | API-077 | chat_session_ensure | 首次 201；再次 200 且 conversation_id 相同；admin 403 | fx_base | P1 |
 | API-078 | chat_answer_citations | 200 answer+citations/claims/context_usage；LLM 关闭仍答；同幂等键同一 turn_id；LLM 故障 degrade_reason；跨用户 404 | fx_llm_off | P1 |
 | API-112 | chat_conversation_get | 200 单会话+分页消息；跨用户 404；admin 403 | fx_base | P1 |
-| API-113 | chat_trace_get | 200 turn/tool_calls/llm_calls/answer；跨用户 404 | fx_base | P1 |
+| API-113 | chat_trace_get | 200 turn/tool_calls/llm_calls/events/answer；跨用户 404 | fx_base | P1 |
 | API-114 | chat_replay | deterministic 匹配；llm/full 可跑；跨用户 404 | fx_base | P1 |
-| API-115 | chat_conversation_delete | 204；重复 204；消息软删、回放数据保留 | fx_base | P1 |
+| API-115 | chat_conversation_delete | 204；重复 204；聊天/时间线硬删，trace/events 404 | fx_base | P1 |
+| API-116 | chat_turn_events | 200 items/next_seq/complete；seq 单调；after_seq 增量；跨用户/删除后 404 | fx_base | P1 |
 | API-079 | metrics_detail_single | 200 且 definition_version/inputs_hash/data_as_of 齐全；blocked 无 value | fx_round30 | P0 |
 | API-080 | trades_detail_owner | 200 且字段与列表一致；跨用户 404 | fx_base | P0 |
 | API-081 | assets_daily_series | 200 日期倒序且 06-30 行金额==oracle（含 daily_return_pct）；未构建 items=[]+build.state=missing；blocked 行数值全 null；from/to 闭区间/status/sort/limit 校验；跨用户 0 条、admin 403 | fx_round30 | P0 |

@@ -146,7 +146,18 @@ class Settings(BaseSettings):
     )
     chat_rpm: int = Field(3, alias="CHAT_RPM")
     chat_daily_turns: int = Field(50, alias="CHAT_DAILY_TURNS")
-    chat_retention_days: int = Field(180, alias="CHAT_RETENTION_DAYS")
+    # 2026-11-21 工具平台 P0：聊天默认永久（0）；时间线单独 180 天。
+    chat_retention_days: int = Field(0, alias="CHAT_RETENTION_DAYS")
+    chat_timeline_retention_days: int = Field(180, alias="CHAT_TIMELINE_RETENTION_DAYS")
+    tool_platform_enabled: bool = Field(False, alias="TOOL_PLATFORM_ENABLED")
+    chat_planner_mode: Literal["auto", "rules", "llm"] = Field(
+        "auto", alias="CHAT_PLANNER_MODE"
+    )
+    chat_max_steps: int = Field(3, alias="CHAT_MAX_STEPS")
+    chat_max_tool_calls: int = Field(6, alias="CHAT_MAX_TOOL_CALLS")
+    tool_max_concurrency: int = Field(4, alias="TOOL_MAX_CONCURRENCY")
+    chat_turn_deadline_seconds: float = Field(60.0, alias="CHAT_TURN_DEADLINE_SECONDS")
+    chat_timeline_enabled: bool = Field(True, alias="CHAT_TIMELINE_ENABLED")
 
     @computed_field  # type: ignore[prop-decorator]
     @property

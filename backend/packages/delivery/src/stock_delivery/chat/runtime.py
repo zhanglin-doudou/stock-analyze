@@ -25,6 +25,7 @@ from stock_contracts.chat.dto import (
 )
 from stock_contracts.chat.enums import ChatStatus, DegradeReason, Intent, ToolName
 from stock_contracts.chat.ports import ChatDataPort
+from stock_contracts.chat.tools import ToolCall, ToolContext
 from stock_contracts.clock import Clock
 from stock_platform.config import Settings
 from stock_platform.obs import get_logger
@@ -35,6 +36,7 @@ from .context import ContextBundle, ContextManager
 from .prompts import ANSWER_SYSTEM, COMPRESS_SYSTEM
 from .provider import LlmError, LlmProvider
 from .state import ChatState
+from .tools import RulePlanner, ToolExecutor, ToolRegistry, ToolTraceSink
 from .understanding import UnderstandingService
 from .validator import sanitize, validate
 
@@ -70,6 +72,8 @@ class ChatRuntime:
         turn_id: str,
         question: str,
         user_message_id: str | None = None,
+        tool_registry: ToolRegistry | None = None,
+        tool_executor: ToolExecutor | None = None,
     ) -> None:
         self.repo = repo
         self.data_port = data_port
@@ -81,6 +85,8 @@ class ChatRuntime:
         self.turn_id = turn_id
         self.user_message_id = user_message_id
         self.question = question
+        self.tool_registry = tool_registry
+        self.tool_executor = tool_executor
         self.context_manager = ContextManager(repo, settings)
         self.understanding_service = UnderstandingService(llm, clock)
         self._bundle: ContextBundle | None = None
@@ -95,9 +101,13 @@ class ChatRuntime:
         self._degrade_reason: DegradeReason | None = None
         self._started = time.monotonic()
         self.assistant_message_id: str | None = None
+        self._events: list[dict[str, Any]] = []
+        self._event_seq = 0
+        self._step = 1
 
     # ── nodes ──────────────────────────────────────────────
     async def load_context(self, state: ChatState) -> dict[str, Any]:
+        self._emit("turn.started", "start", {"question_length": len(self.question)})
         bundle = await self.context_manager.build(
             self.user_id,
             self.conversation,
@@ -110,11 +120,13 @@ class ChatRuntime:
 
     async def understand(self, state: ChatState) -> dict[str, Any]:
         assert self._bundle is not None
+        self._emit("understanding.started", "understand", {})
         if not self.settings.llm_enabled:
             understanding = self.understanding_service.fallback_understanding(
                 self.question, self._bundle.focus
             )
             self._understanding = understanding
+            self._emit_understanding_completed(understanding)
             return {"understanding": to_jsonable(understanding)}
 
         messages = self.context_manager.understanding_messages(self._bundle, self.question)
@@ -130,6 +142,7 @@ class ChatRuntime:
                 result.content, question=self.question, focus=self._bundle.focus
             )
             self._understanding = understanding
+            self._emit_understanding_completed(understanding)
             return {"understanding": to_jsonable(understanding)}
         except LlmError as exc:
             self._degrade_reason = exc.reason
@@ -137,6 +150,7 @@ class ChatRuntime:
                 self.question, self._bundle.focus
             )
             self._understanding = understanding
+            self._emit_understanding_completed(understanding)
             return {
                 "understanding": to_jsonable(understanding),
                 "degrade_reason": exc.reason.value,
@@ -153,6 +167,7 @@ class ChatRuntime:
                 self.question, self._bundle.focus
             )
             self._understanding = understanding
+            self._emit_understanding_completed(understanding)
             return {
                 "understanding": to_jsonable(understanding),
                 "degrade_reason": DegradeReason.LLM_BAD_RESPONSE.value,
@@ -168,10 +183,43 @@ class ChatRuntime:
 
     async def execute_tools(self, state: ChatState) -> dict[str, Any]:
         assert self._understanding is not None
+        if (
+            self.settings.tool_platform_enabled
+            and self.tool_registry is not None
+            and self.tool_executor is not None
+        ):
+            platform_results = await self._execute_via_tool_platform()
+            if platform_results:
+                self._citations = _number_citations(
+                    [citation for result in platform_results for citation in result.citations]
+                )
+                return {"results": [to_jsonable(result) for result in platform_results]}
         tools = _tools_for(self._understanding)
+        self._emit(
+            "plan.created",
+            "plan",
+            {
+                "planner": "legacy",
+                "calls": [
+                    {"tool_id": f"builtin.{tool.value}", "tool": tool.value, "source": "builtin"}
+                    for tool, _ in tools
+                ],
+            },
+        )
         results: list[ToolResult] = []
         for tool, args in tools:
             self._tool_seq += 1
+            self._emit(
+                "tool.call.started",
+                "execute",
+                {
+                    "call_id": f"call_{self._tool_seq}",
+                    "tool_id": f"builtin.{tool.value}",
+                    "tool": tool.value,
+                    "title": tool.value,
+                    "source": "builtin",
+                },
+            )
             started = time.monotonic()
             result = await self.data_port.invoke(tool, args)
             latency = int((time.monotonic() - started) * 1000)
@@ -189,14 +237,64 @@ class ChatRuntime:
                 error_code=result.error_code,
             )
             self._record_tool(tool, args, result, latency)
+            self._emit(
+                "tool.call.succeeded" if result.status is not ChatStatus.ERROR else "tool.call.failed",
+                "execute",
+                {
+                    "call_id": f"call_{self._tool_seq}",
+                    "tool_id": f"builtin.{tool.value}",
+                    "tool": tool.value,
+                    "title": tool.value,
+                    "source": "builtin",
+                    "status": result.status.value,
+                    "row_count": result.row_count,
+                    "latency_ms": latency,
+                    "error_code": result.error_code,
+                },
+            )
             results.append(result)
         self._citations = _number_citations(
             [citation for result in results for citation in result.citations]
         )
         return {"results": [to_jsonable(result) for result in results]}
 
+    async def _execute_via_tool_platform(self) -> list[ToolResult]:
+        assert self._understanding is not None
+        assert self.tool_registry is not None
+        assert self.tool_executor is not None
+        ctx = ToolContext(
+            user_id=self.user_id,
+            request_id=self.turn_id,
+            turn_id=self.turn_id,
+            scopes=frozenset({"read"}),
+            deadline=time.monotonic() + self.settings.chat_turn_deadline_seconds,
+        )
+        catalog = await self.tool_registry.snapshot(ctx, include_external=False)
+        # P0 只接规则 Planner；CHAT_PLANNER_MODE=auto 的 LLM Planner 在 P1 接入。
+        plan = RulePlanner().plan(self._understanding, catalog)
+        if plan.action != "call" or not plan.calls:
+            return []
+        self._emit(
+            "plan.created",
+            "plan",
+            {
+                "planner": "rules",
+                "calls": [
+                    {
+                        "tool_id": call.tool_id,
+                        "args_summary": _args_summary(call.args),
+                        "source": "builtin",
+                    }
+                    for call in plan.calls
+                ],
+            },
+        )
+        trace = _RuntimeToolTrace(self)
+        return await self.tool_executor.execute(plan.calls, catalog, ctx, trace=trace)
+
     async def compose(self, state: ChatState) -> dict[str, Any]:
         assert self._understanding is not None and self._bundle is not None
+        self._emit("answer.started", "answer", {"template": True})
         results = state.get("results") or []
         parsed = [_result_from_dict(item) for item in results]
         template = compose(
@@ -321,6 +419,7 @@ class ChatRuntime:
             }
 
     async def validate(self, state: ChatState) -> dict[str, Any]:
+        self._emit("validation.started", "validate", {"retry": int(state.get("retry_count") or 0)})
         answer = state.get("answer") or {}
         text = str(answer.get("answer_markdown") or "")
         allowed = _allowed_numbers(state.get("results") or [])
@@ -355,6 +454,11 @@ class ChatRuntime:
             and not self._understanding.needs_clarification
         )
         if can_retry:
+            self._emit(
+                "validation.failed",
+                "validate",
+                {"errors": result.errors[:8], "retry_count": retries, "will_retry": True},
+            )
             log.error(
                 "chat.llm.validation_failed",
                 purpose="answer",
@@ -364,6 +468,11 @@ class ChatRuntime:
                 will_retry=True,
             )
             return {"validation_errors": result.errors, "retry_count": 1}
+        self._emit(
+            "validation.failed",
+            "validate",
+            {"errors": result.errors[:8], "retry_count": retries, "will_retry": False},
+        )
         log.error(
             "chat.llm.validation_failed",
             purpose="answer",
@@ -425,6 +534,11 @@ class ChatRuntime:
     async def fallback(self, state: ChatState) -> dict[str, Any]:
         template = self._template
         reason = self._degrade_reason or DegradeReason.LLM_BAD_RESPONSE
+        self._emit(
+            "fallback.triggered",
+            "validate",
+            {"degrade_reason": reason.value, "message": _degrade_message(reason)},
+        )
         if template is None:
             draft = AnswerDraft(
                 answer_markdown="智能分析服务暂时不可用；你可以用固定问题查看已有数据。",
@@ -475,6 +589,29 @@ class ChatRuntime:
         text = str(answer.get("answer_markdown") or "")
         status = str(answer.get("status") or state.get("status") or ChatStatus.OK.value)
         degrade = answer.get("degrade_reason") or state.get("degrade_reason")
+        latency = int((time.monotonic() - self._started) * 1000)
+        self._emit(
+            "turn.failed" if status == ChatStatus.ERROR.value else "turn.completed",
+            "done",
+            {
+                "status": status,
+                "total_ms": latency,
+                "steps": self._step,
+                "tool_calls": len(self._tool_logs),
+                "llm_calls": len(self._llm_logs),
+            },
+        )
+        append_event = getattr(self.repo, "append_event", None)
+        if append_event is not None:
+            for event in self._events:
+                await append_event(
+                    user_id=self.user_id,
+                    turn_id=self.turn_id,
+                    seq=event["seq"],
+                    kind=event["kind"],
+                    phase=event["phase"],
+                    payload=event["payload"],
+                )
         message = await self.repo.append_message(
             user_id=self.user_id,
             conversation_id=str(self.conversation["id"]),
@@ -485,7 +622,6 @@ class ChatRuntime:
             status=status,
         )
         self.assistant_message_id = str(message["id"])
-        latency = int((time.monotonic() - self._started) * 1000)
         await self.repo.update_turn(
             self.user_id,
             self.turn_id,
@@ -507,6 +643,47 @@ class ChatRuntime:
         return {"status": status}
 
     # ── helpers ────────────────────────────────────────────
+    def _emit(self, kind: str, phase: str, payload: Mapping[str, Any]) -> dict[str, Any]:
+        if not self.settings.chat_timeline_enabled:
+            return {}
+        self._event_seq += 1
+        event = {
+            "seq": self._event_seq,
+            "kind": kind,
+            "phase": phase,
+            "turn_id": self.turn_id,
+            "at": self.clock.now().isoformat(),
+            "payload": to_jsonable(dict(payload)),
+        }
+        self._events.append(event)
+        return event
+
+    def _emit_understanding_completed(self, understanding: Understanding) -> None:
+        period = understanding.period.value if understanding.period else None
+        self._emit(
+            "understanding.completed",
+            "understand",
+            {
+                "intents": [item.value for item in understanding.intents],
+                "period": period,
+                "confidence": understanding.confidence,
+                "needs_clarification": understanding.needs_clarification,
+                "ambiguities": list(understanding.ambiguities),
+            },
+        )
+
+    def events(self) -> list[dict[str, Any]]:
+        return list(self._events)
+
+    def timeline_summary(self) -> dict[str, Any]:
+        return {
+            "events": len(self._events),
+            "steps": self._step,
+            "tool_calls": len(self._tool_logs),
+            "total_ms": int((time.monotonic() - self._started) * 1000),
+            "complete": True,
+        }
+
     @staticmethod
     def _retryable(exc: LlmError) -> bool:
         """超时、429、5xx、坏响应等都重试；鉴权/未配置/内容过滤不重试。"""
@@ -526,6 +703,12 @@ class ChatRuntime:
     ) -> LlmResult:
         """统一 LLM 重试：每次失败落 chat_llm_call，成功后落成功记录。"""
         max_retries = max(0, int(self.settings.llm_retry_on_429))
+        self._emit(
+            "model.thinking.started",
+            "think",
+            {"purpose": purpose, "model": self.settings.glm_model},
+        )
+        thinking_started = time.monotonic()
         for attempt in range(max_retries + 1):
             self._llm_seq += 1
             try:
@@ -537,8 +720,24 @@ class ChatRuntime:
                 )
             except LlmError as exc:
                 self._record_llm_error(purpose, exc, prompt_version=prompt_version)
+                self._emit(
+                    "model.thinking.completed",
+                    "think",
+                    {
+                        "purpose": purpose,
+                        "status": "error",
+                        "error_code": exc.reason.value,
+                        "latency_ms": int((time.monotonic() - thinking_started) * 1000),
+                    },
+                )
                 if not self._retryable(exc) or attempt >= max_retries:
                     raise
+                self._emit(
+                    "model.thinking.started",
+                    "think",
+                    {"purpose": purpose, "model": self.settings.glm_model, "retry": True},
+                )
+                thinking_started = time.monotonic()
                 delay = self.settings.llm_retry_backoff_seconds * (2**attempt)
                 log.warning(
                     "chat.llm.retry",
@@ -551,6 +750,16 @@ class ChatRuntime:
                 await asyncio.sleep(delay)
                 continue
             self._record_llm(purpose, result, prompt_version=prompt_version, status="ok")
+            self._emit(
+                "model.thinking.completed",
+                "think",
+                {
+                    "purpose": purpose,
+                    "status": "ok",
+                    "latency_ms": int((time.monotonic() - thinking_started) * 1000),
+                    "tokens": result.total_tokens,
+                },
+            )
             return result
         raise AssertionError("unreachable")
 
@@ -575,14 +784,14 @@ class ChatRuntime:
         return str(parsed.get("summary") or "")[:2000]
 
     def _record_tool(
-        self, tool: ToolName, args: Mapping[str, Any], result: ToolResult, latency: int
+        self, tool: str | ToolName, args: Mapping[str, Any], result: ToolResult, latency: int
     ) -> None:
         # 先在内存留痕，graph 结束后由 persist 统一短事务落库，避免 LLM 等待期间持有长事务。
         self._tool_logs = getattr(self, "_tool_logs", [])
         self._tool_logs.append(
             {
                 "seq": self._tool_seq,
-                "tool_name": tool.value,
+                "tool_name": getattr(tool, "value", str(tool)),
                 "args": to_jsonable(args),
                 "result": to_jsonable(result),
                 "status": result.status.value,
@@ -652,6 +861,41 @@ class ChatRuntime:
 
     def llm_logs(self) -> list[dict[str, Any]]:
         return list(getattr(self, "_llm_logs", []))
+
+
+class _RuntimeToolTrace(ToolTraceSink):
+    """把执行器留痕接回 ChatRuntime 的内存日志；事件在 P0-4 再接 SSE。"""
+
+    def __init__(self, runtime: ChatRuntime) -> None:
+        self.runtime = runtime
+
+    async def record_tool_call(
+        self, call: ToolCall, result: ToolResult, ctx: ToolContext
+    ) -> None:
+        self.runtime._tool_seq += 1
+        self.runtime._record_tool(
+            result.tool, call.args, result, result.latency_ms or 0
+        )
+
+    async def emit(self, event: Mapping[str, Any]) -> None:
+        kind = str(event.get("kind") or "tool.call")
+        payload = {key: value for key, value in event.items() if key != "kind"}
+        self.runtime._emit(kind, "execute", payload)
+
+
+def _args_summary(args: Mapping[str, Any]) -> dict[str, Any]:
+    allowed = {
+        "period",
+        "security",
+        "round_id",
+        "metric_id",
+        "taxonomy",
+        "sort",
+        "sort_dir",
+        "limit",
+        "flag",
+    }
+    return {key: value for key, value in args.items() if key in allowed}
 
 
 def _tools_for(understanding: Understanding) -> list[tuple[ToolName, dict[str, Any]]]:

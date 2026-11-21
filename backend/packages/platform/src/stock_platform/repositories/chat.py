@@ -7,9 +7,10 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime
 from typing import Any
 
-from sqlalchemy import and_, func, or_, select, update
+from sqlalchemy import and_, delete, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from stock_platform.ids import new_id
@@ -19,6 +20,7 @@ from stock_platform.models import (
     ChatMessage,
     ChatToolCall,
     ChatTurn,
+    ChatTurnEvent,
 )
 
 
@@ -49,6 +51,18 @@ def _message_dict(row: ChatMessage) -> dict[str, Any]:
         "content_json": row.content_json,
         "token_count": row.token_count,
         "status": row.status,
+        "created_at": row.created_at,
+    }
+
+
+def _event_dict(row: ChatTurnEvent) -> dict[str, Any]:
+    return {
+        "id": row.id,
+        "turn_id": row.turn_id,
+        "seq": row.seq,
+        "kind": row.kind,
+        "phase": row.phase,
+        "payload": row.payload or {},
         "created_at": row.created_at,
     }
 
@@ -324,6 +338,57 @@ class ChatRepository:
         await self.session.flush()
         return row.id
 
+    async def append_event(
+        self,
+        *,
+        user_id: uuid.UUID,
+        turn_id: str,
+        seq: int,
+        kind: str,
+        phase: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        row = ChatTurnEvent(
+            id=new_id("evt"),
+            turn_id=turn_id,
+            user_id=user_id,
+            seq=seq,
+            kind=kind,
+            phase=phase,
+            payload=payload,
+        )
+        self.session.add(row)
+        await self.session.flush()
+        return _event_dict(row)
+
+    async def list_events(
+        self,
+        user_id: uuid.UUID,
+        turn_id: str,
+        *,
+        after_seq: int = 0,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        rows = list(
+            await self.session.scalars(
+                select(ChatTurnEvent)
+                .where(
+                    ChatTurnEvent.user_id == user_id,
+                    ChatTurnEvent.turn_id == turn_id,
+                    ChatTurnEvent.seq > after_seq,
+                )
+                .order_by(ChatTurnEvent.seq)
+                .limit(limit)
+            )
+        )
+        return [_event_dict(row) for row in rows]
+
+    async def delete_events_before(self, before: datetime) -> int:
+        result = await self.session.execute(
+            delete(ChatTurnEvent).where(ChatTurnEvent.created_at < before)
+        )
+        return int(getattr(result, "rowcount", 0) or 0)
+
     async def get_trace(
         self, user_id: uuid.UUID, turn_id: str
     ) -> tuple[dict[str, Any], list[dict[str, Any]], list[dict[str, Any]]] | None:
@@ -420,6 +485,18 @@ class ChatRepository:
             .where(ChatConversation.user_id == user_id)
             .values(turn_count=ChatConversation.turn_count + 1, updated_at=func.now())
         )
+
+    async def delete_conversation(self, *, user_id: uuid.UUID) -> bool:
+        """用户删除：硬删会话（含已软删行），FK cascade 清消息/轮次/调用/事件。"""
+        conversation = await self.session.scalar(
+            select(ChatConversation).where(ChatConversation.user_id == user_id)
+        )
+        if conversation is None:
+            return False
+        await self.session.execute(
+            delete(ChatConversation).where(ChatConversation.user_id == user_id)
+        )
+        return True
 
     async def reset_conversation(self, *, user_id: uuid.UUID) -> None:
         conversation = await self.get_conversation(user_id)

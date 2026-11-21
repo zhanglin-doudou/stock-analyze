@@ -14,6 +14,7 @@ import type {
   BatchList,
   BillDataResetOut,
   ChatConversationOut,
+  ChatEventsOut,
   ChatMessageIn,
   ChatMessageOut,
   ChatReplayOut,
@@ -1049,6 +1050,13 @@ export function createClient(options: ClientOptions) {
       return send<ChatConversationOut>({
         path: "/chat/conversation",
         query: { limit: query.limit, before_id: query.before_id },
+      }).then((r) => r.data);
+    },
+    /** API-116：单轮执行过程事件（after_seq 增量）。 */
+    getTurnEvents(turnId: string, query: { after_seq?: number; limit?: number } = {}) {
+      return send<ChatEventsOut>({
+        path: `/chat/turns/${encodeURIComponent(turnId)}/events`,
+        query: { after_seq: query.after_seq, limit: query.limit },
       }).then((r) => r.data);
     },
     /** API-113：单轮回放轨迹。 */

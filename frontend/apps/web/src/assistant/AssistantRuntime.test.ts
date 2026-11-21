@@ -66,7 +66,10 @@ describe("createChatAdapter SSE", () => {
     const chunks: string[] = [];
     const generator = adapter.run({
       messages: [{ role: "user", content: [{ type: "text", text: "本月赚多少？" }] }],
-    } as never) as AsyncIterable<{ content: Array<{ type: string; text: string }> }>;
+    } as never) as AsyncIterable<{
+      content: Array<{ type: string; text: string }>;
+      metadata?: { custom?: { timeline?: unknown[] } };
+    }>;
     for await (const result of generator) {
       const part = result.content[0];
       if (part && part.type === "text") chunks.push(part.text);
@@ -76,5 +79,29 @@ describe("createChatAdapter SSE", () => {
     expect(chunks.at(-1)).toContain("最终回答[1]");
     expect(chunks.at(-1)).toContain("数据来源");
     expect(mocks.streamMessage).toHaveBeenCalledWith("cnv_1", { message: "本月赚多少？" }, { signal: undefined });
+  });
+
+  it("step 事件写入 metadata.custom.timeline", async () => {
+    mocks.streamMessage.mockResolvedValue(
+      sseResponse([
+        'event: meta\ndata: {"turn_id":"trn_1"}\n\n',
+        'event: step\nid: 1\ndata: {"seq":1,"kind":"understanding.started","phase":"understand","at":"2026-11-21T10:00:00Z","payload":{}}\n\n',
+        'event: step\nid: 2\ndata: {"seq":2,"kind":"tool.call.succeeded","phase":"execute","call_id":"call_1","at":"2026-11-21T10:00:01Z","payload":{"title":"流水查询","row_count":2}}\n\n',
+        `event: done\ndata: ${JSON.stringify({ message })}\n\n`,
+      ]),
+    );
+    const adapter = createChatAdapter("cnv_1");
+    const timelines: unknown[][] = [];
+    const generator = adapter.run({
+      messages: [{ role: "user", content: [{ type: "text", text: "本月赚多少？" }] }],
+    } as never) as AsyncIterable<{
+      content: Array<{ type: string; text: string }>;
+      metadata?: { custom?: { timeline?: unknown[] } };
+    }>;
+    for await (const result of generator) {
+      const timeline = result.metadata?.custom?.timeline;
+      if (timeline) timelines.push(timeline);
+    }
+    expect(timelines.at(-1)).toHaveLength(2);
   });
 });

@@ -4,7 +4,8 @@
 （`argparse` + `asyncio`），不引入 `click`/`typer` 等三方 CLI 依赖。
 
 子命令一览：seed-tenants / seed-demo / sync-market / sync-sectors / sync-sector-bars /
-api-check / api-snapshot / sdk / api-coverage / verify-p1 / demo-p1 / db-truncate。
+api-check / api-snapshot / sdk / api-coverage / verify-p1 / demo-p1 / db-truncate /
+chat-events-cleanup。
 """
 
 from __future__ import annotations
@@ -48,6 +49,7 @@ from stock_platform.market_live import (
     validate_symbols,
 )
 from stock_platform.market_models import DailyBar
+from stock_platform.repositories.chat import ChatRepository
 from stock_platform.repositories.users import UserRepository
 from stock_platform.sector_fixture import generate_sector_fixture
 from stock_platform.sector_source import create_live_sector_source
@@ -1283,6 +1285,29 @@ async def _db_truncate() -> int:
 
 
 # ── 参数解析 / 分发 ────────────────────────────────────────────
+async def _cleanup_chat_events(*, days: int, dry_run: bool) -> int:
+    """清理超过保留期的聊天时间线事件；聊天正文不动（P0-4）。"""
+    settings = get_settings()
+    cutoff = SystemClock().now() - timedelta(days=days)
+    db = Database(settings, role="owner")
+    if dry_run:
+        from sqlalchemy import func, select
+        from stock_platform.models import ChatTurnEvent
+
+        async with db.session(begin=False) as session:
+            count = await session.scalar(
+                select(func.count()).select_from(ChatTurnEvent).where(
+                    ChatTurnEvent.created_at < cutoff
+                )
+            )
+        emit(f"== chat-events-cleanup（dry-run）== cutoff={cutoff.isoformat()} 待删={count or 0}")
+        return 0
+    async with db.session(begin=True) as session:
+        count = await ChatRepository(session).delete_events_before(cutoff)
+    emit(f"✅ chat-events-cleanup 完成：删除 {count} 条事件（cutoff={cutoff.isoformat()}）")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="stock_api.cli",
@@ -1344,6 +1369,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--email", default=None, help="只构建该账号（缺省=当月有流水的全部用户）"
     )
     trade_flags.add_argument("--dry-run", action="store_true", help="只计算并打印统计，不写库")
+    cleanup = subparsers.add_parser("chat-events-cleanup", help="清理过期聊天时间线事件")
+    cleanup.add_argument("--days", type=int, default=0, help="保留天数；0 使用 CHAT_TIMELINE_RETENTION_DAYS")
+    cleanup.add_argument("--dry-run", action="store_true")
     subparsers.add_parser("api-check", help="契约完整性检查（路径/operationId/错误码/错误响应）")
     snapshot = subparsers.add_parser("api-snapshot", help="规范化写出 contracts/openapi.json")
     snapshot.add_argument("--check", action="store_true", help="只比对不写，漂移则退出码 1")
@@ -1399,6 +1427,9 @@ async def _dispatch(args: argparse.Namespace) -> int:
         return await _build_trade_flags(month=args.month, email=args.email, dry_run=args.dry_run)
     if command == "db-truncate":
         return await _db_truncate()
+    if command == "chat-events-cleanup":
+        days = args.days or get_settings().chat_timeline_retention_days
+        return await _cleanup_chat_events(days=days, dry_run=args.dry_run)
     if command == "api-check":
         return _api_check()
     if command == "api-snapshot":
@@ -1424,6 +1455,7 @@ COMMANDS: dict[str, Callable[[argparse.Namespace], Coroutine[Any, Any, int]]] = 
         "sync-sector-concept",
         "sync-sector-bars",
         "build-trade-flags",
+        "chat-events-cleanup",
         "db-truncate",
         "api-check",
         "api-snapshot",

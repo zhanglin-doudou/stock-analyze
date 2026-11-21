@@ -2406,6 +2406,24 @@ class ChatContextUsageOut(BaseModel):
     compression_steps: list[str] = Field(default_factory=list)
 
 
+class ChatTimelineEventOut(BaseModel):
+    seq: int
+    kind: str
+    phase: str
+    call_id: str | None = None
+    step: int | None = None
+    at: datetime
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class ChatTimelineSummaryOut(BaseModel):
+    events: int
+    steps: int
+    tool_calls: int
+    total_ms: int
+    complete: bool = True
+
+
 class ChatMessageOut(BaseModel):
     conversation_id: str
     turn_id: str
@@ -2423,6 +2441,8 @@ class ChatMessageOut(BaseModel):
     fallback: bool = False
     understanding: dict[str, Any] = Field(default_factory=dict)
     context_usage: ChatContextUsageOut | None = None
+    timeline: list[ChatTimelineEventOut] = Field(default_factory=list)
+    timeline_summary: ChatTimelineSummaryOut | None = None
     timings: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -2450,7 +2470,15 @@ class ChatTraceOut(BaseModel):
     turn: dict[str, Any]
     tool_calls: list[dict[str, Any]] = Field(default_factory=list)
     llm_calls: list[dict[str, Any]] = Field(default_factory=list)
+    events: list[ChatTimelineEventOut] = Field(default_factory=list)
     answer: dict[str, Any] = Field(default_factory=dict)
+
+
+class ChatEventsOut(BaseModel):
+    items: list[ChatTimelineEventOut] = Field(default_factory=list)
+    next_seq: int = 0
+    complete: bool = True
+    synthetic: bool = False
 
 
 class ChatReplayIn(StrictModel):

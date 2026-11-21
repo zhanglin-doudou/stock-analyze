@@ -448,6 +448,35 @@ class ChatTurn(Base):
     )
 
 
+class ChatTurnEvent(Base):
+    """助手单轮执行过程事件（append-only；180 天 TTL）。"""
+
+    __tablename__ = "chat_turn_event"
+    __table_args__ = (
+        UniqueConstraint("turn_id", "seq", name="uq_chat_turn_event_turn_seq"),
+        Index("ix_chat_turn_event_user_at", "user_id", "created_at"),
+        Index("ix_chat_turn_event_created_at", "created_at"),
+        {"schema": SCHEMA},
+    )
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    turn_id: Mapped[str] = mapped_column(
+        String(40),
+        ForeignKey(f"{SCHEMA}.chat_turn.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey(f"{SCHEMA}.user.id", ondelete="CASCADE"), nullable=False
+    )
+    seq: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    kind: Mapped[str] = mapped_column(String(40), nullable=False)
+    phase: Mapped[str] = mapped_column(String(16), nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class ChatToolCall(Base):
     """工具调用原始参数/结果，用于回放。"""
 
@@ -524,6 +553,7 @@ __all__ = [
     "ChatMessage",
     "ChatToolCall",
     "ChatTurn",
+    "ChatTurnEvent",
     "ConfigRelease",
     "IdempotencyKey",
     "Job",

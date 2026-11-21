@@ -57,9 +57,18 @@ fallback → persist → END
 - 只允许一个 `answer` 重试（`retry_count == 1`），禁止无限自循环。
 - `graph.compile()` **不传 checkpointer**；会话状态只来自 `ChatRepository`。
 - 新增/删除节点必须同步更新本文件、`graph.py` 与 `test_runtime.py`。
-- 工具选择由 `runtime._tools_for()` 决定，**不允许 LLM 直接选择/调用任意工具**。
+- `TOOL_PLATFORM_ENABLED=false`（默认）时工具选择由 `runtime._tools_for()` 决定；`true` 时走 `ToolRegistry + RulePlanner + ToolExecutor`。两种路径都**不允许 LLM 直接调用任意工具**。
 
-## 2. 工具白名单与意图
+## 2. 工具白名单与意图（2026-11-21 P0 起双路径）
+
+`TOOL_PLATFORM_ENABLED=true` 时，`execute_tools` 走新工具平台：
+`ToolRegistry.snapshot()` → `RulePlanner.plan()` → `ToolExecutor.execute()`；
+内置工具元数据在 `stock_review/application/chat/provider.py` 的 `BUILTIN_SPECS`，
+执行器统一做 schema 校验/超时/去重/留痕。新增工具优先只改 `BUILTIN_SPECS` +
+handler；`ToolName`/`_tools_for()` 是 flag=false 的 legacy 路径，仍保持兼容。
+
+`ToolResult.tool` 是短名字符串（兼容旧值），新代码用 `tool_id`（如
+`builtin.trades_query`）做唯一标识；不要在新代码里假设 `tool` 是 `ToolName`。
 
 `ChatQueryFacade` 是唯一数据入口；delivery 只传 `ToolName + args`。
 
@@ -227,7 +236,7 @@ make sdk
 约定：
 
 - CI 一律用 `FakeProvider`，不调真实 GLM；真实 GLM 只做人工 smoke。
-- 新增工具必须同时补：`ToolName` 枚举、`_tools_for()`、`ChatQueryFacade` 实现、citations、单元/API 测试。
+- 新增内置工具：`TOOL_PLATFORM_ENABLED=true` 时补 `stock_review/application/chat/provider.py` 的 `BUILTIN_SPECS` + handler；`false` 时补 `ToolName`、`_tools_for()`。两条路径都要补 citations 与单元/API 测试，不能只改一条。
 - 改 prompt 必须升 `prompt_version`（`chat.understand.v1` / `chat.answer.v1`），并跑 golden/validation。
 - 新增/修改 SSE 事件必须同步 API-Catalog、设计文档、前端 parser 与测试。
 
@@ -251,6 +260,7 @@ make sdk
 | `graph.py` | 固定 LangGraph 拓扑；无 checkpointer |
 | `state.py` | `ChatState` TypedDict |
 | `runtime.py` | 节点实现、工具选择、答案/校验/降级/持久化 |
+| `tools/` | `ToolRegistry`/`ToolCatalog`/`ToolExecutor`/`RulePlanner`（P0 工具平台） |
 | `context.py` | 10 轮窗口、160K 压缩、understanding messages |
 | `understanding.py` | 意图/期间/实体/指代与规则回落 |
 | `provider.py` | GLM/Fake provider、错误映射 |

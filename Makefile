@@ -263,6 +263,10 @@ test-metrics:
 test-perf:
 	@$(UV) pytest backend/tests/perf -q
 
+.PHONY: chat-events-cleanup
+chat-events-cleanup:
+	@$(PY) -m stock_api.cli chat-events-cleanup $(ARGS)
+
 .PHONY: test-chat
 test-chat:
 	@$(UV) pytest backend/tests/unit/delivery/chat backend/tests/api/test_chat.py -q

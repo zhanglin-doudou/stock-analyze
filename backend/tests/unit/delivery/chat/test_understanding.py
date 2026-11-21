@@ -105,3 +105,11 @@ def test_model_null_month_period_is_filled_from_question() -> None:
     )
     assert result.period is not None
     assert result.period.value == "2026-11"
+
+
+def test_rule_constraints_are_exposed_for_planner() -> None:
+    service = UnderstandingService(FakeProvider(), FrozenClock(datetime(2026, 11, 20, tzinfo=UTC)))
+    result = service.fallback_understanding("这个月亏损最多的前5只股票", {})
+    assert result.constraints["sort"] == "pnl"
+    assert result.constraints["sort_dir"] == "asc"
+    assert result.constraints["limit"] == 5

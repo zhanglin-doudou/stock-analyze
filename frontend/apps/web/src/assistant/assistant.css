@@ -297,3 +297,44 @@
 .sa-load-earlier-button:disabled { cursor: wait; opacity: 0.75; }
 .sa-load-earlier-button:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 .sa-load-earlier-error { display: block; margin-top: 4px; color: var(--danger); font-size: 11px; }
+
+/* 执行过程时间线（P0-5）：只消费 tokens。 */
+.sa-timeline {
+  margin: 0 0 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--surface-2);
+  font-size: 11.5px;
+  color: var(--text-2);
+}
+.sa-timeline-summary {
+  cursor: pointer;
+  padding: 6px 8px;
+  color: var(--muted);
+  font: 500 11px/1.3 var(--font-ui);
+  list-style-position: inside;
+}
+.sa-timeline-summary:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.sa-timeline-list {
+  margin: 0;
+  padding: 2px 8px 7px;
+  list-style: none;
+}
+.sa-timeline-item {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  padding: 2px 0;
+  line-height: 1.45;
+}
+.sa-timeline-mark {
+  flex: 0 0 12px;
+  color: var(--muted);
+  font-weight: 700;
+}
+.sa-timeline-item[data-status="ok"] .sa-timeline-mark { color: var(--accent); }
+.sa-timeline-item[data-status="warn"] .sa-timeline-mark { color: var(--warn); }
+.sa-timeline-item[data-status="error"] .sa-timeline-mark { color: var(--danger); }
+.sa-timeline-item[data-status="run"] .sa-timeline-mark { color: var(--accent); }
+.sa-timeline-label { flex: 1; min-width: 0; }
+.sa-timeline-meta { color: var(--faint); font-variant-numeric: tabular-nums; }

@@ -32,6 +32,21 @@ describe("parseSse", () => {
     ]);
   });
 
+  it("解析 SSE id（step 事件去重用）", async () => {
+    const response = streamResponse([
+      "event: step\nid: 3\ndata: {\"seq\":3,\"kind\":\"tool.call.started\"}\n\n",
+    ]);
+    const events = [];
+    for await (const event of parseSse(response)) events.push(event);
+    expect(events).toEqual([
+      {
+        event: "step",
+        id: "3",
+        data: { seq: 3, kind: "tool.call.started" },
+      },
+    ]);
+  });
+
   it("无 body 直接报错", async () => {
     await expect(async () => {
       for await (const _ of parseSse(new Response(null))) {

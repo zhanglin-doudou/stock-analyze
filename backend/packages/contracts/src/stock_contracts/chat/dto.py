@@ -7,7 +7,13 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Any, Literal
 
-from stock_contracts.chat.enums import ChatStatus, DegradeReason, Intent, ToolName
+from stock_contracts.chat.enums import (
+    ChatStatus,
+    DegradeReason,
+    Intent,
+    ToolSource,
+    ToolTrust,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -31,7 +37,8 @@ class MissingEntry:
 
 @dataclass(frozen=True, slots=True)
 class ToolResult:
-    tool: ToolName
+    # 短名兼容旧字段（内置工具仍是 "trades_query" 等）；外部工具用 tool_id 限定。
+    tool: str
     status: ChatStatus
     data: Mapping[str, Any]
     citations: tuple[Citation, ...] = ()
@@ -42,6 +49,14 @@ class ToolResult:
     row_count: int = 0
     latency_ms: int | None = None
     error_code: str | None = None
+    # 工具平台新增字段；全部有默认值，旧构造点不需要改。
+    tool_id: str = ""
+    title: str = ""
+    source: ToolSource = ToolSource.BUILTIN
+    trust: ToolTrust = ToolTrust.LOCAL
+    error_message: str | None = None
+    retryable: bool = False
+    cache_hit: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -73,6 +88,10 @@ class Understanding:
     needs_clarification: bool = False
     clarification: str | None = None
     raw: Mapping[str, Any] = field(default_factory=dict)
+    # 2026-11-21 工具平台：约束/能力提示/歧义；旧构造点不受影响。
+    constraints: Mapping[str, Any] = field(default_factory=dict)
+    capability_hints: tuple[str, ...] = ()
+    ambiguities: tuple[Mapping[str, Any], ...] = ()
 
 
 @dataclass(frozen=True, slots=True)

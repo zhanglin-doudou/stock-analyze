@@ -41,6 +41,7 @@ class _UnderstandingIn(BaseModel):
     confidence: float = 0.0
     period: _PeriodIn | None = None
     entities: list[_EntityIn] = Field(default_factory=list)
+    constraints: dict[str, Any] = Field(default_factory=dict)
     resolved_query: str = ""
     needs_clarification: bool = False
     clarification: str | None = None
@@ -168,6 +169,14 @@ class UnderstandingService:
         )
         entities = tuple(_entity(item) for item in raw.entities)
         needs_clarification = raw.needs_clarification or raw.confidence < 0.6
+        constraints = {
+            **_rule_constraints(question),
+            **{
+                key: value
+                for key, value in raw.constraints.items()
+                if key in _CONSTRAINT_KEYS and value not in (None, "")
+            },
+        }
         resolved_query = raw.resolved_query.strip() or question
         # 指代只允许从 focus 解析；没有唯一焦点就要求澄清。
         if any(token in resolved_query for token in _PRONOUNS) and not entities:
@@ -193,6 +202,7 @@ class UnderstandingService:
             needs_clarification=needs_clarification,
             clarification=raw.clarification,
             raw=raw.model_dump(),
+            constraints=constraints,
         )
 
     def _fallback(self, question: str, focus: Mapping[str, Any]) -> Understanding:
@@ -217,7 +227,33 @@ class UnderstandingService:
             needs_clarification=needs,
             clarification="你问的是哪只证券/哪个回合？" if needs else None,
             raw={"fallback": True},
+            constraints=_rule_constraints(question),
         )
+
+
+_CONSTRAINT_KEYS = {"sort", "sort_dir", "limit", "taxonomy", "metric_id", "flag"}
+
+
+def _rule_constraints(question: str) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    if any(word in question for word in ("亏损最多", "亏得最多", "最亏")):
+        out.update({"sort": "pnl", "sort_dir": "asc"})
+    elif any(word in question for word in ("盈利最多", "赚得最多", "最赚")):
+        out.update({"sort": "pnl", "sort_dir": "desc"})
+    if "概念" in question:
+        out["taxonomy"] = "concept"
+    elif "行业" in question or "板块" in question:
+        out["taxonomy"] = "industry"
+    if "胜率" in question:
+        out["metric_id"] = "win_rate"
+    elif "回撤" in question:
+        out["metric_id"] = "max_drawdown"
+    elif "夏普" in question:
+        out["metric_id"] = "sharpe"
+    match = re.search(r"前\s*(\d+)\s*(?:个|只|笔|条)?", question)
+    if match:
+        out["limit"] = max(1, min(int(match.group(1)), 1000))
+    return out
 
 
 def _intent(value: str) -> Intent:
