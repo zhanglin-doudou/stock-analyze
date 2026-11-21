@@ -124,6 +124,10 @@ fallback → persist → END
 - 请求/响应必须进入 `ChatRepository` 的 `chat_llm_call`（`request`/`response`/usage/status/error_code）。
 - `.env` 修改后 **必须重启 API**；`Settings` 在进程启动时加载，uvicorn `--reload` 不监听 `.env`。
 - 禁止打印 `GLM_API_KEY`；禁止把 key 写入 trace、日志、测试快照。
+- 每次真实 GLM 调用写一条 `chat.llm.call` 结构化日志：
+  - 成功：`info`，字段 `status=ok` / `purpose` / `provider` / `model` / `prompt_tokens` / `completion_tokens` / `total_tokens` / `latency_ms`。
+  - 失败：`error`，字段 `status=error` / `purpose` / `provider` / `model` / `error_code` / `status_code` / `latency_ms`。
+  - **不记录** messages、answer 正文、API key；日志测试见 `test_provider_logging.py`。
 
 ## 6. 模板答案与 LLM 答案
 
