@@ -34,7 +34,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 # 2) 源码 + 工作区包（editable 安装，REPO_ROOT=/app）
 # backend/ 已包含 alembic.ini；entrypoint 用 `-c backend/alembic.ini` 指向它
+# config/ 含 LLM 供应商目录（config/llm_providers.json），REPO_ROOT/config 为默认读取路径
 COPY backend backend
+COPY config config
 COPY infra/docker/entrypoint.sh infra/docker/entrypoint.sh
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync --frozen --no-dev ${EXTRAS}
