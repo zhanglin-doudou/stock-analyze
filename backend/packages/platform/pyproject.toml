@@ -25,6 +25,13 @@ dependencies = [
 # akshare 1.19.1 晚发布、兼容未验证，先给上限。
 [project.optional-dependencies]
 live = ["akshare>=1.16.72,<1.20", "pandas>=2.0,<3.1"]
+# 阿里云邮件推送（生产 EMAIL_PROVIDER=aliyun 时安装；适配器 lazy import）
+email = [
+    "alibabacloud-dm20151123",
+    "alibabacloud-credentials",
+    "alibabacloud-tea-openapi",
+    "alibabacloud-tea-util",
+]
 
 [build-system]
 requires = ["hatchling"]

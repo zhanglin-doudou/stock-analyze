@@ -16,7 +16,7 @@
 | PostgreSQL | Architecture-v2 §9；Reliability §4（参数/PITR）；ADR-0014/0018 |
 | 前后端分离（React / Python） | Architecture-v2 §6/§12；Testing §7（前端测试与零口径）；ADR-0016/0021 |
 | 重后轻前 | Architecture-v2 §12、§11（口径只在后端）；ADR-0021 |
-| **优先 API 可验收** | **[API-Catalog](API-Catalog.md)**（114 端点 + 验收矩阵）；Architecture-v2 §2/§2.3；Testing §5 |
+| **优先 API 可验收** | **[API-Catalog](API-Catalog.md)**（118 端点 + 验收矩阵）；Architecture-v2 §2/§2.3；Testing §5 |
 | Monorepo | Architecture-v2 §6；Extensibility §7/§8；ADR 见 §6 |
 
 ---
@@ -26,7 +26,7 @@
 | 文档 | 行数 | 职责 | 最先读哪节 |
 |---|---|---|---|
 | [../Architecture-v2.md](../../Architecture-v2.md) | 951 | **主文档**：驱动力、**可验收 API 清单（先行）**、服务级质量属性、C4、Monorepo 双栈、PG 多租户、队列、指标引擎、前端架构、安全、部署迁移、28+15 追溯矩阵 | §0.2、§2、§19 |
-| [API-Catalog.md](API-Catalog.md) | 1024 | **可验收 API 目录**：总则、114 个端点总表、71 个详细契约小节、63 个错误码、16 个 Schema、异步/SSE、验收矩阵 114/114、契约治理、FR→API 追溯 28/28 | §1、§6、§8 |
+| [API-Catalog.md](API-Catalog.md) | 1024 | **可验收 API 目录**：总则、118 个端点总表、74 个详细契约小节、66 个错误码、16 个 Schema、异步/SSE、验收矩阵 118/118、契约治理、FR→API 追溯 28/28 | §1、§6、§8 |
 | [Reliability.md](Reliability.md) | 506 | 服务级高可用：8 条 SLO 与错误预算、故障域与 15 个单点、优雅停机与滚动发布、expand-contract、PG/PITR、队列可靠性、20 行 FMEA、8×10 降级矩阵、容量、告警、SOP-1~10、12 项演练 | §1、§3、§7 |
 | [Testing.md](Testing.md) | 548 | 测试与门禁：两类新增高危缺陷、分层覆盖率（含端点/越权硬门禁）、12 类套件、**20 行越权矩阵 + RLS 直连 8 项**、API 验收套件、契约三件套、前端测试与零口径断言、确定性、CI 四段、性能 | §2、§4、§5 |
 | [Extensibility.md](Extensibility.md) | 506 | 可扩展性：X-1~X-8 判据、EP-1~EP-12、指标注册表 v2、**租户演进路径**、**API 兼容治理**、前端扩展、版本化矩阵、9 项反扩展、四个作业单 | §2、§4、§5 |
@@ -60,9 +60,9 @@
 | 部署 | 单云主机 Docker Compose：nginx + api×N + worker×M + PostgreSQL 16 + migrate |
 | 代码组织 | Monorepo：`backend/`（uv workspace）+ `frontend/`（pnpm workspace）+ `openapi/` 契约快照 |
 | 后端分层 | `services/api → application → domain ← infrastructure`（core 纯计算） |
-| 数据 | PG 三业务 schema：`ledger` / `review` / `platform` + 1 个公共缓存 schema `market`；44 张表（36 张业务表：ledger 8 / review 11 / platform 17 + 8 张公共缓存表：行情 `market.daily_bar` / `market.pull_range` + 板块 `market.sector` / `sector_member` / `benchmark_member` / `sector_bar` / `sector_pull_range` / `sector_sync_state`）；RLS 双层隔离 |
+| 数据 | PG 三业务 schema：`ledger` / `review` / `platform` + 1 个公共缓存 schema `market`；46 张表（38 张业务表：ledger 8 / review 11 / platform 19 + 8 张公共缓存表：行情 `market.daily_bar` / `market.pull_range` + 板块 `market.sector` / `sector_member` / `benchmark_member` / `sector_bar` / `sector_pull_range` / `sector_sync_state`）；RLS 双层隔离 |
 | 队列 | PG `platform.job` + `FOR UPDATE SKIP LOCKED`（无 Redis/Kafka） |
-| **端点** | **114 个**（API-001~115，API-089 预留不计数；已实现 85 个），28/28 FR 覆盖，验收矩阵 114/114；详细契约小节 70 个；错误码 63 个 |
+| **端点** | **118 个**（API-001~119，API-089 预留不计数；已实现 89 个），28/28 FR 覆盖，验收矩阵 118/118；详细契约小节 74 个；错误码 66 个 |
 | 错误码 | ≥30 个（机器可读 `/api/v1/errors`） |
 | ADR | v2 新增 14 条（0013~0026），取代 v1 的 0001/0006/0007/0008 |
 | 扩展点 | 12 个（EP-1~EP-12） |
@@ -117,7 +117,7 @@
 
 | 编号 | 未决项 | 当前承载 |
 |---|---|---|
-| OQ-1 | 邮箱验证是否必做 | API-Catalog：注册端点已留 `email_verification` 配置位；FR-L2 |
+| OQ-1 | 邮箱验证是否必做 | **已解决（2026-11-22）**：`EMAIL_VERIFICATION_ENABLED` / `PASSWORD_RESET_ENABLED` 可配置，生产建议 true；API-117/118/119 与设计 [2026-11-22-email-verification](../2026-11-22-email-verification.md) |
 | OQ-2 | 是否引入对象存储 | `ObjectStore` 端口已抽象（Extensibility EP-10）；首版本地卷 |
 | OQ-3 | PAT 细粒度 scope | 首版 `read`/`write` 二元（ADR/API-Catalog §0） |
 | OQ-4 | 管理员排障是否可代用户身份 | 首版完全不可（ADR-0014 授权矩阵） |

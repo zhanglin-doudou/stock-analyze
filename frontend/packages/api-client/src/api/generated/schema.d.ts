@@ -157,6 +157,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/email-codes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send Email Code
+         * @description 发送注册/找回验证码；找回对存在性统一通用 200。
+         */
+        post: operations["sendEmailVerificationCode"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/login": {
         parameters: {
             query?: never;
@@ -214,6 +234,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/auth/password-reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Reset Password
+         * @description 验证找回码后改密，并撤销全部 refresh token / PAT；不自动登录。
+         */
+        post: operations["resetPassword"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/auth/refresh": {
         parameters: {
             query?: never;
@@ -245,6 +285,26 @@ export interface paths {
         put?: never;
         /** Register */
         post: operations["registerAccount"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/auth/verification-policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Verification Policy
+         * @description 公开只读策略：注册是否要求验证码、是否开放找回密码。
+         */
+        get: operations["getVerificationPolicy"];
+        put?: never;
+        post?: never;
         delete?: never;
         options?: never;
         head?: never;
@@ -4299,6 +4359,18 @@ export interface components {
             /** Trade Id */
             trade_id: string;
         };
+        /** PasswordResetIn */
+        PasswordResetIn: {
+            /**
+             * Email
+             * Format: email
+             */
+            email: string;
+            /** Email Code */
+            email_code: string;
+            /** New Password */
+            new_password: string;
+        };
         /**
          * PatCreateResponse
          * @description 明文 `token` 仅在此响应中出现一次（API-007 断言①）。
@@ -4860,6 +4932,8 @@ export interface components {
              * Format: email
              */
             email: string;
+            /** Email Code */
+            email_code?: string | null;
             /** Password */
             password: string;
         };
@@ -5580,6 +5654,49 @@ export interface components {
             /** Symbols */
             symbols: string[];
         };
+        /** SendEmailCodeIn */
+        SendEmailCodeIn: {
+            /**
+             * Email
+             * Format: email
+             */
+            email: string;
+            /**
+             * Purpose
+             * @default register
+             * @enum {string}
+             */
+            purpose: "register" | "reset_password";
+        };
+        /** SendEmailCodeOut */
+        SendEmailCodeOut: {
+            /**
+             * Code Length
+             * @default 6
+             */
+            code_length: number;
+            /**
+             * Email
+             * Format: email
+             */
+            email: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Expires In */
+            expires_in: number;
+            /** Max Attempts */
+            max_attempts: number;
+            /**
+             * Purpose
+             * @enum {string}
+             */
+            purpose: "register" | "reset_password";
+            /** Resend After */
+            resend_after: number;
+        };
         /** SettingsOut */
         SettingsOut: {
             appearance: components["schemas"]["AppearancePrefsOut"];
@@ -6131,6 +6248,24 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
+        };
+        /** VerificationPolicyOut */
+        VerificationPolicyOut: {
+            /**
+             * Code Length
+             * @default 6
+             */
+            code_length: number;
+            /** Code Ttl Seconds */
+            code_ttl_seconds: number;
+            /** Email Verification Required */
+            email_verification_required: boolean;
+            /** Max Attempts */
+            max_attempts: number;
+            /** Password Reset Enabled */
+            password_reset_enabled: boolean;
+            /** Resend After Seconds */
+            resend_after_seconds: number;
         };
         /** VersionOut */
         VersionOut: {
@@ -6751,6 +6886,76 @@ export interface operations {
             };
         };
     };
+    sendEmailVerificationCode: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SendEmailCodeIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SendEmailCodeOut"];
+                };
+            };
+            /** @description 资源状态冲突 */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 请求过于频繁 */
+            429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 服务内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 依赖服务不可用 */
+            503: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     login: {
         parameters: {
             query?: never;
@@ -6889,6 +7094,56 @@ export interface operations {
             };
         };
     };
+    resetPassword: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["PasswordResetIn"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description 资源已过期 */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 服务内部错误 */
+            500: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
     refreshToken: {
         parameters: {
             query?: never;
@@ -6963,6 +7218,15 @@ export interface operations {
                     "application/problem+json": components["schemas"]["Error"];
                 };
             };
+            /** @description 资源已过期 */
+            410: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
             /** @description Validation Error */
             422: {
                 headers: {
@@ -6975,6 +7239,35 @@ export interface operations {
             };
             /** @description 请求过于频繁 */
             429: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+        };
+    };
+    getVerificationPolicy: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VerificationPolicyOut"];
+                };
+            };
+            /** @description 服务内部错误 */
+            500: {
                 headers: {
                     [name: string]: unknown;
                 };
@@ -7269,6 +7562,24 @@ export interface operations {
             };
             /** @description 未认证或凭证无效 */
             401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 权限不足 */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/problem+json": components["schemas"]["Error"];
+                };
+            };
+            /** @description 资源不存在 */
+            404: {
                 headers: {
                     [name: string]: unknown;
                 };

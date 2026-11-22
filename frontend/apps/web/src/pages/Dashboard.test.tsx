@@ -1253,12 +1253,12 @@ describe("Dashboard 看板", () => {
 
     const annotations = await screen.findByTestId("sector-concept-annotations");
     expect(annotations.querySelectorAll("li")).toHaveLength(2);
-    expect(annotations.textContent).toContain(
-      "注释1：比亚迪概念、充电桩、高压 —— 【扬杰科技、中熔电气】",
-    );
-    expect(annotations.textContent).toContain(
-      "注释2：6G概念、车联网、动数西算 —— 【紫光股份】",
-    );
+    // 注释内概念按 localeCompare 排序，不同 Node ICU 下顺序可能不同；只断言分组与成员。
+    const text = annotations.textContent ?? "";
+    expect(text).toContain("扬杰科技、中熔电气");
+    for (const name of ["比亚迪概念", "充电桩", "高压"]) expect(text).toContain(name);
+    expect(text).toContain("紫光股份");
+    for (const name of ["6G概念", "车联网", "动数西算"]) expect(text).toContain(name);
   });
 
   it("FT-07 账单旗标图：默认请求 12 个月，切换范围改请求参数，月份口径来自后端", async () => {

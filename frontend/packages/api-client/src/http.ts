@@ -45,6 +45,7 @@ import type {
   OversellRevisionIn,
   OversellRevisionMutationOut,
   OversellRevisionOut,
+  PasswordResetIn,
   PatCreateResponse,
   Preview,
   PreviewOptions,
@@ -59,6 +60,8 @@ import type {
   RegisterIn,
   RegisterResponse,
   RestoreResult,
+  SendEmailCodeIn,
+  SendEmailCodeOut,
   RevokeResult,
   Round,
   RoundFillPage,
@@ -68,6 +71,7 @@ import type {
   RoundInsightsRefreshOut,
   RoundPage,
   SectorCatalogPage,
+  VerificationPolicy,
   SectorsOverview,
   SettingsOut,
   SettingsPatchIn,
@@ -551,6 +555,29 @@ export function createClient(options: ClientOptions) {
     me() {
       // API-005 的路径是 /auth/me（此前误写 /account/me，由契约测试防回归）。
       return send<MeOut>({ path: "/auth/me" }).then((r) => r.data);
+    },
+    getVerificationPolicy() {
+      return send<VerificationPolicy>({
+        path: "/auth/verification-policy",
+        method: "GET",
+        omitAuth: true,
+      }).then((r) => r.data);
+    },
+    sendEmailCode(body: SendEmailCodeIn) {
+      return send<SendEmailCodeOut>({
+        path: "/auth/email-codes",
+        method: "POST",
+        body,
+        omitAuth: true,
+      }).then((r) => r.data);
+    },
+    resetPassword(body: PasswordResetIn) {
+      return send<void>({
+        path: "/auth/password-reset",
+        method: "POST",
+        body,
+        omitAuth: true,
+      }).then(() => undefined);
     },
   };
 

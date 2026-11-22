@@ -12,10 +12,14 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from stock_contracts.constants import (
     ACCESS_TOKEN_TTL_SECONDS,
     DEFAULT_REFRESH_TTL_SECONDS,
+    EMAIL_CODE_MAX_ATTEMPTS,
+    EMAIL_CODE_RESEND_SECONDS,
+    EMAIL_CODE_TTL_SECONDS,
     RF_ANNUAL_DEFAULT,
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[5]
+DEFAULT_EMAIL_CODE_PEPPER = "dev-only-email-code-pepper-change-me"
 
 
 def build_dsn(user: str, password: str, host: str, port: int, database: str) -> str:
@@ -55,6 +59,38 @@ class Settings(BaseSettings):
     access_ttl_seconds: int = Field(ACCESS_TOKEN_TTL_SECONDS, alias="STOCK_ACCESS_TTL_SECONDS")
     refresh_ttl_seconds: int = Field(DEFAULT_REFRESH_TTL_SECONDS, alias="STOCK_REFRESH_TTL_SECONDS")
     argon2_time_cost: int = Field(2, alias="STOCK_ARGON2_TIME_COST")
+
+    # ── 邮箱验证码 / 忘记密码（2026-11-22 设计）──────────────
+    # 两个开关独立：注册是否要求验证码 / 是否开放邮箱找回密码。
+    email_verification_enabled: bool = Field(False, alias="EMAIL_VERIFICATION_ENABLED")
+    password_reset_enabled: bool = Field(False, alias="PASSWORD_RESET_ENABLED")
+    email_provider: Literal["none", "aliyun", "log"] = Field("none", alias="EMAIL_PROVIDER")
+    email_dm_account_name: str = Field("", alias="EMAIL_DM_ACCOUNT_NAME")
+    email_brand: str = Field("星星助手", alias="EMAIL_BRAND")
+    email_site_host: str = Field("xingst.site", alias="EMAIL_SITE_HOST")
+    email_dm_from_alias: str = Field("星星助手【xingst.site】", alias="EMAIL_DM_FROM_ALIAS")
+    email_dm_endpoint: str = Field("dm.aliyuncs.com", alias="EMAIL_DM_ENDPOINT")
+    email_dm_timeout_seconds: float = Field(5.0, alias="EMAIL_DM_TIMEOUT_SECONDS")
+    email_code_pepper: str = Field(
+        DEFAULT_EMAIL_CODE_PEPPER,
+        alias="EMAIL_CODE_PEPPER",
+        repr=False,
+    )
+    email_code_ttl_seconds: int = Field(EMAIL_CODE_TTL_SECONDS, alias="EMAIL_CODE_TTL_SECONDS")
+    email_code_max_attempts: int = Field(EMAIL_CODE_MAX_ATTEMPTS, alias="EMAIL_CODE_MAX_ATTEMPTS")
+    email_code_resend_seconds: int = Field(
+        EMAIL_CODE_RESEND_SECONDS, alias="EMAIL_CODE_RESEND_SECONDS"
+    )
+    email_code_ip_hourly_limit: int = Field(30, alias="EMAIL_CODE_IP_HOURLY_LIMIT")
+    email_code_ip_daily_limit: int = Field(100, alias="EMAIL_CODE_IP_DAILY_LIMIT")
+    email_code_email_hourly_limit: int = Field(5, alias="EMAIL_CODE_EMAIL_HOURLY_LIMIT")
+    email_code_email_daily_limit: int = Field(10, alias="EMAIL_CODE_EMAIL_DAILY_LIMIT")
+    trusted_proxy_cidrs: str = Field("127.0.0.1/32,::1/128", alias="TRUSTED_PROXY_CIDRS")
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def email_enabled(self) -> bool:
+        return self.email_verification_enabled or self.password_reset_enabled
 
     # ── 外部依赖 ──────────────────────────────────────────
     market_mode: Literal["replay", "live"] = Field("replay", alias="MARKET_MODE")
@@ -116,30 +152,20 @@ class Settings(BaseSettings):
     # GLM 免费版：key/base/model 由本地 .env 注入；禁止打印/入库。
     llm_provider: Literal["none", "glm", "local"] = Field("none", alias="LLM_PROVIDER")
     glm_api_key: str | None = Field(None, alias="GLM_API_KEY", repr=False)
-    glm_base_url: str = Field(
-        "https://open.bigmodel.cn/api/paas/v4", alias="GLM_BASE_URL"
-    )
+    glm_base_url: str = Field("https://open.bigmodel.cn/api/paas/v4", alias="GLM_BASE_URL")
     glm_model: str = Field("glm-4.7-flash", alias="GLM_MODEL")
     llm_timeout_seconds: float = Field(60.0, alias="LLM_TIMEOUT_SECONDS")
     llm_max_output_tokens: int = Field(4096, alias="LLM_MAX_OUTPUT_TOKENS")
-    llm_understanding_max_tokens: int = Field(
-        2048, alias="LLM_UNDERSTANDING_MAX_TOKENS"
-    )
+    llm_understanding_max_tokens: int = Field(2048, alias="LLM_UNDERSTANDING_MAX_TOKENS")
     llm_temperature: float = Field(0.2, alias="LLM_TEMPERATURE")
-    llm_thinking: Literal["disabled", "enabled"] = Field(
-        "disabled", alias="LLM_THINKING"
-    )
+    llm_thinking: Literal["disabled", "enabled"] = Field("disabled", alias="LLM_THINKING")
     llm_context_window_tokens: int = Field(200_000, alias="LLM_CONTEXT_WINDOW_TOKENS")
-    llm_context_compress_ratio: float = Field(
-        0.8, alias="LLM_CONTEXT_COMPRESS_RATIO"
-    )
+    llm_context_compress_ratio: float = Field(0.8, alias="LLM_CONTEXT_COMPRESS_RATIO")
     llm_history_turns: int = Field(10, alias="LLM_HISTORY_TURNS")
     llm_max_concurrency: int = Field(2, alias="LLM_MAX_CONCURRENCY")
     # 兼容旧名；当前用于 understanding/answer 的所有可重试失败（超时/429/5xx/坏响应）。
     llm_retry_on_429: int = Field(2, alias="LLM_RETRY_ON_429")
-    llm_retry_backoff_seconds: float = Field(
-        2.0, alias="LLM_RETRY_BACKOFF_SECONDS"
-    )
+    llm_retry_backoff_seconds: float = Field(2.0, alias="LLM_RETRY_BACKOFF_SECONDS")
     llm_daily_token_budget: int | None = Field(None, alias="LLM_DAILY_TOKEN_BUDGET")
     llm_token_estimator: Literal["approx", "tiktoken"] = Field(
         "approx", alias="LLM_TOKEN_ESTIMATOR"
@@ -150,9 +176,7 @@ class Settings(BaseSettings):
     chat_retention_days: int = Field(0, alias="CHAT_RETENTION_DAYS")
     chat_timeline_retention_days: int = Field(180, alias="CHAT_TIMELINE_RETENTION_DAYS")
     tool_platform_enabled: bool = Field(False, alias="TOOL_PLATFORM_ENABLED")
-    chat_planner_mode: Literal["auto", "rules", "llm"] = Field(
-        "auto", alias="CHAT_PLANNER_MODE"
-    )
+    chat_planner_mode: Literal["auto", "rules", "llm"] = Field("auto", alias="CHAT_PLANNER_MODE")
     chat_max_steps: int = Field(3, alias="CHAT_MAX_STEPS")
     chat_max_tool_calls: int = Field(6, alias="CHAT_MAX_TOOL_CALLS")
     tool_max_concurrency: int = Field(4, alias="TOOL_MAX_CONCURRENCY")

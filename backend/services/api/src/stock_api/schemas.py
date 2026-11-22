@@ -23,6 +23,38 @@ class RegisterIn(StrictModel):
     password: str = Field(min_length=12, max_length=128)
     display_name: str | None = Field(default=None, max_length=40)
     accept_tos: bool
+    # 关闭 EMAIL_VERIFICATION_ENABLED 时忽略；开启时业务上必填。
+    email_code: str | None = Field(default=None, pattern=r"^\d{6}$")
+
+
+class SendEmailCodeIn(StrictModel):
+    email: EmailStr = Field(max_length=254)
+    purpose: Literal["register", "reset_password"] = "register"
+
+
+class SendEmailCodeOut(BaseModel):
+    email: EmailStr
+    purpose: Literal["register", "reset_password"]
+    expires_in: int
+    resend_after: int
+    max_attempts: int
+    code_length: int = 6
+    expires_at: datetime
+
+
+class VerificationPolicyOut(BaseModel):
+    email_verification_required: bool
+    password_reset_enabled: bool
+    code_length: int = 6
+    code_ttl_seconds: int
+    resend_after_seconds: int
+    max_attempts: int
+
+
+class PasswordResetIn(StrictModel):
+    email: EmailStr = Field(max_length=254)
+    email_code: str = Field(pattern=r"^\d{6}$")
+    new_password: str = Field(min_length=12, max_length=128)
 
 
 class UserBrief(BaseModel):

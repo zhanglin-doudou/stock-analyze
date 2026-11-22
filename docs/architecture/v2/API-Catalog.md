@@ -48,7 +48,7 @@
 - ETag `W/"<version>"`（列表含查询指纹），写响应返新 ETag；`If-Match` 不匹配 → 409 `VERSION_CONFLICT`（遵循 PRD FR-L4，不采用 412）。
 - 格式：金额**定点字符串 2 位** `"1234.56"`；价格 6 位、数量 4 位；比率十进制小数；时间 ISO 8601 UTC；业务日 `YYYY-MM-DD`（Asia/Shanghai）；`blocked` 时 `value` **字段缺省**。软删默认过滤 `deleted_at NULL`，`include_deleted=true` 仅本人；注销物理级联删除，审计留事件元数据。
 
-## §1 端点总表（115 个；API-089 预留不计数；API-090~095、API-055/096/097、API-098~106、API-107~111、API-077/078/112~116 均已实现；Path 省略公共前缀 `/api/v1`，标注「根」者不在前缀下）
+## §1 端点总表（118 个；API-089 预留不计数；API-090~095、API-055/096/097、API-098~106、API-107~111、API-077/078/112~119 均已实现；Path 省略公共前缀 `/api/v1`，标注「根」者不在前缀下）
 | API-ID | Method | Path | 用途 | FR | 认证/scope | 幂等 | 同步/异步 | 优先级 | 主要成功码 |
 |---|---|---|---|---|---|---|---|---|---|
 | API-001 | POST | `/auth/register` | 注册账号 | L2 | 公开 | 支持 | 同步 | P0 | 201 |
@@ -57,6 +57,9 @@
 | API-004 | POST | `/auth/logout` | 登出并撤销会话 | L2 | Bearer | 支持 | 同步 | P0 | 204 |
 | API-005 | GET | `/auth/me` | 当前用户与角色 | L2/D1 | Bearer | — | 同步 | P0 | 200 |
 | API-006 | DELETE | `/account` | 注销并物理删除数据 | L2/L7 | write | 必需 | 同步 | P0 | 204 |
+| API-117 | POST | `/auth/email-codes` | 发送注册/找回邮箱验证码 | L2 | 公开 | — | 同步 | P0 | 200 |
+| API-118 | GET | `/auth/verification-policy` | 认证验证策略（注册/找回开关） | L2 | 公开 | — | 同步 | P0 | 200 |
+| API-119 | POST | `/auth/password-reset` | 校验找回码并设置新密码 | L2 | 公开 | — | 同步 | P0 | 204 |
 | API-007 | POST | `/tokens` | 创建 PAT（明文一次） | A1 | Bearer | 不适用 | 同步 | P0 | 201 |
 | API-008 | GET | `/tokens` | PAT 列表（无明文） | A1 | read | — | 同步 | P0 | 200 |
 | API-009 | DELETE | `/tokens/{token_id}` | 撤销 PAT | A1 | write | 幂等 | 同步 | P0 | 204 |
@@ -176,10 +179,27 @@
 ### 2.1 认证、导入与流水
 #### API-001 POST /auth/register
 - 用途：注册账号；FR-L2；认证：公开；幂等：支持；同步。
-- 请求：body `email`(string,必填,≤254) / `password`(string,必填,12~128,≥3 类字符) / `display_name`(可选,≤40) / `accept_tos`(bool,必填=true)。
+- 请求：body `email`(string,必填,≤254) / `password`(string,必填,12~128,≥3 类字符) / `display_name`(可选,≤40) / `accept_tos`(bool,必填=true) / `email_code`(可选,6 位数字；`EMAIL_VERIFICATION_ENABLED=true` 时业务必填)。
 - 响应 201：`user{id,email,role:"user",email_verified,created_at}` / `access_token` / `refresh_token` / `token_type:"Bearer"` / `expires_in:900`。
-- 错误码：EMAIL_TAKEN(409)、WEAK_PASSWORD(422)、VALIDATION_ERROR(422)、RATE_LIMITED(429)。
-- 验收断言：① 201 且 user.role=="user"、expires_in==900；② 同邮箱再注册 → 409 EMAIL_TAKEN；③ password="123456" → 422 且用户未创建；④ 缺 accept_tos → 422 且 errors[0].field=="accept_tos"；⑤ 返回 access_token 调 GET /auth/me → 200 且 email 一致，且审计出现 action=="auth.register"。
+- 错误码：EMAIL_TAKEN(409)、WEAK_PASSWORD(422)、VALIDATION_ERROR(422)、EMAIL_CODE_INVALID(422)、EMAIL_CODE_EXPIRED(410)、RATE_LIMITED(429)。
+- 验收断言：① 201 且 user.role=="user"、expires_in==900；② 同邮箱再注册 → 409 EMAIL_TAKEN；③ password="123456" → 422 且用户未创建；④ 缺 accept_tos → 422 且 errors[0].field=="accept_tos"；⑤ 返回 access_token 调 GET /auth/me → 200 且 email 一致，且审计出现 action=="auth.register"；⑥ 验证开启时正确码 → `email_verified=true` 且码只能消费一次；⑦ 错码 1~9 次 422、第 10 次 410，前置错误（弱密码/TOS/邮箱已存在）不消耗次数。
+#### API-117 POST /auth/email-codes
+- 用途：发送注册/找回邮箱验证码；FR-L2；认证：公开；幂等：不支持；同步。
+- 请求：body `email`(必填,≤254) / `purpose`(可选，默认 `register`，枚举 `register|reset_password`)。
+- 响应 200：`email` / `purpose` / `expires_in`(600) / `resend_after`(60) / `max_attempts`(10) / `code_length`(6) / `expires_at`。
+- 错误码：VALIDATION_ERROR(422)、EMAIL_TAKEN(409，仅 register)、RATE_LIMITED(429，IP/register 邮箱)、EMAIL_SEND_FAILED(503，仅 register)；`reset_password` 对未注册/禁用/邮箱配额/DM 失败统一 200 通用响应，仅 IP 限流 429。
+- 验收断言：① 首次发送 200 且邮件只发请求邮箱；② 同 IP 60s 内第二次 429 且 `Retry-After` 1..60；③ 同邮箱同用途 60s 内第二次 register 429 / reset 通用 200；④ 60s 后重发旧码失效；⑤ 已注册邮箱 register 409 且不发信；⑥ 未注册/禁用邮箱 reset 200、不发信、不落码；⑦ DM 失败 register 503、reset 200；⑧ 响应/日志不含验证码。
+#### API-118 GET /auth/verification-policy
+- 用途：公开认证验证策略；FR-L2；认证：公开；同步；`Cache-Control: no-store`。
+- 响应 200：`email_verification_required` / `password_reset_enabled` / `code_length`(6) / `code_ttl_seconds`(600) / `resend_after_seconds`(60) / `max_attempts`(10)。
+- 错误码：仅现有 500/503；无业务错误。
+- 验收断言：① 两个开关可独立 true/false；② 即使 false 也返回参数；③ 不缓存。
+#### API-119 POST /auth/password-reset
+- 用途：校验找回码并设置新密码；FR-L2；认证：公开；幂等：不支持（码一次性）；同步。
+- 请求：body `email`(必填) / `email_code`(6 位数字) / `new_password`(12~128，≥3 类字符)。
+- 响应 204（无 body，不签发 token）；`Cache-Control: no-store`。
+- 错误码：VALIDATION_ERROR(422)、WEAK_PASSWORD(422)、EMAIL_CODE_INVALID(422)、EMAIL_CODE_EXPIRED(410)、INTERNAL_ERROR(500)。
+- 验收断言：① 正确码 204，旧密码登录 401、新密码登录 200；② 1~9 次错码 422、第 10 次 410；③ 过期/已消费/无记录/用户不存在或禁用 → 410；④ 弱密码/新旧相同不消耗次数；⑤ 成功后 refresh 全部失效、PAT 全部失效、该邮箱验证码行删除、`email_verified_at` 为空则补写；⑥ 并发重置最多一个 204，另一个 410；⑦ 响应/日志/审计不含验证码或新密码。
 #### API-002 POST /auth/login
 - 用途：登录签发令牌；FR-L2；认证：公开；幂等：不支持；同步。
 - 请求：body `email`(必填) / `password`(必填) / `device_name`(可选,≤64)。
@@ -709,6 +729,9 @@
 | NOT_FOUND | 404 | 资源不存在或跨用户 | 找不到该资源。 | 确认 ID；跨账号资源按不存在处理。 | 否 |
 | METRIC_NOT_FOUND | 404 | metric_id 不在目录 | 没有这个指标。 | 从指标目录选择有效指标。 | 否 |
 | EMAIL_TAKEN | 409 | 注册邮箱已存在 | 该邮箱已注册。 | 直接登录或找回密码。 | 否 |
+| EMAIL_CODE_INVALID | 422 | 验证码错误且未达上限 | 验证码不正确。 | 检查邮件里的 6 位数字；还可尝试剩余次数，或重新获取。 | 是 |
+| EMAIL_CODE_EXPIRED | 410 | 过期/已消费/已锁定/无记录/第 10 次失败 | 验证码已过期，请重新获取。 | 点击「重新发送」获取新的验证码。 | 否 |
+| EMAIL_SEND_FAILED | 503 | 注册发码时 DM 超时/5xx/凭据/配额失败 | 验证码邮件发送失败。 | 稍后重试；若持续失败请联系支持。 | 是 |
 | VERSION_CONFLICT | 409 | If-Match 版本不符 | 这条数据刚被改过。 | 重新获取最新版本后再提交。 | 否 |
 | IDEMPOTENCY_IN_PROGRESS | 409 | 同键请求仍在执行 | 这个请求正在处理中。 | 用返回的 job_id 轮询结果。 | 是（轮询） |
 | JOB_ALREADY_RUNNING | 409 | 同类任务运行中且参数不同 | 已有一个相同任务在跑。 | 复用返回的 job_id 或等待结束。 | 是（轮询） |
@@ -841,6 +864,9 @@ data: {"job_id":"job_01J9Z6","status":"succeeded","result_ref":"/api/v1/reports/
 | API-004 | auth_logout | 204；refresh 随后 401 TOKEN_REVOKED | fx_base | P0 |
 | API-005 | auth_me | 200 且 email/id/role 与登录一致 | fx_base | P0 |
 | API-006 | account_delete_purge | 204；重新登录 401；业务表 0 行；审计留痕 | fx_base | P0 |
+| API-117 | auth_email_codes_send | 200/429/409/503；60s 冷却；reset 通用 200；码不可见 | fx_base | P0 |
+| API-118 | auth_verification_policy | 200 两个开关/常量；no-store | fx_base | P0 |
+| API-119 | auth_password_reset | 204；旧密码失效；refresh/PAT 撤销；错码 410 | fx_base | P0 |
 | API-007 | tokens_create_once | 201 token 匹配 `^pat_[A-Za-z0-9]{43}$`，之后不再返回 | fx_base | P0 |
 | API-008 | tokens_list_no_secret | 200 无明文字段，仅 prefix | fx_base | P0 |
 | API-009 | tokens_revoke | 204 后 PAT 调 /metrics→401 TOKEN_REVOKED | fx_base | P0 |

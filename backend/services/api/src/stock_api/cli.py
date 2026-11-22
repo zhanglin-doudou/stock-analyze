@@ -5,7 +5,7 @@
 
 子命令一览：seed-tenants / seed-demo / sync-market / sync-sectors / sync-sector-bars /
 api-check / api-snapshot / sdk / api-coverage / verify-p1 / demo-p1 / db-truncate /
-chat-events-cleanup。
+chat-events-cleanup / purge-email-codes。
 """
 
 from __future__ import annotations
@@ -50,6 +50,10 @@ from stock_platform.market_live import (
 )
 from stock_platform.market_models import DailyBar
 from stock_platform.repositories.chat import ChatRepository
+from stock_platform.repositories.email_codes import (
+    EmailCodeThrottleRepository,
+    EmailVerificationRepository,
+)
 from stock_platform.repositories.users import UserRepository
 from stock_platform.sector_fixture import generate_sector_fixture
 from stock_platform.sector_source import create_live_sector_source
@@ -1285,6 +1289,24 @@ async def _db_truncate() -> int:
 
 
 # ── 参数解析 / 分发 ────────────────────────────────────────────
+async def _purge_email_codes(*, older_than_hours: int, dry_run: bool) -> int:
+    """清理过期验证码与不再使用的节流行（幂等）。"""
+    settings = get_settings()
+    before = SystemClock().now() - timedelta(hours=max(1, older_than_hours))
+    db = Database(settings, role="owner")
+    if dry_run:
+        emit(f"== purge-email-codes（dry-run）== cutoff={before.isoformat()}")
+        return 0
+    async with db.session(begin=True) as session:
+        codes = await EmailVerificationRepository(session).purge(before=before)
+        throttles = await EmailCodeThrottleRepository(session).purge(before=before)
+    emit(
+        f"✅ purge-email-codes 完成：验证码 {codes} 行、节流 {throttles} 行"
+        f"（cutoff={before.isoformat()}）"
+    )
+    return 0
+
+
 async def _cleanup_chat_events(*, days: int, dry_run: bool) -> int:
     """清理超过保留期的聊天时间线事件；聊天正文不动（P0-4）。"""
     settings = get_settings()
@@ -1296,9 +1318,9 @@ async def _cleanup_chat_events(*, days: int, dry_run: bool) -> int:
 
         async with db.session(begin=False) as session:
             count = await session.scalar(
-                select(func.count()).select_from(ChatTurnEvent).where(
-                    ChatTurnEvent.created_at < cutoff
-                )
+                select(func.count())
+                .select_from(ChatTurnEvent)
+                .where(ChatTurnEvent.created_at < cutoff)
             )
         emit(f"== chat-events-cleanup（dry-run）== cutoff={cutoff.isoformat()} 待删={count or 0}")
         return 0
@@ -1370,8 +1392,15 @@ def build_parser() -> argparse.ArgumentParser:
     )
     trade_flags.add_argument("--dry-run", action="store_true", help="只计算并打印统计，不写库")
     cleanup = subparsers.add_parser("chat-events-cleanup", help="清理过期聊天时间线事件")
-    cleanup.add_argument("--days", type=int, default=0, help="保留天数；0 使用 CHAT_TIMELINE_RETENTION_DAYS")
+    cleanup.add_argument(
+        "--days", type=int, default=0, help="保留天数；0 使用 CHAT_TIMELINE_RETENTION_DAYS"
+    )
     cleanup.add_argument("--dry-run", action="store_true")
+    purge_codes = subparsers.add_parser("purge-email-codes", help="清理过期验证码与旧节流行")
+    purge_codes.add_argument(
+        "--older-than-hours", type=int, default=24, help="早于多少小时（默认 24）"
+    )
+    purge_codes.add_argument("--dry-run", action="store_true")
     subparsers.add_parser("api-check", help="契约完整性检查（路径/operationId/错误码/错误响应）")
     snapshot = subparsers.add_parser("api-snapshot", help="规范化写出 contracts/openapi.json")
     snapshot.add_argument("--check", action="store_true", help="只比对不写，漂移则退出码 1")
@@ -1430,6 +1459,10 @@ async def _dispatch(args: argparse.Namespace) -> int:
     if command == "chat-events-cleanup":
         days = args.days or get_settings().chat_timeline_retention_days
         return await _cleanup_chat_events(days=days, dry_run=args.dry_run)
+    if command == "purge-email-codes":
+        return await _purge_email_codes(
+            older_than_hours=args.older_than_hours, dry_run=args.dry_run
+        )
     if command == "api-check":
         return _api_check()
     if command == "api-snapshot":
@@ -1456,6 +1489,7 @@ COMMANDS: dict[str, Callable[[argparse.Namespace], Coroutine[Any, Any, int]]] = 
         "sync-sector-bars",
         "build-trade-flags",
         "chat-events-cleanup",
+        "purge-email-codes",
         "db-truncate",
         "api-check",
         "api-snapshot",

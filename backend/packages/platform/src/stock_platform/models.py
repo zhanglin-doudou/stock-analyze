@@ -62,6 +62,58 @@ class User(Base, TimestampMixin):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class EmailVerificationCode(Base, TimestampMixin):
+    """注册/找回验证码（认证前置表，无 user_id，不启用 RLS）。"""
+
+    __tablename__ = "email_verification_code"
+    __table_args__ = (
+        CheckConstraint(
+            "attempts >= 0 AND attempts <= max_attempts",
+            name="ck_email_code_attempts",
+        ),
+        CheckConstraint("expires_at > sent_at", name="ck_email_code_expiry"),
+        CheckConstraint(
+            "status = 'active' OR code_hash = ''",
+            name="ck_email_code_terminal_hash",
+        ),
+        Index("ix_email_code_expires", "expires_at"),
+        Index("ix_email_code_status_expires", "status", "expires_at"),
+        {"schema": SCHEMA},
+    )
+
+    email: Mapped[str] = mapped_column(CITEXT, primary_key=True)
+    purpose: Mapped[str] = mapped_column(String(24), primary_key=True, default="register")
+    code_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="active")
+    attempts: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
+    max_attempts: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=10)
+    sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    send_ip_hash: Mapped[str | None] = mapped_column(String(64))
+    request_id: Mapped[str | None] = mapped_column(String(64))
+
+
+class EmailCodeSendThrottle(Base, TimestampMixin):
+    """验证码发送冷却/配额（认证前置表，无 user_id，不启用 RLS）。"""
+
+    __tablename__ = "email_code_send_throttle"
+    __table_args__ = (
+        CheckConstraint("hour_count >= 0 AND day_count >= 0", name="ck_email_throttle_counts"),
+        Index("ix_email_throttle_last_sent", "last_sent_at"),
+        {"schema": SCHEMA},
+    )
+
+    scope: Mapped[str] = mapped_column(String(16), primary_key=True)
+    key_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    last_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    hour_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    hour_count: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
+    day_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    day_count: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
+
+
 class RefreshToken(Base):
     __tablename__ = "refresh_token"
     __table_args__ = (

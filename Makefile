@@ -193,6 +193,10 @@ sync-sector-bars:
 build-trade-flags:
 	@$(PY) -m stock_api.cli build-trade-flags $(ARGS)
 
+.PHONY: purge-email-codes
+purge-email-codes:
+	@$(PY) -m stock_api.cli purge-email-codes $(ARGS)
+
 # ── 质量 ────────────────────────────────────────────────────
 .PHONY: lint
 lint:

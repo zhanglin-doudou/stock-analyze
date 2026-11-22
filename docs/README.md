@@ -42,7 +42,7 @@ docs/
     └── ADR.md                     # ADR-0013~0026（取代链）
 ```
 
-**关键数字**：88 端点 ｜ 28/28 FR + 15/15 NFR 覆盖 ｜ 44 张表（36 业务 + 8 公共缓存） ｜ 12 扩展点 ｜ 可用性 ≥99.9% ｜ RPO ≤5min / RTO ≤30min ｜ core 覆盖 100/100。
+**关键数字**：118 端点 ｜ 28/28 FR + 15/15 NFR 覆盖 ｜ 46 张表（38 业务 + 8 公共缓存） ｜ 12 扩展点 ｜ 可用性 ≥99.9% ｜ RPO ≤5min / RTO ≤30min ｜ core 覆盖 100/100。
 
 **一期验收（2026-10-20）**：[reviews/Period1-CodeReview-and-Acceptance.md](reviews/Period1-CodeReview-and-Acceptance.md) — 代码审查 + 一期验收报告，结论：**不通过**（5 项 P0 / 17 项 P1 待修，含真账单对账假断链、`replace_range` 数据丢失、admin PAT 越权、撤销入口缺失、verify-p1 空心）。
 > **修复进展（2026-10-21）**：5 项 P0 已全部修复并复验 — [P0-2/P0-3](reviews/Period1-Fix-Log-P0-2-P0-3.md)（数据丢失 / admin PAT）、[P0-1/P0-4/P0-5](reviews/Period1-Fix-Log-P0-1-P0-4-P0-5.md)（真实账对账 / 撤销 UI / 门禁与契约）；`make verify-p1` 15/15 全绿。剩余 P1/P2 见审查报告。

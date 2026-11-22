@@ -305,6 +305,7 @@ RESOURCE_MATRIX: list[tuple[str, str]] = [
     # 2026-11-20（API-078/113/114）：助手资源级端点
     ("post", "/chat/sessions/{session_id}/messages"),
     ("get", "/chat/turns/{turn_id}/trace"),
+    ("get", "/chat/turns/{turn_id}/events"),
     ("post", "/chat/turns/{turn_id}/replay"),
 ]
 
@@ -363,6 +364,7 @@ ADMIN_FORBIDDEN: list[tuple[str, str]] = [
     ("get", "/chat/conversation"),
     ("delete", "/chat/conversation"),
     ("get", "/chat/turns/{turn_id}/trace"),
+    ("get", "/chat/turns/{turn_id}/events"),
     ("post", "/chat/turns/{turn_id}/replay"),
 ]
 
@@ -481,6 +483,7 @@ UNAUTHENTICATED_MATRIX: list[tuple[str, str]] = [
     ("get", "/chat/conversation"),
     ("delete", "/chat/conversation"),
     ("get", "/chat/turns/{turn_id}/trace"),
+    ("get", "/chat/turns/{turn_id}/events"),
     ("post", "/chat/turns/{turn_id}/replay"),
 ]
 

@@ -2,11 +2,11 @@
 
 本文是 [README](../README.md) 的数据库专项文档：本地 PostgreSQL 的两种安装方式、三角色模型、迁移执行、日常 SQL 操作与故障排查。
 
-一期 schema 布局（3 个业务 schema + 1 个公共缓存 schema，由 Alembic 迁移 `0001_phase1` 创建；`0002_platform_tenant_rls` 补 platform 租户表 RLS；`0003_review_rounds` 建二期复盘表 round / round_fill / round_build_state 并同批启 RLS；`0004_review_nav` 建 `review.nav_daily`；`0005_market_cache` 建公共行情缓存 schema `market`；`0006_review_asset_daily` 建资产快照 `asset_daily` / 构建水位 `asset_build_state`；`0007_review_metrics` 建指标物化 `metric_result` / 血缘 `metric_dependency`；`0008_money_fund_bond` 增货基余额列并重写资产恒等式；`0009_metrics_period_tokens` 扩展指标 `period` 为月/年/自定义区间；`0010_asset_daily_remark` 增资产备注列；`0011_market_sectors` 建板块公共缓存 `market.sector` / `sector_member` / `benchmark_member` / `sector_bar` / `sector_pull_range` / `sector_sync_state` 六表（无 RLS、可再生））：
+一期 schema 布局（3 个业务 schema + 1 个公共缓存 schema，由 Alembic 迁移 `0001_phase1` 创建；`0002_platform_tenant_rls` 补 platform 租户表 RLS；`0003_review_rounds` 建二期复盘表 round / round_fill / round_build_state 并同批启 RLS；`0004_review_nav` 建 `review.nav_daily`；`0005_market_cache` 建公共行情缓存 schema `market`；`0006_review_asset_daily` 建资产快照 `asset_daily` / 构建水位 `asset_build_state`；`0007_review_metrics` 建指标物化 `metric_result` / 血缘 `metric_dependency`；`0008_money_fund_bond` 增货基余额列并重写资产恒等式；`0009_metrics_period_tokens` 扩展指标 `period` 为月/年/自定义区间；`0010_asset_daily_remark` 增资产备注列；`0011_market_sectors` 建板块公共缓存 `market.sector` / `sector_member` / `benchmark_member` / `sector_bar` / `sector_pull_range` / `sector_sync_state` 六表（无 RLS、可再生）；`0022_chat_turn_event` 建助手时间线；`0023_email_verification` 建注册/找回验证码与发送节流两表（认证前置、无 RLS））：
 
 | Schema | 内容 |
 |---|---|
-| `platform` | 用户 / 令牌 / 任务 / 幂等键 / 审计 / 配置等平台表；**租户表 job / idempotency_key / user_setting / outbox_event 启 RLS**，认证/系统表不启（见 §2.1） |
+| `platform` | 用户 / 令牌 / 任务 / 幂等键 / 审计 / 配置 / 邮箱验证码 `email_verification_code` / 发送节流 `email_code_send_throttle` 等平台表；**租户表 job / idempotency_key / user_setting / outbox_event 启 RLS**，认证/系统表不启（见 §2.1） |
 | `ledger` | 流水 / 批次 / 预览 / 隔离区 / 摘要规则 / 对账（**全部启 RLS**） |
 | `review` | 复盘域（二期已启用）：FIFO 回合 `round`、配对明细 `round_fill`、增量重建水位 `round_build_state`、每日净值 `nav_daily`、每日资产快照 `asset_daily`、资产构建水位 `asset_build_state`（**全部启 RLS**） |
 | `market` | 公共行情/板块缓存（live 模式）：日线 `daily_bar`、区间覆盖 `pull_range`；板块 `sector`（行业树/概念目录）、`sector_member`（SCD2 成分）、`benchmark_member`（基准成分权重）、`sector_bar`（板块日线）、`sector_pull_range`（同步覆盖区间）、`sector_sync_state`（同步水位/状态）；**公共数据、不启用 RLS**，可再生（丢了可重拉），不进备份/恢复的正确性断言 |
@@ -85,6 +85,7 @@ STOCK_DB_APP_DSN=postgresql+asyncpg://stock_app:stock_app_pw@127.0.0.1:5432/stoc
 | `platform.user` | 登录按 email 查用户时尚未知 `user_id`，无法 `SET LOCAL`（认证前置） |
 | `platform.refresh_token` / `platform.api_token` | 刷新/PAT 校验按 `token_hash` 查（认证前置，未知 `user_id`） |
 | `platform.login_attempt` / `platform.rate_limit_bucket` | 按 email/IP/窗口键计数，认证前即需读写，无 `user_id` 语义 |
+| `platform.email_verification_code` / `platform.email_code_send_throttle` | 注册/找回前按 email / IP 哈希读写，尚无 `user_id`；按 `(email,purpose)` 与 `(scope,key_hash)` 定位 |
 | `platform.config_release` / `platform.schema_version` / `platform.backup_run` | 全局系统状态，无 `user_id` |
 | `platform.audit_log` | 含登录失败等 actor 未知事件；跨租户不可见由 API 层 actor 过滤保证 |
 | `platform.job_event` | 无 `user_id` 列（从属于 `job`，按 `job_id` 访问；写入发生在 job 的租户事务内） |
@@ -131,11 +132,13 @@ uv run alembic -c backend/alembic.ini heads
   - `concept_filter_prefs` 形状：`{"mode": "off|hide|exclude", "excluded": [{"code": "BK0999", "name": "人工智能"}]}`（`name` 为保存时快照；`resolved` **不入库**，由读路径按当前 `market.sector` 目录判定）。概念过滤是**读时生效**（API-087），不触发任何重算或落库。
 - 迁移 `0015_import_mapping_v2`（2026-11-13，导入映射 v2）：建 `ledger.import_template` / `ledger.import_bill_type` / `ledger.import_column_rule` 三表（均启 RLS tenant 策略 + `stock_app` DML / `stock_backup` 只读）；`ledger.import_preview` / `ledger.import_batch` 增加两阶段草稿与提交快照列；历史预览标 `stage='legacy'`、历史批次标 `mapping_source='legacy'`；`platform.schema_version.version` 更新为 `0015_import_mapping_v2`。
 - 迁移 `0016_import_preview_quarantine`（2026-11-14）：`ledger.import_preview` 增 `quarantine_rows jsonb`，把解析期隔离明细随预览草稿一起落库（隔离确认改为「提交前弹窗提醒、不阻断提交」，需要逐行展示原因与定位字段）；版本推进到 `0016_import_preview_quarantine`。
-- 迁移 `0017_remove_money_fund`（2026-11-15，资产口径 2.1）：移除「货币基金余额」功能——`review.asset_daily` 删 `money_fund_units` 列并把恒等式重建为 `total_assets_units = cash_units + market_value_units`，`ledger.trade` 删 `money_fund_balance_units` 列。按方案 A，upgrade 先 `DELETE review.asset_daily` + `DELETE review.asset_build_state`（存量行由 `ASSET_DEFINITION_VERSION=2.1` 全量重建），因此旧资产行**不可恢复**；`platform.schema_version.version` 更新为 `0017_remove_money_fund`（`stock_api/version.py::SCHEMA_VERSION` 同步）；downgrade 只还原 DDL（不还原已删数据）。口径 2.1 同时把「是否需要行情」收敛为 `stock_platform.symbols.needs_quote`（A 股/场内基金）：债券与伪代码按含费成本估值，资产表/净值/指标/归因共用。**已执行；本地库当前为 `0021_chat_message_status_width`。**
+- 迁移 `0017_remove_money_fund`（2026-11-15，资产口径 2.1）：移除「货币基金余额」功能——`review.asset_daily` 删 `money_fund_units` 列并把恒等式重建为 `total_assets_units = cash_units + market_value_units`，`ledger.trade` 删 `money_fund_balance_units` 列。按方案 A，upgrade 先 `DELETE review.asset_daily` + `DELETE review.asset_build_state`（存量行由 `ASSET_DEFINITION_VERSION=2.1` 全量重建），因此旧资产行**不可恢复**；`platform.schema_version.version` 更新为 `0017_remove_money_fund`（`stock_api/version.py::SCHEMA_VERSION` 同步）；downgrade 只还原 DDL（不还原已删数据）。口径 2.1 同时把「是否需要行情」收敛为 `stock_platform.symbols.needs_quote`（A 股/场内基金）：债券与伪代码按含费成本估值，资产表/净值/指标/归因共用。**已执行；本地库当前为 `0023_email_verification`。**
 - 迁移 `0018_trade_manual_revision`（2026-11-15）：`ledger.trade` 增 `revision_of`（指向被修订的卖出 trade_id）+ 部分索引 `(user_id, revision_of) WHERE revision_of IS NOT NULL`，标记超卖修订注入的人工流水（可审计、禁止被区间导入覆盖、支持重复修订/撤回）；版本推进到 `0018_trade_manual_revision`。
 - 迁移 `0019_import_template_bill_types`（2026-11-17）：`ledger.import_template` 增 `bill_type_ids jsonb`（按界面顺序存本模板引用的 `import_bill_type.id`，含废弃项；单向引用不建外键，失效 id 由读取方标 `invalid` 且不阻断导入）；版本推进到 `0019_import_template_bill_types`。
 - 迁移 `0020_chat_assistant`（2026-11-20，智能分析助手）：建 `platform.chat_conversation`（`user_id` 唯一）/`chat_message`/`chat_turn`/`chat_tool_call`/`chat_llm_call` 五表 + 索引 + `tenant_isolation` 策略；工具/LLM 调用原样存 JSONB 供回放，不引入 LangGraph checkpointer；版本推进到 `0020_chat_assistant`。
 - 迁移 `0021_chat_message_status_width`（2026-11-20）：`platform.chat_message.status` 从 `varchar(16)` 扩到 `varchar(32)`；`needs_clarification`(19) 此前写库会 500，`glm-4-flash` 等模型输出该状态时暴露。版本推进到 `0021_chat_message_status_width`。
+- 迁移 `0022_chat_turn_event`（2026-11-21）：`platform.chat_turn_event` 时间线（`tenant_isolation` + `stock_app` DML / `stock_backup` 只读）；版本推进到 `0022_chat_turn_event`。
+- 迁移 `0023_email_verification`（2026-11-22）：`platform.email_verification_code`（`(email,purpose)` 主键；`register` / `reset_password`）与 `platform.email_code_send_throttle`（`(scope,key_hash)` 主键；60s 冷却 + 小时/日配额）两表 + 索引 + `stock_app` DML / `stock_backup` 只读；认证前置、**不启用 RLS**；版本推进到 `0023_email_verification`。清理用 `uv run python -m stock_api.cli purge-email-codes`。
 - 启动即校验：API 启动时会核对 `platform.schema_version` 与代码版本，不匹配直接拒绝启动——先跑迁移再起服务。
 
 ## 4. 连接与执行 SQL

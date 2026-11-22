@@ -14,8 +14,10 @@ from stock_contracts.enums import Role, TokenScope
 from stock_contracts.errors import ApiError, ErrorCode, ForbiddenError
 from stock_platform.config import Settings
 from stock_platform.db import Database
+from stock_platform.email_verification import EmailVerificationService
 from stock_platform.idempotency import IdempotencyStore
 from stock_platform.jobs import JobQueue
+from stock_platform.mail import EmailSender
 from stock_platform.ports import MarketDataSource, SectorDataSource
 from stock_platform.ratelimit import RateLimiter
 from stock_platform.repositories import ApiTokenRepository, UserRepository
@@ -38,6 +40,8 @@ class AppState:
     tokens: TokenService
     market_data: MarketDataSource
     sector_data: SectorDataSource
+    email_sender: EmailSender
+    email_codes: EmailVerificationService
     object_store: Any = None
     llm: Any = None
     extras: dict[str, Any] = field(default_factory=dict)
@@ -203,16 +207,10 @@ def forbid_admin_trades(ctx: Annotated[TenantContext, Depends(get_tenant)]) -> N
     ctx.forbid_admin_trades()
 
 
-def get_request_ip_hash(request: Request) -> str | None:
-    from stock_platform.security import hash_ip
+def get_request_ip_hash(request: Request) -> str:
+    from stock_api.request_ip import client_ip_hash
 
-    forwarded = request.headers.get("x-forwarded-for")
-    raw = (
-        forwarded.split(",")[0].strip()
-        if forwarded
-        else (request.client.host if request.client else None)
-    )
-    return hash_ip(raw)
+    return client_ip_hash(request, get_state(request).settings)
 
 
 def require_if_match(

@@ -4,6 +4,7 @@ import { AppShell } from "./layout/AppShell";
 import { OnboardingGate } from "./layout/OnboardingGate";
 import { useIsAuthenticated } from "./store/session";
 import { FeaturePlaceholder } from "./pages/ComingSoon";
+import { ForgotPassword } from "./pages/ForgotPassword";
 import { Login } from "./pages/Login";
 import { Register } from "./pages/Register";
 
@@ -53,6 +54,7 @@ const ChatHistory = lazy(() =>
 export const appRoutes: RouteObject[] = [
   { path: "/login", element: <Login /> },
   { path: "/register", element: <Register /> },
+  { path: "/forgot-password", element: <ForgotPassword /> },
   {
     path: "/",
     element: (

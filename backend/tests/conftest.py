@@ -54,6 +54,8 @@ _PLATFORM_TABLES = (
     "config_release",
     "rate_limit_bucket",
     "login_attempt",
+    "email_verification_code",
+    "email_code_send_throttle",
     "backup_run",
 )
 _LEDGER_TABLES = LEDGER_TABLES
@@ -120,7 +122,15 @@ def settings() -> Settings:
     `.env` 被手工改成 live（端到端验证）时，测试套件必须仍然走确定性回放，否则
     全量 API 测试会触发外网取数。联网用例（`@pytest.mark.live`）自己构造 live Settings。
     """
-    return get_settings().model_copy(update={"market_mode": "replay", "sector_mode": "replay"})
+    return get_settings().model_copy(
+        update={
+            "market_mode": "replay",
+            "sector_mode": "replay",
+            "email_verification_enabled": False,
+            "password_reset_enabled": False,
+            "email_provider": "none",
+        }
+    )
 
 
 @pytest_asyncio.fixture

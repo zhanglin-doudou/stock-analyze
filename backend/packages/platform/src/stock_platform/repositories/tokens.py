@@ -124,5 +124,17 @@ class ApiTokenRepository:
     async def revoke(self, record: ApiToken, *, now: datetime | None = None) -> None:
         record.revoked_at = now or datetime.now(tz=UTC)
 
+    async def revoke_all_for_user(self, user_id: uuid.UUID, *, now: datetime | None = None) -> int:
+        """密码重置后撤销该用户全部未撤销 PAT（立即阻断脚本访问）。"""
+        stamp = now or datetime.now(tz=UTC)
+        rows = await self._session.scalars(
+            select(ApiToken).where(ApiToken.user_id == user_id, ApiToken.revoked_at.is_(None))
+        )
+        count = 0
+        for row in rows:
+            row.revoked_at = stamp
+            count += 1
+        return count
+
     async def touch(self, record: ApiToken, *, now: datetime | None = None) -> None:
         record.last_used_at = now or datetime.now(tz=UTC)
