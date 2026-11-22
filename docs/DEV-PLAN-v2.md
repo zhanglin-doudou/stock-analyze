@@ -269,7 +269,7 @@ make verify-p3
 
 | ID | 任务 | 产出 | 本地可预演？ | 人日 |
 |---|---|---|---|---|
-| **D-01** | 生产镜像与编排 | `Dockerfile.api`/`worker`（同镜像多入口）、多阶段构建、`docker-compose.prod.yml`（traefik/api×2/worker/postgres/migrate）、健康检查、资源限制 | ✅ 本地 compose 起全套 | 1.5 |
+| **D-01** | 生产镜像与编排 | `Dockerfile.api`/`worker`（同镜像多入口）、多阶段构建、`docker-compose.prod.yml`（traefik/api×2/worker/migrate；**数据库由云主机 5432 提供，不在编排内**）、健康检查、资源限制 | ✅ 本地 compose 起全套 | 1.5 |
 | **D-02** | Traefik 网关与同源 | 路由、TLS(ACME)、gzip、安全头（HSTS/CSP）、限流、`X-Forwarded-For` 真实 IP 对接、SSE 透传、自签证书演练 | ✅ 本地 http://localhost（TLS 必须上云验证） | 1 |
 | **D-03** | 迁移与零停机 | `migrate` 一次性任务、`readyz` 校验 schema 版本、expand-contract 演练脚本、回滚说明 | ✅ 本地跑两轮发布 | 1.5 |
 | **D-04** | 备份与恢复 | WAL 归档配置、每日全量、`pg_verifybackup` 校验、**PITR 恢复演练脚本** `make restore-drill` | ✅ 本地容器演练 | 1.5 |

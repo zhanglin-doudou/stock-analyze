@@ -1,4 +1,5 @@
-# 生产编排：Traefik（唯一入口）+ web + api×N + worker + migrate + postgres
+# 生产编排：Traefik（唯一入口）+ web + api×N + worker + migrate
+# 数据库由云主机 PostgreSQL:5432 提供，不在本编排内（见 docs/DEPLOYMENT.md P0-4）。
 #
 #   cp infra/.env.prod.example infra/.env.prod   # 填写密钥（勿提交）
 #   docker compose --env-file infra/.env.prod -f infra/compose/docker-compose.prod.yml up -d --build
@@ -99,16 +100,12 @@ services:
     <<: *app
     command: ["migrate"]
     restart: "no"
-    depends_on:
-      db:
-        condition: service_healthy
+    # 数据库在编排外（云主机 5432）：无法依赖 db 健康检查，直接连 STOCK_DB_HOST
 
   api:
     <<: *app
     command: ["api"]
     depends_on:
-      db:
-        condition: service_healthy
       migrate:
         condition: service_completed_successfully
     mem_limit: 1g
@@ -140,8 +137,6 @@ services:
     <<: *app
     command: ["worker"]
     depends_on:
-      db:
-        condition: service_healthy
       migrate:
         condition: service_completed_successfully
     mem_limit: 1g
@@ -149,41 +144,10 @@ services:
     # worker 手里可能有长任务：给足优雅退出时间，避免租约到期前被杀
     stop_grace_period: 60s
 
-  db:
-    image: postgres:16
-    restart: unless-stopped
-    networks:
-      - sa-net
-    environment:
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: ${STOCK_DB_SUPERUSER_PASSWORD:?STOCK_DB_SUPERUSER_PASSWORD 未设置}
-      POSTGRES_DB: postgres
-      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
-      # 仅首次初始化使用：init-prod 脚本据此建角色（密码不落仓库）
-      STOCK_DB_NAME: ${STOCK_DB_NAME:-stock_analyze}
-      STOCK_DB_OWNER_PASSWORD: ${STOCK_DB_OWNER_PASSWORD:?}
-      STOCK_DB_APP_PASSWORD: ${STOCK_DB_APP_PASSWORD:?}
-      STOCK_DB_BACKUP_PASSWORD: ${STOCK_DB_BACKUP_PASSWORD:?}
-    volumes:
-      - sa-pgdata:/var/lib/postgresql/data
-      - ../postgres/init-prod:/docker-entrypoint-initdb.d:ro
-    command:
-      - postgres
-      - -c
-      - shared_preload_libraries=pg_stat_statements
-      - -c
-      - max_connections=200
-      - -c
-      - log_min_duration_statement=200
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
-      interval: 5s
-      timeout: 5s
-      retries: 20
-    mem_limit: 2g
+  # db 不在编排内：生产数据库由云主机 PostgreSQL:5432 提供。
+  # 角色初始化用 infra/postgres/init-prod/00-bootstrap.sh 在云主机上手工执行（幂等）。
 
 volumes:
-  sa-pgdata:
   sa-letsencrypt:
 
 networks:
