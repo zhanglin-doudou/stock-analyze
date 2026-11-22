@@ -267,6 +267,47 @@ make deploy-config
 
 ---
 
+### 6.1 本地构建 → 云主机部署（arm64 Mac → x86_64 云主机）
+
+> 云主机 1.15.38.201（ubuntu）：PG 16.15 同机、Docker 29.10、镜像加速 mirror.ccs.tencentyun.com。
+> ubuntu 不在 docker 组，服务器侧 docker 命令一律 `sudo`。
+
+```bash
+# ① 本机交叉构建（arm64 必须指定平台；Intel Mac 可去掉 DOCKER_DEFAULT_PLATFORM）
+cd /Users/bean/Documents/AI/stock-analyze
+DOCKER_DEFAULT_PLATFORM=linux/amd64 docker compose \
+  --env-file infra/.env.prod -f infra/compose/docker-compose.prod.yml build api web
+docker image inspect stock-analyze/api:local --format '{{.Os}}/{{.Architecture}}'   # 期望 linux/amd64
+
+# ② 镜像流式传到云主机（不落临时文件）
+docker save stock-analyze/api:local stock-analyze/web:local | gzip | \
+  ssh -i ~/.ssh/local_macbp.pem ubuntu@1.15.38.201 'gunzip | sudo docker load'
+
+# ③ 代码 + 配置（含 .env.prod 密钥，走 SSH 通道）
+rsync -az --info=progress2 -e "ssh -i ~/.ssh/local_macbp.pem" \
+  --exclude .git --exclude node_modules --exclude .venv --exclude var \
+  --exclude .pnpm-store --exclude .uvcache --exclude .buildx \
+  --exclude .mypy_cache --exclude .pytest_cache --exclude .ruff_cache \
+  --exclude .hypothesis --exclude tmp-shots --exclude frontend/apps/web/dist \
+  ./ ubuntu@1.15.38.201:~/stock-analyze/
+
+# ④ 云主机起栈（--no-build 用预加载镜像；migrate 先行）
+ssh -i ~/.ssh/local_macbp.pem ubuntu@1.15.38.201
+cd ~/stock-analyze && chmod 600 infra/.env.prod
+sudo docker compose --env-file infra/.env.prod -f infra/compose/docker-compose.prod.yml up -d --no-build
+
+# ⑤ 验证
+sudo docker logs stock-analyze-migrate-1 2>&1 | tail -5     # 期望 upgrade head 成功
+./scripts/deploy-smoke.sh                                    # http://localhost
+BASE_URL=https://xingst.site ./scripts/deploy-smoke.sh       # DNS 生效后走公网
+```
+
+**DNS/证书未就绪时**：加 `-f infra/compose/docker-compose.local.yml` 起 HTTP 预演（ACME 不需要）。
+**扩容**：`sudo docker compose ... up -d --no-build --scale api=2`；**停止**：`... down`（PG 数据不受影响）。
+**回滚**：重新 `docker load` 旧镜像 + `up -d --no-build`；迁移遵循 expand-contract，不做 downgrade。
+
+---
+
 ## 7. 实施记录
 
 | 日期 | 变更 | 证据 |
