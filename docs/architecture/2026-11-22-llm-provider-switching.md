@@ -29,7 +29,7 @@
 ```json
 {
   "default_provider": "zhipu",
-  "default_model": "glm-4.7-flash",
+  "default_model": "glm-4-flash",
   "providers": [
     {
       "id": "zhipu",
@@ -103,9 +103,23 @@
   注册表加载/校验/可用性、偏好 llm 组合并与 422、chat 动态装配、设置页渲染。
 - CI 仍一律 `FakeProvider`，不调真实模型。
 
+## 6.1 默认模型与降级提示（2026-11-22 追加）
+
+- **默认模型 = `glm-4-flash`**（目录 `default_model`，2026-11-22 人工确认：免费档里最稳）；
+  同时它也是降级兜底推荐模型（`runtime.RECOMMENDED_MODEL`，与目录默认同值）。
+- **切换提示**：模型调用失败（`LLM_*` 降级原因，不含 `CONTEXT_OVERFLOW`/`TOOL_*`）且
+  失败的不是 `glm-4-flash` 时，降级文案 `what_to_do` 追加
+  「当前模型 {model} 调用失败，可在「设置 → 助手模型」切换到 glm-4-flash 后重试。」
+- 注入点两处：降级草稿（`_fallback_draft` / `fallback`）与 `persist()` 兜底
+  （覆盖「理解失败但答案成功」的半程失败，同时补 `degrade_message`）；提示生成收敛在
+  `runtime._model_switch_hint()`。
+- 前端 `renderAnswer` 在「非 ok / fallback / 带 `what_to_do`」时渲染降级说明与提示，
+  半程失败的回答也会显示。
+- `glm-4-flash` 自身失败不提示切换到自己；提示文案中模型名取实际调用的 provider.model。
+
 ## 7. 兼容性
 
 - `.env`：`LLM_PROVIDER=glm` 仍可用（别名）；`GLM_MODEL`/`GLM_BASE_URL` 变为无效键
-  （Settings `extra="ignore"`，静默忽略）；默认模型从 `.env` 的 `GLM_MODEL` 改为目录
-  `default_model=glm-4.7-flash`（要沿用 `glm-4-flash` 请在设置页选择或改目录）。
+  （Settings `extra="ignore"`，静默忽略）；默认模型为目录 `default_model=glm-4-flash`
+  （2026-11-22 起；此前 `.env` 的 `GLM_MODEL=glm-4-flash` 与之等价）。
 - 小米 key 未注入（`MIMO_API_KEY` 缺失）时该供应商 `available=false`，前端不可选。

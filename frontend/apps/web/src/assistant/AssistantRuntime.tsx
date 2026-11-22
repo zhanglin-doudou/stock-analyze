@@ -68,7 +68,7 @@ function renderAnswer(data: ChatMessageOut): string {
   });
   if (!text.trim()) text = "星星助手暂时没有拿到可回答的数据。";
 
-  if (data.status !== "ok" || data.fallback) {
+  if (data.status !== "ok" || data.fallback || data.what_to_do) {
     const reason =
       data.degrade_message ||
       data.degrade_reason ||

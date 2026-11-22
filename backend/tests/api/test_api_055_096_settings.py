@@ -315,7 +315,7 @@ async def test_get_settings_includes_llm_catalog(client: httpx.AsyncClient, user
     assert llm["provider"] == ""
     assert llm["model"] == ""
     assert llm["default_provider"] == "zhipu"
-    assert llm["default_model"] == "glm-4.7-flash"
+    assert llm["default_model"] == "glm-4-flash"
     ids = [item["id"] for item in llm["providers"]]
     assert ids == ["zhipu", "xiaomi"]
     zhipu = llm["providers"][0]

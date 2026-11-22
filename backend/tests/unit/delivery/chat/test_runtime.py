@@ -214,6 +214,8 @@ async def test_invalid_understanding_json_falls_back_without_500(settings) -> No
     assert final["understanding"]["intents"][0] == "portfolio"
     assert final["degrade_reason"] == "LLM_BAD_RESPONSE"
     assert len(repo.llm_calls) == 2
+    # 理解失败但答案成功：persist 补「切换到 glm-4-flash」提示（fake-chat 非推荐模型）。
+    assert "切换到 glm-4-flash" in (final["answer"].get("what_to_do") or "")
 
 
 class _FlakyProvider:
@@ -303,3 +305,70 @@ def test_next_focus_drops_empty_and_period_security_fields() -> None:
         understanding,
     )
     assert focus == {"period": "2026-11"}
+
+
+# ── 降级提示：切换到推荐模型（2026-11-22）───────────────────
+def test_model_switch_hint_matrix() -> None:
+    from stock_contracts.chat.enums import DegradeReason
+    from stock_delivery.chat.runtime import RECOMMENDED_MODEL, _model_switch_hint
+
+    assert RECOMMENDED_MODEL == "glm-4-flash"
+    hint = _model_switch_hint(DegradeReason.LLM_RATE_LIMITED, "mimo-v2.6-pro")
+    assert hint is not None
+    assert "mimo-v2.6-pro" in hint
+    assert "glm-4-flash" in hint
+    assert "设置" in hint
+    # 字符串原因（turn 级 degrade_reason）同样识别
+    assert _model_switch_hint("LLM_TIMEOUT", "mimo-v2.6-flash") is not None
+    # 推荐模型自身失败不提示切换到自己
+    assert _model_switch_hint(DegradeReason.LLM_RATE_LIMITED, "glm-4-flash") is None
+    # 非模型调用失败 / 未知原因 / 无原因不提示
+    assert _model_switch_hint(DegradeReason.CONTEXT_OVERFLOW, "mimo-v2.6-pro") is None
+    assert _model_switch_hint(DegradeReason.TOOL_UNAVAILABLE, "mimo-v2.6-pro") is None
+    assert _model_switch_hint("NOPE", "mimo-v2.6-pro") is None
+    assert _model_switch_hint(None, "mimo-v2.6-pro") is None
+
+
+async def test_model_failure_answer_fallback_hints_switch(settings) -> None:
+    """非推荐模型答案调用失败：降级草稿提示切换到 glm-4-flash。"""
+    from stock_contracts.chat.enums import DegradeReason
+    from stock_delivery.chat.provider import LlmError
+
+    settings.llm_provider = "auto"
+    understanding = json.dumps(
+        {
+            "intents": ["portfolio"],
+            "confidence": 0.9,
+            "period": {"kind": "month", "value": "2026-11", "label": "本月"},
+            "entities": [],
+            "resolved_query": "本月赚了多少",
+            "needs_clarification": False,
+        }
+    )
+    error = LlmError(DegradeReason.LLM_RATE_LIMITED, "rate limited", retryable=True)
+    provider = _FlakyProvider([understanding, error, error, error])
+    provider.model = "mimo-v2.6-pro"
+    repo = _Repo()
+    runtime = ChatRuntime(
+        repo=repo,  # type: ignore[arg-type]
+        data_port=_Data(),
+        llm=provider,
+        clock=FrozenClock(datetime(2026, 11, 20, tzinfo=UTC)),
+        settings=settings,
+        user_id=uuid.uuid4(),
+        conversation={
+            "id": "cnv_1",
+            "summary": "",
+            "focus": {},
+            "window_turns": 10,
+            "summary_version": 0,
+        },
+        turn_id="trn_1",
+        question="本月赚了多少",
+    )
+    final = await build_graph(runtime).ainvoke({"question": "本月赚了多少"})
+    answer = final["answer"]
+    assert answer["fallback"] is True
+    assert answer["degrade_reason"] == "LLM_RATE_LIMITED"
+    assert "切换到 glm-4-flash" in answer["what_to_do"]
+    assert "mimo-v2.6-pro" in answer["what_to_do"]

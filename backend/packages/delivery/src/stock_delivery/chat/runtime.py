@@ -509,6 +509,11 @@ class ChatRuntime:
             return "retry"
         return "fallback"
 
+    def _what_to_do(self, reason: DegradeReason, default: str) -> str:
+        """降级建议：模型调用失败且非推荐模型时，追加「切换到 RECOMMENDED_MODEL」提示。"""
+        hint = _model_switch_hint(reason, self.llm.model)
+        return f"{default} {hint}" if hint else default
+
     def _fallback_draft(self, reason: DegradeReason) -> AnswerDraft:
         template = self._template
         if template is None:
@@ -517,7 +522,7 @@ class ChatRuntime:
                 status=ChatStatus.DEGRADED,
                 degrade_reason=reason,
                 degrade_message=_degrade_message(reason),
-                what_to_do="稍后重试，或缩小时间范围。",
+                what_to_do=self._what_to_do(reason, "稍后重试，或缩小时间范围。"),
                 retryable=True,
                 fallback=True,
                 context_usage=self._bundle.usage if self._bundle else None,
@@ -531,7 +536,7 @@ class ChatRuntime:
             status=ChatStatus.DEGRADED,
             degrade_reason=reason,
             degrade_message=_degrade_message(reason),
-            what_to_do="稍后重试；金额与引用仍来自本地结构化数据。",
+            what_to_do=self._what_to_do(reason, "稍后重试；金额与引用仍来自本地结构化数据。"),
             retryable=True,
             fallback=True,
             llm_used=self._llm_used,
@@ -552,7 +557,7 @@ class ChatRuntime:
                 status=ChatStatus.DEGRADED,
                 degrade_reason=reason,
                 degrade_message="模型或数据处理失败，已返回降级提示。",
-                what_to_do="稍后重试，或缩小时间范围。",
+                what_to_do=self._what_to_do(reason, "稍后重试，或缩小时间范围。"),
                 retryable=True,
                 fallback=True,
                 context_usage=self._bundle.usage if self._bundle else None,
@@ -567,7 +572,7 @@ class ChatRuntime:
                 status=ChatStatus.DEGRADED,
                 degrade_reason=reason,
                 degrade_message=_degrade_message(reason),
-                what_to_do="稍后重试；金额与引用仍来自本地结构化数据。",
+                what_to_do=self._what_to_do(reason, "稍后重试；金额与引用仍来自本地结构化数据。"),
                 retryable=True,
                 fallback=True,
                 llm_used=self._llm_used,
@@ -596,6 +601,15 @@ class ChatRuntime:
         text = str(answer.get("answer_markdown") or "")
         status = str(answer.get("status") or state.get("status") or ChatStatus.OK.value)
         degrade = answer.get("degrade_reason") or state.get("degrade_reason")
+        # 理解阶段失败但答案成功时草稿不带降级字段；在此统一补模型切换提示。
+        hint = _model_switch_hint(degrade, self.llm.model)
+        if hint and not answer.get("what_to_do"):
+            answer = {
+                **answer,
+                "what_to_do": hint,
+                "degrade_message": answer.get("degrade_message")
+                or _degrade_message(DegradeReason(str(degrade))),
+            }
         latency = int((time.monotonic() - self._started) * 1000)
         self._emit(
             "turn.failed" if status == ChatStatus.ERROR.value else "turn.completed",
@@ -647,7 +661,8 @@ class ChatRuntime:
             focus = _next_focus(self._bundle.focus if self._bundle else {}, self._understanding)
             if focus:
                 await self.repo.update_focus(user_id=self.user_id, focus=focus)
-        return {"status": status}
+        # 回传可能补过提示的 answer，保证即时响应与落库内容一致。
+        return {"status": status, "answer": answer}
 
     # ── helpers ────────────────────────────────────────────
     def _emit(self, kind: str, phase: str, payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -1129,3 +1144,33 @@ def _degrade_message(reason: DegradeReason) -> str:
         DegradeReason.LLM_UNAVAILABLE: "智能分析服务暂时不可用。",
         DegradeReason.CONTEXT_OVERFLOW: "对话上下文过长，已压缩。",
     }.get(reason, "智能分析服务降级。")
+
+
+#: 降级兜底推荐模型（智谱免费档最稳）：非该模型调用失败时提示用户在设置中切换。
+RECOMMENDED_MODEL = "glm-4-flash"
+
+#: 属于「模型调用失败」的降级原因（CONTEXT_OVERFLOW/TOOL_* 不算）。
+_MODEL_FAILURE_REASONS: frozenset[DegradeReason] = frozenset(
+    {
+        DegradeReason.LLM_NOT_CONFIGURED,
+        DegradeReason.LLM_TIMEOUT,
+        DegradeReason.LLM_RATE_LIMITED,
+        DegradeReason.LLM_AUTH_FAILED,
+        DegradeReason.LLM_BAD_RESPONSE,
+        DegradeReason.LLM_CONTENT_FILTER,
+        DegradeReason.LLM_UNAVAILABLE,
+    }
+)
+
+
+def _model_switch_hint(reason: DegradeReason | str | None, model: str) -> str | None:
+    """非推荐模型的调用失败 → 提示切换到 `RECOMMENDED_MODEL`（设置 → 助手模型）。"""
+    if model == RECOMMENDED_MODEL or reason is None:
+        return None
+    try:
+        parsed = reason if isinstance(reason, DegradeReason) else DegradeReason(str(reason))
+    except ValueError:
+        return None
+    if parsed not in _MODEL_FAILURE_REASONS:
+        return None
+    return f"当前模型 {model} 调用失败，可在「设置 → 助手模型」切换到 {RECOMMENDED_MODEL} 后重试。"

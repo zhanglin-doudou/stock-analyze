@@ -172,6 +172,9 @@ def test_shipped_default_catalog_is_valid() -> None:
     registry = lr.load_llm_registry(Settings(), env_lookup=_env())
     ids = [spec.id for spec in registry.providers]
     assert ids == ["zhipu", "xiaomi"]
+    # 默认模型锁定 glm-4-flash（2026-11-22 人工确认：稳定性最好，作为降级推荐模型）。
+    assert registry.default_provider == "zhipu"
+    assert registry.default_model == "glm-4-flash"
     assert registry.has_model("zhipu", "glm-4.7-flash")
     assert registry.has_model("zhipu", "glm-4-flash")
     assert registry.has_model("xiaomi", "mimo-v2.6-flash")
