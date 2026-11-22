@@ -92,8 +92,8 @@
 
 | 状态 | 数量 | 含义 |
 |---|---|---|
-| `[x]` 已完成 | 6 | 配置校验 / 单测 / 文件级证据可复核 |
-| `[~]` 已落地待验收 | 11 | 交付物就位，等镜像构建与起栈后做运行验收 |
+| `[x]` 已完成 | 8 | 配置校验 / 单测 / 文件级证据可复核 |
+| `[~]` 已落地待验收 | 9 | 交付物就位，等镜像构建与起栈后做运行验收 |
 | `[ ]` 未开始 | 18 | 见对应行 |
 
 **本轮已交付物（可直接复核）**
@@ -138,7 +138,7 @@
 | P0-3.1 | 生产 env 模板 `infra/.env.prod.example` | 覆盖全部必填项；无任何真实密钥；`.env.prod` 不入仓 | [x] | `infra/.env.prod.example`；`infra/.env.prod` 已 gitignore |
 | P0-3.2 | 密钥注入 | `STOCK_JWT_SECRET`/`EMAIL_CODE_PEPPER`/DB 密码/`GLM_API_KEY`/`SECTOR_THS_COOKIE` 均由部署侧注入，仓库零明文 | [~] | 注入点已定义（env_file / 密钥管理）；GLM key、THS cookie、DB 密码待部署侧填写 |
 | P0-3.3 | **生产弱口令守卫** | `STOCK_ENV=prod` 时若 JWT secret/pepper 仍为 dev 默认或 <32 字符 → 启动失败 | [x] | prod 守卫：dev 默认值或 <32 字符即启动失败；6 单测 |
-| P0-3.4 | 生产库初始化 | `init-prod` 脚本在**云主机**手工执行，用环境变量建角色（不硬编码密码）；重复执行幂等 | [~] | 脚本已改为 `PGHOST/PGPORT + STOCK_DB_SUPERUSER` 手工执行；待在云主机实际执行一次 |
+| P0-3.4 | 生产库初始化 | `init-prod` 脚本在**云主机**手工执行，用环境变量建角色（不硬编码密码）；重复执行幂等 | [x] | 2026-11-22 在云主机执行成功：三角色（owner/app/backup，均 NOBYPASSRLS）+ `stock_analyze` 库 + citext/pgcrypto；容器内 `stock_app` 认证通过 |
 | P0-3.5 | seed 隔离 | 生产镜像/编排不含 `seed-*` 自动执行；文档明示禁止弱口令账号 | [x] | 编排无 `seed-*` 自动执行；§3.5 明示 `1234@dev.com` 等弱口令账号禁止进入生产 |
 | P0-3.6 | 邮件通道 | `EMAIL_PROVIDER=aliyun` 使用 RAM 角色/OIDC，不落 AK；`EMAIL_*_ENABLED` 按上线节奏开启 | [ ] | 待阿里云 RAM 角色/OIDC 与 DM 账号 |
 | P0-3.7 | 依赖与镜像扫描 | `uv`/`pnpm` 审计 + 镜像 trivy 无 High/Critical（或有豁免记录） | [ ] | 待 uv/pnpm 审计 + 镜像 trivy（依赖镜像构建） |
@@ -147,7 +147,7 @@
 
 | ID | 事项 | 验收标准 | 状态 | 证据 / 待办 |
 |---|---|---|---|---|
-| P0-4.1 | 生产 PG（云主机 5432） | `max_connections` ≥ 估算；`shared_preload_libraries=pg_stat_statements`；5432 仅对应用主机开放（安全组）；建议 TLS | [~] | 连接数估算 ~90（api 2×20 + worker 40 + 迁移/备份/余量）；云主机参数与安全组待核对 |
+| P0-4.1 | 生产 PG（云主机 5432） | `max_connections` ≥ 估算；`shared_preload_libraries=pg_stat_statements`；5432 仅对应用主机开放（安全组）；建议 TLS | [x] | `max_connections=200`（估算 ~90）、`pg_stat_statements`（含扩展）、慢查询 200ms；公网 5432 实测超时（安全组拦截）+ pg_hba 仅 localhost/`172.16.0.0/12`；TLS 待评估 |
 | P0-4.2 | 备份链路（云主机侧） | WAL 归档 + 每日全量 + `pg_verifybackup`；`stock_backup` 角色只读 | [ ] | 待云主机落实（备份为云主机/云盘职责，不在 Docker 编排内） |
 | P0-4.3 | 恢复演练（云主机侧） | 从全量+PITR 恢复到指定时刻，RTO ≤30min 有计时记录 | [ ] | 待云主机落实；`make restore-drill` 未实现 |
 | P0-4.4 | 零停机发布 | expand-contract 演练脚本 + 回滚说明；滚动升级期间 `readyz` 对旧实例 fail-closed 行为符合预期 | [ ] | expand-contract 演练脚本与回滚说明未写 |
@@ -207,7 +207,8 @@
 - 角色初始化：在云主机上手工执行 `infra/postgres/init-prod/00-bootstrap.sh`（`PGHOST/PGPORT + STOCK_DB_SUPERUSER` + 三个密码环境变量），幂等；仓库 `00-bootstrap.sql` 仅 dev Docker 用。
 - 密码轮换：云主机 `ALTER ROLE` + 应用侧改 `.env.prod`；改密码不影响已存在数据。
 - 网络边界：5432 **仅对应用主机开放**（安全组收紧）；建议 TLS（`sslmode=require` 可用 `STOCK_DB_*_DSN` 整串覆盖）。
-- `STOCK_DB_HOST` 按拓扑二选一：**独立数据库主机**填其内网 IP/域名；**与应用同机**填 `host.docker.internal`（compose 已加 `host-gateway` 映射，Linux 也生效）。**不要填 `localhost`**（容器内的 localhost 是容器自身）。
+- **拓扑决议（2026-11-22）**：应用与数据库同机部署在云主机；`.env.prod` 的 `STOCK_DB_HOST=host.docker.internal`（compose 已加 `host-gateway` 映射）。**不要填 `localhost`**（容器内的 localhost 是容器自身）。
+- 云主机 PG 已配置：`listen_addresses='*'` + pg_hba 仅放行 `127.0.0.1/32`、`::1/128`、`172.16.0.0/12`（Docker 网段）；公网 5432 由云安全组拦截（实测超时）；`max_connections=200`、`pg_stat_statements`、慢查询 200ms；配置备份在 `/etc/postgresql/16/main/*.bak-*`。
 - fail-fast：`make deploy-*` 会拒绝 `.env.prod` 里残留 `REPLACE_ME*` 占位符并列出键名（避免 asyncpg DNS 报错）。
 - 备份/WAL 归档/恢复演练属云主机侧职责（P0-4.2/4.3），不在 Docker 编排内。
 
