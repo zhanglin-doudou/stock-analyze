@@ -126,7 +126,7 @@
 
 | ID | 事项 | 验收标准 | 状态 | 证据 / 待办 |
 |---|---|---|---|---|
-| P0-2.1 | 入口与 TLS（宿主 Caddy） | 80→443 301；证书自动签发/续期；`reverse_proxy` 到 `127.0.0.1:8002` | [~] | 站点示例 `infra/caddy/Caddyfile.example`（`flush_interval -1` 保 SSE、`X-Real-IP` 逐跳传递）；云主机 Caddy 对接待配置验证 |
+| P0-2.1 | 入口与 TLS（宿主 Caddy） | 80→443 301；证书自动签发/续期；`reverse_proxy` 到 `127.0.0.1:8002` | [~] | 站点示例 `infra/caddy/Caddyfile.example`（`flush_interval -1` 保 SSE、`X-Real-IP` 逐跳传递）；对接步骤见 §3.6，云主机 Caddy 对接待配置验证 |
 | P0-2.2 | 路由与优先级（web 内 nginx） | `/api/*` 与探针到 api，其余到 web 静态；`/metrics`、`/docs` 公网不可达 | [~] | `infra/nginx/default.conf`：`location /api/` + 探针正则反代 api:8000；`/metrics`、`/docs`、`/redoc` 显式 404 |
 | P0-2.3 | 中间件栈（nginx） | 安全头（HSTS/CSP 等）、gzip（**不含 `text/event-stream`**）、网关粗限流 | [~] | `security-headers.conf`（原 Traefik security-headers 口径）、`limit_req` 120r/s burst 240、`gzip_types` 不含 event-stream；待冒烟 |
 | P0-2.4 | **真实 IP 对接** | 网关后登录失败计数/验证码限流按真实客户端 IP 生效（XFF 最右可信值） | [~] | Caddy `X-Real-IP`→nginx `realip` 还原→应用优先 X-Real-IP；XFF 最右可信值实现 + 6 单测含伪造最左负向；端到端随 P0-1.6 |
@@ -220,6 +220,28 @@
 
 - 已在 `Settings` 增加 prod 校验：JWT secret / pepper 为 dev 默认值或 <32 字符 → **启动即失败**（fail-closed，单测覆盖）。
 - `make seed-*` 创建的 `1234@dev.com` 等**弱口令账号禁止进入生产**；生产编排不执行任何 seed，只能显式 `cli` 调用且需人工确认。
+
+### 3.6 宿主 Caddy 对接步骤（一次性，P0-2.1 执行版）
+
+云主机已有 Caddy（systemd 版，Caddyfile 通常在 `/etc/caddy/Caddyfile`；`systemctl cat caddy | grep -i Caddyfile` 可确认）。把本域名流量指向应用栈：
+
+1. **改 Caddyfile**：为本域名加/改站点段（已有的旧站点段——如 `root`/`file_server` 静态服务——**整段替换**，其它域名的段不动）：
+
+   ```caddyfile
+   xingst.site {
+       reverse_proxy 127.0.0.1:8002 {
+           flush_interval -1                    # SSE 逐帧透传（chat/任务进度）
+           header_up X-Real-IP {remote_host}    # 真实客户端 IP（登录限流按它计）
+           header_up X-Forwarded-Proto {scheme}
+       }
+   }
+   ```
+
+   **禁止加 `encode`**（gzip）：静态压缩 web 内 nginx 已负责，且 SSE 被压缩会整段缓冲。
+2. **校验并热加载**（不断已有连接）：`sudo caddy validate --config /etc/caddy/Caddyfile && sudo systemctl reload caddy`。
+   顺序建议先 `make deploy-prod` 再 reload；反了也只是暂时 502，栈起来即恢复。TLS 证书由 Caddy 自动签发/续期，无需配置证书路径。
+3. **验证**：`curl -I https://xingst.site/` 200 且带 HSTS/CSP；`BASE_URL=https://xingst.site ./scripts/deploy-smoke.sh` 全绿；`curl -N` 看 SSE 逐帧（P0-2.5）。
+4. **边界**：80/443 必须由 Caddy 独占（Traefik 已从编排移除，不会冲突）；若 Caddy 以**容器**方式运行，上游改 `host.docker.internal:8002`（或宿主机 IP），其余不变。
 
 ---
 
