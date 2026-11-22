@@ -7,7 +7,7 @@ import json
 import re
 import time
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, is_dataclass, replace
 from datetime import date, datetime
 from enum import Enum
@@ -74,6 +74,7 @@ class ChatRuntime:
         user_message_id: str | None = None,
         tool_registry: ToolRegistry | None = None,
         tool_executor: ToolExecutor | None = None,
+        on_event: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         self.repo = repo
         self.data_port = data_port
@@ -87,6 +88,7 @@ class ChatRuntime:
         self.question = question
         self.tool_registry = tool_registry
         self.tool_executor = tool_executor
+        self._on_event = on_event
         self.context_manager = ContextManager(repo, settings)
         self.understanding_service = UnderstandingService(llm, clock)
         self._bundle: ContextBundle | None = None
@@ -656,6 +658,8 @@ class ChatRuntime:
             "payload": to_jsonable(dict(payload)),
         }
         self._events.append(event)
+        if self._on_event is not None:
+            self._on_event(event)
         return event
 
     def _emit_understanding_completed(self, understanding: Understanding) -> None:

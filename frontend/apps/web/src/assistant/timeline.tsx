@@ -20,13 +20,32 @@ function payloadOf(event: ChatTimelineEventOut): TimelinePayload {
   return (event.payload ?? {}) as TimelinePayload;
 }
 
+const TOOL_TITLES: Record<string, string> = {
+  assets_query: "资产表",
+  trades_query: "流水查询",
+  rounds_query: "回合列表",
+  round_detail: "回合详情",
+  portfolio_snapshot: "资产概览",
+  performance_metrics: "绩效指标",
+  attribution_summary: "五因子归因",
+  nav_summary: "净值摘要",
+  sector_exposure: "板块暴露",
+  data_quality: "数据质量",
+  metric_explain: "指标口径",
+};
+
+function displayTitle(payload: TimelinePayload): string {
+  const title = payload.title || payload.tool || "工具";
+  return TOOL_TITLES[title] ?? title;
+}
+
 function sourceLabel(source: string | undefined): string {
   return source === "mcp" ? "外部工具" : "内部工具";
 }
 
 function eventLabel(event: ChatTimelineEventOut, previous: ChatTimelineEventOut | undefined): string {
   const payload = payloadOf(event);
-  const title = payload.title || payload.tool || "工具";
+  const title = displayTitle(payload);
   switch (event.kind) {
     case "understanding.started":
       return "正在理解用户意图";

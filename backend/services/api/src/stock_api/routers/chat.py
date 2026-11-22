@@ -7,10 +7,11 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import json
 from collections.abc import AsyncIterator
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 from fastapi import APIRouter, Depends, Header, Query, Request, Response
 from fastapi.responses import StreamingResponse
@@ -167,49 +168,37 @@ async def send_message(
         )
         await repo.update_turn(user_id, str(turn["id"]), user_message_id=user_message["id"])
 
-        facade = ChatQueryFacade(
-            session,
-            user_id=user_id,
-            clock=state.clock,
-            market_data=state.market_data,
-            sector_data=state.sector_data,
-            settings=state.settings,
-        )
-        registry: ToolRegistry | None = None
-        executor: ToolExecutor | None = None
-        if state.settings.tool_platform_enabled:
-            builtin = BuiltinToolProvider(facade)
-            registry = ToolRegistry()
-            for spec in builtin.specs():
-                registry.register(spec, builtin)
-            executor = ToolExecutor(max_calls_per_turn=state.settings.chat_max_tool_calls)
-        runtime = ChatRuntime(
-            repo=repo,
-            data_port=facade,
-            llm=state.llm,
-            clock=state.clock,
-            settings=state.settings,
-            user_id=user_id,
-            conversation=conversation,
-            turn_id=str(turn["id"]),
-            question=question,
-            user_message_id=str(user_message["id"]),
-            tool_registry=registry,
-            tool_executor=executor,
-        )
-        graph = build_graph(runtime)
-        try:
-            final = await graph.ainvoke({"question": question})
-        except Exception as exc:
-            await repo.update_turn(
-                user_id,
-                str(turn["id"]),
-                status="error",
-                degrade_reason="TOOL_UNAVAILABLE",
-                latency_ms=0,
-            )
-            raise ApiError(ErrorCode.LLM_UNAVAILABLE, detail=str(exc)[:200]) from exc
+        # 预检/建回合提交后，SSE 走独立会话实时推事件；JSON 走短事务跑图。
+        turn_id = str(turn["id"])
+        user_message_id = str(user_message["id"])
 
+    if _wants_sse(request):
+        return StreamingResponse(
+            _stream_live_turn(
+                state=state,
+                user_id=user_id,
+                conversation=conversation,
+                turn_id=turn_id,
+                user_message_id=user_message_id,
+                question=question,
+                idempotency_key=idempotency_key,
+            ),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+                "Connection": "keep-alive",
+            },
+        )
+
+    runtime, final = await _run_turn(
+        state=state,
+        user_id=user_id,
+        conversation=conversation,
+        turn_id=turn_id,
+        user_message_id=user_message_id,
+        question=question,
+    )
     result = _message_out(
         runtime=runtime,
         conversation_id=str(conversation["id"]),
@@ -457,6 +446,215 @@ async def delete_conversation(
         )
         await repo.delete_conversation(user_id=user_id)
     return Response(status_code=204)
+
+
+def _make_runtime(
+    *,
+    session: Any,
+    state: Any,
+    user_id: Any,
+    conversation: dict[str, Any],
+    turn_id: str,
+    user_message_id: str,
+    question: str,
+    on_event: Any = None,
+) -> ChatRuntime:
+    facade = ChatQueryFacade(
+        session,
+        user_id=user_id,
+        clock=state.clock,
+        market_data=state.market_data,
+        sector_data=state.sector_data,
+        settings=state.settings,
+    )
+    registry: ToolRegistry | None = None
+    executor: ToolExecutor | None = None
+    if state.settings.tool_platform_enabled:
+        builtin = BuiltinToolProvider(facade)
+        registry = ToolRegistry()
+        for spec in builtin.specs():
+            registry.register(spec, builtin)
+        executor = ToolExecutor(max_calls_per_turn=state.settings.chat_max_tool_calls)
+    return ChatRuntime(
+        repo=ChatRepository(session),
+        data_port=facade,
+        llm=state.llm,
+        clock=state.clock,
+        settings=state.settings,
+        user_id=user_id,
+        conversation=conversation,
+        turn_id=turn_id,
+        question=question,
+        user_message_id=user_message_id,
+        tool_registry=registry,
+        tool_executor=executor,
+        on_event=on_event,
+    )
+
+
+async def _run_turn(
+    *,
+    state: Any,
+    user_id: Any,
+    conversation: dict[str, Any],
+    turn_id: str,
+    user_message_id: str,
+    question: str,
+) -> tuple[ChatRuntime, dict[str, Any]]:
+    async with state.db.session(user_id=user_id, begin=True) as session:
+        runtime = _make_runtime(
+            session=session,
+            state=state,
+            user_id=user_id,
+            conversation=conversation,
+            turn_id=turn_id,
+            user_message_id=user_message_id,
+            question=question,
+        )
+        graph = build_graph(runtime)
+        try:
+            final = await graph.ainvoke({"question": question})
+        except Exception as exc:
+            await ChatRepository(session).update_turn(
+                user_id,
+                turn_id,
+                status="error",
+                degrade_reason="TOOL_UNAVAILABLE",
+                latency_ms=0,
+            )
+            raise ApiError(ErrorCode.LLM_UNAVAILABLE, detail=str(exc)[:200]) from exc
+    return runtime, final
+
+
+async def _stream_live_turn(
+    *,
+    state: Any,
+    user_id: Any,
+    conversation: dict[str, Any],
+    turn_id: str,
+    user_message_id: str,
+    question: str,
+    idempotency_key: str | None,
+) -> AsyncIterator[str]:
+    """SSE 实时流：图在后台任务跑，事件一产生就推给前端。"""
+    yield _sse_event(
+        "meta",
+        {
+            "turn_id": turn_id,
+            "conversation_id": str(conversation["id"]),
+            "status": "running",
+            "llm_used": False,
+            "fallback": False,
+            "degrade_reason": None,
+            "degrade_message": None,
+            "timeline_version": 1,
+        },
+        event_id=0,
+    )
+    queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+    runtime: ChatRuntime | None = None
+    final: dict[str, Any] | None = None
+    task: asyncio.Task[dict[str, Any]] | None = None
+    try:
+        async with state.db.session(user_id=user_id, begin=True) as session:
+            repo = ChatRepository(session)
+            runtime = _make_runtime(
+                session=session,
+                state=state,
+                user_id=user_id,
+                conversation=conversation,
+                turn_id=turn_id,
+                user_message_id=user_message_id,
+                question=question,
+                on_event=queue.put_nowait,
+            )
+            graph = build_graph(runtime)
+
+            async def _run() -> dict[str, Any]:
+                try:
+                    return cast(dict[str, Any], await graph.ainvoke({"question": question}))
+                finally:
+                    queue.put_nowait(None)
+
+            task = asyncio.create_task(_run())
+            try:
+                while True:
+                    event = await queue.get()
+                    if event is None:
+                        break
+                    yield _sse_event("step", event, event_id=int(event["seq"]))
+                final = await task
+            except Exception as exc:
+                with contextlib.suppress(Exception):
+                    await repo.update_turn(
+                        user_id,
+                        turn_id,
+                        status="error",
+                        degrade_reason="TOOL_UNAVAILABLE",
+                        latency_ms=0,
+                    )
+                yield _sse_event(
+                    "error",
+                    {
+                        "code": "LLM_UNAVAILABLE",
+                        "user_message": "智能分析服务暂时不可用",
+                        "what_to_do": "稍后重试，或缩小时间范围。",
+                        "retryable": True,
+                        "detail": str(exc)[:200],
+                    },
+                )
+                return
+            finally:
+                if task is not None and not task.done():
+                    task.cancel()
+    except Exception as exc:
+        yield _sse_event(
+            "error",
+            {
+                "code": "LLM_UNAVAILABLE",
+                "user_message": "智能分析服务暂时不可用",
+                "what_to_do": "稍后重试。",
+                "retryable": True,
+                "detail": str(exc)[:200],
+            },
+        )
+        return
+
+    assert runtime is not None and final is not None
+    result = _message_out(
+        runtime=runtime,
+        conversation_id=str(conversation["id"]),
+        turn_id=turn_id,
+        final=final,
+    )
+    if idempotency_key:
+        try:
+            async with state.db.session(user_id=user_id, begin=True) as idem_session:
+                await state.idempotency.complete(
+                    idem_session,
+                    user_id=user_id,
+                    endpoint="chat.message",
+                    key=idempotency_key,
+                    status_code=200,
+                    body=result.model_dump(mode="json"),
+                )
+        except Exception:
+            # 时间线已经流出，幂等落库失败不阻断 done；下次同 key 仍会重新执行。
+            pass
+    text = result.answer or ""
+    for offset in range(0, len(text), 48):
+        yield _sse_event("delta", {"text": text[offset : offset + 48]})
+        await asyncio.sleep(0.02)
+    yield _sse_event(
+        "done",
+        {
+            "message": result.model_dump(mode="json"),
+            "timeline": result.timeline_summary.model_dump(mode="json")
+            if result.timeline_summary
+            else None,
+        },
+        event_id=result.timeline[-1].seq if result.timeline else 0,
+    )
 
 
 def _wants_sse(request: Request) -> bool:

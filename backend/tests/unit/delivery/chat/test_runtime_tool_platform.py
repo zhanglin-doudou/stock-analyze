@@ -118,6 +118,7 @@ async def test_runtime_can_execute_via_tool_platform(settings: Any) -> None:
     for spec in BUILTIN_SPECS:
         registry.register(spec, builtin)
     repo = _Repo()
+    live_events: list[dict[str, Any]] = []
     runtime = ChatRuntime(
         repo=repo,  # type: ignore[arg-type]
         data_port=data,
@@ -136,6 +137,7 @@ async def test_runtime_can_execute_via_tool_platform(settings: Any) -> None:
         question="本月赚了多少",
         tool_registry=registry,
         tool_executor=ToolExecutor(max_calls_per_turn=6),
+        on_event=live_events.append,
     )
     final = await build_graph(runtime).ainvoke({"question": "本月赚了多少"})
     assert final["status"] == "ok"
@@ -154,3 +156,6 @@ async def test_runtime_can_execute_via_tool_platform(settings: Any) -> None:
     assert "answer.started" in kinds
     assert kinds[-1] == "turn.completed"
     assert len(repo.events) == len(runtime.events())
+    assert [event["kind"] for event in live_events] == [
+        event["kind"] for event in runtime.events()
+    ]

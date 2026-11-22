@@ -102,7 +102,8 @@ export function createChatAdapter(sessionId: string): ChatModelAdapter {
       }
       let timeline: ChatTimelineEventOut[] = [];
       const update = (text: string) => ({
-        content: [{ type: "text" as const, text }],
+        // step 可能先于首个 delta 到达；用零宽占位确保 assistant-ui 先建立消息气泡。
+        content: [{ type: "text" as const, text: text || "\u200b" }],
         metadata: { custom: { timeline } },
       });
       try {
