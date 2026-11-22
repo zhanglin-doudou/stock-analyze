@@ -14,7 +14,7 @@ import uuid
 from collections.abc import Collection, Mapping, Sequence
 from datetime import date, datetime
 
-from sqlalchemy import delete, func, insert, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from stock_ledger.models import Trade
@@ -76,17 +76,16 @@ class MetricResultRepository:
         return {(row.metric_id, row.definition_version, row.params_hash): row for row in rows}
 
     async def upsert(self, user_id: uuid.UUID, values: Mapping[str, object]) -> None:
-        """按唯一键 UPSERT；`updated_at` 必须显式更新（ON CONFLICT 不触发 onupdate）。"""
+        """按确定性主键 UPSERT；`updated_at` 必须显式更新（ON CONFLICT 不触发 onupdate）。
+
+        仲裁必须是**主键 `id`**（`mtr_` + sha256(user|metric|period|version|params_hash)，
+        与业务唯一键一一对应）：并发同键插入时 PG 先报的是主键冲突，若仲裁业务索引
+        则该冲突不被吸收、直接抛 UniqueViolation（见 test_concurrent_same_key_upsert）。
+        """
         payload = {"user_id": user_id, **values}
         statement = pg_insert(MetricResult).values(payload)
         statement = statement.on_conflict_do_update(
-            index_elements=[
-                MetricResult.user_id,
-                MetricResult.metric_id,
-                MetricResult.period,
-                MetricResult.definition_version,
-                MetricResult.params_hash,
-            ],
+            index_elements=[MetricResult.id],
             set_={name: getattr(statement.excluded, name) for name in _UPSERT_COLUMNS}
             | {"updated_at": func.now()},
         )
@@ -101,7 +100,12 @@ class MetricResultRepository:
         definition_version: str,
         rows: Sequence[Mapping[str, object]],
     ) -> None:
-        """只删当前 `(user, metric, period, version)` 的血缘，再插入本次消费的依赖。"""
+        """只删当前 `(user, metric, period, version)` 的血缘，再插入本次消费的依赖。
+
+        血缘行主键同样确定性（`mtd_` + sha256(user|metric|period|version|kind|dep_id)），
+        插入按主键 UPSERT：并发同批替换时后到者刷新 `dep_hash`/`metric_result_id`，
+        不抛唯一冲突（与 `upsert()` 同口径）。
+        """
         await self._session.execute(
             delete(MetricDependency).where(
                 MetricDependency.user_id == user_id,
@@ -111,10 +115,17 @@ class MetricResultRepository:
             )
         )
         if rows:
-            await self._session.execute(
-                insert(MetricDependency),
-                [{"user_id": user_id, **row} for row in rows],
+            statement = pg_insert(MetricDependency).values(
+                [{"user_id": user_id, **row} for row in rows]
             )
+            statement = statement.on_conflict_do_update(
+                index_elements=[MetricDependency.id],
+                set_={
+                    "dep_hash": statement.excluded.dep_hash,
+                    "metric_result_id": statement.excluded.metric_result_id,
+                },
+            )
+            await self._session.execute(statement)
 
     async def count(self, user_id: uuid.UUID) -> int:
         return int(
