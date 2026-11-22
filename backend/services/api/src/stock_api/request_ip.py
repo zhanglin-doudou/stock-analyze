@@ -1,8 +1,8 @@
 """客户端 IP 解析：只信任受信代理覆盖的转发头。
 
 `TRUSTED_PROXY_CIDRS` 内的 peer 才采信转发头（否则客户端可任意伪造）：
-- 优先 `X-Real-IP`（nginx 惯例）；
-- 回退 `X-Forwarded-For` 的**最右合法值**（Traefik 在链尾追加它看到的对端地址；
+- 优先 `X-Real-IP`（网关链 Caddy→nginx 逐跳传递真实客户端地址）；
+- 回退 `X-Forwarded-For` 的**最右合法值**（反代在链尾追加它看到的对端地址；
   最左值可被客户端伪造，绝不能取）。
 
 IP 只以哈希形式使用。
@@ -67,7 +67,7 @@ def _forwarded_for_ip(request: Request) -> str | None:
 def client_ip_hash(request: Request, settings: Settings) -> str:
     peer = request.client.host if request.client else None
     if _is_trusted(peer, settings.trusted_proxy_cidrs):
-        # 优先 X-Real-IP（nginx 惯例）；Traefik 默认只发 X-Forwarded-For，回退取最右值
+        # 优先 X-Real-IP（网关链逐跳传递）；缺失时回退 X-Forwarded-For 最右值
         real_ip = request.headers.get("x-real-ip", "").strip()
         if not _valid_ip(real_ip):
             real_ip = _forwarded_for_ip(request) or ""

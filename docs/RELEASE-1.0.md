@@ -96,7 +96,7 @@
 
 ## 部署形态
 
-- **Docker + Traefik** 单域名同源：SPA 静态 + `/api` 反代 + TLS(ACME)，SSE 实时事件流直通
+- **Docker + 宿主 Caddy** 单域名同源：SPA 静态 + `/api` 反代 + TLS（Caddy 自动签发/续期），SSE 实时事件流直通
 - 云主机 PostgreSQL（三角色分离：owner 迁移 / app 运行 / backup 只读，NOBYPASSRLS）
 - 生产守卫 fail-closed：弱密钥拒绝启动；`/metrics`、`/docs` 公网不可达；安全头 + CSP 全量下发
 - 滚动升级 + 一键回滚（镜像 tag 版本化），备份/恢复演练手册齐备（见 [DEPLOYMENT.md](DEPLOYMENT.md)）

@@ -316,7 +316,7 @@ STOCK_DB_PORT=5433 make test-p2     # 显式指向 Docker 库（不改 .env 的 
 
 - Period2-09 月报（含归因同源接入 09b）、Period2-10 导出、Period2-11 剩余的基准/隐私 API-056/057、Period2-13 报告/导出页、Period2-14 `verify-p2` 与越权全量、Period2-15 前端零口径 ESLint 门禁——共 6 项，约 9 人日。其中 2-15 已有 `parseFloat/parseInt/Number/toFixed` 基础规则与全 src 扫描，尚缺禁算术/禁结论拼接/禁裸 fetch/禁裸术语与 AST 断言。
 - G8 金标结构门禁（`make gate-golden-structure`）已绿；审批门禁仍有 **23 项红灯**（22 个 COVERAGE 夹具缺失 + `perf.fee_breakeven.blocked` 状态不符），`make gate-golden` 会红。
-- 三期（12 项、约 23 人日）未开始；其中 Period3-07 后端已落地，前端 P3 与完整验收待做。交付阶段已开工：Docker/Traefik 编排骨架已落地，进度见 [部署准入清单](docs/DEPLOYMENT.md)。
+- 三期（12 项、约 23 人日）未开始；其中 Period3-07 后端已落地，前端 P3 与完整验收待做。交付阶段已开工：Docker + 宿主 Caddy 编排骨架已落地，进度见 [部署准入清单](docs/DEPLOYMENT.md)。
 - 具体缺失/占位/验收 SKIP 见 [Dashboard 设计 §7](docs/architecture/2026-10-28-dashboard.md) 与 [DEV-PLAN 进度快照](docs/DEV-PLAN-v2.md#06-2026-11-19-进度快照)。
 
 ## 开发约定

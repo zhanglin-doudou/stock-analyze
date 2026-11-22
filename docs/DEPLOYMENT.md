@@ -1,46 +1,49 @@
-# 部署与上线准入清单（Docker + Traefik）
+# 部署与上线准入清单（Docker + 宿主 Caddy）
 
 > **状态**：2026-11-22 制定，开始实施（P0-1 进行中）
 > **关联**：[DEV-PLAN-v2 §5 交付阶段](DEV-PLAN-v2.md#5-交付阶段最后做8-人日) D-01~D-07；本文件是部署专项的**单一事实源**，DEV-PLAN 只保留任务行与指针。
-> **口径变更**：D-02 原方案为 nginx 反代，2026-11-22 改为 **Traefik 作为唯一入口网关**；静态站点仍由 web 容器内的 nginx 提供，Traefik 不再承担静态文件与 gzip 之外的 Web 服务职责。
+> **口径变更**：D-02 原方案为 nginx 反代，2026-11-22 改为 Traefik 网关；**2026-11-23 再改为「宿主 Caddy + web 内 nginx」双层各司其职**——云主机已有 Caddy（TLS/入口），Traefik 容器与 `infra/traefik/` 已移除；路由（/api、探针）、限流、安全头、gzip 全部收敛到 web 容器内 nginx（`infra/nginx/default.conf`），Caddy 只做 TLS 与入口反代（示例 `infra/caddy/Caddyfile.example`）。
 
 ---
 
 ## 0. 目标形态
 
 ```
-                     ┌─────────────────────────────┐
-   Internet ──80/443──▶ Traefik（TLS 终止 / 路由 / 中间件）
-                     └──────┬──────────────┬───────┘
-                            │              │
-              Host + /api/* │              │ Host（其余路径）
-                            ▼              ▼
-                     api × N（uvicorn）   web（nginx + SPA 静态）
-                            │
-              ┌─────────────┼─────────────┐
-              ▼             ▼             ▼
-           worker        migrate（一次性）  cron（sync-market / sync-sectors / 清理）
-                            │
-                            ▼
-              云主机 PostgreSQL:5432（**Docker 编排外**；5432 仅对应用主机开放）
+                     ┌─────────────────────────────────────┐
+   Internet ──80/443──▶ 宿主 Caddy（TLS 终止 / 入口反代）
+                     └──────────────┬──────────────────────┘
+                                    │ 127.0.0.1:8002（唯一上游）
+                                    ▼
+                     web（nginx：SPA 静态 + 路由/限流/安全头）
+                        │ /api/*、/healthz|/readyz|/version
+                        ▼
+                     api × N（uvicorn）
+                        │
+          ┌─────────────┼─────────────┐
+          ▼             ▼             ▼
+       worker        migrate（一次性）  cron（sync-market / sync-sectors / 清理）
+                        │
+                        ▼
+          云主机 PostgreSQL:5432（**Docker 编排外**；5432 仅对应用主机开放）
 ```
 
-**路由表（单域名同源，避免 CORS）**
+**路由表（单域名同源，避免 CORS；路由在 web 内 nginx）**
 
-| 优先级 | 规则 | 上游 | 说明 |
+| 位置 | 规则 | 上游 | 说明 |
 |---|---|---|---|
-| 100 | `Host(域) && PathPrefix(/api/)` | api:8000 | 业务 API，路径原样透传（应用无 `root_path`） |
-| 100 | `Host(域) && Path(/healthz\|/readyz\|/version)` | api:8000 | 容器探针与版本 |
-| 10 | `Host(域)` | web:80 | SPA 静态 + history fallback |
-| — | `/metrics`、`/docs` | **不路由** | 仅内网抓取；web 对 `/metrics` 显式 404 |
+| web nginx | `location /api/` | api:8000 | 业务 API，路径原样透传（应用无 `root_path`）；限流 120r/s、SSE 不缓冲 |
+| web nginx | `~ ^/(healthz\|readyz\|version)$` | api:8000 | 容器探针与版本 |
+| web nginx | 其余路径 | 本机静态 | SPA 静态 + history fallback |
+| web nginx | `/metrics`、`/docs`、`/redoc` | **显式 404** | 公网不可达（避免 SPA fallback 造成“假可达”） |
+| 宿主 Caddy | `reverse_proxy` | 127.0.0.1:8002 | 只做 TLS 与入口；`flush_interval -1` 保 SSE、`X-Real-IP` 逐跳传递 |
 
 **服务矩阵**
 
 | 服务 | 镜像 | 副本 | 说明 |
 |---|---|---|---|
-| traefik | `traefik:v3.3` | 1 | 80/443、ACME、docker provider（自动发现副本） |
-| web | `stock-analyze/web` | 1 | `vite build` 产物 + nginx |
-| api | `stock-analyze/api` | ≥2 | 同镜像入口 `api`，无状态，可水平扩 |
+| caddy | 宿主机已有（编排外） | 1 | 80/443、TLS 自动签发/续期、入口反代到 `127.0.0.1:8002` |
+| web | `stock-analyze/web` | 1 | `vite build` 产物 + nginx（栈内唯一前端入口：静态 + /api 反代/限流/安全头） |
+| api | `stock-analyze/api` | ≥2 | 同镜像入口 `api`，无状态，可水平扩（nginx 经 Docker DNS 自动发现） |
 | worker | `stock-analyze/api` | 1 | 同镜像入口 `worker`（JobQueue 租约天然单飞，扩容前先评估） |
 | migrate | `stock-analyze/api` | 一次性 | `alembic upgrade head`，api 依赖其成功退出 |
 | db | 云主机 PostgreSQL:16+ | — | **不在编排内**：5432 由云主机提供；角色由 `init-prod/00-bootstrap.sh` 手工初始化 |
@@ -72,9 +75,9 @@
 | 缺口 | 影响 |
 |---|---|
 | 无任何 Dockerfile、无生产 compose | 无法交付 |
-| 无 Traefik 配置 | 无入口、无 TLS |
+| 无入口网关配置（现由宿主 Caddy 承担） | 无入口、无 TLS |
 | `00-bootstrap.sql` 硬编码 dev 密码 | 生产库密码即公开 |
-| 客户端 IP 只认 `X-Real-IP`，Traefik 默认不发 | 登录失败计数/验证码限流按代理 IP 归并 |
+| 客户端 IP 只认 `X-Real-IP`，需网关逐跳传递 | 登录失败计数/验证码限流按代理 IP 归并 |
 | 无 `/metrics` 外部访问控制 | 指标裸奔（API 层为公开端点） |
 | 无备份/WAL/恢复演练 | 不满足 RPO ≤5min / RTO ≤30min |
 | 无定时任务编排 | 行情/板块不同步、验证码与时间线不清理 |
@@ -98,8 +101,8 @@
 
 **本轮已交付物（可直接复核）**
 
-- 镜像与编排：`infra/docker/Dockerfile.api`、`Dockerfile.web`、`entrypoint.sh`、`infra/nginx/default.conf`、`infra/compose/docker-compose.prod.yml` / `.local.yml`
-- 网关：`infra/traefik/dynamic/middlewares.yml`（安全头/CSP、compress 排除 SSE、限流）
+- 镜像与编排：`infra/docker/Dockerfile.api`、`Dockerfile.web`、`entrypoint.sh`、`infra/nginx/default.conf` + `security-headers.conf`、`infra/compose/docker-compose.prod.yml` / `.local.yml`
+- 网关：宿主 Caddy 站点示例 `infra/caddy/Caddyfile.example`；安全头/CSP、限流（120r/s）、SSE 不缓冲均在 `infra/nginx/default.conf`（2026-11-23 由 Traefik 中间件迁移，`infra/traefik/` 已删除）
 - 配置与初始化：`infra/.env.prod.example`、`infra/postgres/init-prod/00-bootstrap.sh`（云主机手工执行）
 - 工程入口：`make deploy-*`、`scripts/deploy-smoke.sh`
 - 代码守卫：`request_ip.py`（XFF 最右可信值）、`config.py`（prod 弱口令 fail-closed）+ 12 个单测
@@ -113,21 +116,21 @@
 |---|---|---|---|---|
 | P0-1.1 | `infra/docker/Dockerfile.api` 多阶段构建 | 非 root（uid 10001）、`uv sync --frozen`、`live`/`email` extra 可开关、镜像内可跑 `api/worker/migrate/cli` 四入口 | [~] | Dockerfile 已落地（多阶段、非 root、四入口，`--build-arg EXTRAS=` 开关 live/email）；构建被 Docker Hub 拉层阻塞，四入口待镜像复验 |
 | P0-1.2 | `infra/docker/Dockerfile.web` 多阶段构建 | Node 22 + pnpm 构建 → nginx alpine；产物含 `dist/index.html`；镜像 <100MB | [~] | Dockerfile 已落地；构建、`dist/index.html` 与镜像体积待复验 |
-| P0-1.3 | `infra/compose/docker-compose.prod.yml` | `docker compose config` 通过；服务 traefik/web/api/worker/migrate 齐全（db 在编排外）；api 可 `--scale api=2` | [x] | prod + local 两套 `docker compose config -q` 均 exit 0；Traefik 通过 labels 发现副本 |
-| P0-1.4 | 镜像/编排健康检查 | db `pg_isready`；api `/readyz`；web `GET /`；traefik ping；worker 进程存活 | [~] | db/api/web/traefik 健康检查已声明；worker 以进程存活为准，待起栈验证 |
+| P0-1.3 | `infra/compose/docker-compose.prod.yml` | `docker compose config` 通过；服务 web/api/worker/migrate 齐全（db 与 Caddy 均在编排外）；api 可 `--scale api=2` | [x] | prod + local 两套 `docker compose config -q` 均 exit 0；nginx 经 Docker DNS 发现 api 副本 |
+| P0-1.4 | 镜像/编排健康检查 | db `pg_isready`；api `/readyz`；web `GET /`；worker 进程存活 | [~] | db/api/web 健康检查已声明（traefik 容器已移除）；worker 以进程存活为准，待起栈验证。注意：网关级「摘除不健康副本」（原 Traefik healthcheck）不再有，api 探针失败由人工/重启兜底，单副本部署无影响 |
 | P0-1.5 | 迁移先于 api | api `depends_on: migrate: service_completed_successfully`；migrate 失败则 api 不起 | [~] | api/worker 均 `depends_on: migrate: service_completed_successfully`，待起栈验证失败阻断 |
 | P0-1.6 | 本地全套预演 | `make deploy-local` 后 `http://localhost` 可登录并完成一次导入 | [ ] | 待镜像构建完成后执行 `make deploy-local` + `make deploy-smoke` |
 | P0-1.7 | `.dockerignore` | 排除 `.git/.venv/node_modules/var/.env`；构建上下文 <50MB | [x] | 实测上下文 6.0 MiB / 550 files；排除 .git/.venv/node_modules/var/.env |
 
-### P0-2 Traefik 对接（D-02 改）
+### P0-2 网关对接（D-02：宿主 Caddy + web 内 nginx，2026-11-23 改）
 
 | ID | 事项 | 验收标准 | 状态 | 证据 / 待办 |
 |---|---|---|---|---|
-| P0-2.1 | 静态配置（entrypoint/provider/ACME） | 80→443 301；证书自动签发/续期；docker provider 自动发现 api 副本 | [~] | 80/443、ACME(LE)、docker provider、`idleTimeout=0` 已配置；行为待起栈/上云 |
-| P0-2.2 | 路由与优先级 | `/api/*` 与探针到 api，其余到 web；`/metrics`、`/docs` 公网不可达 | [~] | api 优先级 100、web 10；`/metrics`、`/docs`、`/redoc` 由 nginx 显式 404 |
-| P0-2.3 | 中间件栈 | 安全头（HSTS/CSP 等）、compress（**排除 `text/event-stream`**）、网关粗限流 | [~] | 安全头/CSP、compress 排除 `text/event-stream`、限流 120r/s 已配置；待冒烟 |
-| P0-2.4 | **真实 IP 对接** | Traefik 后登录失败计数/验证码限流按真实客户端 IP 生效（XFF 最右可信值） | [~] | XFF 最右可信值实现（优先 X-Real-IP）+ 6 单测含伪造最左负向；Traefik 后端到端随 P0-1.6 |
-| P0-2.5 | **SSE 透传** | `/api/v1/jobs/{id}/events` 与 chat SSE 经 Traefik 后逐帧到达、不被缓冲/截断 | [ ] | 待起栈后用 `curl -N` 验证逐帧到达 |
+| P0-2.1 | 入口与 TLS（宿主 Caddy） | 80→443 301；证书自动签发/续期；`reverse_proxy` 到 `127.0.0.1:8002` | [~] | 站点示例 `infra/caddy/Caddyfile.example`（`flush_interval -1` 保 SSE、`X-Real-IP` 逐跳传递）；云主机 Caddy 对接待配置验证 |
+| P0-2.2 | 路由与优先级（web 内 nginx） | `/api/*` 与探针到 api，其余到 web 静态；`/metrics`、`/docs` 公网不可达 | [~] | `infra/nginx/default.conf`：`location /api/` + 探针正则反代 api:8000；`/metrics`、`/docs`、`/redoc` 显式 404 |
+| P0-2.3 | 中间件栈（nginx） | 安全头（HSTS/CSP 等）、gzip（**不含 `text/event-stream`**）、网关粗限流 | [~] | `security-headers.conf`（原 Traefik security-headers 口径）、`limit_req` 120r/s burst 240、`gzip_types` 不含 event-stream；待冒烟 |
+| P0-2.4 | **真实 IP 对接** | 网关后登录失败计数/验证码限流按真实客户端 IP 生效（XFF 最右可信值） | [~] | Caddy `X-Real-IP`→nginx `realip` 还原→应用优先 X-Real-IP；XFF 最右可信值实现 + 6 单测含伪造最左负向；端到端随 P0-1.6 |
+| P0-2.5 | **SSE 透传** | `/api/v1/jobs/{id}/events` 与 chat SSE 经 Caddy+nginx 后逐帧到达、不被缓冲/截断 | [ ] | 两端已配置（Caddy `flush_interval -1`；nginx `proxy_buffering off`）；待起栈后用 `curl -N` 验证逐帧到达 |
 | P0-2.6 | `TRUSTED_PROXY_CIDRS` | 覆盖 Docker 网络网段；非受信 peer 伪造 XFF 无效（负向用例） | [x] | `TRUSTED_PROXY_CIDRS=172.16.0.0/12`，sa-net 固定 172.28.0.0/16；负向单测通过 |
 | P0-2.7 | CSP 实测 | 浏览器控制台无 CSP 违规；图表/悬浮助手/导入向导均可用 | [ ] | 待浏览器实测无 CSP 违规（图表 / 悬浮助手 / 导入向导） |
 
@@ -184,16 +187,17 @@
 ### 3.1 真实客户端 IP
 
 - 现状：应用只信任 `TRUSTED_PROXY_CIDRS` 内 peer 的 `X-Real-IP`（[request_ip.py](../backend/services/api/src/stock_api/request_ip.py)）。
-- Traefik 默认只追加 `X-Forwarded-For`（最右值为它看到的对端地址），**不发 `X-Real-IP`**。
-- 结论：应用侧改为「受信 peer 时优先 `X-Real-IP`，否则取 XFF 最右合法值」；`TRUSTED_PROXY_CIDRS` 配 Docker 网段。
+- 网关链 Caddy→nginx **逐跳传递 `X-Real-IP`**（Caddy `header_up X-Real-IP {remote_host}`；nginx `realip` 还原后 `proxy_set_header X-Real-IP $remote_addr`）；应用优先 `X-Real-IP`，缺失时取 XFF 最右合法值。
+- `TRUSTED_PROXY_CIDRS` 配 Docker 网段（nginx→api 的 peer 在 sa-net 内）。
 - 负向：非受信 peer 携带伪造 XFF → 仍按 peer 哈希，不得采信。
 - **不得**用 uvicorn `--forwarded-allow-ips=*` 绕过（客户端可伪造）。
 
 ### 3.2 SSE 透传
 
 - 两个流：`GET /api/v1/jobs/{id}/events`、chat 的 `Accept: text/event-stream`。
-- Traefik 本身流式转发，但 **compress 中间件必须排除 `text/event-stream`**，否则可能整体缓冲。
-- 入口 `idleTimeout` 不得短于最长流时长（chat 单轮上限 60s）；验收以「逐帧到达」而非「最终有响应」为准。
+- 两跳都不能压缩/缓冲：Caddy `reverse_proxy` 配 `flush_interval -1` 且**不启用 encode**；nginx `/api/` 反代 `proxy_buffering off`，`gzip_types` **不含 `text/event-stream`**。
+- nginx `proxy_read_timeout 3600s`（空闲超时，非总时长）；chat 单轮上限 60s（服务端 deadline）。
+- 验收以「逐帧到达」而非「最终有响应」为准。
 
 ### 3.3 `/metrics` 与 `/docs`
 
@@ -236,7 +240,7 @@
 
 ## 5. 实施顺序
 
-1. P0-1 镜像与编排（先能起）→ 2. P0-2 Traefik 与 IP/SSE（能通）→ 3. P0-3 密钥与守卫（能安全起）→ 4. P0-4 备份演练（能恢复）→ 5. P1 定时任务与 CI（能运维）→ 6. P2 文档与上云验收（能交付）。
+1. P0-1 镜像与编排（先能起）→ 2. P0-2 网关与 IP/SSE（能通）→ 3. P0-3 密钥与守卫（能安全起）→ 4. P0-4 备份演练（能恢复）→ 5. P1 定时任务与 CI（能运维）→ 6. P2 文档与上云验收（能交付）。
 
 **回滚原则**：应用回滚只换镜像 tag；迁移采用 expand-contract，回滚不执行 `downgrade`（破坏性），以“前一版本兼容新 schema”为准。
 
@@ -361,7 +365,7 @@ $COMPOSE run --rm --no-deps migrate alembic -c backend/alembic.ini current   # �
 NEW_TAG=$(git rev-parse --short HEAD)
 sed -i "s/^TAG=.*/TAG=$NEW_TAG/" infra/.env.prod
 $COMPOSE build api web
-$COMPOSE up -d --no-build --scale api=2     # Traefik /readyz 自动摘除不健康副本
+$COMPOSE up -d --no-build --scale api=2     # nginx 经 Docker DNS 自动发现副本（10s 内生效）
 
 # ── ② 升级验证 ─────────────────────────────────────────────
 ./scripts/deploy-smoke.sh
@@ -394,7 +398,7 @@ $COMPOSE up -d --no-build --scale api=2
 sudo -u postgres pg_restore -d stock_analyze --clean --if-exists /tmp/backup-<旧>.dump
 ```
 
-**DNS/证书未就绪时**：加 `-f infra/compose/docker-compose.local.yml` 起 HTTP 预演（ACME 不需要）。
+**DNS/证书未就绪时**：加 `-f infra/compose/docker-compose.local.yml` 起 HTTP 预演（不依赖 Caddy 与证书）。
 **扩容**：`sudo docker compose ... up -d --no-build --scale api=2`；**停止**：`... down`（PG 数据不受影响）。
 **回滚**：重新 `docker load` 旧镜像 + `up -d --no-build`；迁移遵循 expand-contract，不做 downgrade。
 
@@ -404,6 +408,7 @@ sudo -u postgres pg_restore -d stock_analyze --clean --if-exists /tmp/backup-<�
 
 | 日期 | 变更 | 证据 |
 |---|---|---|
+| 2026-11-23 | **网关口径再改：Traefik → 宿主 Caddy + web 内 nginx**（云主机已有 Caddy）；`infra/traefik/` 删除；路由/限流/安全头/gzip 迁入 `infra/nginx/default.conf`+`security-headers.conf`；web 端口收敛 `127.0.0.1:8002`、api 不发布端口；新增 `infra/caddy/Caddyfile.example`；`.env.prod.example` 去 DOMAIN/ACME_EMAIL、LLM 口径同步（JSON 目录） | `docker compose config -q` 通过；`nginx -t` 通过（见本轮提交） |
 | 2026-11-22 | 制定准入清单；D-02 由 nginx 改为 Traefik | 本文件 |
 | 2026-11-22 | 落地 Dockerfile.api / Dockerfile.web / prod compose / Traefik 动态中间件 / 生产 env 模板 / init-prod | `infra/docker/`、`infra/compose/`、`infra/traefik/` |
 | 2026-11-22 | 真实 IP 对接（XFF 最右可信值）+ prod 弱口令守卫 | `request_ip.py`、`config.py`；`test_request_ip.py`（6 例）、`test_config_prod_guard.py`（6 例）全绿 |

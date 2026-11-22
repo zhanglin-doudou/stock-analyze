@@ -10,7 +10,7 @@ from stock_platform.security import hash_ip
 
 pytestmark = pytest.mark.no_db
 
-TRUSTED_PEER = "172.20.0.5"  # 模拟同 Docker 网络内的 Traefik
+TRUSTED_PEER = "172.20.0.5"  # 模拟同 Docker 网络内的反代网关（web 内 nginx）
 UNTRUSTED_PEER = "198.51.100.9"
 
 
@@ -53,7 +53,7 @@ def test_trusted_peer_uses_rightmost_xff_when_real_ip_absent() -> None:
 
 
 def test_trusted_peer_ignores_forged_leftmost_xff() -> None:
-    # 客户端自带 "6.6.6.6" 伪造值；Traefik 在末尾追加真实对端 203.0.113.7
+    # 客户端自带 "6.6.6.6" 伪造值；反代在末尾追加真实对端 203.0.113.7
     request = _request(TRUSTED_PEER, {"X-Forwarded-For": "6.6.6.6,203.0.113.7"})
     assert client_ip_hash(request, _settings()) == hash_ip("203.0.113.7")
     assert client_ip_hash(request, _settings()) != hash_ip("6.6.6.6")

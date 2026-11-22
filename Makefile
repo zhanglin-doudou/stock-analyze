@@ -28,11 +28,11 @@ help:
 	@echo "  make api            仅起 FastAPI"
 	@echo "  make worker         仅起任务消费者"
 	@echo "  make web            仅起 Vite dev server"
-	@echo "── 部署（Docker + Traefik，见 docs/DEPLOYMENT.md）──────"
+	@echo "── 部署（Docker + 宿主 Caddy，见 docs/DEPLOYMENT.md）────"
 	@echo "  make deploy-config  校验生产编排（需 infra/.env.prod）"
-	@echo "  make deploy-prod    生产全套构建并启动（TLS/ACME）"
+	@echo "  make deploy-prod    生产全套构建并启动（TLS 由宿主 Caddy 负责）"
 	@echo "  make deploy-local   本地全套预演（HTTP，无 TLS）"
-	@echo "  make deploy-scale N=2       扩 api 副本（Traefik 自动负载均衡）"
+	@echo "  make deploy-scale N=2       扩 api 副本（nginx 自动发现）"
 	@echo "  make deploy-down    停止生产编排（保留数据卷）"
 	@echo "  make deploy-logs    跟踪生产日志"
 	@echo "  make deploy-smoke   部署后冒烟（路由/探针/安全头）"
@@ -171,7 +171,7 @@ worker:
 web:
 	@cd frontend && pnpm --filter web dev
 
-# ── 部署（Docker + Traefik）─────────────────────────────────
+# ── 部署（Docker + 宿主 Caddy）────────────────────────────
 .PHONY: deploy-env-check
 deploy-env-check:
 	@test -f $(PROD_ENV_FILE) || { \
