@@ -242,6 +242,9 @@
    顺序建议先 `make deploy-prod` 再 reload；反了也只是暂时 502，栈起来即恢复。TLS 证书由 Caddy 自动签发/续期，无需配置证书路径。
 3. **验证**：`curl -I https://xingst.site/` 200 且带 HSTS/CSP；`BASE_URL=https://xingst.site ./scripts/deploy-smoke.sh` 全绿；`curl -N` 看 SSE 逐帧（P0-2.5）。
 4. **边界**：80/443 必须由 Caddy 独占（Traefik 已从编排移除，不会冲突）；若 Caddy 以**容器**方式运行，上游改 `host.docker.internal:8002`（或宿主机 IP），其余不变。
+5. **备案期间临时访问**：备案拦截只按域名（Host/SNI）触发，**按 IPv4 直连不拦**——可加临时段
+   `http://<服务器IP> { reverse_proxy 127.0.0.1:8002 { ...同上 } }` 供公网访问应用；
+   备案通过、域名 HTTPS 可用后删除该临时段（2026-11-23 已在云主机这样配置，冒烟全绿）。
 
 ---
 
