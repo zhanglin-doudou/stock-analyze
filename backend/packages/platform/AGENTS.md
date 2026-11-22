@@ -131,6 +131,7 @@ class SectorRepository:
 | `db.py` | Database 类（连接池 + SET LOCAL app.user_id + 连接归还清空） |
 | `models.py` | platform schema ORM（job / job_event / idempotency_key / audit_log / user ...） |
 | `config.py` | Settings + build_dsn + get_settings（从根 .env 读） |
+| `llm_registry.py` | 模型供应商目录（`config/llm_providers.json`）：供应商/模型/`api_key_env` 解析 + 前端快照（2026-11-22） |
 | `tenant.py` | TenantContext（从凭证解析 user_id + 角色） |
 | `jobs.py` | JobQueue（acquire / finish / emit + SKIP LOCKED + 租约） |
 | `idempotency.py` | IdempotencyStore（三态语义） |

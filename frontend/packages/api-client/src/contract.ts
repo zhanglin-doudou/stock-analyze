@@ -60,6 +60,9 @@ export type MeOut = ApiSchemas["MeOut"];
 /** 用户偏好（API-055 GET / API-096 PATCH，2026-11-13）：四组生效值 + 版本。 */
 export type SettingsOut = ApiSchemas["SettingsOut"];
 export type SettingsPatchIn = ApiSchemas["SettingsPatchIn"];
+/** 助手模型偏好与目录（2026-11-22 供应商/模型动态切换）。 */
+export type LlmPrefs = ApiSchemas["LlmPrefsOut"];
+export type LlmProviderCatalog = ApiSchemas["LlmProviderCatalogOut"];
 export type LoginIn = ApiSchemas["LoginIn"];
 export type RegisterIn = ApiSchemas["RegisterIn"];
 export type SendEmailCodeIn = ApiSchemas["SendEmailCodeIn"];

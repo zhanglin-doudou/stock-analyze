@@ -18,6 +18,7 @@ PREFERENCE_COLUMNS: tuple[str, ...] = (
     "display_prefs",
     "market_session_prefs",
     "concept_filter_prefs",
+    "llm_prefs",
     "bill_near_equal_tolerance_bps",
     "bill_chase_margin_bps",
     "bill_stop_loss_margin_bps",

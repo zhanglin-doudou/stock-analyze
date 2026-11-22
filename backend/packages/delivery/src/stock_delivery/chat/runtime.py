@@ -75,12 +75,15 @@ class ChatRuntime:
         tool_registry: ToolRegistry | None = None,
         tool_executor: ToolExecutor | None = None,
         on_event: Callable[[dict[str, Any]], None] | None = None,
+        llm_enabled: bool | None = None,
     ) -> None:
         self.repo = repo
         self.data_port = data_port
         self.llm = llm
         self.clock = clock
         self.settings = settings
+        #: 是否允许调用 LLM（按请求解析；缺省沿用 settings.llm_enabled）。
+        self.llm_enabled = settings.llm_enabled if llm_enabled is None else llm_enabled
         self.user_id = user_id
         self.conversation = dict(conversation)
         self.turn_id = turn_id
@@ -114,7 +117,7 @@ class ChatRuntime:
             self.user_id,
             self.conversation,
             self.question,
-            compressor=self._compress if self.settings.llm_enabled else None,
+            compressor=self._compress if self.llm_enabled else None,
             exclude_message_id=self.user_message_id,
         )
         self._bundle = bundle
@@ -123,7 +126,7 @@ class ChatRuntime:
     async def understand(self, state: ChatState) -> dict[str, Any]:
         assert self._bundle is not None
         self._emit("understanding.started", "understand", {})
-        if not self.settings.llm_enabled:
+        if not self.llm_enabled:
             understanding = self.understanding_service.fallback_understanding(
                 self.question, self._bundle.focus
             )
@@ -161,7 +164,7 @@ class ChatRuntime:
             log.error(
                 "chat.llm.bad_response",
                 purpose="understanding",
-                model=self.settings.glm_model,
+                model=self.llm.model,
                 error=str(exc)[:300],
             )
             self._degrade_reason = DegradeReason.LLM_BAD_RESPONSE
@@ -240,7 +243,9 @@ class ChatRuntime:
             )
             self._record_tool(tool, args, result, latency)
             self._emit(
-                "tool.call.succeeded" if result.status is not ChatStatus.ERROR else "tool.call.failed",
+                "tool.call.succeeded"
+                if result.status is not ChatStatus.ERROR
+                else "tool.call.failed",
                 "execute",
                 {
                     "call_id": f"call_{self._tool_seq}",
@@ -309,7 +314,7 @@ class ChatRuntime:
         return {"answer": to_jsonable(template), "status": template.status.value}
 
     def route_after_compose(self, state: ChatState) -> str:
-        if not self.settings.llm_enabled or self._understanding is None:
+        if not self.llm_enabled or self._understanding is None:
             return "validate"
         if self._understanding.needs_clarification:
             return "validate"
@@ -408,7 +413,7 @@ class ChatRuntime:
             log.error(
                 "chat.llm.bad_response",
                 purpose="answer",
-                model=self.settings.glm_model,
+                model=self.llm.model,
                 error=str(exc)[:300],
             )
             self._degrade_reason = DegradeReason.LLM_BAD_RESPONSE
@@ -444,14 +449,14 @@ class ChatRuntime:
                 log.warning(
                     "chat.llm.validation_warning",
                     purpose="answer",
-                    model=self.settings.glm_model,
+                    model=self.llm.model,
                     warnings=warnings[:8],
                 )
             return {"status": answer.get("status") or ChatStatus.OK.value}
         retries = int(state.get("retry_count") or 0)
         can_retry = (
             retries == 0
-            and self.settings.llm_enabled
+            and self.llm_enabled
             and self._understanding is not None
             and not self._understanding.needs_clarification
         )
@@ -464,7 +469,7 @@ class ChatRuntime:
             log.error(
                 "chat.llm.validation_failed",
                 purpose="answer",
-                model=self.settings.glm_model,
+                model=self.llm.model,
                 errors=result.errors[:8],
                 retry_count=retries,
                 will_retry=True,
@@ -478,7 +483,7 @@ class ChatRuntime:
         log.error(
             "chat.llm.validation_failed",
             purpose="answer",
-            model=self.settings.glm_model,
+            model=self.llm.model,
             errors=result.errors[:8],
             warnings=warnings[:8],
             retry_count=retries,
@@ -497,7 +502,7 @@ class ChatRuntime:
             return "persist"
         answer = state.get("answer") or {}
         if (
-            self.settings.llm_enabled
+            self.llm_enabled
             and int(state.get("retry_count") or 0) == 1
             and not answer.get("fallback", False)
         ):
@@ -710,7 +715,7 @@ class ChatRuntime:
         self._emit(
             "model.thinking.started",
             "think",
-            {"purpose": purpose, "model": self.settings.glm_model},
+            {"purpose": purpose, "model": self.llm.model},
         )
         thinking_started = time.monotonic()
         for attempt in range(max_retries + 1):
@@ -739,7 +744,7 @@ class ChatRuntime:
                 self._emit(
                     "model.thinking.started",
                     "think",
-                    {"purpose": purpose, "model": self.settings.glm_model, "retry": True},
+                    {"purpose": purpose, "model": self.llm.model, "retry": True},
                 )
                 thinking_started = time.monotonic()
                 delay = self.settings.llm_retry_backoff_seconds * (2**attempt)
@@ -834,8 +839,8 @@ class ChatRuntime:
             {
                 "seq": self._llm_seq,
                 "purpose": purpose,
-                "provider": self.settings.llm_provider,
-                "model": self.settings.glm_model,
+                "provider": self.llm.provider,
+                "model": self.llm.model,
                 "prompt_version": prompt_version,
                 "request": to_jsonable(exc.raw_request),
                 "response": to_jsonable(exc.raw_response),
@@ -873,13 +878,9 @@ class _RuntimeToolTrace(ToolTraceSink):
     def __init__(self, runtime: ChatRuntime) -> None:
         self.runtime = runtime
 
-    async def record_tool_call(
-        self, call: ToolCall, result: ToolResult, ctx: ToolContext
-    ) -> None:
+    async def record_tool_call(self, call: ToolCall, result: ToolResult, ctx: ToolContext) -> None:
         self.runtime._tool_seq += 1
-        self.runtime._record_tool(
-            result.tool, call.args, result, result.latency_ms or 0
-        )
+        self.runtime._record_tool(result.tool, call.args, result, result.latency_ms or 0)
 
     async def emit(self, event: Mapping[str, Any]) -> None:
         kind = str(event.get("kind") or "tool.call")

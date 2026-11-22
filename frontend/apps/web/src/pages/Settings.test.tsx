@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import type { PatToken, SectorCatalogPage, SettingsOut } from "@sa/api-client";
 import { Settings } from "./Settings";
 import { api } from "../client";
@@ -73,6 +73,22 @@ function makeSettings(overrides: DeepPartial<SettingsOut> = {}): SettingsOut {
       timezone: "Asia/Shanghai",
     },
     concept_filters: { mode: "off", excluded: [] },
+    llm: {
+      provider: "",
+      model: "",
+      enabled: true,
+      default_provider: "zhipu",
+      default_model: "glm-4.7-flash",
+      providers: [
+        { id: "zhipu", name: "智谱", available: true, models: ["glm-4.7-flash", "glm-4-flash"] },
+        {
+          id: "xiaomi",
+          name: "小米",
+          available: false,
+          models: ["mimo-v2.6-flash", "mimo-v2.6-pro"],
+        },
+      ],
+    },
     benchmark_id: "hs300_tr",
     privacy_flags: {},
   };
@@ -83,6 +99,7 @@ function makeSettings(overrides: DeepPartial<SettingsOut> = {}): SettingsOut {
     market_sessions: { ...base.market_sessions, ...overrides.market_sessions },
     concept_filters: { ...base.concept_filters, ...overrides.concept_filters },
     appearance: { ...base.appearance, ...overrides.appearance },
+    llm: { ...base.llm, ...overrides.llm },
   };
 }
 
@@ -462,5 +479,63 @@ describe("Settings（重置账单数据，API-110）", () => {
     await waitFor(() => expect(resetBillData).toHaveBeenCalledTimes(1));
     expect(await screen.findByTestId("settings-reset-done")).toBeTruthy();
     expect(screen.getByText("已删除 3 行账单数据。")).toBeTruthy();
+  });
+});
+
+describe("Settings（助手模型，2026-11-22）", () => {
+  beforeEach(() => {
+    saveTokens({ access_token: "access-token" });
+    getSettings.mockResolvedValue({
+      settings: makeSettings(),
+      etag: 'W/"2"',
+      notModified: false,
+    } as never);
+  });
+
+  it("渲染模型目录：缺 key 的供应商不可选，选择后成对提交 provider/model", async () => {
+    patchSettings.mockResolvedValue({
+      settings: makeSettings({ version: 3, llm: { provider: "zhipu", model: "glm-4-flash" } }),
+      etag: 'W/"3"',
+    } as never);
+
+    render(<Settings />);
+    await screen.findByRole("heading", { name: "助手模型" });
+
+    const providerSelect = screen.getByLabelText("供应商") as HTMLSelectElement;
+    expect(providerSelect.value).toBe("");
+    const xiaomi = within(providerSelect).getByRole("option", { name: /小米/ }) as HTMLOptionElement;
+    expect(xiaomi.disabled).toBe(true);
+
+    fireEvent.change(providerSelect, { target: { value: "zhipu" } });
+    const modelSelect = screen.getByLabelText("模型") as HTMLSelectElement;
+    expect(modelSelect.value).toBe("glm-4.7-flash");
+    fireEvent.change(modelSelect, { target: { value: "glm-4-flash" } });
+
+    fireEvent.click(screen.getByRole("button", { name: "保存模型" }));
+    await waitFor(() => expect(patchSettings).toHaveBeenCalledTimes(1));
+    expect(patchSettings).toHaveBeenCalledWith(
+      { llm: { provider: "zhipu", model: "glm-4-flash" } },
+      expect.objectContaining({ version: 2 }),
+    );
+    expect(await screen.findByText("保存后使用 zhipu · glm-4-flash")).toBeTruthy();
+  });
+
+  it("恢复默认发 null 对，让后端删键回到部署默认", async () => {
+    patchSettings.mockResolvedValue({
+      settings: makeSettings({ version: 3 }),
+      etag: 'W/"3"',
+    } as never);
+
+    render(<Settings />);
+    const heading = await screen.findByRole("heading", { name: "助手模型" });
+    const card = heading.closest("section") as HTMLElement;
+    expect(within(card).getAllByText(/glm-4.7-flash/).length).toBeGreaterThan(0);
+
+    fireEvent.click(within(card).getByRole("button", { name: "恢复默认" }));
+    await waitFor(() => expect(patchSettings).toHaveBeenCalledTimes(1));
+    expect(patchSettings).toHaveBeenCalledWith(
+      { llm: { provider: null, model: null } },
+      expect.objectContaining({ version: 2 }),
+    );
   });
 });

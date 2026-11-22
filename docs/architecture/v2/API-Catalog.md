@@ -108,8 +108,8 @@
 | API-052 | GET | `/alerts` | 行为规则触发记录 | D6 | read | — | 同步 | P1 | 200 |
 | API-053 | POST | `/alerts/{alert_id}/ack` | 确认提醒 | D6 | write | 幂等 | 同步 | P1 | 200 |
 | API-054 | GET | `/notifications` | 站内通知 | D8 | read | — | 同步 | P2 | 200 |
-| API-055 | GET | `/settings` | 设置总览（四组偏好生效值 + version/ETag） | D1 | read | — | 同步 | P0 | 200 |
-| API-096 | PATCH | `/settings` | 通用偏好局部更新（外观/账单旗标/行情时段/概念过滤，If-Match CAS） | D1 | write | 支持 | 同步 | P0 | 200 |
+| API-055 | GET | `/settings` | 设置总览（五组偏好生效值 + version/ETag；`llm` 组含模型目录） | D1 | read | — | 同步 | P0 | 200 |
+| API-096 | PATCH | `/settings` | 通用偏好局部更新（外观/账单旗标/行情时段/概念过滤/助手模型，If-Match CAS） | D1 | write | 支持 | 同步 | P0 | 200 |
 | API-097 | POST | `/settings/trade-flags/rebuild` | 按生效阈值重建账单旗标（异步任务） | D1 | write | 必需 | 异步 | P1 | 202 |
 | API-110 | POST | `/settings/reset-bill-data` | 重置本人账单数据（清空 ledger/review，不可撤销） | D1 | write | 必需 | 同步 | P1 | 200 |
 | API-111 | GET | `/settings/trade-flags/status` | 账单旗标重建状态（需重建原因 + 各旗标计数） | D1 | read | — | 同步 | P1 | 200 |
@@ -663,10 +663,12 @@
 - 错误码：NOT_FOUND(404)、VALIDATION_ERROR(422)、JOB_ALREADY_RUNNING(409)、QUOTA_EXCEEDED(429)、ADMIN_CANNOT_READ_TRADES(403)、INSUFFICIENT_SCOPE(403)。
 - 验收：删除后注入行不可见、超卖数量恢复；重复删除幂等；跨用户 404；区间覆盖/撤销批次不误删注入行。
 
-#### API-055 GET /settings · API-096 PATCH /settings（2026-11-13 用户偏好 v2.1）
-- 用途：读取/局部更新用户偏好（外观与显示、账单旗标阈值与窗口、行情时段、概念板块过滤）；operationId `getSettings` / `patchSettings`。
-- `GET` 响应 200：`{version,updated_at,appearance{theme,density,trend},bill_flags{near_equal_tolerance_pct,chase_margin_pct,stop_loss_margin_pct,short_term_margin_pct,window_trading_days,flags_hash,is_default},market_sessions{sessions[{open,close}],data_ready_after,session_notice_enabled,timezone},concept_filters{mode,excluded[{code,name,resolved}]},benchmark_id,privacy_flags}`；阈值一律百分比串、窗口为十进制整数字符串；无 `user_setting` 行时返回默认视图（`version=1`、`updated_at=null`）。响应头 `ETag: W/"<version>"`，支持 `If-None-Match` → 304。
-- `PATCH` 请求：header `If-Match: W/"<int>"`（必填，`*`/缺失/非法 422）、可选 `Idempotency-Key`；body 为四组任意子集：typed 列只更新出现键、`null` 恢复默认；JSONB 按 RFC 7396 合并（`null` 删键、数组整体替换）；顶层组 `null` 整组重置；未知键/只读键（`benchmark_id`/`privacy_flags`/`timezone`/`flags_hash`/`is_default`）422；空 body 422；值全等于当前 → 200 不 bump（`X-Settings-Changed: false`）。
+#### API-055 GET /settings · API-096 PATCH /settings（2026-11-13 用户偏好 v2.1；2026-11-22 增 `llm` 组）
+- 用途：读取/局部更新用户偏好（外观与显示、账单旗标阈值与窗口、行情时段、概念板块过滤、助手模型）；operationId `getSettings` / `patchSettings`。
+- `GET` 响应 200：`{version,updated_at,appearance{theme,density,trend},bill_flags{near_equal_tolerance_pct,chase_margin_pct,stop_loss_margin_pct,short_term_margin_pct,window_trading_days,flags_hash,is_default},market_sessions{sessions[{open,close}],data_ready_after,session_notice_enabled,timezone},concept_filters{mode,excluded[{code,name,resolved}]},llm{provider,model,enabled,default_provider,default_model,providers[{id,name,available,models[]}]},benchmark_id,privacy_flags}`；阈值一律百分比串、窗口为十进制整数字符串；无 `user_setting` 行时返回默认视图（`version=1`、`updated_at=null`）。响应头 `ETag: W/"<version>"`，支持 `If-None-Match` → 304。
+- `llm` 组（2026-11-22 动态切换）：`provider`/`model` 为用户原始选择，**空字符串 = 跟随部署默认**（`default_provider`/`default_model` 来自 `config/llm_providers.json`）；`enabled` 为部署 LLM 开关（`LLM_PROVIDER=none/local` 时 false）；`providers[].available` 表示该供应商 API key 环境变量已配置（**不含** base_url / api_key_env / key 本身）。
+- `PATCH` 请求：header `If-Match: W/"<int>"`（必填，`*`/缺失/非法 422）、可选 `Idempotency-Key`；body 为五组任意子集：typed 列只更新出现键、`null` 恢复默认；JSONB 按 RFC 7396 合并（`null` 删键、数组整体替换）；顶层组 `null` 整组重置；未知键/只读键（`benchmark_id`/`privacy_flags`/`timezone`/`flags_hash`/`is_default`）422；空 body 422；值全等于当前 → 200 不 bump（`X-Settings-Changed: false`）。
+- `llm` 组写规则：`provider` 与 `model` 必须**同时提交**（值或同时 `null` 恢复默认），只给一个 422；取值必须命中目录（provider 存在且 model 属于该 provider），否则 422 `llm.provider`/`llm.model`；保存后下一条聊天消息即按新模型路由（无需重启）。
 - 并发：`UPDATE ... WHERE user_id=:uid AND version=:expected` 单条 CAS；首次缺行 `INSERT ... ON CONFLICT DO NOTHING` 后 version=2；旧版本 409 `VERSION_CONFLICT`。`Idempotency-Key` 重放返回缓存 body，`Idempotency-Replayed: true`；请求指纹含 If-Match + body。
 - 审计：有实际变更才写 `audit_log(action="settings.patch", meta={changed[],from_version,to_version})`。
 - 错误码：VALIDATION_ERROR(422)、VERSION_CONFLICT(409)、IDEMPOTENCY_KEY_REUSED(422)、IDEMPOTENCY_IN_PROGRESS(409)、INSUFFICIENT_SCOPE(403)。
@@ -927,8 +929,8 @@ data: {"job_id":"job_01J9Z6","status":"succeeded","result_ref":"/api/v1/reports/
 | API-052 | alerts_trigger_payload | 200 含 rule_code/payload；无建议词 | fx_alert | P1 |
 | API-053 | alerts_ack | 200 acked_at 非空 | fx_alert | P1 |
 | API-054 | notifications_list | 200 仅本人通知 | fx_alert | P2 |
-| API-055 | settings_get（已实现） | 200 含四组偏好生效值 + version/ETag；无行返回默认视图且 `updated_at=null`；`If-None-Match` → 304；只读 | fx_settings | P0 |
-| API-096 | settings_patch（已实现） | 200 + ETag；If-Match 必填/非法 422；CAS 冲突 409；未知键/只读键/空 body 422；无变更不 bump；幂等重放；审计仅在有变更时写入；跨用户互不影响 | fx_settings | P0 |
+| API-055 | settings_get（已实现） | 200 含五组偏好生效值 + version/ETag（`llm` 组含目录与 available）；无行返回默认视图且 `updated_at=null`；`If-None-Match` → 304；只读 | fx_settings | P0 |
+| API-096 | settings_patch（已实现） | 200 + ETag；If-Match 必填/非法 422；CAS 冲突 409；未知键/只读键/空 body 422；`llm` 组 provider/model 必须同时提交且命中目录否则 422；无变更不 bump；幂等重放；审计仅在有变更时写入；跨用户互不影响 | fx_settings | P0 |
 | API-097 | settings_trade_flags_rebuild（已实现） | 202 + Location；Idempotency-Key 必填；months 格式/上限/scope 冲突 422；同参复用 X-Job-Reused；异参 409；重放幂等；重建后行指纹为当前 flags_hash；跨用户互不影响 | fx_settings | P1 |
 | API-110 | settings_reset_bill_data（已实现） | 200 含 deleted/total；Idempotency-Key 必填/非法 422；重放幂等；仅清本人 ledger/review 数据且跨用户互不影响；admin 403 | fx_settings | P1 |
 | API-111 | settings_trade_flags_status（已实现） | 200 含 needs_rebuild/reasons/flags 计数；有账单无当前口径 → NO_CURRENT_FLAGS；旗标未完全覆盖账单 → INCOMPLETE_COVERAGE；pending 行情未覆盖不触发、覆盖后触发 PENDING_MARKET_COVERED；只读不改行；跨用户隔离；admin 403 | fx_settings | P1 |

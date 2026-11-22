@@ -21,10 +21,12 @@ from stock_contracts.preferences import (
     GROUP_APPEARANCE,
     GROUP_BILL_FLAGS,
     GROUP_CONCEPT_FILTERS,
+    GROUP_LLM,
     GROUP_MARKET_SESSIONS,
     GROUPS,
     JSONB_COLUMNS,
     JSONB_WRITABLE_KEYS,
+    LLM_ID_MAX_LEN,
     READONLY_KEYS,
     THEMES,
     TOP_LEVEL_READONLY,
@@ -35,6 +37,7 @@ from stock_core.preferences.resolve import (
     effective_appearance,
     effective_bill_bps,
     effective_concept_filters,
+    effective_llm,
     effective_market_sessions,
 )
 from stock_core.preferences.units import (
@@ -150,6 +153,15 @@ def _validate_excluded(value: object) -> list[dict[str, str]]:
     return excluded
 
 
+def _validate_llm_id(field: str, value: object) -> str:
+    """供应商/模型 id 形状（目录成员校验在 API 层对注册表做）。"""
+    if not isinstance(value, str) or not value:
+        raise PreferenceValidationError(field, "必须是非空字符串（恢复默认请传 null）")
+    if len(value) > LLM_ID_MAX_LEN:
+        raise PreferenceValidationError(field, f"超过 {LLM_ID_MAX_LEN} 字符")
+    return value
+
+
 def _merge_jsonb(
     group: str,
     stored: Mapping[str, Any],
@@ -186,6 +198,8 @@ def _merge_jsonb(
             if not isinstance(value, bool):
                 raise PreferenceValidationError(f"{group}.{key}", "必须是布尔值")
             merged[key] = value
+        elif group == GROUP_LLM and key in {"provider", "model"}:
+            merged[key] = _validate_llm_id(f"{group}.{key}", value)
         else:  # pragma: no cover - `_check_keys` 已拦截
             raise PreferenceValidationError(f"{group}.{key}", "未知字段")
     return {key: merged[key] for key in writable if key in merged}
@@ -296,6 +310,27 @@ def _apply_concept_filters(
     return columns, {"concept_filter_prefs": new_raw}, changed
 
 
+def _apply_llm(
+    stored: Mapping[str, Any], payload: Mapping[str, Any] | None
+) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
+    old = effective_llm(stored)
+    if payload is not None:
+        present = sorted(set(payload) & {"provider", "model"})
+        if len(present) == 1:
+            raise PreferenceValidationError(
+                f"{GROUP_LLM}.{present[0]}", "provider 与 model 必须同时提交（或整组传 null）"
+            )
+    new_raw = _merge_jsonb(GROUP_LLM, stored, payload) if payload is not None else {}
+    if bool(new_raw.get("provider")) != bool(new_raw.get("model")):
+        raise PreferenceValidationError(
+            f"{GROUP_LLM}.model", "provider 与 model 必须同时设置（或同时恢复默认）"
+        )
+    new = effective_llm({**stored, "llm_prefs": new_raw})
+    changed = [f"{GROUP_LLM}.{key}" for key in ("provider", "model") if old[key] != new[key]]
+    columns = {"llm_prefs": new_raw} if changed else {}
+    return columns, {"llm_prefs": new_raw}, changed
+
+
 def apply_patch(stored: Mapping[str, Any], patch: Mapping[str, Any]) -> PatchResult:
     """合并并校验一次 PATCH；无差异时 `changed=[]`（调用方不 bump 版本）。"""
     if not patch:
@@ -315,6 +350,7 @@ def apply_patch(stored: Mapping[str, Any], patch: Mapping[str, Any]) -> PatchRes
         (GROUP_BILL_FLAGS, _apply_bill_flags),
         (GROUP_MARKET_SESSIONS, _apply_market_sessions),
         (GROUP_CONCEPT_FILTERS, _apply_concept_filters),
+        (GROUP_LLM, _apply_llm),
     )
     for group, handler in handlers:
         if group not in patch:

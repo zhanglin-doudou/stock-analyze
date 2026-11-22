@@ -71,8 +71,7 @@ class _Data:
 
 
 async def test_runtime_template_and_llm_path(settings) -> None:
-    settings.llm_provider = "glm"
-    settings.glm_api_key = "test"
+    settings.llm_provider = "auto"
     provider = FakeProvider(
         [
             json.dumps(
@@ -129,8 +128,7 @@ async def test_runtime_template_and_llm_path(settings) -> None:
 
 
 async def test_llm_answer_without_numbers_keeps_template_numbers(settings) -> None:
-    settings.llm_provider = "glm"
-    settings.glm_api_key = "test"
+    settings.llm_provider = "auto"
     provider = FakeProvider(
         [
             json.dumps(
@@ -179,8 +177,7 @@ async def test_llm_answer_without_numbers_keeps_template_numbers(settings) -> No
 
 
 async def test_invalid_understanding_json_falls_back_without_500(settings) -> None:
-    settings.llm_provider = "glm"
-    settings.glm_api_key = "test"
+    settings.llm_provider = "auto"
     provider = FakeProvider(
         [
             '{"intents":"trades","confidence":0.9}',
@@ -241,8 +238,7 @@ async def test_timeout_retries_both_understanding_and_answer(settings) -> None:
     from stock_contracts.chat.enums import DegradeReason
     from stock_delivery.chat.provider import LlmError
 
-    settings.llm_provider = "glm"
-    settings.glm_api_key = "test"
+    settings.llm_provider = "auto"
     settings.llm_retry_on_429 = 1
     settings.llm_retry_backoff_seconds = 0
     provider = _FlakyProvider(

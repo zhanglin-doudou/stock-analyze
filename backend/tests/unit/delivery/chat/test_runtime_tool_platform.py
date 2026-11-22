@@ -80,8 +80,7 @@ class _Data:
 
 
 async def test_runtime_can_execute_via_tool_platform(settings: Any) -> None:
-    settings.llm_provider = "glm"
-    settings.glm_api_key = "test"
+    settings.llm_provider = "auto"
     settings.tool_platform_enabled = True
     provider = FakeProvider(
         [
@@ -156,6 +155,4 @@ async def test_runtime_can_execute_via_tool_platform(settings: Any) -> None:
     assert "answer.started" in kinds
     assert kinds[-1] == "turn.completed"
     assert len(repo.events) == len(runtime.events())
-    assert [event["kind"] for event in live_events] == [
-        event["kind"] for event in runtime.events()
-    ]
+    assert [event["kind"] for event in live_events] == [event["kind"] for event in runtime.events()]

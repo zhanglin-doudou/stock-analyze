@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, Request, Response
@@ -37,6 +37,7 @@ from stock_ledger.models import (
 )
 from stock_platform import audit
 from stock_platform.idempotency import IdempotencyStore
+from stock_platform.llm_registry import LlmRegistry
 from stock_platform.market_models import TAXONOMY_CONCEPT, Sector
 from stock_platform.models import UserSetting
 from stock_platform.repositories.users import UserSettingRepository
@@ -65,6 +66,8 @@ from stock_api.schemas import (
     ConceptExcludedOut,
     ConceptFiltersPrefsOut,
     JobLinks,
+    LlmPrefsOut,
+    LlmProviderCatalogOut,
     MarketSessionsPrefsOut,
     SettingsOut,
     SettingsPatchIn,
@@ -115,6 +118,7 @@ _SETTING_COLUMNS: tuple[str, ...] = (
     "display_prefs",
     "market_session_prefs",
     "concept_filter_prefs",
+    "llm_prefs",
     "bill_near_equal_tolerance_bps",
     "bill_chase_margin_bps",
     "bill_stop_loss_margin_bps",
@@ -169,7 +173,46 @@ async def _resolved_codes(session: AsyncSession, codes: Iterable[str]) -> set[st
     return set(rows)
 
 
-async def _settings_out(session: AsyncSession, setting: UserSetting | None) -> SettingsOut:
+def _llm_out(stored: dict[str, Any], registry: LlmRegistry, *, enabled: bool) -> LlmPrefsOut:
+    """llm 组回显：用户原始选择（空 = 跟随默认）+ 目录快照（不含 key/base_url）。"""
+    effective = resolve(stored)
+    catalog = registry.catalog()
+    return LlmPrefsOut(
+        provider=str(effective.llm["provider"]),
+        model=str(effective.llm["model"]),
+        enabled=enabled,
+        default_provider=str(catalog["default_provider"]),
+        default_model=str(catalog["default_model"]),
+        providers=[LlmProviderCatalogOut(**item) for item in catalog["providers"]],
+    )
+
+
+def _validate_llm_patch(patch: Mapping[str, Any], registry: LlmRegistry) -> None:
+    """目录成员校验（core 只做形状）：provider 存在且 model 属于该 provider。"""
+    group = patch.get("llm")
+    if not isinstance(group, Mapping):
+        return
+    provider = group.get("provider")
+    model = group.get("model")
+    if provider is None or model is None:
+        return  # 缺键由 core 的「必须同时提交」拦截
+    if registry.get_provider(str(provider)) is None:
+        raise ApiError(
+            ErrorCode.VALIDATION_ERROR,
+            detail=f"未知模型供应商：{provider}",
+            errors=[FieldError("llm.provider", "invalid", "不在可用模型目录内")],
+        )
+    if not registry.has_model(str(provider), str(model)):
+        raise ApiError(
+            ErrorCode.VALIDATION_ERROR,
+            detail=f"模型 {model} 不属于供应商 {provider}",
+            errors=[FieldError("llm.model", "invalid", "不在该供应商的模型目录内")],
+        )
+
+
+async def _settings_out(
+    session: AsyncSession, setting: UserSetting | None, registry: LlmRegistry, *, enabled: bool
+) -> SettingsOut:
     stored = _stored_of(setting)
     effective = resolve(stored)
     excluded = effective.concept_filters["excluded"]
@@ -191,6 +234,7 @@ async def _settings_out(session: AsyncSession, setting: UserSetting | None) -> S
                 for item in excluded
             ],
         ),
+        llm=_llm_out(stored, registry, enabled=enabled),
         benchmark_id=setting.benchmark_id if setting is not None else "hs300_tr",
         privacy_flags=setting.privacy_flags if setting is not None else {},
     )
@@ -212,7 +256,12 @@ async def get_settings(
         etag = _etag(version)
         if if_none_match is not None and if_none_match.strip() == etag:
             return Response(status_code=304, headers={"ETag": etag})
-        out = await _settings_out(session, setting)
+        out = await _settings_out(
+            session,
+            setting,
+            state.llm_registry,
+            enabled=state.settings.llm_enabled,
+        )
     response.headers["ETag"] = etag
     return out
 
@@ -278,6 +327,7 @@ async def patch_settings(
 
         repo = UserSettingRepository(session)
         setting = await repo.get_for_read(user_id)
+        _validate_llm_patch(patch, state.llm_registry)
         try:
             result = apply_patch(_stored_of(setting), patch)
         except PreferenceValidationError as exc:
@@ -289,7 +339,12 @@ async def patch_settings(
 
         changed = bool(result.changed)
         if not changed:
-            out = await _settings_out(session, setting)
+            out = await _settings_out(
+                session,
+                setting,
+                state.llm_registry,
+                enabled=state.settings.llm_enabled,
+            )
             body = out.model_dump(mode="json")
             if idempotency_key is not None:
                 await state.idempotency.complete(
@@ -324,7 +379,12 @@ async def patch_settings(
                 request_id=request.headers.get("x-request-id"),
                 source="api",
             )
-            out = await _settings_out(session, updated)
+            out = await _settings_out(
+                session,
+                updated,
+                state.llm_registry,
+                enabled=state.settings.llm_enabled,
+            )
             body = out.model_dump(mode="json")
             if idempotency_key is not None:
                 await state.idempotency.complete(

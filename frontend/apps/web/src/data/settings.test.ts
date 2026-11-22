@@ -35,6 +35,17 @@ function makeSettings(overrides: Partial<SettingsOut> & { updated_at: string | n
       timezone: "Asia/Shanghai",
     },
     concept_filters: { mode: "off", excluded: [] },
+    llm: {
+      provider: "",
+      model: "",
+      enabled: true,
+      default_provider: "zhipu",
+      default_model: "glm-4.7-flash",
+      providers: [
+        { id: "zhipu", name: "智谱", available: true, models: ["glm-4.7-flash", "glm-4-flash"] },
+        { id: "xiaomi", name: "小米", available: false, models: ["mimo-v2.6-flash", "mimo-v2.6-pro"] },
+      ],
+    },
     benchmark_id: "hs300_tr",
     privacy_flags: {},
     ...overrides,

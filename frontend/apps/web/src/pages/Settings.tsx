@@ -138,6 +138,19 @@ function conceptFormOf(settings: SettingsOut): ConceptForm {
   };
 }
 
+/** 助手模型：空 provider/model = 跟随部署默认（后端 llm 组语义）。 */
+interface LlmForm {
+  provider: string;
+  model: string;
+}
+
+function llmFormOf(settings: SettingsOut): LlmForm {
+  return {
+    provider: settings.llm.provider ?? "",
+    model: settings.llm.model ?? "",
+  };
+}
+
 function sameCodes(left: ConceptEntry[], right: ConceptEntry[]): boolean {
   if (left.length !== right.length) return false;
   const a = left.map((item) => item.code).sort();
@@ -180,6 +193,7 @@ export function Settings() {
   const [bill, setBill] = useState<BillForm | null>(null);
   const [sessions, setSessions] = useState<SessionsForm | null>(null);
   const [concept, setConcept] = useState<ConceptForm | null>(null);
+  const [llm, setLlm] = useState<LlmForm | null>(null);
 
   // API-097：按生效阈值重建账单旗标（P0「需重建」提示的真实入口）。
   const [rebuildJobId, setRebuildJobId] = useState<string | null>(null);
@@ -215,6 +229,7 @@ export function Settings() {
     setBill(billFormOf(next));
     setSessions(sessionsFormOf(next));
     setConcept(conceptFormOf(next));
+    setLlm(llmFormOf(next));
   }, []);
 
   const loadSettings = useCallback(async () => {
@@ -339,6 +354,7 @@ export function Settings() {
         if (group === "bill") setBill(billFormOf(next));
         if (group === "sessions") setSessions(sessionsFormOf(next));
         if (group === "concept") setConcept(conceptFormOf(next));
+        if (group === "llm") setLlm(llmFormOf(next));
       }
       return next;
     } catch (err) {
@@ -456,6 +472,28 @@ export function Settings() {
     });
   }
 
+  function changeLlmProvider(value: string): void {
+    if (!llm) return;
+    if (!value) {
+      setLlm({ provider: "", model: "" });
+      return;
+    }
+    const models = (settings?.llm.providers ?? []).find((item) => item.id === value)?.models ?? [];
+    setLlm({
+      provider: value,
+      model: models.includes(llm.model) ? llm.model : (models[0] ?? ""),
+    });
+  }
+
+  async function saveLlm(): Promise<void> {
+    if (!settings || !llm) return;
+    // 空选择 = 回到部署默认（RFC 7396 删键）；选择值成对提交。
+    const patch: SettingsPatchIn = llm.provider
+      ? { llm: { provider: llm.provider, model: llm.model } }
+      : { llm: { provider: null, model: null } };
+    await submitGroup("llm", patch);
+  }
+
   async function create(event: FormEvent): Promise<void> {
     event.preventDefault();
     setBusy(true);
@@ -551,12 +589,26 @@ export function Settings() {
 
   const saveErrorMessage = saveError ? toProblem(saveError).user_message : null;
 
+  const llmProviders = settings?.llm.providers ?? [];
+  const llmSelectedModels =
+    llm && llm.provider
+      ? llmProviders.find((item) => item.id === llm.provider)?.models ?? []
+      : [];
+  const llmDefaultProviderName =
+    llmProviders.find((item) => item.id === settings?.llm.default_provider)?.name ??
+    settings?.llm.default_provider ??
+    "";
+  const llmDirty =
+    settings && llm
+      ? llm.provider !== (settings.llm.provider ?? "") || llm.model !== (settings.llm.model ?? "")
+      : false;
+
   return (
     <div className="settings">
       <header className="settings-head">
         <div className="settings-eyebrow">Preferences</div>
         <h1 className="settings-title">设置</h1>
-        <p className="settings-sub">外观、账单旗标阈值、行情时段与概念过滤；偏好同步到当前账号。</p>
+        <p className="settings-sub">外观、账单旗标阈值、行情时段、概念过滤与助手模型；偏好同步到当前账号。</p>
       </header>
 
       <ProblemView error={error} onRetry={() => void load()} />
@@ -989,6 +1041,84 @@ export function Settings() {
               className="settings-btn settings-btn-ghost"
               disabled={saving !== null}
               onClick={() => void submitGroup("concept", { concept_filters: null })}
+            >
+              恢复默认
+            </button>
+          </div>
+        </section>
+      ) : null}
+
+      {settings && llm ? (
+        <section className="settings-card">
+          <div className="settings-card-head">
+            <h2>助手模型</h2>
+            <span className="settings-meta">
+              {settings.llm.enabled ? "保存后下一条消息即生效 · 已同步到云端" : "部署未启用 LLM"}
+            </span>
+          </div>
+          <p className="settings-hint">
+            星星助手使用的模型供应商与模型；可用目录由服务端配置（config/llm_providers.json），
+            缺少 API key 的供应商不可选。选择跟随默认时，使用{" "}
+            {llmDefaultProviderName} · {settings.llm.default_model}。
+          </p>
+
+          <div className="settings-field-group">
+            <label className="settings-field">
+              供应商
+              <select
+                value={llm.provider}
+                onChange={(event) => changeLlmProvider(event.target.value)}
+              >
+                <option value="">跟随默认（{llmDefaultProviderName}）</option>
+                {llmProviders.map((item) => (
+                  <option key={item.id} value={item.id} disabled={!item.available}>
+                    {item.name}
+                    {item.available ? "" : "（缺少 API key）"}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="settings-field">
+              模型
+              <select
+                value={llm.model}
+                disabled={llm.provider === ""}
+                onChange={(event) => setLlm({ ...llm, model: event.target.value })}
+              >
+                {llm.provider === "" ? (
+                  <option value="">{settings.llm.default_model}（默认）</option>
+                ) : (
+                  llmSelectedModels.map((model) => (
+                    <option key={model} value={model}>
+                      {model}
+                    </option>
+                  ))
+                )}
+              </select>
+            </label>
+
+            <span className="settings-hint">
+              {llm.provider === ""
+                ? "当前跟随部署默认，未做个人选择。"
+                : `保存后使用 ${llm.provider} · ${llm.model}`}
+            </span>
+          </div>
+
+          <div className="settings-actions">
+            <button
+              type="button"
+              className="settings-btn"
+              disabled={!llmDirty || saving !== null}
+              onClick={() => void saveLlm()}
+            >
+              {saving === "llm" ? "保存中…" : "保存模型"}
+            </button>
+            <button
+              type="button"
+              className="settings-btn settings-btn-ghost"
+              disabled={saving !== null}
+              onClick={() => void submitGroup("llm", { llm: { provider: null, model: null } })}
             >
               恢复默认
             </button>

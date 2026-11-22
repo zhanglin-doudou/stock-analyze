@@ -14,6 +14,7 @@ from stock_core.preferences.resolve import (
     effective_appearance,
     effective_bill_bps,
     effective_concept_filters,
+    effective_llm,
     effective_market_sessions,
     resolve,
 )
@@ -37,6 +38,7 @@ __all__ = [
     "effective_appearance",
     "effective_bill_bps",
     "effective_concept_filters",
+    "effective_llm",
     "effective_market_sessions",
     "flags_hash",
     "format_bps",

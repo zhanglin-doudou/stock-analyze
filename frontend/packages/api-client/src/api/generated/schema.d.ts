@@ -3773,6 +3773,48 @@ export interface components {
             /** Next Cursor */
             next_cursor?: string | null;
         };
+        /**
+         * LlmPatch
+         * @description provider 与 model 必须同时提交（或整组 `null` 恢复默认）。
+         */
+        LlmPatch: {
+            /** Model */
+            model?: string | null;
+            /** Provider */
+            provider?: string | null;
+        };
+        /**
+         * LlmPrefsOut
+         * @description 助手模型偏好：`provider`/`model` 为空 = 跟随部署默认；目录供前端渲染选择器。
+         */
+        LlmPrefsOut: {
+            /** Default Model */
+            default_model: string;
+            /** Default Provider */
+            default_provider: string;
+            /** Enabled */
+            enabled: boolean;
+            /** Model */
+            model: string;
+            /** Provider */
+            provider: string;
+            /** Providers */
+            providers?: components["schemas"]["LlmProviderCatalogOut"][];
+        };
+        /**
+         * LlmProviderCatalogOut
+         * @description 供应商目录项（2026-11-22）：`available` = API key 环境变量已配置。
+         */
+        LlmProviderCatalogOut: {
+            /** Available */
+            available: boolean;
+            /** Id */
+            id: string;
+            /** Models */
+            models?: string[];
+            /** Name */
+            name: string;
+        };
         /** LoginIn */
         LoginIn: {
             /** Device Name */
@@ -5704,6 +5746,7 @@ export interface components {
             benchmark_id: string;
             bill_flags: components["schemas"]["BillFlagsPrefsOut"];
             concept_filters: components["schemas"]["ConceptFiltersPrefsOut"];
+            llm: components["schemas"]["LlmPrefsOut"];
             market_sessions: components["schemas"]["MarketSessionsPrefsOut"];
             /** Privacy Flags */
             privacy_flags?: {
@@ -5722,6 +5765,7 @@ export interface components {
             appearance?: components["schemas"]["AppearancePatch"] | null;
             bill_flags?: components["schemas"]["BillFlagsPatch"] | null;
             concept_filters?: components["schemas"]["ConceptFiltersPatch"] | null;
+            llm?: components["schemas"]["LlmPatch"] | null;
             market_sessions?: components["schemas"]["MarketSessionsPatch"] | null;
         };
         /**

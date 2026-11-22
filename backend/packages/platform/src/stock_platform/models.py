@@ -335,6 +335,10 @@ class UserSetting(Base):
     concept_filter_prefs: Mapped[dict[str, Any]] = mapped_column(
         JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
     )
+    # 2026-11-22 助手模型偏好：{"provider": ..., "model": ...}；空 = 跟随部署默认（迁移 0024）。
+    llm_prefs: Mapped[dict[str, Any]] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
+    )
     version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False

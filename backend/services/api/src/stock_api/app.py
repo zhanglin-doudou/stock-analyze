@@ -11,13 +11,14 @@ from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 from stock_contracts.clock import Clock, SystemClock
 from stock_contracts.errors import ApiError
-from stock_delivery.chat.provider import build_provider
+from stock_delivery.chat.provider import LlmProviderFactory, build_provider
 from stock_ledger.market import create_market_source
 from stock_platform.config import DEFAULT_EMAIL_CODE_PEPPER, Settings, get_settings
 from stock_platform.db import Database
 from stock_platform.email_verification import EmailVerificationService
 from stock_platform.idempotency import IdempotencyStore
 from stock_platform.jobs import JobQueue
+from stock_platform.llm_registry import load_llm_registry
 from stock_platform.mail import EmailSender, create_email_sender
 from stock_platform.obs import configure_logging, get_logger
 from stock_platform.ratelimit import RateLimiter
@@ -126,6 +127,8 @@ def build_state(
     market_data = create_market_source(settings, session_factory=db.session, clock=resolved_clock)
     # 板块数据源同口径（replay 读夹具；live 读 market.* 缓存，缺 akshare 启动期 fail-fast）。
     sector_data = create_sector_source(settings, session_factory=db.session, clock=resolved_clock)
+    # 模型供应商目录（config/llm_providers.json）：启动期 fail-fast 加载一次。
+    llm_registry = load_llm_registry(settings)
     return AppState(
         settings=settings,
         db=db,
@@ -141,7 +144,9 @@ def build_state(
         email_sender=sender,
         email_codes=EmailVerificationService(settings, code_hasher),
         object_store=LocalObjectStore(settings.data_dir / "objects"),
-        llm=build_provider(settings),
+        llm=build_provider(settings, llm_registry),
+        llm_registry=llm_registry,
+        llm_factory=LlmProviderFactory(settings, llm_registry),
     )
 
 

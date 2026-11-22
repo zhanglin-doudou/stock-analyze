@@ -30,12 +30,13 @@ from stock_core.preferences.units import format_bps, format_window, parse_clock_
 
 @dataclass(frozen=True, slots=True)
 class EffectivePreferences:
-    """四组生效值（API 形状）+ 两个派生指纹。"""
+    """五组生效值（API 形状）+ 两个派生指纹。"""
 
     appearance: dict[str, Any]
     bill_flags: dict[str, Any]
     market_sessions: dict[str, Any]
     concept_filters: dict[str, Any]
+    llm: dict[str, Any]
     flags_hash: str
     concept_filter_hash: str
     #: 生效阈值（bps 整数域，键为 DB 列名）；供旗标判定构造 `TradeFlagConfig`。
@@ -147,6 +148,19 @@ def effective_concept_filters(stored: Mapping[str, Any]) -> dict[str, Any]:
     return {"mode": mode, "excluded": excluded}
 
 
+def effective_llm(stored: Mapping[str, Any]) -> dict[str, str]:
+    """助手模型选择（2026-11-22）：空 = 跟随部署默认；半截值整组视为未设置。"""
+    raw = stored.get("llm_prefs")
+    source = raw if isinstance(raw, Mapping) else {}
+    provider = source.get("provider")
+    model = source.get("model")
+    provider_str = provider if isinstance(provider, str) and provider else ""
+    model_str = model if isinstance(model, str) and model else ""
+    if not provider_str or not model_str:
+        return {"provider": "", "model": ""}
+    return {"provider": provider_str, "model": model_str}
+
+
 def resolve(stored: Mapping[str, Any]) -> EffectivePreferences:
     appearance = effective_appearance(stored)
     bps = effective_bill_bps(stored)
@@ -167,6 +181,7 @@ def resolve(stored: Mapping[str, Any]) -> EffectivePreferences:
         bill_flags=bill_flags,
         market_sessions=market_sessions,
         concept_filters=concept_filters,
+        llm=effective_llm(stored),
         flags_hash=digest,
         concept_filter_hash=concept_filter_hash(
             str(concept_filters["mode"]),
@@ -181,6 +196,7 @@ __all__ = [
     "effective_appearance",
     "effective_bill_bps",
     "effective_concept_filters",
+    "effective_llm",
     "effective_market_sessions",
     "resolve",
 ]

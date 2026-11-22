@@ -136,7 +136,7 @@
 | ID | 事项 | 验收标准 | 状态 | 证据 / 待办 |
 |---|---|---|---|---|
 | P0-3.1 | 生产 env 模板 `infra/.env.prod.example` | 覆盖全部必填项；无任何真实密钥；`.env.prod` 不入仓 | [x] | `infra/.env.prod.example`；`infra/.env.prod` 已 gitignore |
-| P0-3.2 | 密钥注入 | `STOCK_JWT_SECRET`/`EMAIL_CODE_PEPPER`/DB 密码/`GLM_API_KEY`/`SECTOR_THS_COOKIE` 均由部署侧注入，仓库零明文 | [~] | 注入点已定义（env_file / 密钥管理）；GLM key、THS cookie、DB 密码待部署侧填写 |
+| P0-3.2 | 密钥注入 | `STOCK_JWT_SECRET`/`EMAIL_CODE_PEPPER`/DB 密码/`GLM_API_KEY`/`MIMO_API_KEY`/`SECTOR_THS_COOKIE` 均由部署侧注入，仓库零明文（LLM 供应商目录见 `config/llm_providers.json`，key 环境变量名在目录里声明） | [~] | 注入点已定义（env_file / 密钥管理）；GLM key、MIMO key、THS cookie、DB 密码待部署侧填写 |
 | P0-3.3 | **生产弱口令守卫** | `STOCK_ENV=prod` 时若 JWT secret/pepper 仍为 dev 默认或 <32 字符 → 启动失败 | [x] | prod 守卫：dev 默认值或 <32 字符即启动失败；6 单测 |
 | P0-3.4 | 生产库初始化 | `init-prod` 脚本在**云主机**手工执行，用环境变量建角色（不硬编码密码）；重复执行幂等 | [x] | 2026-11-22 在云主机执行成功：三角色（owner/app/backup，均 NOBYPASSRLS）+ `stock_analyze` 库 + citext/pgcrypto；容器内 `stock_app` 认证通过 |
 | P0-3.5 | seed 隔离 | 生产镜像/编排不含 `seed-*` 自动执行；文档明示禁止弱口令账号 | [x] | 编排无 `seed-*` 自动执行；§3.5 明示 `1234@dev.com` 等弱口令账号禁止进入生产 |
