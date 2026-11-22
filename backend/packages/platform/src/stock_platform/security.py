@@ -157,6 +157,34 @@ def hash_ip(raw: str | None) -> str | None:
     return sha256_hex(raw)[:32] if raw else None
 
 
+class EmailCodeHasher:
+    """邮箱验证码专用 Argon2id + pepper。
+
+    与口令哈希分离：验证码是 6 位数字，若只存普通哈希，DB 泄露后可离线撞库；
+    加 pepper 后必须同时拿到 DB 与密钥。pepper 轮换会使未使用码立即失效。
+    """
+
+    def __init__(self, pepper: str, time_cost: int = 2) -> None:
+        if len(pepper) < 32:
+            raise ValueError("EMAIL_CODE_PEPPER 至少 32 字符")
+        self._pepper = pepper
+        self._hasher = PasswordHasher(time_cost=time_cost, memory_cost=64 * 1024, parallelism=2)
+
+    def hash(self, code: str) -> str:
+        return self._hasher.hash(f"{self._pepper}:{code}")
+
+    def verify(self, hashed: str, code: str) -> bool:
+        try:
+            return self._hasher.verify(hashed, f"{self._pepper}:{code}")
+        except (VerifyMismatchError, InvalidHashError):
+            return False
+
+
+@lru_cache(maxsize=8)
+def email_code_hasher_for(pepper: str, time_cost: int = 2) -> EmailCodeHasher:
+    return EmailCodeHasher(pepper, time_cost)
+
+
 @lru_cache(maxsize=8)
 def hasher_for(time_cost: int = 2) -> PasswordHasherPort:
     """口令哈希器单例（Argon2 参数化开销较高）。"""

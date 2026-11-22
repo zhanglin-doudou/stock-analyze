@@ -60,3 +60,56 @@ def test_explicit_portfolio_intent_overrides_model_performance() -> None:
         focus={},
     )
     assert result.intents[0].value == "portfolio"
+
+
+def test_top_loss_question_routes_to_rounds() -> None:
+    service = UnderstandingService(FakeProvider(), FrozenClock(datetime(2026, 11, 20, tzinfo=UTC)))
+    result = service.fallback_understanding("这个月亏损最多的股票是哪一个", {})
+    assert result.intents[0].value == "rounds"
+
+
+def test_object_shaped_intents_are_repaired_and_logged() -> None:
+    from structlog.testing import capture_logs
+
+    service = UnderstandingService(FakeProvider(), FrozenClock(datetime(2026, 11, 20, tzinfo=UTC)))
+    with capture_logs() as logs:
+        result = service.parse(
+            '{"intents":[{"name":"trades","params":{"filter":"loss"}}],'
+            '"confidence":0.9,"period":{"kind":"month","value":"2026-11"},'
+            '"entities":[],"resolved_query":"本月亏损最多","needs_clarification":false}',
+            question="这个月亏损最多的股票是哪一个",
+            focus={},
+        )
+    assert result.intents[0].value == "rounds"
+    assert any(
+        item.get("event") == "chat.llm.bad_response" and item.get("recovered") is True
+        for item in logs
+    )
+
+
+def test_operations_question_routes_to_trades_with_period() -> None:
+    service = UnderstandingService(FakeProvider(), FrozenClock(datetime(2026, 11, 20, tzinfo=UTC)))
+    result = service.fallback_understanding("我这个月有哪些操作", {})
+    assert result.intents[0].value == "trades"
+    assert result.period is not None
+    assert result.period.value == "2026-11"
+
+
+def test_model_null_month_period_is_filled_from_question() -> None:
+    service = UnderstandingService(FakeProvider(), FrozenClock(datetime(2026, 11, 20, tzinfo=UTC)))
+    result = service.parse(
+        '{"intents":["trades"],"confidence":0.9,"period":{"kind":"month","value":null,"label":"本月"},'
+        '"entities":[],"resolved_query":"本月有哪些操作","needs_clarification":false}',
+        question="本月有哪些操作",
+        focus={},
+    )
+    assert result.period is not None
+    assert result.period.value == "2026-11"
+
+
+def test_rule_constraints_are_exposed_for_planner() -> None:
+    service = UnderstandingService(FakeProvider(), FrozenClock(datetime(2026, 11, 20, tzinfo=UTC)))
+    result = service.fallback_understanding("这个月亏损最多的前5只股票", {})
+    assert result.constraints["sort"] == "pnl"
+    assert result.constraints["sort_dir"] == "asc"
+    assert result.constraints["limit"] == 5

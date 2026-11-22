@@ -14,6 +14,7 @@ import type {
   BatchList,
   BillDataResetOut,
   ChatConversationOut,
+  ChatEventsOut,
   ChatMessageIn,
   ChatMessageOut,
   ChatReplayOut,
@@ -44,6 +45,7 @@ import type {
   OversellRevisionIn,
   OversellRevisionMutationOut,
   OversellRevisionOut,
+  PasswordResetIn,
   PatCreateResponse,
   Preview,
   PreviewOptions,
@@ -58,6 +60,8 @@ import type {
   RegisterIn,
   RegisterResponse,
   RestoreResult,
+  SendEmailCodeIn,
+  SendEmailCodeOut,
   RevokeResult,
   Round,
   RoundFillPage,
@@ -67,6 +71,7 @@ import type {
   RoundInsightsRefreshOut,
   RoundPage,
   SectorCatalogPage,
+  VerificationPolicy,
   SectorsOverview,
   SettingsOut,
   SettingsPatchIn,
@@ -550,6 +555,29 @@ export function createClient(options: ClientOptions) {
     me() {
       // API-005 的路径是 /auth/me（此前误写 /account/me，由契约测试防回归）。
       return send<MeOut>({ path: "/auth/me" }).then((r) => r.data);
+    },
+    getVerificationPolicy() {
+      return send<VerificationPolicy>({
+        path: "/auth/verification-policy",
+        method: "GET",
+        omitAuth: true,
+      }).then((r) => r.data);
+    },
+    sendEmailCode(body: SendEmailCodeIn) {
+      return send<SendEmailCodeOut>({
+        path: "/auth/email-codes",
+        method: "POST",
+        body,
+        omitAuth: true,
+      }).then((r) => r.data);
+    },
+    resetPassword(body: PasswordResetIn) {
+      return send<void>({
+        path: "/auth/password-reset",
+        method: "POST",
+        body,
+        omitAuth: true,
+      }).then(() => undefined);
     },
   };
 
@@ -1049,6 +1077,13 @@ export function createClient(options: ClientOptions) {
       return send<ChatConversationOut>({
         path: "/chat/conversation",
         query: { limit: query.limit, before_id: query.before_id },
+      }).then((r) => r.data);
+    },
+    /** API-116：单轮执行过程事件（after_seq 增量）。 */
+    getTurnEvents(turnId: string, query: { after_seq?: number; limit?: number } = {}) {
+      return send<ChatEventsOut>({
+        path: `/chat/turns/${encodeURIComponent(turnId)}/events`,
+        query: { after_seq: query.after_seq, limit: query.limit },
       }).then((r) => r.data);
     },
     /** API-113：单轮回放轨迹。 */

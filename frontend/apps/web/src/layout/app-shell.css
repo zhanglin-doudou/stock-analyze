@@ -34,6 +34,7 @@
 }
 
 .app-shell {
+  display: flex;
   min-height: 100vh;
   background: var(--bg);
   color: var(--text);
@@ -523,6 +524,8 @@
 
 /* ── 顶栏 ──────────────────────────────────── */
 .shell-main {
+  flex: 1;
+  min-width: 0;
   margin-left: var(--rail-width);
   min-height: 100vh;
   display: flex;

@@ -124,6 +124,33 @@ describe("一期端点与契约快照对齐（DEV-PLAN 附录 A.1）", () => {
   });
 });
 
+describe("邮箱验证码 / 忘记密码端点（API-117/118/119）", () => {
+  const endpoints: Phase1Endpoint[] = [
+    { id: "API-117", method: "post", path: "/auth/email-codes" },
+    { id: "API-118", method: "get", path: "/auth/verification-policy" },
+    { id: "API-119", method: "post", path: "/auth/password-reset" },
+  ];
+
+  it("均在快照 paths 与 generated 中", () => {
+    for (const endpoint of endpoints) {
+      expect(snapshot.paths[fullPath(endpoint)]?.[endpoint.method], endpoint.id).toBeTruthy();
+      expect(generated, endpoint.id).toContain(`    "${fullPath(endpoint)}": {`);
+    }
+  });
+
+  it("RegisterIn 带 email_code，策略/重置 schema 字段齐全", () => {
+    expectFields("RegisterIn", ["email_code"]);
+    expectFields("VerificationPolicyOut", [
+      "email_verification_required",
+      "password_reset_enabled",
+      "code_ttl_seconds",
+      "resend_after_seconds",
+      "max_attempts",
+    ]);
+    expectFields("PasswordResetIn", ["email", "email_code", "new_password"]);
+  });
+});
+
 describe("RFC 7807 错误体（Error schema）", () => {
   it("包含 code/user_message/what_to_do/retryable/request_id/errors 六个扩展字段", () => {
     const error = snapshot.components.schemas.Error;

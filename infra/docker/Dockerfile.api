@@ -1,0 +1,57 @@
+# syntax=docker/dockerfile:1.7
+# 生产镜像：api / worker / migrate / cli 共用同一镜像（同镜像多入口）。
+# 构建上下文 = 仓库根目录；cwd 固定 /app，使 Settings.REPO_ROOT 与仓库布局一致。
+#
+#   构建： docker build -f infra/docker/Dockerfile.api -t stock-analyze/api .
+#   运行： docker run ... stock-analyze/api api|worker|migrate|cli ...
+#
+# live（akshare 行情）与 email（阿里云 DM）为默认安装的 extra；若部署不启用可去掉，
+# 但 MARKET_MODE=live / EMAIL_PROVIDER=aliyun 时必须安装，否则启动即失败（fail-fast）。
+FROM ghcr.io/astral-sh/uv:0.9 AS uv
+
+FROM python:3.12-slim AS builder
+# 生产默认安装 live(akshare) + email(阿里云 DM)；不需要时 --build-arg EXTRAS=""
+ARG EXTRAS="--extra live --extra email"
+ENV UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PYTHON_DOWNLOADS=0 \
+    UV_PROJECT_ENVIRONMENT=/app/.venv
+WORKDIR /app
+COPY --from=uv /uv /uvx /bin/
+
+# 1) 依赖层：只拷工作区清单，源码变动不击穿缓存
+COPY pyproject.toml uv.lock ./
+COPY backend/packages/contracts/pyproject.toml backend/packages/contracts/pyproject.toml
+COPY backend/packages/core/pyproject.toml backend/packages/core/pyproject.toml
+COPY backend/packages/platform/pyproject.toml backend/packages/platform/pyproject.toml
+COPY backend/packages/ledger/pyproject.toml backend/packages/ledger/pyproject.toml
+COPY backend/packages/review/pyproject.toml backend/packages/review/pyproject.toml
+COPY backend/packages/delivery/pyproject.toml backend/packages/delivery/pyproject.toml
+COPY backend/services/api/pyproject.toml backend/services/api/pyproject.toml
+COPY backend/services/worker/pyproject.toml backend/services/worker/pyproject.toml
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev --no-install-workspace
+
+# 2) 源码 + 工作区包（editable 安装，REPO_ROOT=/app）
+# backend/ 已包含 alembic.ini；entrypoint 用 `-c backend/alembic.ini` 指向它
+COPY backend backend
+COPY infra/docker/entrypoint.sh infra/docker/entrypoint.sh
+RUN --mount=type=cache,target=/root/.cache/uv \
+    uv sync --frozen --no-dev ${EXTRAS}
+
+FROM python:3.12-slim AS runtime
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PATH="/app/.venv/bin:$PATH"
+RUN groupadd --gid 10001 app \
+ && useradd --uid 10001 --gid app --create-home --home-dir /home/app app
+WORKDIR /app
+COPY --from=builder --chown=app:app /app /app
+RUN mkdir -p /app/var \
+ && chmod +x /app/infra/docker/entrypoint.sh \
+ && chown -R app:app /app/var
+USER app
+EXPOSE 8000
+# 健康检查由编排层负责（api: /readyz；worker: 进程存活）
+ENTRYPOINT ["/app/infra/docker/entrypoint.sh"]
+CMD ["api"]

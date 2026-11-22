@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping, Sequence
+from dataclasses import replace
 from datetime import date
 from typing import Any
 
@@ -13,8 +14,11 @@ from pydantic import BaseModel, Field, ValidationError
 from stock_contracts.chat.dto import PeriodSpec, ResolvedEntity, Understanding
 from stock_contracts.chat.enums import Intent
 from stock_contracts.clock import Clock
+from stock_platform.obs import get_logger
 
 from .provider import LlmError, LlmProvider
+
+log = get_logger("stock_delivery.chat.understanding")
 
 
 class _PeriodIn(BaseModel):
@@ -37,6 +41,7 @@ class _UnderstandingIn(BaseModel):
     confidence: float = 0.0
     period: _PeriodIn | None = None
     entities: list[_EntityIn] = Field(default_factory=list)
+    constraints: dict[str, Any] = Field(default_factory=dict)
     resolved_query: str = ""
     needs_clarification: bool = False
     clarification: str | None = None
@@ -46,7 +51,10 @@ _FIXED: tuple[tuple[tuple[str, ...], Intent], ...] = (
     (("为什么", "归因", "拖累", "贡献"), Intent.ATTRIBUTION),
     (("胜率", "盈亏比", "回撤", "持有", "夏普", "收益", "赚", "亏", "费用"), Intent.PERFORMANCE),
     (("最赚", "最亏", "回合", "交易次数"), Intent.ROUNDS),
-    (("流水", "交易明细", "旗标", "追涨", "卖飞", "抄底"), Intent.TRADES),
+    (
+        ("流水", "交易明细", "交易", "操作", "买卖", "成交", "旗标", "追涨", "卖飞", "抄底"),
+        Intent.TRADES,
+    ),
     (("资产", "现金", "仓位", "持仓"), Intent.ASSETS),
     (("净值", "年化", "twr", "xirr"), Intent.NAV),
     (("板块", "行业", "概念", "集中"), Intent.SECTORS),
@@ -56,6 +64,15 @@ _FIXED: tuple[tuple[tuple[str, ...], Intent], ...] = (
 _PRONOUNS = ("它", "这个", "那个", "那笔", "这只", "那只", "该股", "该回合")
 
 # “赚了多少 / 赚了还是亏了”问的是资产表的累计收益，不是指标页的收益率。
+_ROUNDS_PATTERNS = (
+    "亏损最多",
+    "亏得最多",
+    "最亏",
+    "盈利最多",
+    "赚得最多",
+    "最赚",
+)
+
 _PORTFOLIO_PATTERNS = (
     "赚了多少",
     "赚了还是亏了",
@@ -72,6 +89,8 @@ _PORTFOLIO_PATTERNS = (
 
 
 def _explicit_intents(question: str) -> tuple[Intent, ...] | None:
+    if any(pattern in question for pattern in _ROUNDS_PATTERNS):
+        return (Intent.ROUNDS,)
     if not any(pattern in question for pattern in _PORTFOLIO_PATTERNS):
         return None
     intents: list[Intent] = [Intent.PORTFOLIO]
@@ -116,6 +135,24 @@ class UnderstandingService:
             raw = json.loads(repair_json(content))
         if not isinstance(raw, dict):
             raise ValueError("understanding 不是 JSON object")
+        intents = raw.get("intents")
+        if isinstance(intents, list) and any(not isinstance(item, str) for item in intents):
+            repaired: list[str] = []
+            for item in intents:
+                if isinstance(item, str):
+                    repaired.append(item)
+                elif isinstance(item, dict):
+                    name = item.get("name") or item.get("intent") or item.get("type")
+                    if isinstance(name, str) and name:
+                        repaired.append(name)
+            log.error(
+                "chat.llm.bad_response",
+                purpose="understanding",
+                error="intents 不是字符串数组，已按 name 规范化",
+                recovered=True,
+                raw_intents=intents[:4],
+            )
+            raw = {**raw, "intents": repaired}
         return _UnderstandingIn.model_validate(raw)
 
     def _normalize(
@@ -132,19 +169,40 @@ class UnderstandingService:
         )
         entities = tuple(_entity(item) for item in raw.entities)
         needs_clarification = raw.needs_clarification or raw.confidence < 0.6
+        constraints = {
+            **_rule_constraints(question),
+            **{
+                key: value
+                for key, value in raw.constraints.items()
+                if key in _CONSTRAINT_KEYS and value not in (None, "")
+            },
+        }
         resolved_query = raw.resolved_query.strip() or question
         # 指代只允许从 focus 解析；没有唯一焦点就要求澄清。
         if any(token in resolved_query for token in _PRONOUNS) and not entities:
             needs_clarification = True
+        period = _period(raw.period)
+        if period is None or period.value is None:
+            rule_period = _rule_period(question, self.clock.today())
+            if rule_period.value:
+                # 模型常返回 {"kind":"month","value":null,"label":"本月"}；用规则补全，
+                # 否则 _tools_for 不会传 period，工具会退化成默认区间。
+                period = replace(
+                    period or rule_period,
+                    kind=rule_period.kind,
+                    value=rule_period.value,
+                    label=period.label if period and period.label else rule_period.label,
+                )
         return Understanding(
             intents=intents,
             confidence=max(0.0, min(1.0, raw.confidence)),
-            period=_period(raw.period),
+            period=period,
             entities=entities,
             resolved_query=resolved_query,
             needs_clarification=needs_clarification,
             clarification=raw.clarification,
             raw=raw.model_dump(),
+            constraints=constraints,
         )
 
     def _fallback(self, question: str, focus: Mapping[str, Any]) -> Understanding:
@@ -169,7 +227,33 @@ class UnderstandingService:
             needs_clarification=needs,
             clarification="你问的是哪只证券/哪个回合？" if needs else None,
             raw={"fallback": True},
+            constraints=_rule_constraints(question),
         )
+
+
+_CONSTRAINT_KEYS = {"sort", "sort_dir", "limit", "taxonomy", "metric_id", "flag"}
+
+
+def _rule_constraints(question: str) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    if any(word in question for word in ("亏损最多", "亏得最多", "最亏")):
+        out.update({"sort": "pnl", "sort_dir": "asc"})
+    elif any(word in question for word in ("盈利最多", "赚得最多", "最赚")):
+        out.update({"sort": "pnl", "sort_dir": "desc"})
+    if "概念" in question:
+        out["taxonomy"] = "concept"
+    elif "行业" in question or "板块" in question:
+        out["taxonomy"] = "industry"
+    if "胜率" in question:
+        out["metric_id"] = "win_rate"
+    elif "回撤" in question:
+        out["metric_id"] = "max_drawdown"
+    elif "夏普" in question:
+        out["metric_id"] = "sharpe"
+    match = re.search(r"前\s*(\d+)\s*(?:个|只|笔|条)?", question)
+    if match:
+        out["limit"] = max(1, min(int(match.group(1)), 1000))
+    return out
 
 
 def _intent(value: str) -> Intent:

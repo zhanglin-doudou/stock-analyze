@@ -48,7 +48,7 @@
 - ETag `W/"<version>"`（列表含查询指纹），写响应返新 ETag；`If-Match` 不匹配 → 409 `VERSION_CONFLICT`（遵循 PRD FR-L4，不采用 412）。
 - 格式：金额**定点字符串 2 位** `"1234.56"`；价格 6 位、数量 4 位；比率十进制小数；时间 ISO 8601 UTC；业务日 `YYYY-MM-DD`（Asia/Shanghai）；`blocked` 时 `value` **字段缺省**。软删默认过滤 `deleted_at NULL`，`include_deleted=true` 仅本人；注销物理级联删除，审计留事件元数据。
 
-## §1 端点总表（114 个；API-089 预留不计数；API-090~095、API-055/096/097、API-098~106、API-107~111、API-077/078/112~115 均已实现；Path 省略公共前缀 `/api/v1`，标注「根」者不在前缀下）
+## §1 端点总表（118 个；API-089 预留不计数；API-090~095、API-055/096/097、API-098~106、API-107~111、API-077/078/112~119 均已实现；Path 省略公共前缀 `/api/v1`，标注「根」者不在前缀下）
 | API-ID | Method | Path | 用途 | FR | 认证/scope | 幂等 | 同步/异步 | 优先级 | 主要成功码 |
 |---|---|---|---|---|---|---|---|---|---|
 | API-001 | POST | `/auth/register` | 注册账号 | L2 | 公开 | 支持 | 同步 | P0 | 201 |
@@ -57,6 +57,9 @@
 | API-004 | POST | `/auth/logout` | 登出并撤销会话 | L2 | Bearer | 支持 | 同步 | P0 | 204 |
 | API-005 | GET | `/auth/me` | 当前用户与角色 | L2/D1 | Bearer | — | 同步 | P0 | 200 |
 | API-006 | DELETE | `/account` | 注销并物理删除数据 | L2/L7 | write | 必需 | 同步 | P0 | 204 |
+| API-117 | POST | `/auth/email-codes` | 发送注册/找回邮箱验证码 | L2 | 公开 | — | 同步 | P0 | 200 |
+| API-118 | GET | `/auth/verification-policy` | 认证验证策略（注册/找回开关） | L2 | 公开 | — | 同步 | P0 | 200 |
+| API-119 | POST | `/auth/password-reset` | 校验找回码并设置新密码 | L2 | 公开 | — | 同步 | P0 | 204 |
 | API-007 | POST | `/tokens` | 创建 PAT（明文一次） | A1 | Bearer | 不适用 | 同步 | P0 | 201 |
 | API-008 | GET | `/tokens` | PAT 列表（无明文） | A1 | read | — | 同步 | P0 | 200 |
 | API-009 | DELETE | `/tokens/{token_id}` | 撤销 PAT | A1 | write | 幂等 | 同步 | P0 | 204 |
@@ -136,7 +139,8 @@
 | API-112 | GET | `/chat/conversation` | 单会话元数据 + 分页消息 | D7 | read | — | 同步 | P1 | 200 |
 | API-113 | GET | `/chat/turns/{turn_id}/trace` | 单轮完整回放轨迹（理解/工具/LLM） | D7 | read | — | 同步 | P1 | 200 |
 | API-114 | POST | `/chat/turns/{turn_id}/replay` | 回放（deterministic/llm/full） | D7 | write | — | 同步 | P1 | 200 |
-| API-115 | DELETE | `/chat/conversation` | 清空单会话（软删消息，保留回放数据） | D7 | write | 幂等 | 同步 | P1 | 204 |
+| API-115 | DELETE | `/chat/conversation` | 用户删除单会话（硬删聊天+时间线） | D7 | write | 幂等 | 同步 | P1 | 204 |
+| API-116 | GET | `/chat/turns/{turn_id}/events` | 单轮执行过程事件（after_seq 增量） | D7 | read | — | 同步 | P1 | 200 |
 | API-079 | GET | `/metrics/{metric_id}` | 指标详情（单指标完整 MetricResult） | R5/R8/D1 | read | — | 同步 | P0 | 200 |
 | API-080 | GET | `/trades/{trade_id}` | 流水详情（含血缘与版本） | L4/L8/D1 | read | — | 同步 | P0 | 200 |
 | API-081 | GET | `/assets` | 每日资产快照列表（现金/持仓市值/成本/浮盈/日收益） | D1 | read | — | 同步 | P0 | 200 |
@@ -175,10 +179,27 @@
 ### 2.1 认证、导入与流水
 #### API-001 POST /auth/register
 - 用途：注册账号；FR-L2；认证：公开；幂等：支持；同步。
-- 请求：body `email`(string,必填,≤254) / `password`(string,必填,12~128,≥3 类字符) / `display_name`(可选,≤40) / `accept_tos`(bool,必填=true)。
+- 请求：body `email`(string,必填,≤254) / `password`(string,必填,12~128,≥3 类字符) / `display_name`(可选,≤40) / `accept_tos`(bool,必填=true) / `email_code`(可选,6 位数字；`EMAIL_VERIFICATION_ENABLED=true` 时业务必填)。
 - 响应 201：`user{id,email,role:"user",email_verified,created_at}` / `access_token` / `refresh_token` / `token_type:"Bearer"` / `expires_in:900`。
-- 错误码：EMAIL_TAKEN(409)、WEAK_PASSWORD(422)、VALIDATION_ERROR(422)、RATE_LIMITED(429)。
-- 验收断言：① 201 且 user.role=="user"、expires_in==900；② 同邮箱再注册 → 409 EMAIL_TAKEN；③ password="123456" → 422 且用户未创建；④ 缺 accept_tos → 422 且 errors[0].field=="accept_tos"；⑤ 返回 access_token 调 GET /auth/me → 200 且 email 一致，且审计出现 action=="auth.register"。
+- 错误码：EMAIL_TAKEN(409)、WEAK_PASSWORD(422)、VALIDATION_ERROR(422)、EMAIL_CODE_INVALID(422)、EMAIL_CODE_EXPIRED(410)、RATE_LIMITED(429)。
+- 验收断言：① 201 且 user.role=="user"、expires_in==900；② 同邮箱再注册 → 409 EMAIL_TAKEN；③ password="123456" → 422 且用户未创建；④ 缺 accept_tos → 422 且 errors[0].field=="accept_tos"；⑤ 返回 access_token 调 GET /auth/me → 200 且 email 一致，且审计出现 action=="auth.register"；⑥ 验证开启时正确码 → `email_verified=true` 且码只能消费一次；⑦ 错码 1~9 次 422、第 10 次 410，前置错误（弱密码/TOS/邮箱已存在）不消耗次数。
+#### API-117 POST /auth/email-codes
+- 用途：发送注册/找回邮箱验证码；FR-L2；认证：公开；幂等：不支持；同步。
+- 请求：body `email`(必填,≤254) / `purpose`(可选，默认 `register`，枚举 `register|reset_password`)。
+- 响应 200：`email` / `purpose` / `expires_in`(600) / `resend_after`(60) / `max_attempts`(10) / `code_length`(6) / `expires_at`。
+- 错误码：VALIDATION_ERROR(422)、EMAIL_TAKEN(409，仅 register)、RATE_LIMITED(429，IP/register 邮箱)、EMAIL_SEND_FAILED(503，仅 register)；`reset_password` 对未注册/禁用/邮箱配额/DM 失败统一 200 通用响应，仅 IP 限流 429。
+- 验收断言：① 首次发送 200 且邮件只发请求邮箱；② 同 IP 60s 内第二次 429 且 `Retry-After` 1..60；③ 同邮箱同用途 60s 内第二次 register 429 / reset 通用 200；④ 60s 后重发旧码失效；⑤ 已注册邮箱 register 409 且不发信；⑥ 未注册/禁用邮箱 reset 200、不发信、不落码；⑦ DM 失败 register 503、reset 200；⑧ 响应/日志不含验证码。
+#### API-118 GET /auth/verification-policy
+- 用途：公开认证验证策略；FR-L2；认证：公开；同步；`Cache-Control: no-store`。
+- 响应 200：`email_verification_required` / `password_reset_enabled` / `code_length`(6) / `code_ttl_seconds`(600) / `resend_after_seconds`(60) / `max_attempts`(10)。
+- 错误码：仅现有 500/503；无业务错误。
+- 验收断言：① 两个开关可独立 true/false；② 即使 false 也返回参数；③ 不缓存。
+#### API-119 POST /auth/password-reset
+- 用途：校验找回码并设置新密码；FR-L2；认证：公开；幂等：不支持（码一次性）；同步。
+- 请求：body `email`(必填) / `email_code`(6 位数字) / `new_password`(12~128，≥3 类字符)。
+- 响应 204（无 body，不签发 token）；`Cache-Control: no-store`。
+- 错误码：VALIDATION_ERROR(422)、WEAK_PASSWORD(422)、EMAIL_CODE_INVALID(422)、EMAIL_CODE_EXPIRED(410)、INTERNAL_ERROR(500)。
+- 验收断言：① 正确码 204，旧密码登录 401、新密码登录 200；② 1~9 次错码 422、第 10 次 410；③ 过期/已消费/无记录/用户不存在或禁用 → 410；④ 弱密码/新旧相同不消耗次数；⑤ 成功后 refresh 全部失效、PAT 全部失效、该邮箱验证码行删除、`email_verified_at` 为空则补写；⑥ 并发重置最多一个 204，另一个 410；⑦ 响应/日志/审计不含验证码或新密码。
 #### API-002 POST /auth/login
 - 用途：登录签发令牌；FR-L2；认证：公开；幂等：不支持；同步。
 - 请求：body `email`(必填) / `password`(必填) / `device_name`(可选,≤64)。
@@ -494,10 +515,10 @@
 #### API-078 POST /chat/sessions/{session_id}/messages
 - 用途：复盘问答（工具取数 + 金额后端填充 + 出站守卫）；FR-D7；认证：write；幂等：支持；同步。
 - 请求：path `session_id`；body `message`(必填,1~2000) / `context{period?,round_id?}`；头 `Idempotency-Key`(推荐)。
-- 响应 200（JSON）：`conversation_id` / `turn_id` / `message_id` / `answer` / `answer_format` / `citations[]{number,citation_id,label,value,source_endpoint,source_params,definition_version,data_as_of}` / `claims[]{claim_id,text,citation_ids}` / `status` / `degrade_reason` / `degrade_message` / `what_to_do` / `retryable` / `llm_used` / `fallback` / `understanding` / `context_usage` / `timings`。
-- SSE 变体：同一路径请求头 `Accept: text/event-stream` 时返回 `text/event-stream`，事件依次 `meta`（turn_id/status/llm_used/degrade_reason）→ `delta`（`{"text": "分片"}`，可多次）→ `done`（`{"message": ChatMessageOut}`）；错误发生在流建立前仍走 RFC 7807，流内异常发 `error` 事件。前端按 delta 增量渲染，done 用完整消息补充 citations/来源。
+- 响应 200（JSON）：`conversation_id` / `turn_id` / `message_id` / `answer` / `answer_format` / `citations[]{number,citation_id,label,value,source_endpoint,source_params,definition_version,data_as_of}` / `claims[]{claim_id,text,citation_ids}` / `status` / `degrade_reason` / `degrade_message` / `what_to_do` / `retryable` / `llm_used` / `fallback` / `understanding` / `context_usage` / `timeline[]{seq,kind,phase,call_id?,step?,at,payload}` / `timeline_summary{events,steps,tool_calls,total_ms,complete}` / `timings`。
+- SSE 变体：同一路径请求头 `Accept: text/event-stream` 时返回 `text/event-stream`，事件实时依次 `meta`（turn_id/status/llm_used/degrade_reason/timeline_version）→ `step`（图运行中产生即推送，可多次）→ `delta`（`{"text": "分片"}`，可多次）→ `done`（`{"message": ChatMessageOut,"timeline":ChatTimelineSummaryOut}`）；错误发生在流建立前仍走 RFC 7807，流内异常发 `error` 事件。前端按 delta 增量渲染，done 用完整消息补充 citations/来源。
 - 错误码：NOT_FOUND(404)、MESSAGE_TOO_LONG(422)、VALIDATION_ERROR(422)、RATE_LIMITED(429)、QUOTA_EXCEEDED(429)、LLM_UNAVAILABLE(503)、IDEMPOTENCY_*(409/422)。
-- 验收断言：① 200 且 answer 非空；② 回答中每个金额都能在 citations 找到来源，且 source_endpoint 可调用返回一致值；③ LLM 关闭（`llm_provider=none`）时金额类问题仍 200 且 answer 金额正确（fallback==true）；④ 出站守卫：测试钩子捕获的出站 payload 不含金额/股东账号；⑤ 跨用户 session → 404；⑥ 同 `Idempotency-Key` 重放返回同一 `turn_id`，不重复调用工具/LLM；⑦ LLM 故障时 `degrade_reason` 非空且模板数字仍正确；⑧ `Accept: text/event-stream` 返回 meta/delta/done，done.message.answer 与 JSON 版本一致。
+- 验收断言：① 200 且 answer 非空；② 回答中每个金额都能在 citations 找到来源，且 source_endpoint 可调用返回一致值；③ LLM 关闭（`llm_provider=none`）时金额类问题仍 200 且 answer 金额正确（fallback==true）；④ 出站守卫：测试钩子捕获的出站 payload 不含金额/股东账号；⑤ 跨用户 session → 404；⑥ 同 `Idempotency-Key` 重放返回同一 `turn_id`，不重复调用工具/LLM；⑦ LLM 故障时 `degrade_reason` 非空且模板数字仍正确；⑧ `Accept: text/event-stream` 返回 meta/step*/delta*/done，done.message.answer 与 JSON 版本一致；step.seq 单调。
 
 #### API-112 GET /chat/conversation
 - 用途：读取当前用户唯一对话与分页消息；FR-D7；认证 read；operationId `getChatConversation`。
@@ -507,7 +528,7 @@
 
 #### API-113 GET /chat/turns/{turn_id}/trace
 - 用途：回放单轮完整轨迹；FR-D7；认证 read；operationId `getChatTrace`。
-- 响应 200：`{turn,tool_calls[]{seq,tool,args,result,status,error_code,latency_ms},llm_calls[]{seq,purpose,provider,model,prompt_version,request,response,usage,status},answer}`。
+- 响应 200：`{turn,tool_calls[]{seq,tool,args,result,status,error_code,latency_ms},llm_calls[]{seq,purpose,provider,model,prompt_version,request,response,usage,status},events[]ChatTimelineEvent,answer}`。
 - 错误码：NOT_FOUND(404)、ADMIN_CANNOT_READ_TRADES(403)、INSUFFICIENT_SCOPE(403)。
 
 #### API-114 POST /chat/turns/{turn_id}/replay
@@ -517,9 +538,16 @@
 - 错误码：NOT_FOUND(404)、VALIDATION_ERROR(422)、LLM_UNAVAILABLE(503)、ADMIN_CANNOT_READ_TRADES(403)。
 
 #### API-115 DELETE /chat/conversation
-- 用途：清空当前用户对话（软删消息，保留回放数据）；FR-D7；认证 write；幂等；operationId `deleteChatConversation`。
-- 响应 204；重复调用 204。
+- 用途：用户删除当前用户对话；硬删 `chat_conversation` 并级联删除消息/轮次/工具/LLM/时间线事件；FR-D7；认证 write；幂等；operationId `deleteChatConversation`。
+- 响应 204；重复调用 204；删除后 trace/events 404；审计只保留 `chat.conversation.delete` 元数据。
 - 错误码：TOKEN_*(401)、INSUFFICIENT_SCOPE(403)、ADMIN_CANNOT_READ_TRADES(403)。
+
+#### API-116 GET /chat/turns/{turn_id}/events
+- 用途：读取单轮执行过程时间线（P0-4）；FR-D7；认证 read；同步；operationId `getChatTurnEvents`。
+- 请求：path `turn_id`；query `after_seq`(>=0,默认 0) / `limit`(1~100,默认 100)。
+- 响应 200：`{items[]{seq,kind,phase,call_id?,step?,at,payload},next_seq,complete,synthetic}`；事件按 `seq` 升序。
+- 错误码：NOT_FOUND(404)、TOKEN_*(401)、INSUFFICIENT_SCOPE(403)、ADMIN_CANNOT_READ_TRADES(403)。
+- 验收断言：① 一次问答后 items 含 understanding/tool/answer/turn 事件且 seq 单调；② `after_seq` 只返回更大 seq；③ 跨用户/删除后 404；④ 事件超过 180 天返回空并由 trace 合成。
 
 ### 2.5 板块（2026-10-31 新增）
 #### API-087 GET /sectors/overview
@@ -701,6 +729,9 @@
 | NOT_FOUND | 404 | 资源不存在或跨用户 | 找不到该资源。 | 确认 ID；跨账号资源按不存在处理。 | 否 |
 | METRIC_NOT_FOUND | 404 | metric_id 不在目录 | 没有这个指标。 | 从指标目录选择有效指标。 | 否 |
 | EMAIL_TAKEN | 409 | 注册邮箱已存在 | 该邮箱已注册。 | 直接登录或找回密码。 | 否 |
+| EMAIL_CODE_INVALID | 422 | 验证码错误且未达上限 | 验证码不正确。 | 检查邮件里的 6 位数字；还可尝试剩余次数，或重新获取。 | 是 |
+| EMAIL_CODE_EXPIRED | 410 | 过期/已消费/已锁定/无记录/第 10 次失败 | 验证码已过期，请重新获取。 | 点击「重新发送」获取新的验证码。 | 否 |
+| EMAIL_SEND_FAILED | 503 | 注册发码时 DM 超时/5xx/凭据/配额失败 | 验证码邮件发送失败。 | 稍后重试；若持续失败请联系支持。 | 是 |
 | VERSION_CONFLICT | 409 | If-Match 版本不符 | 这条数据刚被改过。 | 重新获取最新版本后再提交。 | 否 |
 | IDEMPOTENCY_IN_PROGRESS | 409 | 同键请求仍在执行 | 这个请求正在处理中。 | 用返回的 job_id 轮询结果。 | 是（轮询） |
 | JOB_ALREADY_RUNNING | 409 | 同类任务运行中且参数不同 | 已有一个相同任务在跑。 | 复用返回的 job_id 或等待结束。 | 是（轮询） |
@@ -833,6 +864,9 @@ data: {"job_id":"job_01J9Z6","status":"succeeded","result_ref":"/api/v1/reports/
 | API-004 | auth_logout | 204；refresh 随后 401 TOKEN_REVOKED | fx_base | P0 |
 | API-005 | auth_me | 200 且 email/id/role 与登录一致 | fx_base | P0 |
 | API-006 | account_delete_purge | 204；重新登录 401；业务表 0 行；审计留痕 | fx_base | P0 |
+| API-117 | auth_email_codes_send | 200/429/409/503；60s 冷却；reset 通用 200；码不可见 | fx_base | P0 |
+| API-118 | auth_verification_policy | 200 两个开关/常量；no-store | fx_base | P0 |
+| API-119 | auth_password_reset | 204；旧密码失效；refresh/PAT 撤销；错码 410 | fx_base | P0 |
 | API-007 | tokens_create_once | 201 token 匹配 `^pat_[A-Za-z0-9]{43}$`，之后不再返回 | fx_base | P0 |
 | API-008 | tokens_list_no_secret | 200 无明文字段，仅 prefix | fx_base | P0 |
 | API-009 | tokens_revoke | 204 后 PAT 调 /metrics→401 TOKEN_REVOKED | fx_base | P0 |
@@ -922,9 +956,10 @@ data: {"job_id":"job_01J9Z6","status":"succeeded","result_ref":"/api/v1/reports/
 | API-077 | chat_session_ensure | 首次 201；再次 200 且 conversation_id 相同；admin 403 | fx_base | P1 |
 | API-078 | chat_answer_citations | 200 answer+citations/claims/context_usage；LLM 关闭仍答；同幂等键同一 turn_id；LLM 故障 degrade_reason；跨用户 404 | fx_llm_off | P1 |
 | API-112 | chat_conversation_get | 200 单会话+分页消息；跨用户 404；admin 403 | fx_base | P1 |
-| API-113 | chat_trace_get | 200 turn/tool_calls/llm_calls/answer；跨用户 404 | fx_base | P1 |
+| API-113 | chat_trace_get | 200 turn/tool_calls/llm_calls/events/answer；跨用户 404 | fx_base | P1 |
 | API-114 | chat_replay | deterministic 匹配；llm/full 可跑；跨用户 404 | fx_base | P1 |
-| API-115 | chat_conversation_delete | 204；重复 204；消息软删、回放数据保留 | fx_base | P1 |
+| API-115 | chat_conversation_delete | 204；重复 204；聊天/时间线硬删，trace/events 404 | fx_base | P1 |
+| API-116 | chat_turn_events | 200 items/next_seq/complete；seq 单调；after_seq 增量；跨用户/删除后 404 | fx_base | P1 |
 | API-079 | metrics_detail_single | 200 且 definition_version/inputs_hash/data_as_of 齐全；blocked 无 value | fx_round30 | P0 |
 | API-080 | trades_detail_owner | 200 且字段与列表一致；跨用户 404 | fx_base | P0 |
 | API-081 | assets_daily_series | 200 日期倒序且 06-30 行金额==oracle（含 daily_return_pct）；未构建 items=[]+build.state=missing；blocked 行数值全 null；from/to 闭区间/status/sort/limit 校验；跨用户 0 条、admin 403 | fx_round30 | P0 |

@@ -21,8 +21,8 @@ from stock_contracts.errors import (
 _UPPER_SNAKE = re.compile(r"^[A-Z][A-Z0-9_]*$")
 
 
-def test_seed_error_count_is_61() -> None:
-    assert SEED_ERROR_COUNT == 61
+def test_seed_error_count_is_66() -> None:
+    assert SEED_ERROR_COUNT == 66
 
 
 def test_every_error_code_has_problem() -> None:

@@ -45,6 +45,7 @@ class UserRepository:
         password_hash: str,
         role: Role = Role.USER,
         display_name: str | None = None,
+        email_verified_at: datetime | None = None,
     ) -> User:
         user = User(
             email=email,
@@ -52,6 +53,7 @@ class UserRepository:
             role=str(role),
             display_name=display_name,
             status="active",
+            email_verified_at=email_verified_at,
         )
         self._session.add(user)
         await self._session.flush()

@@ -23,6 +23,38 @@ class RegisterIn(StrictModel):
     password: str = Field(min_length=12, max_length=128)
     display_name: str | None = Field(default=None, max_length=40)
     accept_tos: bool
+    # 关闭 EMAIL_VERIFICATION_ENABLED 时忽略；开启时业务上必填。
+    email_code: str | None = Field(default=None, pattern=r"^\d{6}$")
+
+
+class SendEmailCodeIn(StrictModel):
+    email: EmailStr = Field(max_length=254)
+    purpose: Literal["register", "reset_password"] = "register"
+
+
+class SendEmailCodeOut(BaseModel):
+    email: EmailStr
+    purpose: Literal["register", "reset_password"]
+    expires_in: int
+    resend_after: int
+    max_attempts: int
+    code_length: int = 6
+    expires_at: datetime
+
+
+class VerificationPolicyOut(BaseModel):
+    email_verification_required: bool
+    password_reset_enabled: bool
+    code_length: int = 6
+    code_ttl_seconds: int
+    resend_after_seconds: int
+    max_attempts: int
+
+
+class PasswordResetIn(StrictModel):
+    email: EmailStr = Field(max_length=254)
+    email_code: str = Field(pattern=r"^\d{6}$")
+    new_password: str = Field(min_length=12, max_length=128)
 
 
 class UserBrief(BaseModel):
@@ -2406,6 +2438,24 @@ class ChatContextUsageOut(BaseModel):
     compression_steps: list[str] = Field(default_factory=list)
 
 
+class ChatTimelineEventOut(BaseModel):
+    seq: int
+    kind: str
+    phase: str
+    call_id: str | None = None
+    step: int | None = None
+    at: datetime
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class ChatTimelineSummaryOut(BaseModel):
+    events: int
+    steps: int
+    tool_calls: int
+    total_ms: int
+    complete: bool = True
+
+
 class ChatMessageOut(BaseModel):
     conversation_id: str
     turn_id: str
@@ -2423,6 +2473,8 @@ class ChatMessageOut(BaseModel):
     fallback: bool = False
     understanding: dict[str, Any] = Field(default_factory=dict)
     context_usage: ChatContextUsageOut | None = None
+    timeline: list[ChatTimelineEventOut] = Field(default_factory=list)
+    timeline_summary: ChatTimelineSummaryOut | None = None
     timings: dict[str, Any] = Field(default_factory=dict)
 
 
@@ -2450,7 +2502,15 @@ class ChatTraceOut(BaseModel):
     turn: dict[str, Any]
     tool_calls: list[dict[str, Any]] = Field(default_factory=list)
     llm_calls: list[dict[str, Any]] = Field(default_factory=list)
+    events: list[ChatTimelineEventOut] = Field(default_factory=list)
     answer: dict[str, Any] = Field(default_factory=dict)
+
+
+class ChatEventsOut(BaseModel):
+    items: list[ChatTimelineEventOut] = Field(default_factory=list)
+    next_seq: int = 0
+    complete: bool = True
+    synthetic: bool = False
 
 
 class ChatReplayIn(StrictModel):

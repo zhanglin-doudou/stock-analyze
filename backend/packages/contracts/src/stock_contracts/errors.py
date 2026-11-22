@@ -24,6 +24,10 @@ class ErrorCode(StrEnum):
     ADMIN_CANNOT_READ_TRADES = "ADMIN_CANNOT_READ_TRADES"
     FORBIDDEN = "FORBIDDEN"
     FOREIGN_RESOURCE_IN_BATCH = "FOREIGN_RESOURCE_IN_BATCH"
+    # ── 邮箱验证码 / 找回密码（2026-11-22 设计）──────────────
+    EMAIL_CODE_INVALID = "EMAIL_CODE_INVALID"
+    EMAIL_CODE_EXPIRED = "EMAIL_CODE_EXPIRED"
+    EMAIL_SEND_FAILED = "EMAIL_SEND_FAILED"
     # ── 资源 ──────────────────────────────────────────────
     NOT_FOUND = "NOT_FOUND"
     METRIC_NOT_FOUND = "METRIC_NOT_FOUND"
@@ -168,6 +172,27 @@ CATALOG: dict[ErrorCode, Problem] = dict(
         _p(ErrorCode.NOT_FOUND, 404, "找不到该资源。", "确认 ID；跨账号资源按不存在处理。", False),
         _p(ErrorCode.METRIC_NOT_FOUND, 404, "没有这个指标。", "从指标目录选择有效指标。", False),
         _p(ErrorCode.EMAIL_TAKEN, 409, "该邮箱已注册。", "直接登录或找回密码。", False),
+        _p(
+            ErrorCode.EMAIL_CODE_INVALID,
+            422,
+            "验证码不正确。",
+            "检查邮件里的 6 位数字；还可以尝试剩余次数，或重新获取验证码。",
+            True,
+        ),
+        _p(
+            ErrorCode.EMAIL_CODE_EXPIRED,
+            410,
+            "验证码已过期，请重新获取。",
+            "点击「重新发送」获取新的验证码。",
+            False,
+        ),
+        _p(
+            ErrorCode.EMAIL_SEND_FAILED,
+            503,
+            "验证码邮件发送失败。",
+            "稍后重试；若持续失败请联系支持。",
+            True,
+        ),
         _p(
             ErrorCode.VERSION_CONFLICT,
             409,
@@ -424,7 +449,7 @@ DEGRADED_CODES: frozenset[ErrorCode] = frozenset(
     }
 )
 
-SEED_ERROR_COUNT = 61
+SEED_ERROR_COUNT = 66
 
 
 def problem_catalog() -> list[Problem]:

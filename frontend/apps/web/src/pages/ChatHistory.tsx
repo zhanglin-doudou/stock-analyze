@@ -21,6 +21,7 @@ import { Button } from "@/components/ui/button";
 import { formatChatTime } from "../lib/datetime";
 import { LoadingState } from "../components/ui/spinner";
 import { ProblemView } from "../ui/Problem";
+import { TimelineList } from "../assistant/timeline";
 import "./chat-history.css";
 
 type TurnRow = {
@@ -95,6 +96,14 @@ function TraceSection({ trace }: { trace: ChatTraceOut }) {
           <summary className="chat-trace-key">understanding JSON</summary>
           <pre className="chat-detail-pre">{JSON.stringify(understanding ?? {}, null, 2)}</pre>
         </details>
+      </div>
+      <div className="chat-detail-section">
+        <h3>执行过程（{trace.events?.length ?? 0}）</h3>
+        {trace.events?.length ? (
+          <TimelineList events={trace.events} />
+        ) : (
+          <p className="muted">无过程记录（旧回合或已超过 180 天）。</p>
+        )}
       </div>
       <div className="chat-detail-section">
         <h3>工具调用（{toolCalls.length}）</h3>

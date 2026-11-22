@@ -13,14 +13,16 @@ from stock_contracts.clock import Clock, SystemClock
 from stock_contracts.errors import ApiError
 from stock_delivery.chat.provider import build_provider
 from stock_ledger.market import create_market_source
-from stock_platform.config import Settings, get_settings
+from stock_platform.config import DEFAULT_EMAIL_CODE_PEPPER, Settings, get_settings
 from stock_platform.db import Database
+from stock_platform.email_verification import EmailVerificationService
 from stock_platform.idempotency import IdempotencyStore
 from stock_platform.jobs import JobQueue
+from stock_platform.mail import EmailSender, create_email_sender
 from stock_platform.obs import configure_logging, get_logger
 from stock_platform.ratelimit import RateLimiter
 from stock_platform.sector_source import create_sector_source
-from stock_platform.security import TokenService
+from stock_platform.security import TokenService, email_code_hasher_for
 from stock_platform.storage import LocalObjectStore
 
 from stock_api.deps import AppState
@@ -79,9 +81,47 @@ async def _check_schema_version(state: AppState) -> None:
         )
 
 
-def build_state(settings: Settings, clock: Clock | None = None) -> AppState:
+def _validate_email_settings(settings: Settings) -> None:
+    """邮箱能力启动校验；不联网，只检查配置组合。"""
+    if settings.env == "prod" and settings.email_provider == "log":
+        raise RuntimeError("生产环境禁止 EMAIL_PROVIDER=log（会把验证码打进日志）")
+    if not settings.email_enabled:
+        return
+    if settings.email_provider == "none":
+        raise RuntimeError("邮箱验证/找回已启用但 EMAIL_PROVIDER=none")
+    if len(settings.email_code_pepper) < 32:
+        raise RuntimeError("EMAIL_CODE_PEPPER 至少 32 字符")
+    if settings.env == "prod" and settings.email_code_pepper == DEFAULT_EMAIL_CODE_PEPPER:
+        raise RuntimeError("生产环境必须替换 EMAIL_CODE_PEPPER")
+    if settings.email_provider == "aliyun" and not settings.email_dm_account_name:
+        raise RuntimeError("EMAIL_PROVIDER=aliyun 时必须配置 EMAIL_DM_ACCOUNT_NAME")
+    if settings.email_code_ttl_seconds <= 0 or settings.email_code_max_attempts <= 0:
+        raise RuntimeError("EMAIL_CODE_TTL_SECONDS / MAX_ATTEMPTS 必须为正")
+    if settings.email_code_resend_seconds <= 0:
+        raise RuntimeError("EMAIL_CODE_RESEND_SECONDS 必须为正")
+    if (
+        min(
+            settings.email_code_ip_hourly_limit,
+            settings.email_code_ip_daily_limit,
+            settings.email_code_email_hourly_limit,
+            settings.email_code_email_daily_limit,
+        )
+        < 0
+    ):
+        raise RuntimeError("邮箱验证码配额不能为负")
+
+
+def build_state(
+    settings: Settings,
+    clock: Clock | None = None,
+    *,
+    email_sender: EmailSender | None = None,
+) -> AppState:
+    _validate_email_settings(settings)
     db = Database(settings, role="app")
     resolved_clock = clock or SystemClock()
+    sender = email_sender or create_email_sender(settings)
+    code_hasher = email_code_hasher_for(settings.email_code_pepper, settings.argon2_time_cost)
     # 行情源统一走工厂：live 分支需要无租户 session_factory（公共行情缓存）。
     market_data = create_market_source(settings, session_factory=db.session, clock=resolved_clock)
     # 板块数据源同口径（replay 读夹具；live 读 market.* 缓存，缺 akshare 启动期 fail-fast）。
@@ -98,12 +138,19 @@ def build_state(settings: Settings, clock: Clock | None = None) -> AppState:
         ),
         market_data=market_data,
         sector_data=sector_data,
+        email_sender=sender,
+        email_codes=EmailVerificationService(settings, code_hasher),
         object_store=LocalObjectStore(settings.data_dir / "objects"),
         llm=build_provider(settings),
     )
 
 
-def create_app(settings: Settings | None = None, *, clock: Clock | None = None) -> FastAPI:
+def create_app(
+    settings: Settings | None = None,
+    *,
+    clock: Clock | None = None,
+    email_sender: EmailSender | None = None,
+) -> FastAPI:
     resolved = settings or get_settings()
     configure_logging(resolved.log_level, json_output=resolved.env == "prod")
 
@@ -124,7 +171,7 @@ def create_app(settings: Settings | None = None, *, clock: Clock | None = None) 
         lifespan=lifespan,
         default_response_class=JSONResponse,
     )
-    app.state.sa = build_state(resolved, clock)
+    app.state.sa = build_state(resolved, clock, email_sender=email_sender)
 
     app.add_middleware(RequestContextMiddleware)
     app.add_exception_handler(ApiError, api_error_handler)

@@ -1,6 +1,7 @@
 # 智能分析助手 · 完整开发设计 v1.0
 
 > 状态：**设计定稿（2026-11-20）**；后端 Chat-00~08 与前端悬浮窗/问答历史均已按本设计落地；前端使用 assistant-ui primitives + 项目 tokens。
+> 2026-11-21 后续：工具注册、MCP 对外开放/接入、执行时间线重构见 [2026-11-21-tool-platform-refactor.md](2026-11-21-tool-platform-refactor.md)；本文的工具枚举/固定图、聊天保留与删除、MCP 相关部分以新设计为准。
 > 需求基线：[PRD-v2 FR-D7](../prd/PRD-v2.md)、[DEV-PLAN Period3-07](../DEV-PLAN-v2.md)、[ADR-0022](v2/ADR.md)、[API-Catalog API-077/078](v2/API-Catalog.md)。
 > 本设计取代 [2026-11-19 调研稿](2026-11-19-intelligent-assistant-research.md) 中的 L0/L1 隐私分层与“不做历史端点”结论；调研稿的其他分析保留参考价值。
 > 已拍板：GLM-4.7-Flash 免费版验证、单会话、对话/工具/LLM 调用全量入库可回放、滑动窗口 10 轮 + 200K 的 80% 压缩、语义理解与指代替换、业务数据可全量使用、不做 RAG、LLM 故障输出降级原因与服务不可用提示。
@@ -255,8 +256,8 @@ app = graph.compile()  # 不传 checkpointer
 | `LLM_CONTEXT_COMPRESS_RATIO` | `0.8` | 160K 触发压缩 |
 | `LLM_HISTORY_TURNS` | `10` | 滑动窗口默认轮数 |
 | `LLM_MAX_CONCURRENCY` | `2` | 每副本并发；免费额度下先保守 |
-| `LLM_RETRY_ON_429` | `2` | 429 最多重试 2 次（2s/8s 退避，尊重 `Retry-After`） |
-| `LLM_RETRY_BACKOFF_SECONDS` | `2` | 429 首次退避；第二次 ×4 |
+| `LLM_RETRY_ON_429` | `2` | 兼容旧名；现在覆盖超时/429/5xx/坏响应的 understanding 与 answer 重试（2s/4s 退避） |
+| `LLM_RETRY_BACKOFF_SECONDS` | `2` | 首次退避；后续 ×2 |
 | `LLM_DAILY_TOKEN_BUDGET` | 待定 | 免费额度保护；80% 告警 |
 | `LLM_TOKEN_ESTIMATOR` | `approx` | `approx`/`tiktoken`；预检保守估算 |
 

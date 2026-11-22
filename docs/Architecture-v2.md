@@ -254,7 +254,7 @@
 | GET | `/api/v1/openapi.json` | 契约自描述 | P0 |
 | GET | `/api/v1/errors` | 机器可读错误码总表 | P1 |
 
-**规模**：**88 个端点**（API-001~088），覆盖 28 条 FR（权威清单与字段级契约见 [API-Catalog §1](architecture/v2/API-Catalog.md)；覆盖关系见 §19 与 API-Catalog §8）。
+**规模**：**118 个端点**（API-001~119），覆盖 28 条 FR（权威清单与字段级契约见 [API-Catalog §1](architecture/v2/API-Catalog.md)；覆盖关系见 §19 与 API-Catalog §8）。
 
 > 路径约定：本节用**完整路径**；《API-Catalog》§1 省略公共前缀 `/api/v1`（运维端点 `/healthz`、`/readyz`、`/version`、`/metrics` 不在前缀下）。两处端点集合一致，以 API-Catalog 为准。
 
@@ -497,7 +497,7 @@ services/api ─▶ application ─▶ domain ◀── infrastructure
 | 管理面 | `platform.user` 等系统表不进租户策略；admin 仅访问系统视图 | 满足"admin 不可读交易明细" |
 | 公共缓存 | `market` schema 无 `user_id`、**不启用 RLS**：行情两表（`daily_bar` / `pull_range`）+ 板块六表（`sector` / `sector_member` / `benchmark_member` / `sector_bar` / `sector_pull_range` / `sector_sync_state`）；行情/板块均为公开数据、可再生 | 所有租户共享；写路径仅内部装配或 CLI 同步（不开放 HTTP 写端点） |
 
-### 9.2 schema 与表清单（v1 的 31 张 → v2 的 44 张：36 张业务表 + 8 张公共缓存表）
+### 9.2 schema 与表清单（v1 的 31 张 → v2 的 46 张：38 张业务表 + 8 张公共缓存表）
 
 **`platform`（系统与多租户）**
 

@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -33,8 +33,24 @@ function historyMessage(index: number, role: "user" | "assistant") {
   };
 }
 
+function renderWithShell() {
+  return render(
+    <MemoryRouter>
+      <div className="app-shell">
+        <div className="shell-main">
+          <button type="button">主区操作</button>
+        </div>
+        <StarAssistant />
+      </div>
+    </MemoryRouter>,
+  );
+}
+
 describe("StarAssistant", () => {
   beforeEach(() => {
+    window.localStorage.clear();
+    mocks.ensureSession.mockClear();
+    mocks.getConversation.mockClear();
     mocks.ensureSession.mockResolvedValue({ conversation_id: "cnv_test" });
     mocks.getConversation.mockResolvedValue({
       conversation_id: "cnv_test",
@@ -123,5 +139,109 @@ describe("StarAssistant", () => {
       limit: 8,
       before_id: "msg_0",
     });
+  });
+
+  it("悬浮窗打开时外部仍可操作且不会关闭，close 后仅显示悬浮按钮", async () => {
+    const user = userEvent.setup();
+    renderWithShell();
+    await user.click(screen.getByRole("button", { name: "打开星星助手" }));
+    expect(await screen.findByText("本月收益为正。")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "打开星星助手" })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "主区操作" }));
+    expect(screen.getByRole("dialog", { name: "星星助手" })).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "关闭星星助手" }));
+    expect(screen.queryByRole("dialog", { name: "星星助手" })).toBeNull();
+    expect(screen.getByRole("button", { name: "打开星星助手" })).toBeTruthy();
+  });
+
+  it("Esc 关闭悬浮窗", async () => {
+    const user = userEvent.setup();
+    renderWithShell();
+    await user.click(screen.getByRole("button", { name: "打开星星助手" }));
+    expect(await screen.findByRole("dialog", { name: "星星助手" })).toBeTruthy();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("dialog", { name: "星星助手" })).toBeNull();
+    expect(screen.getByRole("button", { name: "打开星星助手" })).toBeTruthy();
+  });
+
+  it("右侧固定与悬浮窗往返时保持会话，且与 shell-main 平级", async () => {
+    const user = userEvent.setup();
+    const { container } = renderWithShell();
+    await user.click(screen.getByRole("button", { name: "打开星星助手" }));
+    expect(await screen.findByText("本月收益为正。")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "固定到右侧" }));
+    expect(window.localStorage.getItem("sa.assistant.mode")).toBe("docked");
+    const aside = await screen.findByRole("complementary", { name: "星星助手" });
+    const shellMain = container.querySelector(".shell-main");
+    expect(aside.parentElement).toBe(shellMain?.parentElement ?? null);
+    expect(screen.queryByRole("dialog", { name: "星星助手" })).toBeNull();
+    expect(screen.getByText("本月收益为正。")).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "切换为悬浮窗" }));
+    expect(await screen.findByRole("dialog", { name: "星星助手" })).toBeTruthy();
+    expect(screen.queryByRole("complementary", { name: "星星助手" })).toBeNull();
+    expect(window.localStorage.getItem("sa.assistant.mode")).toBe("dialog");
+    expect(mocks.ensureSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("关闭后再次打开沿用上次的固定模式", async () => {
+    const user = userEvent.setup();
+    renderWithShell();
+    await user.click(screen.getByRole("button", { name: "打开星星助手" }));
+    expect(await screen.findByText("本月收益为正。")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "固定到右侧" }));
+    expect(screen.queryByRole("dialog", { name: "星星助手" })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "关闭星星助手" }));
+    expect(screen.getByRole("button", { name: "打开星星助手" })).toBeTruthy();
+    expect(screen.queryByRole("complementary", { name: "星星助手" })).toBeNull();
+
+    await user.click(screen.getByRole("button", { name: "打开星星助手" }));
+    expect(await screen.findByRole("complementary", { name: "星星助手" })).toBeTruthy();
+    expect(screen.queryByRole("dialog", { name: "星星助手" })).toBeNull();
+  });
+
+  it("拖拽将宽度限制在 25% 到 50%，并支持键盘调整", async () => {
+    const user = userEvent.setup();
+    const { container } = renderWithShell();
+    await user.click(screen.getByRole("button", { name: "打开星星助手" }));
+    expect(await screen.findByText("本月收益为正。")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "固定到右侧" }));
+
+    const appShell = container.querySelector(".app-shell") as HTMLElement;
+    appShell.getBoundingClientRect = () =>
+      ({
+        x: 0,
+        y: 0,
+        top: 0,
+        left: 0,
+        right: 1000,
+        bottom: 800,
+        width: 1000,
+        height: 800,
+        toJSON: () => ({}),
+      }) as DOMRect;
+    const separator = screen.getByRole("separator", { name: "调整星星助手宽度" });
+    const aside = screen.getByRole("complementary", { name: "星星助手" });
+
+    fireEvent.pointerDown(separator, { pointerId: 1, button: 0, clientX: 200 });
+    expect(separator.getAttribute("aria-valuenow")).toBe("50");
+    expect(aside.style.width).toBe("50%");
+    fireEvent.pointerMove(separator, { pointerId: 1, clientX: 900 });
+    expect(separator.getAttribute("aria-valuenow")).toBe("25");
+    expect(aside.style.width).toBe("25%");
+    fireEvent.pointerUp(separator, { pointerId: 1, clientX: 900 });
+
+    fireEvent.pointerMove(separator, { pointerId: 1, clientX: 200 });
+    expect(separator.getAttribute("aria-valuenow")).toBe("25");
+    fireEvent.keyDown(separator, { key: "ArrowLeft" });
+    expect(separator.getAttribute("aria-valuenow")).toBe("26");
+    fireEvent.keyDown(separator, { key: "ArrowLeft", shiftKey: true });
+    expect(separator.getAttribute("aria-valuenow")).toBe("31");
+    fireEvent.keyDown(separator, { key: "ArrowRight" });
+    expect(separator.getAttribute("aria-valuenow")).toBe("30");
   });
 });

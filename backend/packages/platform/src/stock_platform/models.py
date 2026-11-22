@@ -62,6 +62,58 @@ class User(Base, TimestampMixin):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
+class EmailVerificationCode(Base, TimestampMixin):
+    """注册/找回验证码（认证前置表，无 user_id，不启用 RLS）。"""
+
+    __tablename__ = "email_verification_code"
+    __table_args__ = (
+        CheckConstraint(
+            "attempts >= 0 AND attempts <= max_attempts",
+            name="ck_email_code_attempts",
+        ),
+        CheckConstraint("expires_at > sent_at", name="ck_email_code_expiry"),
+        CheckConstraint(
+            "status = 'active' OR code_hash = ''",
+            name="ck_email_code_terminal_hash",
+        ),
+        Index("ix_email_code_expires", "expires_at"),
+        Index("ix_email_code_status_expires", "status", "expires_at"),
+        {"schema": SCHEMA},
+    )
+
+    email: Mapped[str] = mapped_column(CITEXT, primary_key=True)
+    purpose: Mapped[str] = mapped_column(String(24), primary_key=True, default="register")
+    code_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="active")
+    attempts: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
+    max_attempts: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=10)
+    sent_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    consumed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    send_ip_hash: Mapped[str | None] = mapped_column(String(64))
+    request_id: Mapped[str | None] = mapped_column(String(64))
+
+
+class EmailCodeSendThrottle(Base, TimestampMixin):
+    """验证码发送冷却/配额（认证前置表，无 user_id，不启用 RLS）。"""
+
+    __tablename__ = "email_code_send_throttle"
+    __table_args__ = (
+        CheckConstraint("hour_count >= 0 AND day_count >= 0", name="ck_email_throttle_counts"),
+        Index("ix_email_throttle_last_sent", "last_sent_at"),
+        {"schema": SCHEMA},
+    )
+
+    scope: Mapped[str] = mapped_column(String(16), primary_key=True)
+    key_hash: Mapped[str] = mapped_column(String(64), primary_key=True)
+    last_sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    hour_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    hour_count: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
+    day_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    day_count: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=0)
+
+
 class RefreshToken(Base):
     __tablename__ = "refresh_token"
     __table_args__ = (
@@ -448,6 +500,35 @@ class ChatTurn(Base):
     )
 
 
+class ChatTurnEvent(Base):
+    """助手单轮执行过程事件（append-only；180 天 TTL）。"""
+
+    __tablename__ = "chat_turn_event"
+    __table_args__ = (
+        UniqueConstraint("turn_id", "seq", name="uq_chat_turn_event_turn_seq"),
+        Index("ix_chat_turn_event_user_at", "user_id", "created_at"),
+        Index("ix_chat_turn_event_created_at", "created_at"),
+        {"schema": SCHEMA},
+    )
+
+    id: Mapped[str] = mapped_column(String(40), primary_key=True)
+    turn_id: Mapped[str] = mapped_column(
+        String(40),
+        ForeignKey(f"{SCHEMA}.chat_turn.id", ondelete="CASCADE"),
+        nullable=False,
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        PGUUID(as_uuid=True), ForeignKey(f"{SCHEMA}.user.id", ondelete="CASCADE"), nullable=False
+    )
+    seq: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    kind: Mapped[str] = mapped_column(String(40), nullable=False)
+    phase: Mapped[str] = mapped_column(String(16), nullable=False)
+    payload: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
 class ChatToolCall(Base):
     """工具调用原始参数/结果，用于回放。"""
 
@@ -524,6 +605,7 @@ __all__ = [
     "ChatMessage",
     "ChatToolCall",
     "ChatTurn",
+    "ChatTurnEvent",
     "ConfigRelease",
     "IdempotencyKey",
     "Job",

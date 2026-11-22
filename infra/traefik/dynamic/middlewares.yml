@@ -1,0 +1,33 @@
+# Traefik 动态配置（file provider，watch 自动热更新）
+# 路由由各服务的 docker labels 声明；这里只放跨路由复用的中间件。
+http:
+  middlewares:
+    security-headers:
+      headers:
+        stsSeconds: 31536000
+        stsIncludeSubdomains: true
+        stsPreload: true
+        forceSTSHeader: true
+        contentTypeNosniff: true
+        frameDeny: true
+        referrerPolicy: strict-origin-when-cross-origin
+        permissionsPolicy: "camera=(), microphone=(), geolocation=()"
+        # 前端为 Vite SPA：Tailwind/Radix 使用内联 style，故 style-src 放行 'unsafe-inline'；
+        # 脚本必须外链（构建产物在 /assets/*）。调整后按 DEPLOYMENT.md P0-2.7 实测控制台。
+        contentSecurityPolicy: >-
+          default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline';
+          img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self';
+          object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+
+    compress:
+      compress:
+        # SSE 不能被压缩/缓冲，否则进度与 chat 流会整段一次性到达
+        excludedContentTypes:
+          - text/event-stream
+
+    # 网关粗限流（按来源 IP，防突发/扫描）；按用户/令牌的细限流属 Period3-09，应用层实现
+    ratelimit:
+      rateLimit:
+        period: 1s
+        average: 120
+        burst: 240

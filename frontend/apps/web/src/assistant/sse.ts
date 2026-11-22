@@ -1,6 +1,7 @@
 export type SseEvent = {
   event: string;
   data: unknown;
+  id?: string;
 };
 
 /** 轻量 SSE 解析器：支持 event/data/多行 data/CRLF/注释，按空行切分。 */
@@ -31,6 +32,7 @@ export async function* parseSse(response: Response): AsyncGenerator<SseEvent> {
 function parseBlock(block: string): SseEvent | null {
   const lines = block.replace(/\r\n/g, "\n").split("\n");
   let event = "message";
+  let id: string | undefined;
   const data: string[] = [];
   for (const line of lines) {
     if (!line || line.startsWith(":")) continue;
@@ -39,13 +41,16 @@ function parseBlock(block: string): SseEvent | null {
     let value = colon >= 0 ? line.slice(colon + 1) : "";
     if (value.startsWith(" ")) value = value.slice(1);
     if (field === "event") event = value;
+    else if (field === "id") id = value;
     else if (field === "data") data.push(value);
   }
   if (data.length === 0) return null;
   const raw = data.join("\n");
   try {
-    return { event, data: JSON.parse(raw) as unknown };
+    return id === undefined
+      ? { event, data: JSON.parse(raw) as unknown }
+      : { event, data: JSON.parse(raw) as unknown, id };
   } catch {
-    return { event, data: raw };
+    return id === undefined ? { event, data: raw } : { event, data: raw, id };
   }
 }

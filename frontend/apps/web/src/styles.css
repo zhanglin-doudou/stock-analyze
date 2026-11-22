@@ -110,6 +110,26 @@ input[type="checkbox"] {
   max-width: 380px;
   margin: 60px auto;
 }
+.auth-code-row {
+  display: flex;
+  gap: var(--s2);
+  align-items: flex-start;
+}
+.auth-code-row input {
+  flex: 1;
+  min-width: 0;
+}
+.auth-code-button {
+  white-space: nowrap;
+  min-width: 112px;
+}
+.auth-code-hint {
+  display: block;
+  margin-top: var(--s1);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  line-height: var(--lh-body);
+}
 .edit-card {
   border-color: var(--accent);
 }

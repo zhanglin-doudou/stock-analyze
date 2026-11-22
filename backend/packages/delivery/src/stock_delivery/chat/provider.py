@@ -16,6 +16,9 @@ from pydantic import SecretStr
 from stock_contracts.chat.dto import LlmResult
 from stock_contracts.chat.enums import DegradeReason
 from stock_platform.config import Settings
+from stock_platform.obs import get_logger
+
+log = get_logger("stock_delivery.chat.provider")
 
 
 class LlmError(Exception):
@@ -127,18 +130,33 @@ class GlmProvider:
                 reason, retryable = DegradeReason.LLM_RATE_LIMITED, True
             elif status in (401, 403) or "authentication" in low or "api key" in low:
                 reason, retryable = DegradeReason.LLM_AUTH_FAILED, False
+            elif "length limit" in low or "maximum context length" in low or "truncated" in low:
+                reason, retryable = DegradeReason.LLM_BAD_RESPONSE, False
             elif "timeout" in low or "timed out" in low:
                 reason, retryable = DegradeReason.LLM_TIMEOUT, False
             elif "content" in low and "filter" in low:
                 reason, retryable = DegradeReason.LLM_CONTENT_FILTER, False
             else:
                 reason, retryable = DegradeReason.LLM_UNAVAILABLE, False
+            latency_ms = int((time.monotonic() - started) * 1000)
+            log.error(
+                "chat.llm.call",
+                status="error",
+                purpose=purpose,
+                provider=self.provider,
+                model=self.settings.glm_model,
+                error_code=reason.value,
+                status_code=status if isinstance(status, int) else None,
+                error=text[:300] or reason.value,
+                latency_ms=latency_ms,
+            )
             raise LlmError(
                 reason,
                 text[:300] or reason.value,
                 retryable=retryable,
                 status_code=status if isinstance(status, int) else None,
                 raw_request=raw_request,
+                raw_response={"error": text[:300]},
             ) from exc
 
         latency_ms = int((time.monotonic() - started) * 1000)
@@ -155,6 +173,17 @@ class GlmProvider:
             "usage": usage,
             "metadata": metadata,
         }
+        log.info(
+            "chat.llm.call",
+            status="ok",
+            purpose=purpose,
+            provider=self.provider,
+            model=self.settings.glm_model,
+            prompt_tokens=int(prompt_tokens) if prompt_tokens is not None else None,
+            completion_tokens=int(completion_tokens) if completion_tokens is not None else None,
+            total_tokens=int(total_tokens) if total_tokens is not None else None,
+            latency_ms=latency_ms,
+        )
         return LlmResult(
             content=content,
             provider=self.provider,

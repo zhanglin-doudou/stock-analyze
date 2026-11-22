@@ -5,12 +5,12 @@ import uuid
 from datetime import UTC, date, datetime
 
 import pytest
-from stock_contracts.chat.dto import Citation, ToolResult
+from stock_contracts.chat.dto import Citation, PeriodSpec, ToolResult, Understanding
 from stock_contracts.chat.enums import ChatStatus
 from stock_contracts.clock import FrozenClock
 from stock_delivery.chat.graph import build_graph
 from stock_delivery.chat.provider import FakeProvider
-from stock_delivery.chat.runtime import ChatRuntime
+from stock_delivery.chat.runtime import ChatRuntime, _next_focus
 
 pytestmark = pytest.mark.no_db
 
@@ -176,3 +176,134 @@ async def test_llm_answer_without_numbers_keeps_template_numbers(settings) -> No
     assert final["status"] == "ok"
     assert "100,000.00" in final["answer"]["answer_markdown"]
     assert "整体表现平稳" in final["answer"]["answer_markdown"]
+
+
+async def test_invalid_understanding_json_falls_back_without_500(settings) -> None:
+    settings.llm_provider = "glm"
+    settings.glm_api_key = "test"
+    provider = FakeProvider(
+        [
+            '{"intents":"trades","confidence":0.9}',
+            json.dumps(
+                {
+                    "answer_markdown": "本月收益 -1,234.56 元 [[1]]",
+                    "claims": [],
+                    "used_citations": ["c1_1"],
+                    "confidence": "medium",
+                    "followups": [],
+                }
+            ),
+        ]
+    )
+    repo = _Repo()
+    runtime = ChatRuntime(
+        repo=repo,  # type: ignore[arg-type]
+        data_port=_Data(),
+        llm=provider,
+        clock=FrozenClock(datetime(2026, 11, 20, tzinfo=UTC)),
+        settings=settings,
+        user_id=uuid.uuid4(),
+        conversation={
+            "id": "cnv_1",
+            "summary": "",
+            "focus": {},
+            "window_turns": 10,
+            "summary_version": 0,
+        },
+        turn_id="trn_1",
+        question="本月赚了多少",
+    )
+    final = await build_graph(runtime).ainvoke({"question": "本月赚了多少"})
+    assert final["understanding"]["intents"][0] == "portfolio"
+    assert final["degrade_reason"] == "LLM_BAD_RESPONSE"
+    assert len(repo.llm_calls) == 2
+
+
+class _FlakyProvider:
+    provider = "fake"
+    model = "fake-chat"
+
+    def __init__(self, items):
+        self.items = list(items)
+        self.calls = 0
+
+    async def complete_messages(self, **_kwargs):
+        from stock_contracts.chat.dto import LlmResult
+
+        self.calls += 1
+        item = self.items.pop(0)
+        if isinstance(item, Exception):
+            raise item
+        return LlmResult(content=item, provider="fake", model="fake-chat")
+
+
+async def test_timeout_retries_both_understanding_and_answer(settings) -> None:
+    from stock_contracts.chat.enums import DegradeReason
+    from stock_delivery.chat.provider import LlmError
+
+    settings.llm_provider = "glm"
+    settings.glm_api_key = "test"
+    settings.llm_retry_on_429 = 1
+    settings.llm_retry_backoff_seconds = 0
+    provider = _FlakyProvider(
+        [
+            LlmError(DegradeReason.LLM_TIMEOUT, "Request timed out"),
+            json.dumps(
+                {
+                    "intents": ["portfolio"],
+                    "confidence": 0.9,
+                    "period": {"kind": "month", "value": "2026-11"},
+                    "entities": [],
+                    "resolved_query": "本月赚了多少",
+                    "needs_clarification": False,
+                }
+            ),
+            LlmError(DegradeReason.LLM_TIMEOUT, "Request timed out"),
+            json.dumps(
+                {
+                    "answer_markdown": "本月收益 -1,234.56 元 [[1]]",
+                    "claims": [],
+                    "used_citations": ["c1_1"],
+                    "confidence": "medium",
+                    "followups": [],
+                }
+            ),
+        ]
+    )
+    repo = _Repo()
+    runtime = ChatRuntime(
+        repo=repo,  # type: ignore[arg-type]
+        data_port=_Data(),
+        llm=provider,
+        clock=FrozenClock(datetime(2026, 11, 20, tzinfo=UTC)),
+        settings=settings,
+        user_id=uuid.uuid4(),
+        conversation={
+            "id": "cnv_1",
+            "summary": "",
+            "focus": {},
+            "window_turns": 10,
+            "summary_version": 0,
+        },
+        turn_id="trn_1",
+        question="本月赚了多少",
+    )
+    final = await build_graph(runtime).ainvoke({"question": "本月赚了多少"})
+    assert final["status"] == "ok"
+    assert provider.calls == 4
+    assert len(repo.llm_calls) == 4
+
+
+def test_next_focus_drops_empty_and_period_security_fields() -> None:
+    understanding = Understanding(
+        intents=(),
+        confidence=0.9,
+        period=PeriodSpec(kind="month", value="2026-11"),
+        entities=(),
+        resolved_query="本月有哪些操作",
+    )
+    focus = _next_focus(
+        {"period": "2026-10", "security_code": "", "security_name": "本月"},
+        understanding,
+    )
+    assert focus == {"period": "2026-11"}

@@ -2,28 +2,33 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
 import time
 import uuid
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, is_dataclass, replace
 from datetime import date, datetime
 from enum import Enum
-from typing import Any
+from typing import Any, Literal, cast
 
+from pydantic import BaseModel, Field, ValidationError, field_validator
 from stock_contracts.chat.dto import (
     AnswerDraft,
     Citation,
     Claim,
     ContextUsage,
+    LlmResult,
     ToolResult,
     Understanding,
 )
 from stock_contracts.chat.enums import ChatStatus, DegradeReason, Intent, ToolName
 from stock_contracts.chat.ports import ChatDataPort
+from stock_contracts.chat.tools import ToolCall, ToolContext
 from stock_contracts.clock import Clock
 from stock_platform.config import Settings
+from stock_platform.obs import get_logger
 from stock_platform.repositories.chat import ChatRepository
 
 from .composer import compose
@@ -31,6 +36,7 @@ from .context import ContextBundle, ContextManager
 from .prompts import ANSWER_SYSTEM, COMPRESS_SYSTEM
 from .provider import LlmError, LlmProvider
 from .state import ChatState
+from .tools import RulePlanner, ToolExecutor, ToolRegistry, ToolTraceSink
 from .understanding import UnderstandingService
 from .validator import sanitize, validate
 
@@ -49,6 +55,9 @@ def to_jsonable(value: Any) -> Any:
     return value
 
 
+log = get_logger("stock_delivery.chat.runtime")
+
+
 class ChatRuntime:
     def __init__(
         self,
@@ -63,6 +72,9 @@ class ChatRuntime:
         turn_id: str,
         question: str,
         user_message_id: str | None = None,
+        tool_registry: ToolRegistry | None = None,
+        tool_executor: ToolExecutor | None = None,
+        on_event: Callable[[dict[str, Any]], None] | None = None,
     ) -> None:
         self.repo = repo
         self.data_port = data_port
@@ -74,6 +86,9 @@ class ChatRuntime:
         self.turn_id = turn_id
         self.user_message_id = user_message_id
         self.question = question
+        self.tool_registry = tool_registry
+        self.tool_executor = tool_executor
+        self._on_event = on_event
         self.context_manager = ContextManager(repo, settings)
         self.understanding_service = UnderstandingService(llm, clock)
         self._bundle: ContextBundle | None = None
@@ -88,9 +103,13 @@ class ChatRuntime:
         self._degrade_reason: DegradeReason | None = None
         self._started = time.monotonic()
         self.assistant_message_id: str | None = None
+        self._events: list[dict[str, Any]] = []
+        self._event_seq = 0
+        self._step = 1
 
     # ── nodes ──────────────────────────────────────────────
     async def load_context(self, state: ChatState) -> dict[str, Any]:
+        self._emit("turn.started", "start", {"question_length": len(self.question)})
         bundle = await self.context_manager.build(
             self.user_id,
             self.conversation,
@@ -103,44 +122,57 @@ class ChatRuntime:
 
     async def understand(self, state: ChatState) -> dict[str, Any]:
         assert self._bundle is not None
+        self._emit("understanding.started", "understand", {})
         if not self.settings.llm_enabled:
             understanding = self.understanding_service.fallback_understanding(
                 self.question, self._bundle.focus
             )
             self._understanding = understanding
+            self._emit_understanding_completed(understanding)
             return {"understanding": to_jsonable(understanding)}
 
-        self._llm_seq += 1
         messages = self.context_manager.understanding_messages(self._bundle, self.question)
         try:
-            result = await self.llm.complete_messages(
+            result = await self._complete_with_retry(
                 purpose="understanding",
                 messages=messages,
                 max_tokens=self.settings.llm_understanding_max_tokens,
-                json_mode=True,
+                prompt_version="chat.understand.v1",
             )
+            self._llm_used = True
             understanding = self.understanding_service.parse(
                 result.content, question=self.question, focus=self._bundle.focus
             )
-            self._record_llm(
-                "understanding",
-                result,
-                prompt_version="chat.understand.v1",
-                status="ok",
-            )
-            self._llm_used = True
             self._understanding = understanding
+            self._emit_understanding_completed(understanding)
             return {"understanding": to_jsonable(understanding)}
         except LlmError as exc:
-            self._record_llm_error("understanding", exc, prompt_version="chat.understand.v1")
             self._degrade_reason = exc.reason
             understanding = self.understanding_service.fallback_understanding(
                 self.question, self._bundle.focus
             )
             self._understanding = understanding
+            self._emit_understanding_completed(understanding)
             return {
                 "understanding": to_jsonable(understanding),
                 "degrade_reason": exc.reason.value,
+            }
+        except (json.JSONDecodeError, ValidationError, ValueError, TypeError) as exc:
+            log.error(
+                "chat.llm.bad_response",
+                purpose="understanding",
+                model=self.settings.glm_model,
+                error=str(exc)[:300],
+            )
+            self._degrade_reason = DegradeReason.LLM_BAD_RESPONSE
+            understanding = self.understanding_service.fallback_understanding(
+                self.question, self._bundle.focus
+            )
+            self._understanding = understanding
+            self._emit_understanding_completed(understanding)
+            return {
+                "understanding": to_jsonable(understanding),
+                "degrade_reason": DegradeReason.LLM_BAD_RESPONSE.value,
             }
 
     def route_after_understand(self, state: ChatState) -> str:
@@ -153,10 +185,43 @@ class ChatRuntime:
 
     async def execute_tools(self, state: ChatState) -> dict[str, Any]:
         assert self._understanding is not None
+        if (
+            self.settings.tool_platform_enabled
+            and self.tool_registry is not None
+            and self.tool_executor is not None
+        ):
+            platform_results = await self._execute_via_tool_platform()
+            if platform_results:
+                self._citations = _number_citations(
+                    [citation for result in platform_results for citation in result.citations]
+                )
+                return {"results": [to_jsonable(result) for result in platform_results]}
         tools = _tools_for(self._understanding)
+        self._emit(
+            "plan.created",
+            "plan",
+            {
+                "planner": "legacy",
+                "calls": [
+                    {"tool_id": f"builtin.{tool.value}", "tool": tool.value, "source": "builtin"}
+                    for tool, _ in tools
+                ],
+            },
+        )
         results: list[ToolResult] = []
         for tool, args in tools:
             self._tool_seq += 1
+            self._emit(
+                "tool.call.started",
+                "execute",
+                {
+                    "call_id": f"call_{self._tool_seq}",
+                    "tool_id": f"builtin.{tool.value}",
+                    "tool": tool.value,
+                    "title": tool.value,
+                    "source": "builtin",
+                },
+            )
             started = time.monotonic()
             result = await self.data_port.invoke(tool, args)
             latency = int((time.monotonic() - started) * 1000)
@@ -174,14 +239,64 @@ class ChatRuntime:
                 error_code=result.error_code,
             )
             self._record_tool(tool, args, result, latency)
+            self._emit(
+                "tool.call.succeeded" if result.status is not ChatStatus.ERROR else "tool.call.failed",
+                "execute",
+                {
+                    "call_id": f"call_{self._tool_seq}",
+                    "tool_id": f"builtin.{tool.value}",
+                    "tool": tool.value,
+                    "title": tool.value,
+                    "source": "builtin",
+                    "status": result.status.value,
+                    "row_count": result.row_count,
+                    "latency_ms": latency,
+                    "error_code": result.error_code,
+                },
+            )
             results.append(result)
         self._citations = _number_citations(
             [citation for result in results for citation in result.citations]
         )
         return {"results": [to_jsonable(result) for result in results]}
 
+    async def _execute_via_tool_platform(self) -> list[ToolResult]:
+        assert self._understanding is not None
+        assert self.tool_registry is not None
+        assert self.tool_executor is not None
+        ctx = ToolContext(
+            user_id=self.user_id,
+            request_id=self.turn_id,
+            turn_id=self.turn_id,
+            scopes=frozenset({"read"}),
+            deadline=time.monotonic() + self.settings.chat_turn_deadline_seconds,
+        )
+        catalog = await self.tool_registry.snapshot(ctx, include_external=False)
+        # P0 只接规则 Planner；CHAT_PLANNER_MODE=auto 的 LLM Planner 在 P1 接入。
+        plan = RulePlanner().plan(self._understanding, catalog)
+        if plan.action != "call" or not plan.calls:
+            return []
+        self._emit(
+            "plan.created",
+            "plan",
+            {
+                "planner": "rules",
+                "calls": [
+                    {
+                        "tool_id": call.tool_id,
+                        "args_summary": _args_summary(call.args),
+                        "source": "builtin",
+                    }
+                    for call in plan.calls
+                ],
+            },
+        )
+        trace = _RuntimeToolTrace(self)
+        return await self.tool_executor.execute(plan.calls, catalog, ctx, trace=trace)
+
     async def compose(self, state: ChatState) -> dict[str, Any]:
         assert self._understanding is not None and self._bundle is not None
+        self._emit("answer.started", "answer", {"template": True})
         results = state.get("results") or []
         parsed = [_result_from_dict(item) for item in results]
         template = compose(
@@ -207,23 +322,22 @@ class ChatRuntime:
             "resolved_query": self._understanding.resolved_query,
             "intents": [item.value for item in self._understanding.intents],
             "status": self._template.status.value,
-            "results": state.get("results") or [],
+            "results": _compact_results_for_llm(state.get("results") or []),
             "citations": [to_jsonable(item) for item in self._citations],
         }
         repair = state.get("validation_errors") or []
         user = json.dumps(evidence, ensure_ascii=False)
         if repair:
             user += "\n上次输出未通过校验：" + "; ".join(repair) + "\n请修正后重试。"
-        self._llm_seq += 1
         try:
-            result = await self.llm.complete_messages(
+            result = await self._complete_with_retry(
                 purpose="answer",
                 messages=[
                     {"role": "system", "content": ANSWER_SYSTEM},
                     {"role": "user", "content": user},
                 ],
                 max_tokens=self.settings.llm_max_output_tokens,
-                json_mode=True,
+                prompt_version="chat.answer.v1",
             )
             parsed = _parse_answer(result.content)
             claims = tuple(
@@ -256,7 +370,12 @@ class ChatRuntime:
                 answer_markdown=answer_markdown,
                 claims=claims,
                 used_citations=tuple(parsed.get("used_citations") or ()),
-                confidence=parsed.get("confidence") or "medium",
+                confidence=cast(
+                    Literal["high", "medium", "low"],
+                    parsed.get("confidence")
+                    if parsed.get("confidence") in {"high", "medium", "low"}
+                    else "medium",
+                ),
                 followups=tuple(parsed.get("followups") or ()),
                 status=self._template.status,
                 fallback=False,
@@ -275,11 +394,9 @@ class ChatRuntime:
                     answer_markdown=template_text + "\n\n" + draft.answer_markdown,
                     claims=self._template.claims + draft.claims,
                 )
-            self._record_llm("answer", result, prompt_version="chat.answer.v1", status="ok")
             self._llm_used = True
             return {"answer": to_jsonable(draft), "status": draft.status.value}
         except LlmError as exc:
-            self._record_llm_error("answer", exc, prompt_version="chat.answer.v1")
             self._degrade_reason = exc.reason
             draft = self._fallback_draft(exc.reason)
             return {
@@ -288,6 +405,12 @@ class ChatRuntime:
                 "status": ChatStatus.DEGRADED.value,
             }
         except (json.JSONDecodeError, ValueError) as exc:
+            log.error(
+                "chat.llm.bad_response",
+                purpose="answer",
+                model=self.settings.glm_model,
+                error=str(exc)[:300],
+            )
             self._degrade_reason = DegradeReason.LLM_BAD_RESPONSE
             draft = self._fallback_draft(DegradeReason.LLM_BAD_RESPONSE)
             return {
@@ -298,6 +421,7 @@ class ChatRuntime:
             }
 
     async def validate(self, state: ChatState) -> dict[str, Any]:
+        self._emit("validation.started", "validate", {"retry": int(state.get("retry_count") or 0)})
         answer = state.get("answer") or {}
         text = str(answer.get("answer_markdown") or "")
         allowed = _allowed_numbers(state.get("results") or [])
@@ -312,12 +436,17 @@ class ChatRuntime:
         )
         template_text = str(self._template.answer_markdown) if self._template else ""
         numeric_answer = re.sub(r"\[\[[^\]]+\]\]", "", text)
+        warnings = list(result.warnings)
         if re.search(r"\d", template_text) and not re.search(r"\d", numeric_answer):
-            result = type(result)(
-                ok=False,
-                errors=[*result.errors, "missing_numbers"],
-            )
+            warnings.append("missing_numbers")
         if result.ok:
+            if warnings:
+                log.warning(
+                    "chat.llm.validation_warning",
+                    purpose="answer",
+                    model=self.settings.glm_model,
+                    warnings=warnings[:8],
+                )
             return {"status": answer.get("status") or ChatStatus.OK.value}
         retries = int(state.get("retry_count") or 0)
         can_retry = (
@@ -327,7 +456,34 @@ class ChatRuntime:
             and not self._understanding.needs_clarification
         )
         if can_retry:
+            self._emit(
+                "validation.failed",
+                "validate",
+                {"errors": result.errors[:8], "retry_count": retries, "will_retry": True},
+            )
+            log.error(
+                "chat.llm.validation_failed",
+                purpose="answer",
+                model=self.settings.glm_model,
+                errors=result.errors[:8],
+                retry_count=retries,
+                will_retry=True,
+            )
             return {"validation_errors": result.errors, "retry_count": 1}
+        self._emit(
+            "validation.failed",
+            "validate",
+            {"errors": result.errors[:8], "retry_count": retries, "will_retry": False},
+        )
+        log.error(
+            "chat.llm.validation_failed",
+            purpose="answer",
+            model=self.settings.glm_model,
+            errors=result.errors[:8],
+            warnings=warnings[:8],
+            retry_count=retries,
+            will_retry=False,
+        )
         return {
             "validation_errors": result.errors,
             "retry_count": retries + 1,
@@ -380,6 +536,11 @@ class ChatRuntime:
     async def fallback(self, state: ChatState) -> dict[str, Any]:
         template = self._template
         reason = self._degrade_reason or DegradeReason.LLM_BAD_RESPONSE
+        self._emit(
+            "fallback.triggered",
+            "validate",
+            {"degrade_reason": reason.value, "message": _degrade_message(reason)},
+        )
         if template is None:
             draft = AnswerDraft(
                 answer_markdown="智能分析服务暂时不可用；你可以用固定问题查看已有数据。",
@@ -430,6 +591,29 @@ class ChatRuntime:
         text = str(answer.get("answer_markdown") or "")
         status = str(answer.get("status") or state.get("status") or ChatStatus.OK.value)
         degrade = answer.get("degrade_reason") or state.get("degrade_reason")
+        latency = int((time.monotonic() - self._started) * 1000)
+        self._emit(
+            "turn.failed" if status == ChatStatus.ERROR.value else "turn.completed",
+            "done",
+            {
+                "status": status,
+                "total_ms": latency,
+                "steps": self._step,
+                "tool_calls": len(self._tool_logs),
+                "llm_calls": len(self._llm_logs),
+            },
+        )
+        append_event = getattr(self.repo, "append_event", None)
+        if append_event is not None:
+            for event in self._events:
+                await append_event(
+                    user_id=self.user_id,
+                    turn_id=self.turn_id,
+                    seq=event["seq"],
+                    kind=event["kind"],
+                    phase=event["phase"],
+                    payload=event["payload"],
+                )
         message = await self.repo.append_message(
             user_id=self.user_id,
             conversation_id=str(self.conversation["id"]),
@@ -440,7 +624,6 @@ class ChatRuntime:
             status=status,
         )
         self.assistant_message_id = str(message["id"])
-        latency = int((time.monotonic() - self._started) * 1000)
         await self.repo.update_turn(
             self.user_id,
             self.turn_id,
@@ -460,6 +643,129 @@ class ChatRuntime:
             if focus:
                 await self.repo.update_focus(user_id=self.user_id, focus=focus)
         return {"status": status}
+
+    # ── helpers ────────────────────────────────────────────
+    def _emit(self, kind: str, phase: str, payload: Mapping[str, Any]) -> dict[str, Any]:
+        if not self.settings.chat_timeline_enabled:
+            return {}
+        self._event_seq += 1
+        event = {
+            "seq": self._event_seq,
+            "kind": kind,
+            "phase": phase,
+            "turn_id": self.turn_id,
+            "at": self.clock.now().isoformat(),
+            "payload": to_jsonable(dict(payload)),
+        }
+        self._events.append(event)
+        if self._on_event is not None:
+            self._on_event(event)
+        return event
+
+    def _emit_understanding_completed(self, understanding: Understanding) -> None:
+        period = understanding.period.value if understanding.period else None
+        self._emit(
+            "understanding.completed",
+            "understand",
+            {
+                "intents": [item.value for item in understanding.intents],
+                "period": period,
+                "confidence": understanding.confidence,
+                "needs_clarification": understanding.needs_clarification,
+                "ambiguities": list(understanding.ambiguities),
+            },
+        )
+
+    def events(self) -> list[dict[str, Any]]:
+        return list(self._events)
+
+    def timeline_summary(self) -> dict[str, Any]:
+        return {
+            "events": len(self._events),
+            "steps": self._step,
+            "tool_calls": len(self._tool_logs),
+            "total_ms": int((time.monotonic() - self._started) * 1000),
+            "complete": True,
+        }
+
+    @staticmethod
+    def _retryable(exc: LlmError) -> bool:
+        """超时、429、5xx、坏响应等都重试；鉴权/未配置/内容过滤不重试。"""
+        return exc.reason not in {
+            DegradeReason.LLM_NOT_CONFIGURED,
+            DegradeReason.LLM_AUTH_FAILED,
+            DegradeReason.LLM_CONTENT_FILTER,
+        }
+
+    async def _complete_with_retry(
+        self,
+        *,
+        purpose: str,
+        messages: Sequence[Mapping[str, str]],
+        max_tokens: int,
+        prompt_version: str,
+    ) -> LlmResult:
+        """统一 LLM 重试：每次失败落 chat_llm_call，成功后落成功记录。"""
+        max_retries = max(0, int(self.settings.llm_retry_on_429))
+        self._emit(
+            "model.thinking.started",
+            "think",
+            {"purpose": purpose, "model": self.settings.glm_model},
+        )
+        thinking_started = time.monotonic()
+        for attempt in range(max_retries + 1):
+            self._llm_seq += 1
+            try:
+                result = await self.llm.complete_messages(
+                    purpose=purpose,
+                    messages=messages,
+                    max_tokens=max_tokens,
+                    json_mode=True,
+                )
+            except LlmError as exc:
+                self._record_llm_error(purpose, exc, prompt_version=prompt_version)
+                self._emit(
+                    "model.thinking.completed",
+                    "think",
+                    {
+                        "purpose": purpose,
+                        "status": "error",
+                        "error_code": exc.reason.value,
+                        "latency_ms": int((time.monotonic() - thinking_started) * 1000),
+                    },
+                )
+                if not self._retryable(exc) or attempt >= max_retries:
+                    raise
+                self._emit(
+                    "model.thinking.started",
+                    "think",
+                    {"purpose": purpose, "model": self.settings.glm_model, "retry": True},
+                )
+                thinking_started = time.monotonic()
+                delay = self.settings.llm_retry_backoff_seconds * (2**attempt)
+                log.warning(
+                    "chat.llm.retry",
+                    purpose=purpose,
+                    attempt=attempt + 1,
+                    max_attempts=max_retries,
+                    error_code=exc.reason.value,
+                    delay_seconds=delay,
+                )
+                await asyncio.sleep(delay)
+                continue
+            self._record_llm(purpose, result, prompt_version=prompt_version, status="ok")
+            self._emit(
+                "model.thinking.completed",
+                "think",
+                {
+                    "purpose": purpose,
+                    "status": "ok",
+                    "latency_ms": int((time.monotonic() - thinking_started) * 1000),
+                    "tokens": result.total_tokens,
+                },
+            )
+            return result
+        raise AssertionError("unreachable")
 
     # ── helpers ────────────────────────────────────────────
     async def _compress(self, summary: str, old: Sequence[dict[str, str]]) -> str:
@@ -482,14 +788,14 @@ class ChatRuntime:
         return str(parsed.get("summary") or "")[:2000]
 
     def _record_tool(
-        self, tool: ToolName, args: Mapping[str, Any], result: ToolResult, latency: int
+        self, tool: str | ToolName, args: Mapping[str, Any], result: ToolResult, latency: int
     ) -> None:
         # 先在内存留痕，graph 结束后由 persist 统一短事务落库，避免 LLM 等待期间持有长事务。
         self._tool_logs = getattr(self, "_tool_logs", [])
         self._tool_logs.append(
             {
                 "seq": self._tool_seq,
-                "tool_name": tool.value,
+                "tool_name": getattr(tool, "value", str(tool)),
                 "args": to_jsonable(args),
                 "result": to_jsonable(result),
                 "status": result.status.value,
@@ -561,6 +867,41 @@ class ChatRuntime:
         return list(getattr(self, "_llm_logs", []))
 
 
+class _RuntimeToolTrace(ToolTraceSink):
+    """把执行器留痕接回 ChatRuntime 的内存日志；事件在 P0-4 再接 SSE。"""
+
+    def __init__(self, runtime: ChatRuntime) -> None:
+        self.runtime = runtime
+
+    async def record_tool_call(
+        self, call: ToolCall, result: ToolResult, ctx: ToolContext
+    ) -> None:
+        self.runtime._tool_seq += 1
+        self.runtime._record_tool(
+            result.tool, call.args, result, result.latency_ms or 0
+        )
+
+    async def emit(self, event: Mapping[str, Any]) -> None:
+        kind = str(event.get("kind") or "tool.call")
+        payload = {key: value for key, value in event.items() if key != "kind"}
+        self.runtime._emit(kind, "execute", payload)
+
+
+def _args_summary(args: Mapping[str, Any]) -> dict[str, Any]:
+    allowed = {
+        "period",
+        "security",
+        "round_id",
+        "metric_id",
+        "taxonomy",
+        "sort",
+        "sort_dir",
+        "limit",
+        "flag",
+    }
+    return {key: value for key, value in args.items() if key in allowed}
+
+
 def _tools_for(understanding: Understanding) -> list[tuple[ToolName, dict[str, Any]]]:
     period = (
         understanding.period.value if understanding.period and understanding.period.value else None
@@ -580,21 +921,30 @@ def _tools_for(understanding: Understanding) -> list[tuple[ToolName, dict[str, A
     tools: list[tuple[ToolName, dict[str, Any]]] = []
     for intent in understanding.intents[:2]:
         if intent in {Intent.ASSETS, Intent.PORTFOLIO}:
-            tools.append((ToolName.ASSETS_QUERY, {**args, "limit": 30}))
+            tools.append((ToolName.ASSETS_QUERY, {**args, "limit": 1000}))
             tools.append((ToolName.PORTFOLIO_SNAPSHOT, {}))
         elif intent is Intent.PERFORMANCE:
             tools.append((ToolName.PERFORMANCE_METRICS, {**args}))
         elif intent is Intent.ATTRIBUTION:
             tools.append((ToolName.ATTRIBUTION_SUMMARY, {**args}))
         elif intent is Intent.ROUNDS:
-            tools.append((ToolName.ROUNDS_QUERY, {**args, "limit": 20}))
+            round_args: dict[str, Any] = {**args, "limit": 1000}
+            if any(
+                word in understanding.resolved_query for word in ("亏损最多", "亏得最多", "最亏")
+            ):
+                round_args.update({"sort": "pnl", "sort_dir": "asc"})
+            elif any(
+                word in understanding.resolved_query for word in ("盈利最多", "赚得最多", "最赚")
+            ):
+                round_args.update({"sort": "pnl", "sort_dir": "desc"})
+            tools.append((ToolName.ROUNDS_QUERY, round_args))
         elif intent is Intent.ROUND_DETAIL:
             if round_id:
                 tools.append((ToolName.ROUND_DETAIL, {"round_id": round_id}))
             else:
-                tools.append((ToolName.ROUNDS_QUERY, {**args, "limit": 20}))
+                tools.append((ToolName.ROUNDS_QUERY, {**args, "limit": 1000}))
         elif intent is Intent.TRADES:
-            tools.append((ToolName.TRADES_QUERY, {**args, "limit": 50}))
+            tools.append((ToolName.TRADES_QUERY, {**args, "limit": 1000}))
         elif intent is Intent.NAV:
             tools.append((ToolName.NAV_SUMMARY, {**args}))
         elif intent is Intent.SECTORS:
@@ -655,6 +1005,43 @@ def _result_from_dict(data: Mapping[str, Any]) -> ToolResult:
     )
 
 
+class _ClaimIn(BaseModel):
+    claim_id: str = ""
+    text: str = ""
+    citation_ids: list[str] = Field(default_factory=list)
+
+    @field_validator("citation_ids", mode="before")
+    @classmethod
+    def _ids(cls, value: Any) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [value]
+        return [str(item) for item in value]
+
+
+class _AnswerIn(BaseModel):
+    answer_markdown: str = ""
+    claims: list[_ClaimIn] = Field(default_factory=list)
+    used_citations: list[str] = Field(default_factory=list)
+    confidence: str = "medium"
+    followups: list[str] = Field(default_factory=list)
+
+    @field_validator("answer_markdown", mode="before")
+    @classmethod
+    def _text(cls, value: Any) -> str:
+        return "" if value is None else str(value)
+
+    @field_validator("used_citations", "followups", mode="before")
+    @classmethod
+    def _strings(cls, value: Any) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [value]
+        return [str(item) for item in value]
+
+
 def _parse_answer(content: str) -> dict[str, Any]:
     try:
         parsed = json.loads(content)
@@ -664,7 +1051,28 @@ def _parse_answer(content: str) -> dict[str, Any]:
         parsed = json.loads(repair_json(content))
     if not isinstance(parsed, dict):
         raise ValueError("answer 不是 JSON object")
-    return parsed
+    return _AnswerIn.model_validate(parsed).model_dump()
+
+
+def _compact_results_for_llm(
+    results: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """给 LLM 的证据包瘦身：保留行数据/引用，去掉长词表，最多 10 行。"""
+    compacted: list[dict[str, Any]] = []
+    for result in results:
+        data = result.get("data")
+        if not isinstance(data, dict):
+            compacted.append(dict(result))
+            continue
+        slim = dict(data)
+        slim.pop("flag_glossary", None)
+        slim.pop("flag_config", None)
+        items = slim.get("items")
+        if isinstance(items, list) and len(items) > 10:
+            slim["items"] = items[:10]
+            slim["items_truncated_for_llm"] = True
+        compacted.append({**result, "data": slim})
+    return compacted
 
 
 def _allowed_numbers(results: Sequence[Mapping[str, Any]]) -> set[str]:
@@ -689,13 +1097,21 @@ def _allowed_numbers(results: Sequence[Mapping[str, Any]]) -> set[str]:
 
 def _next_focus(focus: Mapping[str, Any], understanding: Understanding) -> dict[str, Any]:
     out = dict(focus)
+    # 清理旧版本可能写入的空证券/期间词焦点，避免污染下一轮给模型的 focus。
+    for key in ("security_code", "security_name", "round_id", "metric_id"):
+        if not out.get(key):
+            out.pop(key, None)
+    if out.get("security_name") in {"本月", "这个月", "上个月", "今年"} and not out.get(
+        "security_code"
+    ):
+        out.pop("security_name", None)
     for entity in understanding.entities:
-        if entity.type == "security":
+        if entity.type == "security" and (entity.resolved_id or entity.resolved_name):
             out["security_code"] = entity.resolved_id
             out["security_name"] = entity.resolved_name
-        elif entity.type == "round":
+        elif entity.type == "round" and entity.resolved_id:
             out["round_id"] = entity.resolved_id
-        elif entity.type == "metric":
+        elif entity.type == "metric" and entity.resolved_id:
             out["metric_id"] = entity.resolved_id
     if understanding.period and understanding.period.value:
         out["period"] = understanding.period.value

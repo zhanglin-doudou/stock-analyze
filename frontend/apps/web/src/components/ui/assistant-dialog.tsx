@@ -3,8 +3,8 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { cn } from "@/lib/utils";
 
 /**
- * 星星助手专用 Dialog：保留 Radix 的焦点陷阱/Esc 关闭，
- * 但使用 fixed 悬浮面板而不是页面中央的遮罩模态框。
+ * 星星助手专用 Dialog：使用非模态 fixed 悬浮面板，保留 Esc 关闭，
+ * 外部页面仍可交互，且点击外部不会关闭助手。
  */
 const AssistantDialog = DialogPrimitive.Root;
 const AssistantDialogTrigger = DialogPrimitive.Trigger;

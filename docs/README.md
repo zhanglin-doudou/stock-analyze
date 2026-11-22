@@ -16,6 +16,7 @@
 | 知道**测试怎么做**、覆盖率门禁 | [architecture/v2/Testing.md](architecture/v2/Testing.md) |
 | 知道**怎么上线/兜底/恢复** | [architecture/v2/Reliability.md](architecture/v2/Reliability.md) |
 | 知道**加功能要改哪里** | [architecture/v2/Extensibility.md](architecture/v2/Extensibility.md) |
+| 知道**怎么部署/上线准入** | [DEPLOYMENT.md](DEPLOYMENT.md) — Docker + Traefik 准入清单（DEV-PLAN §5 的执行版） |
 | 知道**先写什么、每期怎么本地验** | [DEV-PLAN-v2.md](DEV-PLAN-v2.md) — 三期开发清单（45 任务 / 96.0 人日） |
 | 搞懂**账单导入**（认列/认类型/对账/隔离及下游影响） | [help/2026-11-18-bill-import-guide.md](help/2026-11-18-bill-import-guide.md) |
 | 知道**为什么这么决策** | [architecture/v2/ADR.md](architecture/v2/ADR.md) |
@@ -28,6 +29,8 @@
 ```
 docs/
 ├── Architecture-v2.md              # 主架构（前置"可验收 API 清单"）
+├── DATABASE.md                     # 数据库安装 / 角色模型 / 迁移 / 日常 SQL
+├── DEPLOYMENT.md                   # ★ 部署准入清单：Docker + Traefik（D-01~D-07 执行版）
 ├── DEV-PLAN-v2.md                  # ★ 开发清单：一期/二期/三期 + 交付；每期本地可验证脚本
 ├── prd/
 │   └── PRD-v2.md                   # 需求基线 v2.0（28 FR + 15 NFR，每条带 API 验收）
@@ -42,7 +45,7 @@ docs/
     └── ADR.md                     # ADR-0013~0026（取代链）
 ```
 
-**关键数字**：88 端点 ｜ 28/28 FR + 15/15 NFR 覆盖 ｜ 44 张表（36 业务 + 8 公共缓存） ｜ 12 扩展点 ｜ 可用性 ≥99.9% ｜ RPO ≤5min / RTO ≤30min ｜ core 覆盖 100/100。
+**关键数字**：118 端点 ｜ 28/28 FR + 15/15 NFR 覆盖 ｜ 46 张表（38 业务 + 8 公共缓存） ｜ 12 扩展点 ｜ 可用性 ≥99.9% ｜ RPO ≤5min / RTO ≤30min ｜ core 覆盖 100/100。
 
 **一期验收（2026-10-20）**：[reviews/Period1-CodeReview-and-Acceptance.md](reviews/Period1-CodeReview-and-Acceptance.md) — 代码审查 + 一期验收报告，结论：**不通过**（5 项 P0 / 17 项 P1 待修，含真账单对账假断链、`replace_range` 数据丢失、admin PAT 越权、撤销入口缺失、verify-p1 空心）。
 > **修复进展（2026-10-21）**：5 项 P0 已全部修复并复验 — [P0-2/P0-3](reviews/Period1-Fix-Log-P0-2-P0-3.md)（数据丢失 / admin PAT）、[P0-1/P0-4/P0-5](reviews/Period1-Fix-Log-P0-1-P0-4-P0-5.md)（真实账对账 / 撤销 UI / 门禁与契约）；`make verify-p1` 15/15 全绿。剩余 P1/P2 见审查报告。

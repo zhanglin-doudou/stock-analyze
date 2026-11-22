@@ -7,10 +7,11 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import hashlib
 import json
 from collections.abc import AsyncIterator
-from typing import Annotated, Any
+from typing import Annotated, Any, cast
 
 from fastapi import APIRouter, Depends, Header, Query, Request, Response
 from fastapi.responses import StreamingResponse
@@ -18,9 +19,12 @@ from stock_contracts.chat.enums import ToolName
 from stock_contracts.errors import ApiError, ErrorCode
 from stock_delivery.chat.graph import build_graph
 from stock_delivery.chat.runtime import ChatRuntime, to_jsonable
+from stock_delivery.chat.tools import ToolExecutor, ToolRegistry
+from stock_platform import audit
 from stock_platform.repositories.chat import ChatRepository
 from stock_platform.tenant import TenantContext
 from stock_review.application.chat.facade import ChatQueryFacade
+from stock_review.application.chat.provider import BuiltinToolProvider
 
 from stock_api.deps import get_state, get_tenant
 from stock_api.routing import StrictQueryRoute
@@ -29,12 +33,15 @@ from stock_api.schemas import (
     ChatClaimOut,
     ChatContextUsageOut,
     ChatConversationOut,
+    ChatEventsOut,
     ChatHistoryMessageOut,
     ChatMessageIn,
     ChatMessageOut,
     ChatReplayIn,
     ChatReplayOut,
     ChatSessionOut,
+    ChatTimelineEventOut,
+    ChatTimelineSummaryOut,
     ChatTraceOut,
 )
 
@@ -161,39 +168,37 @@ async def send_message(
         )
         await repo.update_turn(user_id, str(turn["id"]), user_message_id=user_message["id"])
 
-        facade = ChatQueryFacade(
-            session,
-            user_id=user_id,
-            clock=state.clock,
-            market_data=state.market_data,
-            sector_data=state.sector_data,
-            settings=state.settings,
-        )
-        runtime = ChatRuntime(
-            repo=repo,
-            data_port=facade,
-            llm=state.llm,
-            clock=state.clock,
-            settings=state.settings,
-            user_id=user_id,
-            conversation=conversation,
-            turn_id=str(turn["id"]),
-            question=question,
-            user_message_id=str(user_message["id"]),
-        )
-        graph = build_graph(runtime)
-        try:
-            final = await graph.ainvoke({"question": question})
-        except Exception as exc:
-            await repo.update_turn(
-                user_id,
-                str(turn["id"]),
-                status="error",
-                degrade_reason="TOOL_UNAVAILABLE",
-                latency_ms=0,
-            )
-            raise ApiError(ErrorCode.LLM_UNAVAILABLE, detail=str(exc)[:200]) from exc
+        # 预检/建回合提交后，SSE 走独立会话实时推事件；JSON 走短事务跑图。
+        turn_id = str(turn["id"])
+        user_message_id = str(user_message["id"])
 
+    if _wants_sse(request):
+        return StreamingResponse(
+            _stream_live_turn(
+                state=state,
+                user_id=user_id,
+                conversation=conversation,
+                turn_id=turn_id,
+                user_message_id=user_message_id,
+                question=question,
+                idempotency_key=idempotency_key,
+            ),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+                "Connection": "keep-alive",
+            },
+        )
+
+    runtime, final = await _run_turn(
+        state=state,
+        user_id=user_id,
+        conversation=conversation,
+        turn_id=turn_id,
+        user_message_id=user_message_id,
+        question=question,
+    )
     result = _message_out(
         runtime=runtime,
         conversation_id=str(conversation["id"]),
@@ -276,12 +281,56 @@ async def get_trace(
         if trace is None:
             raise ApiError(ErrorCode.NOT_FOUND, detail="回合不存在")
         turn, tools, llms = trace
+        events = await repo.list_events(user_id, turn_id)
+        timeline = _timeline_out(events) if events else _synthetic_timeline(tools, llms)
         answer: dict[str, Any] = {}
         if turn.get("assistant_message_id"):
             message = await repo.get_message(user_id, str(turn["assistant_message_id"]))
             if message is not None:
                 answer = message.get("content_json") or {"answer": message.get("content")}
-    return ChatTraceOut(turn=turn, tool_calls=tools, llm_calls=llms, answer=answer)
+    return ChatTraceOut(
+        turn=turn,
+        tool_calls=tools,
+        llm_calls=llms,
+        events=timeline,
+        answer=answer,
+    )
+
+
+@router.get(
+    "/chat/turns/{turn_id}/events",
+    response_model=ChatEventsOut,
+    operation_id="getChatTurnEvents",
+)
+async def get_turn_events(
+    turn_id: str,
+    request: Request,
+    ctx: Annotated[TenantContext, Depends(get_tenant)],
+    after_seq: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[int, Query(ge=1, le=100)] = 100,
+) -> ChatEventsOut:
+    """API-116：单轮执行过程事件（owner；after_seq 增量补齐）。"""
+    ctx.forbid_admin_trades()
+    user_id = ctx.require_user()
+    state = get_state(request)
+    async with state.db.session(user_id=user_id, begin=True) as session:
+        repo = ChatRepository(session)
+        trace = await repo.get_trace(user_id, turn_id)
+        if trace is None:
+            raise ApiError(ErrorCode.NOT_FOUND, detail="回合不存在")
+        events = await repo.list_events(user_id, turn_id, after_seq=after_seq, limit=limit)
+        _, tools, llms = trace
+    synthetic = not events and after_seq == 0
+    items = _timeline_out(events) if events else _synthetic_timeline(tools, llms)
+    if synthetic:
+        items = [item for item in items if item.seq > after_seq][:limit]
+    next_seq = items[-1].seq if items else after_seq
+    return ChatEventsOut(
+        items=items,
+        next_seq=next_seq,
+        complete=len(items) < limit,
+        synthetic=synthetic,
+    )
 
 
 @router.post(
@@ -384,8 +433,228 @@ async def delete_conversation(
     user_id = ctx.require_write()
     state = get_state(request)
     async with state.db.session(user_id=user_id, begin=True) as session:
-        await ChatRepository(session).reset_conversation(user_id=user_id)
+        repo = ChatRepository(session)
+        await audit.record(
+            session,
+            action="chat.conversation.delete",
+            actor_id=user_id,
+            target_type="chat_conversation",
+            target_id=str(user_id),
+            meta={"hard_delete": True, "timeline": "cleared"},
+            request_id=request.headers.get("x-request-id"),
+            source="api",
+        )
+        await repo.delete_conversation(user_id=user_id)
     return Response(status_code=204)
+
+
+def _make_runtime(
+    *,
+    session: Any,
+    state: Any,
+    user_id: Any,
+    conversation: dict[str, Any],
+    turn_id: str,
+    user_message_id: str,
+    question: str,
+    on_event: Any = None,
+) -> ChatRuntime:
+    facade = ChatQueryFacade(
+        session,
+        user_id=user_id,
+        clock=state.clock,
+        market_data=state.market_data,
+        sector_data=state.sector_data,
+        settings=state.settings,
+    )
+    registry: ToolRegistry | None = None
+    executor: ToolExecutor | None = None
+    if state.settings.tool_platform_enabled:
+        builtin = BuiltinToolProvider(facade)
+        registry = ToolRegistry()
+        for spec in builtin.specs():
+            registry.register(spec, builtin)
+        executor = ToolExecutor(max_calls_per_turn=state.settings.chat_max_tool_calls)
+    return ChatRuntime(
+        repo=ChatRepository(session),
+        data_port=facade,
+        llm=state.llm,
+        clock=state.clock,
+        settings=state.settings,
+        user_id=user_id,
+        conversation=conversation,
+        turn_id=turn_id,
+        question=question,
+        user_message_id=user_message_id,
+        tool_registry=registry,
+        tool_executor=executor,
+        on_event=on_event,
+    )
+
+
+async def _run_turn(
+    *,
+    state: Any,
+    user_id: Any,
+    conversation: dict[str, Any],
+    turn_id: str,
+    user_message_id: str,
+    question: str,
+) -> tuple[ChatRuntime, dict[str, Any]]:
+    async with state.db.session(user_id=user_id, begin=True) as session:
+        runtime = _make_runtime(
+            session=session,
+            state=state,
+            user_id=user_id,
+            conversation=conversation,
+            turn_id=turn_id,
+            user_message_id=user_message_id,
+            question=question,
+        )
+        graph = build_graph(runtime)
+        try:
+            final = await graph.ainvoke({"question": question})
+        except Exception as exc:
+            await ChatRepository(session).update_turn(
+                user_id,
+                turn_id,
+                status="error",
+                degrade_reason="TOOL_UNAVAILABLE",
+                latency_ms=0,
+            )
+            raise ApiError(ErrorCode.LLM_UNAVAILABLE, detail=str(exc)[:200]) from exc
+    return runtime, final
+
+
+async def _stream_live_turn(
+    *,
+    state: Any,
+    user_id: Any,
+    conversation: dict[str, Any],
+    turn_id: str,
+    user_message_id: str,
+    question: str,
+    idempotency_key: str | None,
+) -> AsyncIterator[str]:
+    """SSE 实时流：图在后台任务跑，事件一产生就推给前端。"""
+    yield _sse_event(
+        "meta",
+        {
+            "turn_id": turn_id,
+            "conversation_id": str(conversation["id"]),
+            "status": "running",
+            "llm_used": False,
+            "fallback": False,
+            "degrade_reason": None,
+            "degrade_message": None,
+            "timeline_version": 1,
+        },
+        event_id=0,
+    )
+    queue: asyncio.Queue[dict[str, Any] | None] = asyncio.Queue()
+    runtime: ChatRuntime | None = None
+    final: dict[str, Any] | None = None
+    task: asyncio.Task[dict[str, Any]] | None = None
+    try:
+        async with state.db.session(user_id=user_id, begin=True) as session:
+            repo = ChatRepository(session)
+            runtime = _make_runtime(
+                session=session,
+                state=state,
+                user_id=user_id,
+                conversation=conversation,
+                turn_id=turn_id,
+                user_message_id=user_message_id,
+                question=question,
+                on_event=queue.put_nowait,
+            )
+            graph = build_graph(runtime)
+
+            async def _run() -> dict[str, Any]:
+                try:
+                    return cast(dict[str, Any], await graph.ainvoke({"question": question}))
+                finally:
+                    queue.put_nowait(None)
+
+            task = asyncio.create_task(_run())
+            try:
+                while True:
+                    event = await queue.get()
+                    if event is None:
+                        break
+                    yield _sse_event("step", event, event_id=int(event["seq"]))
+                final = await task
+            except Exception as exc:
+                with contextlib.suppress(Exception):
+                    await repo.update_turn(
+                        user_id,
+                        turn_id,
+                        status="error",
+                        degrade_reason="TOOL_UNAVAILABLE",
+                        latency_ms=0,
+                    )
+                yield _sse_event(
+                    "error",
+                    {
+                        "code": "LLM_UNAVAILABLE",
+                        "user_message": "智能分析服务暂时不可用",
+                        "what_to_do": "稍后重试，或缩小时间范围。",
+                        "retryable": True,
+                        "detail": str(exc)[:200],
+                    },
+                )
+                return
+            finally:
+                if task is not None and not task.done():
+                    task.cancel()
+    except Exception as exc:
+        yield _sse_event(
+            "error",
+            {
+                "code": "LLM_UNAVAILABLE",
+                "user_message": "智能分析服务暂时不可用",
+                "what_to_do": "稍后重试。",
+                "retryable": True,
+                "detail": str(exc)[:200],
+            },
+        )
+        return
+
+    assert runtime is not None and final is not None
+    result = _message_out(
+        runtime=runtime,
+        conversation_id=str(conversation["id"]),
+        turn_id=turn_id,
+        final=final,
+    )
+    if idempotency_key:
+        try:
+            async with state.db.session(user_id=user_id, begin=True) as idem_session:
+                await state.idempotency.complete(
+                    idem_session,
+                    user_id=user_id,
+                    endpoint="chat.message",
+                    key=idempotency_key,
+                    status_code=200,
+                    body=result.model_dump(mode="json"),
+                )
+        except Exception:
+            # 时间线已经流出，幂等落库失败不阻断 done；下次同 key 仍会重新执行。
+            pass
+    text = result.answer or ""
+    for offset in range(0, len(text), 48):
+        yield _sse_event("delta", {"text": text[offset : offset + 48]})
+        await asyncio.sleep(0.02)
+    yield _sse_event(
+        "done",
+        {
+            "message": result.model_dump(mode="json"),
+            "timeline": result.timeline_summary.model_dump(mode="json")
+            if result.timeline_summary
+            else None,
+        },
+        event_id=result.timeline[-1].seq if result.timeline else 0,
+    )
 
 
 def _wants_sse(request: Request) -> bool:
@@ -407,8 +676,9 @@ def _stream_or_json(result: ChatMessageOut, request: Request) -> ChatMessageOut 
     )
 
 
-def _sse_event(event: str, data: dict[str, Any]) -> str:
-    return f"event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+def _sse_event(event: str, data: dict[str, Any], *, event_id: int | None = None) -> str:
+    prefix = f"id: {event_id}\n" if event_id is not None else ""
+    return f"{prefix}event: {event}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
 
 
 async def _sse_events(result: ChatMessageOut) -> AsyncIterator[str]:
@@ -422,14 +692,28 @@ async def _sse_events(result: ChatMessageOut) -> AsyncIterator[str]:
             "fallback": result.fallback,
             "degrade_reason": result.degrade_reason,
             "degrade_message": result.degrade_message,
+            "timeline_version": 1,
         },
+        event_id=0,
     )
+    for event in result.timeline:
+        yield _sse_event("step", event.model_dump(mode="json"), event_id=event.seq)
+        await asyncio.sleep(0.005)
     text = result.answer or ""
     for offset in range(0, len(text), 48):
         yield _sse_event("delta", {"text": text[offset : offset + 48]})
         # 让 ASGI 有机会按 chunk flush，前端才能看到增量而不是一帧全量。
         await asyncio.sleep(0.02)
-    yield _sse_event("done", {"message": result.model_dump(mode="json")})
+    yield _sse_event(
+        "done",
+        {
+            "message": result.model_dump(mode="json"),
+            "timeline": result.timeline_summary.model_dump(mode="json")
+            if result.timeline_summary
+            else None,
+        },
+        event_id=result.timeline[-1].seq if result.timeline else 0,
+    )
 
 
 def _strip_latency(value: Any) -> Any:
@@ -442,6 +726,67 @@ def _strip_latency(value: Any) -> Any:
     if isinstance(value, list):
         return [_strip_latency(item) for item in value]
     return value
+
+
+def _synthetic_timeline(
+    tools: list[dict[str, Any]], llms: list[dict[str, Any]]
+) -> list[ChatTimelineEventOut]:
+    """旧回合/超 180 天：用 tool/llm trace 合成最小时间线。"""
+    items: list[ChatTimelineEventOut] = []
+    for seq, tool in enumerate(tools, start=1):
+        status = str(tool.get("status") or "")
+        items.append(
+            ChatTimelineEventOut(
+                seq=seq,
+                kind="tool.call.succeeded" if status == "ok" else "tool.call.failed",
+                phase="execute",
+                call_id=f"call_{tool.get('seq', seq)}",
+                step=1,
+                at=str(tool.get("created_at") or ""),
+                payload={
+                    "tool": str(tool.get("tool") or ""),
+                    "status": status,
+                    "row_count": int(tool.get("row_count") or 0),
+                    "latency_ms": int(tool.get("latency_ms") or 0),
+                    "error_code": tool.get("error_code"),
+                    "synthetic": True,
+                },
+            )
+        )
+    for offset, llm in enumerate(llms, start=len(items) + 1):
+        items.append(
+            ChatTimelineEventOut(
+                seq=offset,
+                kind="model.thinking.completed",
+                phase="think",
+                at=str(llm.get("created_at") or ""),
+                payload={
+                    "purpose": str(llm.get("purpose") or ""),
+                    "status": str(llm.get("status") or ""),
+                    "latency_ms": int(llm.get("latency_ms") or 0),
+                    "synthetic": True,
+                },
+            )
+        )
+    return items
+
+
+def _timeline_out(events: list[dict[str, Any]]) -> list[ChatTimelineEventOut]:
+    out: list[ChatTimelineEventOut] = []
+    for event in events:
+        payload = event.get("payload") or {}
+        out.append(
+            ChatTimelineEventOut(
+                seq=int(event["seq"]),
+                kind=str(event["kind"]),
+                phase=str(event["phase"]),
+                call_id=payload.get("call_id"),
+                step=payload.get("step"),
+                at=str(event.get("at") or event.get("created_at")),
+                payload=payload,
+            )
+        )
+    return out
 
 
 def _message_out(
@@ -477,6 +822,8 @@ def _message_out(
         to_jsonable(runtime.context_usage) if runtime.context_usage else None
     )
     understanding = to_jsonable(runtime.understanding) if runtime.understanding else {}
+    timeline = _timeline_out(runtime.events())
+    summary = runtime.timeline_summary()
     return ChatMessageOut(
         conversation_id=conversation_id,
         turn_id=turn_id,
@@ -493,4 +840,6 @@ def _message_out(
         fallback=bool(answer.get("fallback")),
         understanding=understanding,
         context_usage=ChatContextUsageOut(**usage) if isinstance(usage, dict) else None,
+        timeline=timeline,
+        timeline_summary=ChatTimelineSummaryOut(**summary),
     )

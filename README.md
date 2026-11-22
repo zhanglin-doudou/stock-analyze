@@ -12,9 +12,10 @@
 > - **Period2-20 导入映射重构（2026-11-13）**：迁移 `0015_import_mapping_v2`，两阶段导入确认（列映射 API-098 → 账单类型 API-099 → 提交 API-011）、预览刷新 API-106、列映射模板 API-100/101、管理员列规则 API-102~105；追加平安证券预设 `sys:pingan`、券商模板锁定与预设类型复制。v2 由请求头 `X-Import-Flow: v2` 显式开启，旧客户端保持 legacy 严格 422 行为。
 > - **2026-11-15~19 增量（未在原 DEV-PLAN 任务表内）**：超卖卖出人工修订 API-107~109（注入资金腿+买入腿、可撤回、重算回合/资产）；账单数据治理 API-110（重置本人账单数据）与 API-111（旗标重建状态/未覆盖原因）；前端 Tailwind + Radix 组件层**全局化**（取代导入页 H-1 限定域）；行情 `sync-market` 改增量同步并输出未到当日证券；货基口径收口至 2.4、送股/转增并入 `rights`。
 > - **智能分析助手（2026-11-20，前后端已落地）**：迁移 `0020_chat_assistant` + `0021_chat_message_status_width`（单会话/消息/轮次/工具/LLM 调用 5 表 + RLS）；GLM-4.7-Flash / GLM-4-Flash provider；`ChatQueryFacade` 10 个只读工具（含资产表、流水/回合旗标 + 顶层解释）；10 轮/160K 压缩；语义理解/指代；LangGraph 单轮编排；API-077/078/112~115；回放 deterministic/llm/full；前端悬浮窗「星星助手」+ 数据菜单「问答历史」已接入 assistant-ui；回答通过 SSE 增量显示。设计见 [完整开发设计](docs/architecture/2026-11-20-intelligent-assistant-design.md)。
+> - **邮箱验证码 + 忘记密码（2026-11-22）**：迁移 `0023_email_verification`，新增 API-117/118/119：注册邮箱验证码、认证验证策略、找回密码（全量 refresh/PAT 撤销）；阿里云 DM 默认凭据、精确 60s IP/邮箱冷却、10 分钟 TTL、10 次失败锁定；前端注册页验证码、登录页找回入口与 `/forgot-password`。设计见 [2026-11-22-email-verification](docs/architecture/2026-11-22-email-verification.md)。
 > - **二期剩余（6 项）**：月报（2-09，含归因同源 09b）、导出（2-10）、设置基准/隐私 API-056/057（2-11 收尾）、报告/导出前端页（2-13）、`verify-p2` 与越权全量（2-14）、前端零口径 ESLint 门禁（2-15）。`/reports`、`/exports` 仍是占位入口，验收按缺失清单 SKIP，不伪造数据。
 > - **三期 / 交付**：均未开始。
-> - **进度口径**：原始规划 55 项任务中，30 项完成、2 项部分完成（2-11 设置收尾、2-15 零口径门禁基础规则）、23 项未开始；Period3-07 后端已落地但前端/完整验收未完成，暂不计入完成。按 DEV-PLAN 估时剩余约 **40 人日**（二期 9 + 三期 23 + 交付 8），约占最初 96 人日基线的 **42%**。端点：API-Catalog 登记 114 个，已实现 85 个，未实现 29 个（集中在二期暂停项与三期）。详见 [DEV-PLAN §0.6](docs/DEV-PLAN-v2.md#06-2026-11-19-进度快照)。
+> - **进度口径**：原始规划 55 项任务中，30 项完成、2 项部分完成（2-11 设置收尾、2-15 零口径门禁基础规则）、23 项未开始；Period3-07 后端已落地但前端/完整验收未完成，暂不计入完成。按 DEV-PLAN 估时剩余约 **40 人日**（二期 9 + 三期 23 + 交付 8），约占最初 96 人日基线的 **42%**。端点：API-Catalog 登记 118 个，已实现 89 个，未实现 29 个（集中在二期暂停项与三期）。详见 [DEV-PLAN §0.6](docs/DEV-PLAN-v2.md#06-2026-11-19-进度快照)。
 >
 > 设计与验收记录见 [Dashboard 设计](docs/architecture/2026-10-28-dashboard.md)、[月度报告设计](docs/architecture/2026-10-28-monthly-report.md)、[S10 验收记录](docs/reviews/2026-10-27-p207-S10-acceptance.md)、[回合洞察设计](docs/architecture/2026-11-04-fifo-round-insights.md)。
 
@@ -315,14 +316,14 @@ STOCK_DB_PORT=5433 make test-p2     # 显式指向 Docker 库（不改 .env 的 
 
 - Period2-09 月报（含归因同源接入 09b）、Period2-10 导出、Period2-11 剩余的基准/隐私 API-056/057、Period2-13 报告/导出页、Period2-14 `verify-p2` 与越权全量、Period2-15 前端零口径 ESLint 门禁——共 6 项，约 9 人日。其中 2-15 已有 `parseFloat/parseInt/Number/toFixed` 基础规则与全 src 扫描，尚缺禁算术/禁结论拼接/禁裸 fetch/禁裸术语与 AST 断言。
 - G8 金标结构门禁（`make gate-golden-structure`）已绿；审批门禁仍有 **23 项红灯**（22 个 COVERAGE 夹具缺失 + `perf.fee_breakeven.blocked` 状态不符），`make gate-golden` 会红。
-- 三期（12 项、约 23 人日）与交付阶段（7 项、约 8 人日）未开始；其中 Period3-07 后端已落地，前端 P3 与完整验收待做。
+- 三期（12 项、约 23 人日）未开始；其中 Period3-07 后端已落地，前端 P3 与完整验收待做。交付阶段已开工：Docker/Traefik 编排骨架已落地，进度见 [部署准入清单](docs/DEPLOYMENT.md)。
 - 具体缺失/占位/验收 SKIP 见 [Dashboard 设计 §7](docs/architecture/2026-10-28-dashboard.md) 与 [DEV-PLAN 进度快照](docs/DEV-PLAN-v2.md#06-2026-11-19-进度快照)。
 
 ## 开发约定
 
 - 入口：[AGENTS.md](AGENTS.md)（跨子系统强制约定；仓库无 `AGENT.md`）。
 - 架构：[Architecture-v2](docs/Architecture-v2.md) · 计划：[DEV-PLAN-v2](docs/DEV-PLAN-v2.md) · 契约：[API-Catalog](docs/architecture/v2/API-Catalog.md)
-- 数据库：[docs/DATABASE.md](docs/DATABASE.md) · 测试：[Testing](docs/architecture/v2/Testing.md) · 可靠性/扩展：[Reliability](docs/architecture/v2/Reliability.md) / [Extensibility](docs/architecture/v2/Extensibility.md)
+- 数据库：[docs/DATABASE.md](docs/DATABASE.md) · 部署：[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) · 测试：[Testing](docs/architecture/v2/Testing.md) · 可靠性/扩展：[Reliability](docs/architecture/v2/Reliability.md) / [Extensibility](docs/architecture/v2/Extensibility.md)
 - 关键约定：禁 float、Clock 注入、仓储显式 `user_id`、契约先行、`ApiError(ErrorCode.*)`、跨账号 404、长任务 202 + JobQueue。
 
 ## 文档索引

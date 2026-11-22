@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import json
+
 import pytest
-from stock_delivery.chat.context import ContextManager, estimate_tokens
+from stock_contracts.chat.dto import ContextUsage
+from stock_delivery.chat.context import ContextBundle, ContextManager, estimate_tokens
 
 pytestmark = pytest.mark.no_db
 
@@ -44,3 +47,23 @@ async def test_build_keeps_recent_and_truncates(settings) -> None:
     assert bundle.usage.compressed is True
     assert len(bundle.history) <= 4
     assert bundle.usage.estimated_input_tokens <= manager.input_budget()
+
+
+async def test_understanding_messages_serializes_focus_as_json(settings) -> None:
+    manager = ContextManager(_Repo([]), settings)  # type: ignore[arg-type]
+    bundle = ContextBundle(
+        summary="",
+        focus={"period": "2026-11", "security_code": "", "security_name": None},
+        history=[],
+        usage=ContextUsage(
+            window_turns=10,
+            included_turns=0,
+            estimated_input_tokens=10,
+            summary_version=0,
+        ),
+    )
+    messages = manager.understanding_messages(bundle, "本月有哪些操作")
+    focus = next(item for item in messages if item["content"].startswith("当前焦点（JSON）："))
+    payload = json.loads(focus["content"].removeprefix("当前焦点（JSON）："))
+    assert payload["period"] == "2026-11"
+    assert payload["security_code"] == ""
