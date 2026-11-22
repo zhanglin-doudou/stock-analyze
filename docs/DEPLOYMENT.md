@@ -207,6 +207,8 @@
 - 角色初始化：在云主机上手工执行 `infra/postgres/init-prod/00-bootstrap.sh`（`PGHOST/PGPORT + STOCK_DB_SUPERUSER` + 三个密码环境变量），幂等；仓库 `00-bootstrap.sql` 仅 dev Docker 用。
 - 密码轮换：云主机 `ALTER ROLE` + 应用侧改 `.env.prod`；改密码不影响已存在数据。
 - 网络边界：5432 **仅对应用主机开放**（安全组收紧）；建议 TLS（`sslmode=require` 可用 `STOCK_DB_*_DSN` 整串覆盖）。
+- `STOCK_DB_HOST` 按拓扑二选一：**独立数据库主机**填其内网 IP/域名；**与应用同机**填 `host.docker.internal`（compose 已加 `host-gateway` 映射，Linux 也生效）。**不要填 `localhost`**（容器内的 localhost 是容器自身）。
+- fail-fast：`make deploy-*` 会拒绝 `.env.prod` 里残留 `REPLACE_ME*` 占位符并列出键名（避免 asyncpg DNS 报错）。
 - 备份/WAL 归档/恢复演练属云主机侧职责（P0-4.2/4.3），不在 Docker 编排内。
 
 ### 3.5 生产弱口令守卫

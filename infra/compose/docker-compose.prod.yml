@@ -15,6 +15,10 @@ x-app: &app
     dockerfile: infra/docker/Dockerfile.api
   env_file:
     - ../.env.prod
+  extra_hosts:
+    # 数据库与应用同机部署时可用 STOCK_DB_HOST=host.docker.internal
+    # （Linux 宿主机也生效；Docker Desktop 自带该域名）
+    - "host.docker.internal:host-gateway"
   networks:
     - sa-net
   init: true

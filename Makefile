@@ -179,6 +179,13 @@ deploy-env-check:
 		echo "   先执行：cp infra/.env.prod.example $(PROD_ENV_FILE) 并填写密钥（该文件已被 gitignore）"; \
 		exit 2; \
 	}
+	@unset=$$(sed -n 's/^\([A-Z0-9_]*\)=REPLACE_ME.*/\1/p' $(PROD_ENV_FILE)); \
+	if [ -n "$$unset" ]; then \
+		echo "❌ $(PROD_ENV_FILE) 仍有未替换的占位符（REPLACE_ME*）:"; \
+		echo "$$unset" | sed 's/^/   - /'; \
+		echo "   逐项填写后重试；数据库地址配置见 docs/DEPLOYMENT.md §3.4"; \
+		exit 2; \
+	fi
 
 .PHONY: deploy-config
 deploy-config: deploy-env-check
