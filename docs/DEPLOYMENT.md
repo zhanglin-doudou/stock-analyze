@@ -302,6 +302,45 @@ sudo docker logs stock-analyze-migrate-1 2>&1 | tail -5     # 期望 upgrade hea
 BASE_URL=https://xingst.site ./scripts/deploy-smoke.sh       # DNS 生效后走公网
 ```
 
+### 6.2 云主机本机构建与替换 + 回滚（推荐）
+
+> 云主机是 x86_64 原生构建（无需交叉编译），docker.io 走 mirror.ccs.tencentyun.com、ghcr.io 可达。
+> **版本化约定**：镜像 tag 用 git sha（`infra/.env.prod` 的 `TAG`），旧镜像留在磁盘上即天然可回滚。
+
+```bash
+# ── ① 代码上服务器（rsync 见 §6.1 ③，或 git pull）后，记录当前版本 ──
+ssh -i ~/.ssh/local_macbp.pem ubuntu@1.15.38.201
+cd ~/stock-analyze
+OLD_TAG=$(sed -n 's/^TAG=//p' infra/.env.prod)          # 记住当前 TAG（回滚目标）
+NEW_TAG=$(git rev-parse --short HEAD 2>/dev/null || date +%Y%m%d%H%M)
+
+# ── ② 构建新镜像（tag=git sha）──
+sed -i "s/^TAG=.*/TAG=$NEW_TAG/" infra/.env.prod
+sudo docker compose --env-file infra/.env.prod -f infra/compose/docker-compose.prod.yml build api web
+
+# ── ③ 替换：api/worker/web 用新镜像重建（migrate 先行）──
+sudo docker compose --env-file infra/.env.prod -f infra/compose/docker-compose.prod.yml up -d --no-build
+
+# ── ④ 验证 ──
+sudo docker compose --env-file infra/.env.prod -f infra/compose/docker-compose.prod.yml ps
+sudo docker logs stock-analyze-migrate-1 2>&1 | tail -5
+./scripts/deploy-smoke.sh
+```
+
+**回滚（一条命令切回旧版本）**
+
+```bash
+cd ~/stock-analyze
+sed -i "s/^TAG=.*/TAG=$OLD_TAG/" infra/.env.prod     # 切回旧 tag
+sudo docker compose --env-file infra/.env.prod -f infra/compose/docker-compose.prod.yml up -d --no-build
+./scripts/deploy-smoke.sh
+```
+
+- 回滚只换镜像，**不执行 `alembic downgrade`**；前提是上一版本兼容当前 DB schema（expand-contract 发布纪律，见 P0-4.4）。
+- `api/worker/migrate` 共用 api 镜像，回滚时一起切换；web 镜像独立同 tag。
+- 旧镜像保留策略：磁盘上至少留最近 3 个 tag，再清 `sudo docker image prune`（勿用 `prune -a` 误删待回滚镜像）。
+- 查询历史版本：`sudo docker images stock-analyze/api` / `stock-analyze/web`。
+
 **DNS/证书未就绪时**：加 `-f infra/compose/docker-compose.local.yml` 起 HTTP 预演（ACME 不需要）。
 **扩容**：`sudo docker compose ... up -d --no-build --scale api=2`；**停止**：`... down`（PG 数据不受影响）。
 **回滚**：重新 `docker load` 旧镜像 + `up -d --no-build`；迁移遵循 expand-contract，不做 downgrade。
