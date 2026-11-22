@@ -150,7 +150,7 @@
 | P0-4.1 | 生产 PG（云主机 5432） | `max_connections` ≥ 估算；`shared_preload_libraries=pg_stat_statements`；5432 仅对应用主机开放（安全组）；建议 TLS | [x] | `max_connections=200`（估算 ~90）、`pg_stat_statements`（含扩展）、慢查询 200ms；公网 5432 实测超时（安全组拦截）+ pg_hba 仅 localhost/`172.16.0.0/12`；TLS 待评估 |
 | P0-4.2 | 备份链路（云主机侧） | WAL 归档 + 每日全量 + `pg_verifybackup`；`stock_backup` 角色只读 | [ ] | 待云主机落实（备份为云主机/云盘职责，不在 Docker 编排内） |
 | P0-4.3 | 恢复演练（云主机侧） | 从全量+PITR 恢复到指定时刻，RTO ≤30min 有计时记录 | [ ] | 待云主机落实；`make restore-drill` 未实现 |
-| P0-4.4 | 零停机发布 | expand-contract 演练脚本 + 回滚说明；滚动升级期间 `readyz` 对旧实例 fail-closed 行为符合预期 | [ ] | expand-contract 演练脚本与回滚说明未写 |
+| P0-4.4 | 零停机发布 | expand-contract 演练脚本 + 回滚说明；滚动升级期间 `readyz` 对旧实例 fail-closed 行为符合预期 | [ ] | 回滚说明已产出（§6.2/§6.3 含 downgrade 示例）；expand-contract 演练与滚动升级实测待做 |
 
 ### P1 定时任务与可观测
 
@@ -340,6 +340,59 @@ sudo docker compose --env-file infra/.env.prod -f infra/compose/docker-compose.p
 - `api/worker/migrate` 共用 api 镜像，回滚时一起切换；web 镜像独立同 tag。
 - 旧镜像保留策略：磁盘上至少留最近 3 个 tag，再清 `sudo docker image prune`（勿用 `prune -a` 误删待回滚镜像）。
 - 查询历史版本：`sudo docker images stock-analyze/api` / `stock-analyze/web`。
+
+### 6.3 完整示例：构建 → 滚动升级 → 迁移回退（downgrade）→ 镜像回滚
+
+> 场景：`$OLD_TAG`（当前线上）→ `$NEW_TAG`（含新迁移），升级后发现问题需要回退。
+> ⚠️ `downgrade` 会**删表/删列，数据不可逆**（如 `0020_chat_assistant` 的 downgrade 删全部 chat 表）。
+> 只在「新版本刚上线、其产生的数据可丢」的补救窗口使用，且升级前必须备份。常规回滚仍优先**只换镜像、不 downgrade**（expand-contract）。
+
+```bash
+ssh -i ~/.ssh/local_macbp.pem ubuntu@1.15.38.201
+cd ~/stock-analyze
+export COMPOSE="sudo docker compose --env-file infra/.env.prod -f infra/compose/docker-compose.prod.yml"
+
+# ── ⓪ 升级前：备份 + 记录迁移版本（必做）──────────────────
+OLD_TAG=$(sed -n 's/^TAG=//p' infra/.env.prod)
+sudo -u postgres pg_dump -Fc stock_analyze > /tmp/backup-$OLD_TAG-$(date +%Y%m%d%H%M).dump
+$COMPOSE run --rm --no-deps migrate alembic -c backend/alembic.ini current   # 记下 revision
+
+# ── ① 构建新镜像 + 滚动升级（api×2 逐副本替换）────────────
+NEW_TAG=$(git rev-parse --short HEAD)
+sed -i "s/^TAG=.*/TAG=$NEW_TAG/" infra/.env.prod
+$COMPOSE build api web
+$COMPOSE up -d --no-build --scale api=2     # Traefik /readyz 自动摘除不健康副本
+
+# ── ② 升级验证 ─────────────────────────────────────────────
+./scripts/deploy-smoke.sh
+curl -s https://xingst.site/version         # 核对 app_version / schema_version
+```
+
+```bash
+# ── ③ 出问题：看迁移版本链，确定回退目标 ───────────────────
+$COMPOSE run --rm --no-deps migrate alembic -c backend/alembic.ini history
+$COMPOSE run --rm --no-deps migrate alembic -c backend/alembic.ini current
+```
+
+```bash
+# ── ④ 版本回退（含迁移；分钟级不可用的补救流程）──────────
+$COMPOSE stop api worker          # 先停新版本，避免新代码打旧 schema
+$COMPOSE run --rm --no-deps migrate alembic -c backend/alembic.ini downgrade -1    # 退一步；或 downgrade <revision>
+sed -i "s/^TAG=.*/TAG=$OLD_TAG/" infra/.env.prod
+$COMPOSE up -d --no-build --scale api=2
+./scripts/deploy-smoke.sh
+```
+
+**要点**
+
+- **顺序铁律：停新 → downgrade → 起旧**。反过来（旧代码 + 新 schema）或漏停（新代码 + 旧 schema）都会让 `readyz` 的 schema 版本校验 fail-closed——这是设计意图，防止错配上线。
+- **纯代码回滚（新版本无迁移）**：跳过 ③④ 的 stop 与 downgrade，直接切 `TAG` 再 `up -d`（零停机，见 §6.2）。
+- `downgrade -1` 只退一步；多步用 `downgrade <revision>`（revision 从 `history` 取）。执行后 `current` 应等于 `$OLD_TAG` 版本代码期望的 schema 版本。
+- downgrade 补救窗口之外的数据丢不起时，**别 downgrade**，用 ⓪ 的备份恢复（P0-4.3 演练目标）：
+
+```bash
+sudo -u postgres pg_restore -d stock_analyze --clean --if-exists /tmp/backup-<旧>.dump
+```
 
 **DNS/证书未就绪时**：加 `-f infra/compose/docker-compose.local.yml` 起 HTTP 预演（ACME 不需要）。
 **扩容**：`sudo docker compose ... up -d --no-build --scale api=2`；**停止**：`... down`（PG 数据不受影响）。
