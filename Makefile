@@ -6,6 +6,9 @@ UV := uv run
 PY := $(UV) python
 ALEMBIC := $(UV) alembic -c backend/alembic.ini
 COMPOSE := docker compose -f infra/compose/docker-compose.dev.yml
+PROD_ENV_FILE ?= infra/.env.prod
+COMPOSE_PROD := docker compose --env-file $(PROD_ENV_FILE) -f infra/compose/docker-compose.prod.yml
+COMPOSE_LOCAL := $(COMPOSE_PROD) -f infra/compose/docker-compose.local.yml
 ENV_FILE := .env
 SUPERUSER ?= $(shell whoami)
 DB_NAME ?= stock_analyze
@@ -25,6 +28,14 @@ help:
 	@echo "  make api            仅起 FastAPI"
 	@echo "  make worker         仅起任务消费者"
 	@echo "  make web            仅起 Vite dev server"
+	@echo "── 部署（Docker + Traefik，见 docs/DEPLOYMENT.md）──────"
+	@echo "  make deploy-config  校验生产编排（需 infra/.env.prod）"
+	@echo "  make deploy-prod    生产全套构建并启动（TLS/ACME）"
+	@echo "  make deploy-local   本地全套预演（HTTP，无 TLS）"
+	@echo "  make deploy-scale N=2       扩 api 副本（Traefik 自动负载均衡）"
+	@echo "  make deploy-down    停止生产编排（保留数据卷）"
+	@echo "  make deploy-logs    跟踪生产日志"
+	@echo "  make deploy-smoke   部署后冒烟（路由/探针/安全头）"
 	@echo "── 数据 ──────────────────────────────────────────────"
 	@echo "  make seed-tenants   造体验账号(1234@dev.com)+A/B/admin 与账单"
 	@echo "  make seed-demo      造体验账号 + 演示数据（含行情回放）"
@@ -159,6 +170,45 @@ worker:
 .PHONY: web
 web:
 	@cd frontend && pnpm --filter web dev
+
+# ── 部署（Docker + Traefik）─────────────────────────────────
+.PHONY: deploy-env-check
+deploy-env-check:
+	@test -f $(PROD_ENV_FILE) || { \
+		echo "❌ 缺少 $(PROD_ENV_FILE)"; \
+		echo "   先执行：cp infra/.env.prod.example $(PROD_ENV_FILE) 并填写密钥（该文件已被 gitignore）"; \
+		exit 2; \
+	}
+
+.PHONY: deploy-config
+deploy-config: deploy-env-check
+	@$(COMPOSE_PROD) config -q
+	@echo "✅ 生产编排配置有效（$(PROD_ENV_FILE)）"
+
+.PHONY: deploy-prod
+deploy-prod: deploy-env-check
+	@$(COMPOSE_PROD) up -d --build
+
+.PHONY: deploy-local
+deploy-local: deploy-env-check
+	@$(COMPOSE_LOCAL) up -d --build
+	@echo "→ http://localhost （HTTP 预演；TLS 必须上云验证，见 docs/DEPLOYMENT.md §4）"
+
+.PHONY: deploy-scale
+deploy-scale: deploy-env-check
+	@$(COMPOSE_PROD) up -d --scale api=$(or $(N),2)
+
+.PHONY: deploy-down
+deploy-down: deploy-env-check
+	@$(COMPOSE_PROD) down
+
+.PHONY: deploy-logs
+deploy-logs: deploy-env-check
+	@$(COMPOSE_PROD) logs -f --tail=200
+
+.PHONY: deploy-smoke
+deploy-smoke:
+	@./scripts/deploy-smoke.sh
 
 # ── 数据 ────────────────────────────────────────────────────
 .PHONY: seed-tenants

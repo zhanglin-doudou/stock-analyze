@@ -7,7 +7,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, computed_field
+from pydantic import Field, computed_field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from stock_contracts.constants import (
     ACCESS_TOKEN_TTL_SECONDS,
@@ -19,6 +19,7 @@ from stock_contracts.constants import (
 )
 
 REPO_ROOT = Path(__file__).resolve().parents[5]
+DEV_JWT_SECRET = "dev-only-insecure-secret-change-me"
 DEFAULT_EMAIL_CODE_PEPPER = "dev-only-email-code-pepper-change-me"
 
 
@@ -54,7 +55,7 @@ class Settings(BaseSettings):
     db_echo: bool = Field(False, alias="STOCK_DB_ECHO")
 
     # ── 认证 ──────────────────────────────────────────────
-    jwt_secret: str = Field("dev-only-insecure-secret-change-me", alias="STOCK_JWT_SECRET")
+    jwt_secret: str = Field(DEV_JWT_SECRET, alias="STOCK_JWT_SECRET")
     jwt_algorithm: str = "HS256"
     access_ttl_seconds: int = Field(ACCESS_TOKEN_TTL_SECONDS, alias="STOCK_ACCESS_TTL_SECONDS")
     refresh_ttl_seconds: int = Field(DEFAULT_REFRESH_TTL_SECONDS, alias="STOCK_REFRESH_TTL_SECONDS")
@@ -188,6 +189,25 @@ class Settings(BaseSettings):
     def llm_enabled(self) -> bool:
         """显式开关：none/local 不调用远端；glm 必须有 key。"""
         return self.llm_provider == "glm" and bool(self.glm_api_key)
+
+    @model_validator(mode="after")
+    def _guard_production_secrets(self) -> Settings:
+        """生产 fail-closed：禁止 dev 默认/过短密钥静默上线（DEPLOYMENT P0-3.3）。
+
+        漏注入时宁可启动失败，也不能用仓库里公开的默认值签发 JWT 或计算验证码哈希。
+        """
+        if self.env != "prod":
+            return self
+        weak: list[str] = []
+        if self.jwt_secret == DEV_JWT_SECRET or len(self.jwt_secret) < 32:
+            weak.append("STOCK_JWT_SECRET")
+        if self.email_code_pepper == DEFAULT_EMAIL_CODE_PEPPER or len(self.email_code_pepper) < 32:
+            weak.append("EMAIL_CODE_PEPPER")
+        if weak:
+            raise ValueError(
+                "生产环境密钥未正确注入（必须覆盖 dev 默认值且 ≥32 字符）: " + ", ".join(weak)
+            )
+        return self
 
     # ── 运维 ──────────────────────────────────────────────
     readyz_timeout_seconds: float = Field(2.0, alias="STOCK_READYZ_TIMEOUT_SECONDS")

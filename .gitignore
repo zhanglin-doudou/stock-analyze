@@ -40,3 +40,9 @@ mutants/
 
 # 本地临时产物（页面截图/调试输出，不入库）
 tmp-shots/
+
+# 生产部署密钥（模板见 infra/.env.prod.example）
+infra/.env.prod
+
+# 本地 buildx 状态（沙箱内构建用）
+.buildx/

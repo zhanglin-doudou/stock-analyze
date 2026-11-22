@@ -1,0 +1,27 @@
+# 本地全套预演：在 prod 编排上关闭 TLS/ACME，仅监听 80（http://localhost）。
+#
+#   docker compose --env-file infra/.env.prod \
+#     -f infra/compose/docker-compose.prod.yml \
+#     -f infra/compose/docker-compose.local.yml up -d --build
+#
+# 用途：验证镜像、迁移、探针、路由、SSE；TLS/证书必须在上云后验证（DEPLOYMENT.md §4）。
+services:
+  traefik:
+    command:
+      - --log.level=INFO
+      - --accesslog=true
+      - --ping=true
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.network=sa-net
+      - --providers.file.directory=/etc/traefik/dynamic
+      - --providers.file.watch=true
+      - --entrypoints.web.address=:80
+
+  api:
+    labels:
+      traefik.http.routers.api.entrypoints: web
+
+  web:
+    labels:
+      traefik.http.routers.web.entrypoints: web

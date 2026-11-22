@@ -264,11 +264,13 @@ make verify-p3
 ## 5. 交付阶段（最后做，≈8 人日）
 
 > 前 3 期一律不写 Dockerfile、不配 nginx、不碰证书。**本地能验完的东西，不要提前上云。**
+>
+> **2026-11-22 决议**：D-01/D-02 的入口方案定为 **Traefik**（替代 nginx 反代），静态站点仍由 web 容器内 nginx 提供；逐项准入清单与验收标准见 [DEPLOYMENT.md](DEPLOYMENT.md)。
 
 | ID | 任务 | 产出 | 本地可预演？ | 人日 |
 |---|---|---|---|---|
-| **D-01** | 生产镜像与编排 | `Dockerfile.api`/`worker`（同镜像多入口）、多阶段构建、`docker-compose.prod.yml`（nginx/api×2/worker/postgres/migrate）、健康检查、资源限制 | ✅ 本地 compose 起全套 | 1.5 |
-| **D-02** | nginx 与同源 | 静态资源、`/api` 反代、gzip、缓存头、安全头（HSTS/CSP）、自签证书演练 | ✅ 本地 https://localhost | 1 |
+| **D-01** | 生产镜像与编排 | `Dockerfile.api`/`worker`（同镜像多入口）、多阶段构建、`docker-compose.prod.yml`（traefik/api×2/worker/postgres/migrate）、健康检查、资源限制 | ✅ 本地 compose 起全套 | 1.5 |
+| **D-02** | Traefik 网关与同源 | 路由、TLS(ACME)、gzip、安全头（HSTS/CSP）、限流、`X-Forwarded-For` 真实 IP 对接、SSE 透传、自签证书演练 | ✅ 本地 http://localhost（TLS 必须上云验证） | 1 |
 | **D-03** | 迁移与零停机 | `migrate` 一次性任务、`readyz` 校验 schema 版本、expand-contract 演练脚本、回滚说明 | ✅ 本地跑两轮发布 | 1.5 |
 | **D-04** | 备份与恢复 | WAL 归档配置、每日全量、`pg_verifybackup` 校验、**PITR 恢复演练脚本** `make restore-drill` | ✅ 本地容器演练 | 1.5 |
 | **D-05** | 安全加固 | 密钥注入、应用角色权限复核、依赖漏洞扫描、OWASP 自查清单、日志脱敏复核 | ✅ 扫描本地镜像 | 1 |
