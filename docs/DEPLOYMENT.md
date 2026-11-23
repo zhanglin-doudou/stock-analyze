@@ -246,6 +246,16 @@
    `http://<服务器IP> { reverse_proxy 127.0.0.1:8002 { ...同上 } }` 供公网访问应用；
    备案通过、域名 HTTPS 可用后删除该临时段（2026-11-23 已在云主机这样配置，冒烟全绿）。
 
+### 3.7 邮件（阿里云 DM）凭据与非阿里云主机（2026-11-23 实战坑）
+
+- `EMAIL_PROVIDER=aliyun` 的凭据走 `alibabacloud_credentials` **默认链**（env → 配置文件 → ECS RAM 角色）。
+- **阿里云 ECS + 实例 RAM 角色**部署可以不写 AK；**非阿里云主机（如腾讯云）必须在 `.env.prod` 显式提供
+  `ALIBABA_CLOUD_ACCESS_KEY_ID` / `ALIBABA_CLOUD_ACCESS_KEY_SECRET`**——否则 SDK 回退访问
+  ECS 元数据服务 `100.100.100.200` 超时，报 `UnretryableException` → 接口 503 `EMAIL_SEND_FAILED`。
+- 宿主机 `~/.aliyun/config.json`（aliyun CLI 配置）**容器内看不到**，不会被应用使用；AK 必须进 env。
+- 建议用 RAM **最小权限用户**（仅授权 DirectMail 发信），不要复用全权限账号 AK。
+- 发信地址 `EMAIL_DM_ACCOUNT_NAME` 须是阿里云 DM 控制台已创建的发信地址、且域名已完成 DM 验证（DNS）。
+
 ---
 
 ## 4. 上云后必测（DEV-PLAN §5 验收单）
@@ -372,6 +382,10 @@ sudo docker compose --env-file infra/.env.prod -f infra/compose/docker-compose.p
 - `api/worker/migrate` 共用 api 镜像，回滚时一起切换；web 镜像独立同 tag。
 - 旧镜像保留策略：磁盘上至少留最近 3 个 tag，再清 `sudo docker image prune`（勿用 `prune -a` 误删待回滚镜像）。
 - 查询历史版本：`sudo docker images stock-analyze/api` / `stock-analyze/web`。
+
+> **Makefile 等价命令（推荐）**：
+> `make deploy-prod` 等价于 ①②③——先把当前 `TAG` 记入 `infra/.deploy-prod.old-tag`（gitignore），再把 `infra/.env.prod` 的 `TAG` 改为 `git rev-parse --short HEAD`，构建 `api web` 后 `up -d --no-build`；
+> 回滚用 `make deploy-fallback-prod`：读回该文件里的旧 TAG、切 `TAG` 后 `up -d --no-build`，**不执行** `alembic downgrade`。
 
 ### 6.3 完整示例：构建 → 滚动升级 → 迁移回退（downgrade）→ 镜像回滚
 

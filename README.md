@@ -341,3 +341,12 @@ STOCK_DB_PORT=5433 make test-p2     # 显式指向 Docker 库（不改 .env 的 
 - [S10 验收记录](docs/reviews/2026-10-27-p207-S10-acceptance.md)
 - [Period2-01/02 实施日志](docs/reviews/Period2-01-02-Implementation-Log.md)
 - [开发计划与进度快照](docs/DEV-PLAN-v2.md) · [PRD](docs/prd/PRD-v2.md)
+
+## 许可协议
+
+本项目采用 [PolyForm Noncommercial License 1.0.0](LICENSE)（SPDX：`PolyForm-Noncommercial-1.0.0`）发布：
+
+- **允许**：个人学习、研究、实验、自用，以及慈善/教育/公共研究/政府等非商业机构的非商业用途；可修改、可分发（须随附许可证与版权声明）。
+- **禁止**：任何商业用途（含企业内部商业经营、付费服务、SaaS 对外收费、商业产品集成等）。
+- 软件按“现状”提供，不附带任何担保；专利与责任条款见 [LICENSE](LICENSE)。
+- **商业授权**：如需商用（闭源集成、内部经营、SaaS 收费等），请联系 **714080803@qq.com** 获取书面商业许可。

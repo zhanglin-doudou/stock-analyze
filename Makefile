@@ -9,6 +9,8 @@ COMPOSE := docker compose -f infra/compose/docker-compose.dev.yml
 PROD_ENV_FILE ?= infra/.env.prod
 COMPOSE_PROD := docker compose --env-file $(PROD_ENV_FILE) -f infra/compose/docker-compose.prod.yml
 COMPOSE_LOCAL := $(COMPOSE_PROD) -f infra/compose/docker-compose.local.yml
+# deploy-prod 把替换前的 TAG 记到该文件，供 deploy-fallback-prod 回滚（gitignore）
+PROD_OLD_TAG_FILE ?= infra/.deploy-prod.old-tag
 ENV_FILE := .env
 SUPERUSER ?= $(shell whoami)
 DB_NAME ?= stock_analyze
@@ -30,7 +32,8 @@ help:
 	@echo "  make web            仅起 Vite dev server"
 	@echo "── 部署（Docker + 宿主 Caddy，见 docs/DEPLOYMENT.md）────"
 	@echo "  make deploy-config  校验生产编排（需 infra/.env.prod）"
-	@echo "  make deploy-prod    生产全套构建并启动（TLS 由宿主 Caddy 负责）"
+	@echo "  make deploy-prod    生产发布：记录旧 TAG → 按 git sha 构建 api/web → up -d --no-build"
+	@echo "  make deploy-fallback-prod  回滚到上次 deploy-prod 记录的旧 TAG（只换镜像）"
 	@echo "  make deploy-local   本地全套预演（HTTP，无 TLS）"
 	@echo "  make deploy-scale N=2       扩 api 副本（nginx 自动发现）"
 	@echo "  make deploy-down    停止生产编排（保留数据卷）"
@@ -193,9 +196,49 @@ deploy-config: deploy-env-check
 	@$(COMPOSE_PROD) config -q
 	@echo "✅ 生产编排配置有效（$(PROD_ENV_FILE)）"
 
+# 生产发布（与 docs/DEPLOYMENT.md §6.2 一致）：
+#   ① 记录当前 TAG 到 $(PROD_OLD_TAG_FILE)（回滚目标）
+#   ② 把 $(PROD_ENV_FILE) 的 TAG 改为 git sha
+#   ③ 构建 api/web 后 up -d --no-build（拉取与构建分离，避免 --build 隐式重建）
 .PHONY: deploy-prod
 deploy-prod: deploy-env-check
-	@$(COMPOSE_PROD) up -d --build
+	@old=$$(sed -n 's/^TAG=//p' $(PROD_ENV_FILE) | head -n1); \
+	if [ -n "$$old" ]; then \
+		printf '%s\n' "$$old" > $(PROD_OLD_TAG_FILE); \
+		echo "→ 已记录旧版本 TAG=$$old（回滚：make deploy-fallback-prod）"; \
+	else \
+		echo "ℹ️  $(PROD_ENV_FILE) 未配置 TAG，跳过旧版本记录"; \
+	fi
+	@new=$$(git rev-parse --short HEAD 2>/dev/null || date +%Y%m%d%H%M); \
+	awk -v t="$$new" 'BEGIN{done=0} /^TAG=/{print "TAG=" t; done=1; next} {print} END{if(!done) print "TAG=" t}' \
+		$(PROD_ENV_FILE) > $(PROD_ENV_FILE).tmp && mv $(PROD_ENV_FILE).tmp $(PROD_ENV_FILE); \
+	echo "→ 本次发布 TAG=$$new"
+	@$(COMPOSE_PROD) build api web
+	@$(COMPOSE_PROD) up -d --no-build
+	@echo "✅ 已替换为 TAG=$$(sed -n 's/^TAG=//p' $(PROD_ENV_FILE) | head -n1)"
+	@echo "→ 冒烟：./scripts/deploy-smoke.sh（或 BASE_URL=https://<域名> ./scripts/deploy-smoke.sh）"
+
+# 回滚到上一次 deploy-prod 记录的 TAG：只换镜像，不执行 alembic downgrade
+# （expand-contract 前提：旧版本兼容当前 schema；含破坏性迁移的补救见 DEPLOYMENT §6.3）
+.PHONY: deploy-fallback-prod
+deploy-fallback-prod: deploy-env-check
+	@test -s $(PROD_OLD_TAG_FILE) || { \
+		echo "❌ 缺少 $(PROD_OLD_TAG_FILE)（没有可回滚的旧 TAG 记录）"; \
+		echo "   该文件由 make deploy-prod 写入；也可手工 echo <旧TAG> > $(PROD_OLD_TAG_FILE)"; \
+		exit 2; \
+	}
+	@old=$$(sed -n '1p' $(PROD_OLD_TAG_FILE)); \
+	docker image inspect stock-analyze/api:"$$old" >/dev/null 2>&1 || { \
+		echo "❌ 本机没有 stock-analyze/api:$$old 镜像（可能已被清理）"; \
+		echo "   可回滚镜像：docker images stock-analyze/api / stock-analyze/web"; \
+		exit 2; \
+	}; \
+	awk -v t="$$old" 'BEGIN{done=0} /^TAG=/{print "TAG=" t; done=1; next} {print} END{if(!done) print "TAG=" t}' \
+		$(PROD_ENV_FILE) > $(PROD_ENV_FILE).tmp && mv $(PROD_ENV_FILE).tmp $(PROD_ENV_FILE); \
+	echo "→ 回滚 TAG=$$old"
+	@$(COMPOSE_PROD) up -d --no-build
+	@echo "✅ 已回滚到 TAG=$$(sed -n 's/^TAG=//p' $(PROD_ENV_FILE) | head -n1)（未执行 alembic downgrade）"
+	@echo "→ 冒烟：./scripts/deploy-smoke.sh"
 
 .PHONY: deploy-local
 deploy-local: deploy-env-check

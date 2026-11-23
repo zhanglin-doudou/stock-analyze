@@ -24,6 +24,10 @@ x-app: &app
     - "host.docker.internal:host-gateway"
   networks:
     - sa-net
+  # 对象存储（上传的账单文件等）：api 写入、worker 读取，必须共享同一卷
+  # （LocalObjectStore = /app/var/objects；不共享会导致 import_commit 找不到文件）
+  volumes:
+    - sa-data:/app/var
   init: true
   restart: unless-stopped
   logging:
@@ -91,6 +95,10 @@ services:
 
   # db 不在编排内：生产数据库由云主机 PostgreSQL:5432 提供。
   # 角色初始化用 infra/postgres/init-prod/00-bootstrap.sh 在云主机上手工执行（幂等）。
+
+volumes:
+  # api/worker 共享的对象存储卷（上传账单等文件，跨容器可见）
+  sa-data:
 
 networks:
   sa-net:
