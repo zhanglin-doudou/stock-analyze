@@ -1,5 +1,11 @@
 import { useEffect, useState, type ReactElement } from "react";
+import { api } from "../client";
+import { saveTokens } from "../store/session";
 import { useGuideAuth } from "./useGuideAuth";
+
+/** 公开 demo 体验账号（明文内置，仅供访客一键体验；该账号内勿存私密数据）。 */
+const DEMO_EMAIL = "xingst01@demo.com";
+const DEMO_PASSWORD = "xingst666";
 
 /** 合规声明：全站统一口径，页脚与独立合规区块、FAQ 复用同一段文案。 */
 const COMPLIANCE =
@@ -347,6 +353,24 @@ function ComplianceNote() {
 }
 
 function CtaFooter({ authed, homeHref }: { authed: boolean; homeHref: string }) {
+  const [demoPending, setDemoPending] = useState(false);
+  const [demoError, setDemoError] = useState(false);
+
+  /** 一键 demo 登录：立即发起登录请求，成功后带着令牌进入工作台。 */
+  async function demoLogin(): Promise<void> {
+    setDemoPending(true);
+    setDemoError(false);
+    try {
+      const result = await api.auth.login({ email: DEMO_EMAIL, password: DEMO_PASSWORD });
+      saveTokens(result);
+      window.location.assign(homeHref);
+    } catch {
+      setDemoError(true);
+    } finally {
+      setDemoPending(false);
+    }
+  }
+
   return (
     <>
       <section className="guide-section">
@@ -364,6 +388,23 @@ function CtaFooter({ authed, homeHref }: { authed: boolean; homeHref: string }) 
                 </>
               )}
             </div>
+            {authed ? null : (
+              <div className="guide-cta-demo">
+                <button
+                  type="button"
+                  className="guide-demo-link"
+                  onClick={() => void demoLogin()}
+                  disabled={demoPending}
+                >
+                  {demoPending ? "正在登录…" : "用demo账号体验"}
+                </button>
+                {demoError ? (
+                  <p className="guide-demo-error" role="alert">
+                    登录失败，请稍后重试，或注册自己的账号。
+                  </p>
+                ) : null}
+              </div>
+            )}
           </div>
         </div>
       </section>

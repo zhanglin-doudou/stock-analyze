@@ -195,6 +195,11 @@
 @media (max-width: 768px) { .guide-cta h2 { font-size: var(--fs-h2); } }
 .guide-cta p { color: var(--muted); margin: 0 0 var(--s5); }
 .guide-cta-row { display: flex; gap: var(--s3); justify-content: center; flex-wrap: wrap; }
+.guide-cta-demo { margin-top: var(--s4); text-align: center; }
+.guide-demo-link { background: none; border: none; padding: 0; color: var(--muted); font-size: var(--fs-sm); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.guide-demo-link:hover:not(:disabled) { color: var(--accent); }
+.guide-demo-link:disabled { opacity: 0.6; cursor: default; }
+.guide-demo-error { margin: var(--s2) 0 0; color: var(--danger); font-size: var(--fs-xs); }
 
 .guide-footer { border-top: 1px solid var(--line); padding: var(--s6) 0; margin-top: var(--s7); color: var(--muted); font-size: var(--fs-xs); }
 .guide-footer-inner { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: var(--s3); }

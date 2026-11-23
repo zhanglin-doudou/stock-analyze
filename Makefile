@@ -36,6 +36,7 @@ help:
 	@echo "  make deploy-down    停止生产编排（保留数据卷）"
 	@echo "  make deploy-logs    跟踪生产日志"
 	@echo "  make deploy-smoke   部署后冒烟（路由/探针/安全头）"
+	@echo "  make sync-market-to-cloud  本地 market 缓存 → 云主机数据库（行数自动核对）"
 	@echo "── 数据 ──────────────────────────────────────────────"
 	@echo "  make seed-tenants   造体验账号(1234@dev.com)+A/B/admin 与账单"
 	@echo "  make seed-demo      造体验账号 + 演示数据（含行情回放）"
@@ -216,6 +217,11 @@ deploy-logs: deploy-env-check
 .PHONY: deploy-smoke
 deploy-smoke:
 	@./scripts/deploy-smoke.sh
+
+# 本地 market 公共缓存 → 云主机数据库（单事务替换 + 行数核对；REMOTE/SSH_KEY/REMOTE_DIR 可覆盖）
+.PHONY: sync-market-to-cloud
+sync-market-to-cloud:
+	@./scripts/sync-market-to-cloud.sh
 
 # ── 数据 ────────────────────────────────────────────────────
 .PHONY: seed-tenants

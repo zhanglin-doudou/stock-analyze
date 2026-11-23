@@ -288,6 +288,9 @@ make deploy-local
 # 仅校验编排（db 不在编排内）
 make deploy-config
 
+# market 公共缓存同步（本地 market.* → 云库；单事务替换 + 行数自动核对）
+make sync-market-to-cloud            # REMOTE/SSH_KEY/REMOTE_DIR 可覆盖
+
 # 首次：先在云主机初始化角色（PGHOST/PGPORT 指向云主机）
 # PGHOST=<ip> STOCK_DB_SUPERUSER=postgres STOCK_DB_OWNER_PASSWORD=... \
 #   STOCK_DB_APP_PASSWORD=... STOCK_DB_BACKUP_PASSWORD=... \

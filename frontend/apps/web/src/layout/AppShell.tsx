@@ -420,10 +420,13 @@ export function AppShell() {
           >
             <Icon name="guide" size={16} />
           </a>
-          <span className="shell-status">
-            <i className="shell-status-dot" aria-hidden="true" />
-            本地实例
-          </span>
+          {/* 「本地实例」只标注开发环境；生产构建不展示 */}
+          {import.meta.env.DEV ? (
+            <span className="shell-status">
+              <i className="shell-status-dot" aria-hidden="true" />
+              本地实例
+            </span>
+          ) : null}
         </header>
 
         <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} />

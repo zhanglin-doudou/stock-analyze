@@ -3,6 +3,7 @@ import { Slot } from "@radix-ui/react-slot";
 import { cva, type VariantProps } from "class-variance-authority";
 import { cn } from "@/lib/utils";
 import { disabledState, focusRing } from "./styles";
+import { Spinner } from "./spinner";
 
 /**
  * 按钮。默认高度/圆角取项目控制件 token（--control-h / --r-sm），
@@ -35,12 +36,29 @@ export interface ButtonProps
   extends React.ButtonHTMLAttributes<HTMLButtonElement>,
     VariantProps<typeof buttonVariants> {
   asChild?: boolean;
+  /**
+   * 接口/异步操作进行中：前置 spinner、禁用交互并标记 `aria-busy`。
+   * 文案切换（如「提交中…」）由调用方通过 children 决定，组件不猜测。
+   */
+  loading?: boolean;
 }
 
 const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
-  ({ className, variant, size, asChild = false, ...props }, ref) => {
+  ({ className, variant, size, asChild = false, loading = false, disabled, children, ...props }, ref) => {
     const Comp = asChild ? Slot : "button";
-    return <Comp ref={ref} className={cn(buttonVariants({ variant, size }), className)} {...props} />;
+    return (
+      <Comp
+        ref={ref}
+        className={cn(buttonVariants({ variant, size }), className)}
+        disabled={disabled || loading}
+        aria-busy={loading ? true : undefined}
+        {...props}
+      >
+        {/* Slot 要求单子节点，asChild 模式下不注入 spinner */}
+        {loading && !asChild ? <Spinner className="tw-text-current" /> : null}
+        {children}
+      </Comp>
+    );
   },
 );
 Button.displayName = "Button";
