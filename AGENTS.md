@@ -189,6 +189,7 @@ make sync-sectors ARGS='--dry-run'   # 板块同步自检（配置/表检查，�
 make sync-sector-industry             # 只同步行业板块（THS）
 make sync-sector-concept              # 只同步概念板块（THS，可与行业分开）
 make sync-sector-bars ARGS='--start 2026-04-01'   # 只回填行业指数日线（不重抓目录/成分）
+make sync-market-to-cloud             # 本地 market 公共缓存 → 云主机数据库（单事务替换+行数核对）
 ```
 
 > `make verify-p1` 仅覆盖一期；`verify-p2` 尚未提供（Period2-14 暂停）。二期验收使用 `test-p2` + `test-metrics` + 各 gate，并在记录中明确 SKIP。
