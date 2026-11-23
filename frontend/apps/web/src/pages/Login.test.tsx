@@ -65,4 +65,13 @@ describe("Login 找回入口", () => {
     );
     expect(screen.getByText("密码已重置，请用新密码登录。")).toBeTruthy();
   });
+
+  it("提供使用引导入口", () => {
+    render(
+      <MemoryRouter>
+        <Login />
+      </MemoryRouter>,
+    );
+    expect(screen.getByRole("link", { name: /使用引导/ }).getAttribute("href")).toBe("/guide");
+  });
 });

@@ -3,6 +3,8 @@ import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { api } from "../client";
 import { saveTokens } from "../store/session";
 import { ProblemView } from "../ui/Problem";
+import { GuideEntryLink } from "../guide/GuideEntryLink";
+import { sanitizeNextPath } from "../utils/nextPath";
 
 export function Login() {
   const navigate = useNavigate();
@@ -38,7 +40,9 @@ export function Login() {
     try {
       const result = await api.auth.login({ email, password });
       saveTokens(result);
-      navigate("/", { replace: true });
+      // 登录后优先回跳来源页（next 经安全校验，防 open redirect）。
+      const next = sanitizeNextPath(searchParams.get("next"));
+      navigate(next ?? "/", { replace: true });
     } catch (err) {
       setError(err);
     } finally {
@@ -90,6 +94,7 @@ export function Login() {
             <Link to="/forgot-password">忘记密码？</Link>
           </p>
         ) : null}
+        <GuideEntryLink />
       </form>
     </div>
   );

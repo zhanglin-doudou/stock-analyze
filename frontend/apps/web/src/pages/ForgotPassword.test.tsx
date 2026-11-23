@@ -49,6 +49,11 @@ function renderPage(): void {
 }
 
 describe("ForgotPassword", () => {
+  it("提供使用引导入口", () => {
+    renderPage();
+    expect(screen.getByRole("link", { name: /使用引导/ }).getAttribute("href")).toBe("/guide");
+  });
+
   it("发送后显示通用文案与验证码/新密码表单", async () => {
     renderPage();
     await waitFor(() => expect(getPolicy).toHaveBeenCalled());

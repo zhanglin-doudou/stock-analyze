@@ -44,6 +44,10 @@ class AppState:
     email_codes: EmailVerificationService
     object_store: Any = None
     llm: Any = None
+    #: 模型供应商目录（`config/llm_providers.json`，启动期加载）。
+    llm_registry: Any = None
+    #: 按用户选择动态构建 provider 的工厂（(provider_id, model) 缓存）。
+    llm_factory: Any = None
     extras: dict[str, Any] = field(default_factory=dict)
 
 

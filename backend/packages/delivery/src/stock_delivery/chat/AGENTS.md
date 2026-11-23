@@ -125,21 +125,32 @@ handler；`ToolName`/`_tools_for()` 是 flag=false 的 legacy 路径，仍保持
 - 历史消息按 `created_at + id` 稳定排序；同一轮 user/assistant 的 `created_at` 可能完全相同，不能只按时间排序。
 - 不做 RAG/向量检索；工具结果只以摘要/瘦身形式进上下文。
 
-## 5. LLM Provider
+## 5. LLM Provider（2026-11-22 供应商目录化）
 
 `provider.py`：
 
-- `GlmProvider`：`langchain_openai.ChatOpenAI`，OpenAI-compatible `/chat/completions`。
-- `FakeProvider`：CI/单测/无网环境；禁止在 CI 调真实 GLM。
-- `build_provider(settings)`：只有 `LLM_PROVIDER=glm` 且 `GLM_API_KEY` 非空才返回 `GlmProvider`，否则 `FakeProvider`。
+- 供应商/模型/key 的唯一来源是 **`config/llm_providers.json`**（`stock_platform.llm_registry`）：
+  供应商 id/name/base_url/`api_key_env`（key 的**环境变量名**）/模型列表 + `default_*`；
+  目录改动需重启 API。key 只从环境解析（`os.environ` 优先、本地回落 `.env`），禁止打印/入库。
+- `OpenAiCompatProvider`：任意 OpenAI-compatible `/chat/completions`（智谱/小米/…），
+  `provider`/`model`/`base_url`/`api_key` 显式注入；key 缺失**不阻断构造**，请求期抛
+  `LLM_NOT_CONFIGURED` 走降级。`json_mode=True` 用 `response_format=json_object`；
+  `thinking` 参数只在目录 `supports_thinking=true` 的供应商上随 `LLM_THINKING=disabled` 下发。
+- `LlmProviderFactory.resolve(selection)`：按用户 `llm_prefs`（`{"provider","model"}`，空 = 跟随
+  默认）解析并按 `(provider_id, model)` 缓存构建；选择无效/为空返回 `None` 由调用侧回落默认。
+  装配点在 `stock_api.routers.chat._resolve_llm()`（按请求动态路由，改设置后下一条消息生效）。
+- `FakeProvider`：CI/单测/无网环境；禁止在 CI 调真实模型。
+- `build_provider(settings, registry)`：`LLM_PROVIDER=none/local` → `FakeProvider`；`auto` →
+  目录默认目标；目录内 provider id → 该供应商首个模型；未知 id 启动失败。
+- `ChatRuntime(llm_enabled=...)`：是否允许调用 LLM 是**按请求**解析值（缺省 `settings.llm_enabled`
+  = `LLM_PROVIDER` 非 none/local）；不要在 runtime 内再读 `settings.llm_enabled`。
 - `ChatOpenAI(max_retries=0)`：**不要在 SDK 内自动重试**；runtime 的 `_complete_with_retry()` 统一处理 understanding/answer 的超时、429、5xx、坏响应。
 - 重试次数：`LLM_RETRY_ON_429`（兼容旧名，默认 2 次；即最多 3 次调用），退避 `LLM_RETRY_BACKOFF_SECONDS × 2^attempt`。
 - 不重试：`LLM_NOT_CONFIGURED` / `LLM_AUTH_FAILED` / `LLM_CONTENT_FILTER`；每次失败都写 `chat_llm_call`，最终失败再降级。
-- `json_mode=True` 时使用 `response_format={"type":"json_object"}`；`LLM_THINKING=disabled` 时传 `thinking`。
-- 请求/响应必须进入 `ChatRepository` 的 `chat_llm_call`（`request`/`response`/usage/status/error_code）。
-- `.env` 修改后 **必须重启 API**；`Settings` 在进程启动时加载，uvicorn `--reload` 不监听 `.env`。
-- 禁止打印 `GLM_API_KEY`；禁止把 key 写入 trace、日志、测试快照。
-- 每次真实 GLM 调用写一条 `chat.llm.call` 结构化日志：
+- 请求/响应必须进入 `ChatRepository` 的 `chat_llm_call`（`request`/`response`/usage/status/error_code；`provider`/`model` 取自实际调用的 provider）。
+- `.env` / `config/llm_providers.json` 修改后 **必须重启 API**；`Settings` 在进程启动时加载，uvicorn `--reload` 不监听 `.env`。
+- 禁止打印任何供应商 API key；禁止把 key 写入 trace、日志、测试快照。
+- 每次真实 LLM 调用写一条 `chat.llm.call` 结构化日志：
   - 成功：`info`，字段 `status=ok` / `purpose` / `provider` / `model` / `prompt_tokens` / `completion_tokens` / `total_tokens` / `latency_ms`。
   - 失败：`error`，字段 `status=error` / `purpose` / `provider` / `model` / `error_code` / `status_code` / `latency_ms`。
   - **不记录** messages、answer 正文、API key；日志测试见 `test_provider_logging.py`。
@@ -244,7 +255,7 @@ make sdk
 
 | 现象 | 优先检查 |
 |---|---|
-| `llm_calls` 为空 | API 进程启动时的 `LLM_PROVIDER` / `GLM_API_KEY`；改 `.env` 后是否重启 |
+| `llm_calls` 为空 | 部署 `LLM_PROVIDER` / 目录 `api_key_env` 对应 key 是否注入；改 `.env`/目录后是否重启 |
 | 每个问题都“请补充” | `understanding._normalize()` 的低质量回落；模型是否 `confidence=0` / 空 `resolved_query` |
 | 回答读指标不读资产表 | `_explicit_intents()` 与 `_tools_for()` 的意图映射 |
 | `needs_clarification` 写入 500 | `chat_message.status` 宽度（0021）是否已迁移 |
@@ -263,7 +274,7 @@ make sdk
 | `tools/` | `ToolRegistry`/`ToolCatalog`/`ToolExecutor`/`RulePlanner`（P0 工具平台） |
 | `context.py` | 10 轮窗口、160K 压缩、understanding messages |
 | `understanding.py` | 意图/期间/实体/指代与规则回落 |
-| `provider.py` | GLM/Fake provider、错误映射 |
+| `provider.py` | OpenAI-compatible/Fake provider、错误映射、动态工厂（2026-11-22） |
 | `composer.py` | 确定性模板答案 + citations/claims |
 | `prompts.py` | understanding/answer/compress v1 提示词 |
 | `validator.py` | 数字/引用/建议/HTML 校验 |

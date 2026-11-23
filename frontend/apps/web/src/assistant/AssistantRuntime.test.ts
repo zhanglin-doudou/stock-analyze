@@ -104,4 +104,33 @@ describe("createChatAdapter SSE", () => {
     }
     expect(timelines.at(-1)).toHaveLength(2);
   });
+
+  it("半程失败（答案成功但模型调用失败）也显示切换到 glm-4-flash 的提示", async () => {
+    const degraded = {
+      ...message,
+      degrade_reason: "LLM_BAD_RESPONSE",
+      degrade_message: "模型输出格式异常，已回退结构化摘要。",
+      what_to_do: "当前模型 mimo-v2.6-pro 调用失败，可在「设置 → 助手模型」切换到 glm-4-flash 后重试。",
+    };
+    mocks.streamMessage.mockResolvedValue(
+      sseResponse([
+        'event: meta\ndata: {"turn_id":"trn_1"}\n\n',
+        'event: delta\ndata: {"text":"最终回答"}\n\n',
+        `event: done\ndata: ${JSON.stringify({ message: degraded })}\n\n`,
+      ]),
+    );
+    const adapter = createChatAdapter("cnv_1");
+    const chunks: string[] = [];
+    const generator = adapter.run({
+      messages: [{ role: "user", content: [{ type: "text", text: "本月赚多少？" }] }],
+    } as never) as AsyncIterable<{ content: Array<{ type: string; text: string }> }>;
+    for await (const result of generator) {
+      const part = result.content[0];
+      if (part && part.type === "text") chunks.push(part.text);
+    }
+    const last = chunks.at(-1) ?? "";
+    expect(last).toContain("模型输出格式异常");
+    expect(last).toContain("切换到 glm-4-flash");
+    expect(last).toContain("mimo-v2.6-pro");
+  });
 });

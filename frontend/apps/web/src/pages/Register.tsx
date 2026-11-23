@@ -4,6 +4,7 @@ import { isApiProblemError } from "@sa/api-client";
 import { api } from "../client";
 import { saveTokens } from "../store/session";
 import { ProblemView } from "../ui/Problem";
+import { GuideEntryLink } from "../guide/GuideEntryLink";
 
 export function Register() {
   const navigate = useNavigate();
@@ -216,6 +217,7 @@ export function Register() {
         <p className="muted">
           已有账号？<Link to="/login">去登录</Link>
         </p>
+        <GuideEntryLink />
       </form>
     </div>
   );

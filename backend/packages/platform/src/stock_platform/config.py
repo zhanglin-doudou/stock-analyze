@@ -7,7 +7,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, computed_field, model_validator
+from pydantic import Field, computed_field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from stock_contracts.constants import (
     ACCESS_TOKEN_TTL_SECONDS,
@@ -149,12 +149,14 @@ class Settings(BaseSettings):
     # 指标引擎：无风险利率（C-24，D-14）
     rf_annual: Decimal = Field(RF_ANNUAL_DEFAULT, alias="RF_ANNUAL")
 
-    # ── 智能分析助手（2026-11-20）──────────────────────────
-    # GLM 免费版：key/base/model 由本地 .env 注入；禁止打印/入库。
-    llm_provider: Literal["none", "glm", "local"] = Field("none", alias="LLM_PROVIDER")
-    glm_api_key: str | None = Field(None, alias="GLM_API_KEY", repr=False)
-    glm_base_url: str = Field("https://open.bigmodel.cn/api/paas/v4", alias="GLM_BASE_URL")
-    glm_model: str = Field("glm-4.7-flash", alias="GLM_MODEL")
+    # ── 智能分析助手（2026-11-20；2026-11-22 供应商目录化）──
+    # 供应商/模型/key 环境变量名的唯一来源是 `config/llm_providers.json`
+    # （见 docs/architecture/2026-11-22-llm-provider-switching.md）；key 只从
+    # 环境注入（`stock_platform.llm_registry` 解析），禁止打印/入库。
+    # LLM_PROVIDER：none=关闭 / local=Fake（离线测试）/ auto=目录默认 /
+    # 目录内 provider id；旧值 `glm` 是 `auto` 的兼容别名。
+    llm_provider: str = Field("auto", alias="LLM_PROVIDER")
+    llm_providers_file: Path | None = Field(None, alias="LLM_PROVIDERS_FILE")
     llm_timeout_seconds: float = Field(60.0, alias="LLM_TIMEOUT_SECONDS")
     llm_max_output_tokens: int = Field(4096, alias="LLM_MAX_OUTPUT_TOKENS")
     llm_understanding_max_tokens: int = Field(2048, alias="LLM_UNDERSTANDING_MAX_TOKENS")
@@ -187,8 +189,20 @@ class Settings(BaseSettings):
     @computed_field  # type: ignore[prop-decorator]
     @property
     def llm_enabled(self) -> bool:
-        """显式开关：none/local 不调用远端；glm 必须有 key。"""
-        return self.llm_provider == "glm" and bool(self.glm_api_key)
+        """是否允许出站 LLM：none/local 关闭；auto/目录内 provider id 开启。
+
+        key 是否齐备由 `stock_platform.llm_registry` 解析决定，缺 key 时调用侧
+        抛 `LLM_NOT_CONFIGURED` 走降级，不在这里静默关掉。
+        """
+        return self.llm_provider not in ("none", "local")
+
+    @field_validator("llm_provider", mode="before")
+    @classmethod
+    def _normalize_llm_provider(cls, value: object) -> object:
+        """旧值 `glm` 兼容别名 → `auto`；其余原样（目录 provider id 启动期校验）。"""
+        if value == "glm":
+            return "auto"
+        return value
 
     @model_validator(mode="after")
     def _guard_production_secrets(self) -> Settings:

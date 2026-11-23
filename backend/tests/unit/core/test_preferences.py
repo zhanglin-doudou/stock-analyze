@@ -77,6 +77,7 @@ def test_resolve_defaults() -> None:
     assert effective.bill_flags["flags_hash"] == DEFAULT_FLAGS_HASH
     assert effective.market_sessions["sessions"] == DEFAULT_MARKET_SESSIONS["sessions"]
     assert effective.concept_filters == {"mode": "off", "excluded": []}
+    assert effective.llm == {"provider": "", "model": ""}
     assert effective.concept_filter_hash == ""
 
 
@@ -429,3 +430,66 @@ def test_multi_group_patch() -> None:
     assert result.stored["display_prefs"] == {"theme": "dark"}
     assert result.stored["bill_window_trading_days"] == 10
     assert result.stored["concept_filter_prefs"]["mode"] == "exclude"
+
+
+# ── llm 组（2026-11-22 动态切换）────────────────────────────
+def test_effective_llm_normalization() -> None:
+    assert resolve({"llm_prefs": "x"}).llm == {"provider": "", "model": ""}
+    assert resolve({"llm_prefs": {"provider": "zhipu"}}).llm == {"provider": "", "model": ""}
+    assert resolve({"llm_prefs": {"model": "glm-4-flash"}}).llm == {"provider": "", "model": ""}
+    assert resolve({"llm_prefs": {"provider": 5, "model": "glm-4-flash"}}).llm == {
+        "provider": "",
+        "model": "",
+    }
+    assert resolve({"llm_prefs": {"provider": "zhipu", "model": 7}}).llm == {
+        "provider": "",
+        "model": "",
+    }
+    assert resolve({"llm_prefs": {"provider": "zhipu", "model": "glm-4-flash"}}).llm == {
+        "provider": "zhipu",
+        "model": "glm-4-flash",
+    }
+
+
+def test_llm_patch_set_reset_and_no_change() -> None:
+    result = apply_patch({}, {"llm": {"provider": "zhipu", "model": "glm-4-flash"}})
+    assert result.changed == ["llm.provider", "llm.model"]
+    assert result.stored["llm_prefs"] == {"provider": "zhipu", "model": "glm-4-flash"}
+    assert result.columns == {"llm_prefs": {"provider": "zhipu", "model": "glm-4-flash"}}
+
+    same = apply_patch(result.stored, {"llm": {"provider": "zhipu", "model": "glm-4-flash"}})
+    assert same.changed == []
+
+    reset = apply_patch(result.stored, {"llm": {"provider": None, "model": None}})
+    assert reset.changed == ["llm.provider", "llm.model"]
+    assert reset.stored["llm_prefs"] == {}
+
+    group_reset = apply_patch(result.stored, {"llm": None})
+    assert group_reset.changed == ["llm.provider", "llm.model"]
+    assert group_reset.columns == {"llm_prefs": {}}
+
+
+def test_llm_patch_validation() -> None:
+    with pytest.raises(PreferenceValidationError) as exc:
+        apply_patch({}, {"llm": {"provider": "zhipu"}})
+    assert exc.value.field == "llm.provider"
+
+    with pytest.raises(PreferenceValidationError) as exc:
+        apply_patch({}, {"llm": {"model": "glm-4-flash"}})
+    assert exc.value.field == "llm.model"
+
+    with pytest.raises(PreferenceValidationError):
+        apply_patch({}, {"llm": {"provider": "", "model": "glm-4-flash"}})
+
+    with pytest.raises(PreferenceValidationError):
+        apply_patch({}, {"llm": {"provider": "z", "model": "m" * 65}})
+
+    with pytest.raises(PreferenceValidationError):
+        apply_patch({}, {"llm": {"provider": 3, "model": "glm-4-flash"}})
+
+    with pytest.raises(PreferenceValidationError) as exc:
+        apply_patch({}, {"llm": {"provider": "zhipu", "model": None}})
+    assert exc.value.field == "llm.model"
+
+    with pytest.raises(PreferenceValidationError):
+        apply_patch({}, {"llm": {"unknown": "x"}})

@@ -75,12 +75,15 @@ class ChatRuntime:
         tool_registry: ToolRegistry | None = None,
         tool_executor: ToolExecutor | None = None,
         on_event: Callable[[dict[str, Any]], None] | None = None,
+        llm_enabled: bool | None = None,
     ) -> None:
         self.repo = repo
         self.data_port = data_port
         self.llm = llm
         self.clock = clock
         self.settings = settings
+        #: 是否允许调用 LLM（按请求解析；缺省沿用 settings.llm_enabled）。
+        self.llm_enabled = settings.llm_enabled if llm_enabled is None else llm_enabled
         self.user_id = user_id
         self.conversation = dict(conversation)
         self.turn_id = turn_id
@@ -114,7 +117,7 @@ class ChatRuntime:
             self.user_id,
             self.conversation,
             self.question,
-            compressor=self._compress if self.settings.llm_enabled else None,
+            compressor=self._compress if self.llm_enabled else None,
             exclude_message_id=self.user_message_id,
         )
         self._bundle = bundle
@@ -123,7 +126,7 @@ class ChatRuntime:
     async def understand(self, state: ChatState) -> dict[str, Any]:
         assert self._bundle is not None
         self._emit("understanding.started", "understand", {})
-        if not self.settings.llm_enabled:
+        if not self.llm_enabled:
             understanding = self.understanding_service.fallback_understanding(
                 self.question, self._bundle.focus
             )
@@ -161,7 +164,7 @@ class ChatRuntime:
             log.error(
                 "chat.llm.bad_response",
                 purpose="understanding",
-                model=self.settings.glm_model,
+                model=self.llm.model,
                 error=str(exc)[:300],
             )
             self._degrade_reason = DegradeReason.LLM_BAD_RESPONSE
@@ -240,7 +243,9 @@ class ChatRuntime:
             )
             self._record_tool(tool, args, result, latency)
             self._emit(
-                "tool.call.succeeded" if result.status is not ChatStatus.ERROR else "tool.call.failed",
+                "tool.call.succeeded"
+                if result.status is not ChatStatus.ERROR
+                else "tool.call.failed",
                 "execute",
                 {
                     "call_id": f"call_{self._tool_seq}",
@@ -309,7 +314,7 @@ class ChatRuntime:
         return {"answer": to_jsonable(template), "status": template.status.value}
 
     def route_after_compose(self, state: ChatState) -> str:
-        if not self.settings.llm_enabled or self._understanding is None:
+        if not self.llm_enabled or self._understanding is None:
             return "validate"
         if self._understanding.needs_clarification:
             return "validate"
@@ -408,7 +413,7 @@ class ChatRuntime:
             log.error(
                 "chat.llm.bad_response",
                 purpose="answer",
-                model=self.settings.glm_model,
+                model=self.llm.model,
                 error=str(exc)[:300],
             )
             self._degrade_reason = DegradeReason.LLM_BAD_RESPONSE
@@ -444,14 +449,14 @@ class ChatRuntime:
                 log.warning(
                     "chat.llm.validation_warning",
                     purpose="answer",
-                    model=self.settings.glm_model,
+                    model=self.llm.model,
                     warnings=warnings[:8],
                 )
             return {"status": answer.get("status") or ChatStatus.OK.value}
         retries = int(state.get("retry_count") or 0)
         can_retry = (
             retries == 0
-            and self.settings.llm_enabled
+            and self.llm_enabled
             and self._understanding is not None
             and not self._understanding.needs_clarification
         )
@@ -464,7 +469,7 @@ class ChatRuntime:
             log.error(
                 "chat.llm.validation_failed",
                 purpose="answer",
-                model=self.settings.glm_model,
+                model=self.llm.model,
                 errors=result.errors[:8],
                 retry_count=retries,
                 will_retry=True,
@@ -478,7 +483,7 @@ class ChatRuntime:
         log.error(
             "chat.llm.validation_failed",
             purpose="answer",
-            model=self.settings.glm_model,
+            model=self.llm.model,
             errors=result.errors[:8],
             warnings=warnings[:8],
             retry_count=retries,
@@ -497,12 +502,17 @@ class ChatRuntime:
             return "persist"
         answer = state.get("answer") or {}
         if (
-            self.settings.llm_enabled
+            self.llm_enabled
             and int(state.get("retry_count") or 0) == 1
             and not answer.get("fallback", False)
         ):
             return "retry"
         return "fallback"
+
+    def _what_to_do(self, reason: DegradeReason, default: str) -> str:
+        """降级建议：模型调用失败且非推荐模型时，追加「切换到 RECOMMENDED_MODEL」提示。"""
+        hint = _model_switch_hint(reason, self.llm.model)
+        return f"{default} {hint}" if hint else default
 
     def _fallback_draft(self, reason: DegradeReason) -> AnswerDraft:
         template = self._template
@@ -512,7 +522,7 @@ class ChatRuntime:
                 status=ChatStatus.DEGRADED,
                 degrade_reason=reason,
                 degrade_message=_degrade_message(reason),
-                what_to_do="稍后重试，或缩小时间范围。",
+                what_to_do=self._what_to_do(reason, "稍后重试，或缩小时间范围。"),
                 retryable=True,
                 fallback=True,
                 context_usage=self._bundle.usage if self._bundle else None,
@@ -526,7 +536,7 @@ class ChatRuntime:
             status=ChatStatus.DEGRADED,
             degrade_reason=reason,
             degrade_message=_degrade_message(reason),
-            what_to_do="稍后重试；金额与引用仍来自本地结构化数据。",
+            what_to_do=self._what_to_do(reason, "稍后重试；金额与引用仍来自本地结构化数据。"),
             retryable=True,
             fallback=True,
             llm_used=self._llm_used,
@@ -547,7 +557,7 @@ class ChatRuntime:
                 status=ChatStatus.DEGRADED,
                 degrade_reason=reason,
                 degrade_message="模型或数据处理失败，已返回降级提示。",
-                what_to_do="稍后重试，或缩小时间范围。",
+                what_to_do=self._what_to_do(reason, "稍后重试，或缩小时间范围。"),
                 retryable=True,
                 fallback=True,
                 context_usage=self._bundle.usage if self._bundle else None,
@@ -562,7 +572,7 @@ class ChatRuntime:
                 status=ChatStatus.DEGRADED,
                 degrade_reason=reason,
                 degrade_message=_degrade_message(reason),
-                what_to_do="稍后重试；金额与引用仍来自本地结构化数据。",
+                what_to_do=self._what_to_do(reason, "稍后重试；金额与引用仍来自本地结构化数据。"),
                 retryable=True,
                 fallback=True,
                 llm_used=self._llm_used,
@@ -591,6 +601,15 @@ class ChatRuntime:
         text = str(answer.get("answer_markdown") or "")
         status = str(answer.get("status") or state.get("status") or ChatStatus.OK.value)
         degrade = answer.get("degrade_reason") or state.get("degrade_reason")
+        # 理解阶段失败但答案成功时草稿不带降级字段；在此统一补模型切换提示。
+        hint = _model_switch_hint(degrade, self.llm.model)
+        if hint and not answer.get("what_to_do"):
+            answer = {
+                **answer,
+                "what_to_do": hint,
+                "degrade_message": answer.get("degrade_message")
+                or _degrade_message(DegradeReason(str(degrade))),
+            }
         latency = int((time.monotonic() - self._started) * 1000)
         self._emit(
             "turn.failed" if status == ChatStatus.ERROR.value else "turn.completed",
@@ -642,7 +661,8 @@ class ChatRuntime:
             focus = _next_focus(self._bundle.focus if self._bundle else {}, self._understanding)
             if focus:
                 await self.repo.update_focus(user_id=self.user_id, focus=focus)
-        return {"status": status}
+        # 回传可能补过提示的 answer，保证即时响应与落库内容一致。
+        return {"status": status, "answer": answer}
 
     # ── helpers ────────────────────────────────────────────
     def _emit(self, kind: str, phase: str, payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -710,7 +730,7 @@ class ChatRuntime:
         self._emit(
             "model.thinking.started",
             "think",
-            {"purpose": purpose, "model": self.settings.glm_model},
+            {"purpose": purpose, "model": self.llm.model},
         )
         thinking_started = time.monotonic()
         for attempt in range(max_retries + 1):
@@ -739,7 +759,7 @@ class ChatRuntime:
                 self._emit(
                     "model.thinking.started",
                     "think",
-                    {"purpose": purpose, "model": self.settings.glm_model, "retry": True},
+                    {"purpose": purpose, "model": self.llm.model, "retry": True},
                 )
                 thinking_started = time.monotonic()
                 delay = self.settings.llm_retry_backoff_seconds * (2**attempt)
@@ -834,8 +854,8 @@ class ChatRuntime:
             {
                 "seq": self._llm_seq,
                 "purpose": purpose,
-                "provider": self.settings.llm_provider,
-                "model": self.settings.glm_model,
+                "provider": self.llm.provider,
+                "model": self.llm.model,
                 "prompt_version": prompt_version,
                 "request": to_jsonable(exc.raw_request),
                 "response": to_jsonable(exc.raw_response),
@@ -873,13 +893,9 @@ class _RuntimeToolTrace(ToolTraceSink):
     def __init__(self, runtime: ChatRuntime) -> None:
         self.runtime = runtime
 
-    async def record_tool_call(
-        self, call: ToolCall, result: ToolResult, ctx: ToolContext
-    ) -> None:
+    async def record_tool_call(self, call: ToolCall, result: ToolResult, ctx: ToolContext) -> None:
         self.runtime._tool_seq += 1
-        self.runtime._record_tool(
-            result.tool, call.args, result, result.latency_ms or 0
-        )
+        self.runtime._record_tool(result.tool, call.args, result, result.latency_ms or 0)
 
     async def emit(self, event: Mapping[str, Any]) -> None:
         kind = str(event.get("kind") or "tool.call")
@@ -1128,3 +1144,33 @@ def _degrade_message(reason: DegradeReason) -> str:
         DegradeReason.LLM_UNAVAILABLE: "智能分析服务暂时不可用。",
         DegradeReason.CONTEXT_OVERFLOW: "对话上下文过长，已压缩。",
     }.get(reason, "智能分析服务降级。")
+
+
+#: 降级兜底推荐模型（智谱免费档最稳）：非该模型调用失败时提示用户在设置中切换。
+RECOMMENDED_MODEL = "glm-4-flash"
+
+#: 属于「模型调用失败」的降级原因（CONTEXT_OVERFLOW/TOOL_* 不算）。
+_MODEL_FAILURE_REASONS: frozenset[DegradeReason] = frozenset(
+    {
+        DegradeReason.LLM_NOT_CONFIGURED,
+        DegradeReason.LLM_TIMEOUT,
+        DegradeReason.LLM_RATE_LIMITED,
+        DegradeReason.LLM_AUTH_FAILED,
+        DegradeReason.LLM_BAD_RESPONSE,
+        DegradeReason.LLM_CONTENT_FILTER,
+        DegradeReason.LLM_UNAVAILABLE,
+    }
+)
+
+
+def _model_switch_hint(reason: DegradeReason | str | None, model: str) -> str | None:
+    """非推荐模型的调用失败 → 提示切换到 `RECOMMENDED_MODEL`（设置 → 助手模型）。"""
+    if model == RECOMMENDED_MODEL or reason is None:
+        return None
+    try:
+        parsed = reason if isinstance(reason, DegradeReason) else DegradeReason(str(reason))
+    except ValueError:
+        return None
+    if parsed not in _MODEL_FAILURE_REASONS:
+        return None
+    return f"当前模型 {model} 调用失败，可在「设置 → 助手模型」切换到 {RECOMMENDED_MODEL} 后重试。"

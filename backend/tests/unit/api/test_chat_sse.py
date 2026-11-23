@@ -156,7 +156,7 @@ class _FakeGraph:
 async def test_stream_live_turn_emits_step_before_done(monkeypatch: Any) -> None:
     runtime_holder: dict[str, _FakeRuntime] = {}
 
-    def _make_runtime(**kwargs: Any) -> _FakeRuntime:
+    async def _make_runtime(**kwargs: Any) -> _FakeRuntime:
         runtime = _FakeRuntime(kwargs["on_event"])
         runtime_holder["runtime"] = runtime
         return runtime

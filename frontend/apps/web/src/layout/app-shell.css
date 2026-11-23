@@ -619,6 +619,10 @@
   cursor: pointer;
 }
 
+a.shell-iconbtn {
+  text-decoration: none;
+}
+
 .shell-iconbtn:hover {
   border-color: var(--line-strong);
   color: var(--text);

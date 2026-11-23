@@ -1,5 +1,5 @@
-import { lazy, type ReactElement } from "react";
-import { Navigate, createBrowserRouter, type RouteObject } from "react-router-dom";
+import { lazy, useEffect, type ReactElement } from "react";
+import { Navigate, createBrowserRouter, useLocation, type RouteObject } from "react-router-dom";
 import { AppShell } from "./layout/AppShell";
 import { OnboardingGate } from "./layout/OnboardingGate";
 import { useIsAuthenticated } from "./store/session";
@@ -8,10 +8,23 @@ import { ForgotPassword } from "./pages/ForgotPassword";
 import { Login } from "./pages/Login";
 import { Register } from "./pages/Register";
 
-/** 登录守卫：无 token → 跳 /login。导出供路由测试直接渲染。 */
+/** 整页跳转公开引导页：/guide 是独立静态页，不在 SPA 路由表内，必须整页跳转，否则会被 * 通配吞回 / 造成死循环。 */
+function RedirectToGuide(): null {
+  useEffect(() => {
+    window.location.replace("/guide");
+  }, []);
+  return null;
+}
+
+/** 登录守卫：无 token 时，仅根路径 → /guide；深层受保护页 → /login（带 next 供登录后回跳）。导出供路由测试直接渲染。 */
 export function RequireAuth({ children }: { children: ReactElement }): ReactElement {
   const authenticated = useIsAuthenticated();
-  if (!authenticated) return <Navigate to="/login" replace />;
+  const location = useLocation();
+  if (!authenticated) {
+    if (location.pathname === "/") return <RedirectToGuide />;
+    const next = encodeURIComponent(location.pathname + location.search);
+    return <Navigate to={`/login?next=${next}`} replace />;
+  }
   return children;
 }
 

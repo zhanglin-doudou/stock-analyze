@@ -2333,6 +2333,26 @@ class ConceptFiltersPrefsOut(BaseModel):
     excluded: list[ConceptExcludedOut] = Field(default_factory=list)
 
 
+class LlmProviderCatalogOut(BaseModel):
+    """供应商目录项（2026-11-22）：`available` = API key 环境变量已配置。"""
+
+    id: str
+    name: str
+    available: bool
+    models: list[str] = Field(default_factory=list)
+
+
+class LlmPrefsOut(BaseModel):
+    """助手模型偏好：`provider`/`model` 为空 = 跟随部署默认；目录供前端渲染选择器。"""
+
+    provider: str
+    model: str
+    enabled: bool
+    default_provider: str
+    default_model: str
+    providers: list[LlmProviderCatalogOut] = Field(default_factory=list)
+
+
 class SettingsOut(BaseModel):
     version: int
     updated_at: datetime | None = None
@@ -2340,6 +2360,7 @@ class SettingsOut(BaseModel):
     bill_flags: BillFlagsPrefsOut
     market_sessions: MarketSessionsPrefsOut
     concept_filters: ConceptFiltersPrefsOut
+    llm: LlmPrefsOut
     benchmark_id: str
     privacy_flags: dict[str, Any] = Field(default_factory=dict)
 
@@ -2381,6 +2402,13 @@ class ConceptFiltersPatch(StrictModel):
     excluded: list[ConceptExcludedPatchItem] | None = None
 
 
+class LlmPatch(StrictModel):
+    """provider 与 model 必须同时提交（或整组 `null` 恢复默认）。"""
+
+    provider: str | None = Field(None, min_length=1, max_length=64)
+    model: str | None = Field(None, min_length=1, max_length=64)
+
+
 class SettingsPatchIn(StrictModel):
     """顶层组 `null` = 整组重置默认；`{}` = 该组无变更。"""
 
@@ -2388,6 +2416,7 @@ class SettingsPatchIn(StrictModel):
     bill_flags: BillFlagsPatch | None = None
     market_sessions: MarketSessionsPatch | None = None
     concept_filters: ConceptFiltersPatch | None = None
+    llm: LlmPatch | None = None
 
 
 # ── 智能分析助手（API-077/078/112~115）──────────────────────

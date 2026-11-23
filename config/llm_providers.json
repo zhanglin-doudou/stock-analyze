@@ -1,0 +1,22 @@
+{
+  "default_provider": "zhipu",
+  "default_model": "glm-4-flash",
+  "providers": [
+    {
+      "id": "zhipu",
+      "name": "智谱",
+      "base_url": "https://open.bigmodel.cn/api/paas/v4",
+      "api_key_env": "GLM_API_KEY",
+      "supports_thinking": true,
+      "models": ["glm-4.7-flash", "glm-4-flash"]
+    },
+    {
+      "id": "xiaomi",
+      "name": "小米",
+      "base_url": "https://token-plan-cn.xiaomimimo.com/v1",
+      "api_key_env": "MIMO_API_KEY",
+      "supports_thinking": false,
+      "models": ["mimo-v2.6-flash", "mimo-v2.6-pro"]
+    }
+  ]
+}

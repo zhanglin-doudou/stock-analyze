@@ -180,6 +180,25 @@ async def test_concurrent_same_key_upsert(owner_engine: AsyncEngine):
 
 
 @pytest.mark.asyncio
+async def test_concurrent_replace_dependencies(owner_engine: AsyncEngine):
+    """并发同键血缘替换：确定性主键 UPSERT 吸收冲突，最终仍 1 行血缘。"""
+    user_id = await _new_user(owner_engine)
+
+    async def write(dep_hash: str) -> None:
+        rows = ({"dep_kind": "dataset", "dep_id": "rounds", "dep_hash": dep_hash},)
+        async with AsyncSession(owner_engine) as session:
+            repo = MetricResultRepository(session)
+            await persist_outcome(repo, user_id, _outcome(lineage=rows))
+            await session.commit()
+
+    await asyncio.gather(
+        write("sha256:" + "a" * 64), write("sha256:" + "b" * 64), write("sha256:" + "c" * 64)
+    )
+    assert await _count_results(owner_engine, user_id) == 1
+    assert await _count_deps(owner_engine, user_id, "1.0") == 1
+
+
+@pytest.mark.asyncio
 async def test_dependency_replaces_only_current_version(owner_engine: AsyncEngine):
     """血缘替换只清当前 `(user, metric, period, version)`；旧版本血缘保留。"""
     user_id = await _new_user(owner_engine)

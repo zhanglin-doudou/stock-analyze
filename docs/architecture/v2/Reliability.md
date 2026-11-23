@@ -462,7 +462,7 @@ M=2 → ρ = 0.44 → Wq ≈ 40s                            ⚠ 仅够冗余
 | **SOP-2** 迁移卡住 | migrate >5min、DDL 等待 | 新版本不上线（旧版服务） | ① 查阻塞树是否被长事务挡；② 等 ≤60s 或终止阻塞源（非 migrate）；③ `lock_timeout` 触发→中止发布 | 旧版 `/readyz` 正常；migration head 未前进；无残留锁 | 已部分执行且回滚失败→备份+人工修复脚本 |
 | **SOP-3** 队列积压 | 最老 pending >10min | 导入/报告延迟（SLO-4） | ① `--scale worker=8`；② 查 dead_letter 与失败码，隔离毒任务；③ 评估背压（§5.5） | pending 年龄 <300s 且下降；成功率回升 | 积压 >30min 或 worker 起不来→公告+降级批量任务 |
 | **SOP-4** 磁盘满 | 水位 <5%、`ENOSPC` | 写失败、WAL 无法归档 | ① `ops/cleanup.sh` 删过期导出/日志/**已归档** WAL；② 扩卷；③ 验证归档补齐 | >15%；`wal_archive_lag` 回落；写测试成功 | 无法扩容/清理不足→只读模式+公告 |
-| **SOP-5** 证书过期 | `cert_expiry_days <7` | 全员不可用 | ① `certbot renew --force-renewal`；② `nginx -t && nginx -s reload`；③ 验链/OCSP | `curl -I` 200；续期 >30 天 | 续期失败（DNS/端口）→手动上传+修 ACME |
+| **SOP-5** 证书过期 | `cert_expiry_days <7` | 全员不可用 | ① 查 Caddy 自动续期：`caddy list-certificates` 与日志中 ACME 报错；② 修 DNS/80 可达性后 `caddy validate && caddy reload` 触发重签；③ 验链/OCSP | `curl -I` 200；续期 >30 天 | 续期失败（DNS/端口）→手动上传证书应急 + 修 ACME 配置 |
 | **SOP-6** 发布回滚 | 5xx >0.5% 3min / p95 >2× / job 失败 >2% | 部分或全部受影响 | ① 停发布保留现场；② `ops/rollback.sh` 回滚镜像 tag；③ SPA 软链回切 | 5xx <0.1%；p95 回基线；`/version` 旧版；队列消化 | 回滚后仍异常→数据/迁移问题→SOP-2/§3.4 |
 | **SOP-7** PITR 恢复 | 损坏/误删/误迁移（FM-06） | 数据回滚目标时刻 | ① 冻结写入+卷快照；② 空实例恢复 basebackup+`recovery_target_time`；③ 5 项校验+RLS 冒烟后切流 | 5 项全过；RTO ≤30min；RPO ≤5min；越权 404 | 校验失败或 RTO 超 30min→上一份备份+通知 |
 | **SOP-8** 备份校验失败 | `backup_verify_ok=false`（SLO-5） | 恢复点可靠性下降（暂不影响服务） | ① 立即重做并校验；② 失败回退上一份已验证备份并标坏件；③ 查对象存储凭据/配额/网络 | 一次校验通过；`backup_age <26h` | 连续 2 次失败→P0 冻结发布 |

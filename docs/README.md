@@ -16,7 +16,8 @@
 | 知道**测试怎么做**、覆盖率门禁 | [architecture/v2/Testing.md](architecture/v2/Testing.md) |
 | 知道**怎么上线/兜底/恢复** | [architecture/v2/Reliability.md](architecture/v2/Reliability.md) |
 | 知道**加功能要改哪里** | [architecture/v2/Extensibility.md](architecture/v2/Extensibility.md) |
-| 知道**怎么部署/上线准入** | [DEPLOYMENT.md](DEPLOYMENT.md) — Docker + Traefik 准入清单（DEV-PLAN §5 的执行版） |
+| 知道**怎么部署/上线准入** | [DEPLOYMENT.md](DEPLOYMENT.md) — Docker + 宿主 Caddy 准入清单（DEV-PLAN §5 的执行版） |
+| 看**v1.0 发布说明**（功能亮点 / 宣传稿） | [RELEASE-1.0.md](RELEASE-1.0.md) |
 | 知道**先写什么、每期怎么本地验** | [DEV-PLAN-v2.md](DEV-PLAN-v2.md) — 三期开发清单（45 任务 / 96.0 人日） |
 | 搞懂**账单导入**（认列/认类型/对账/隔离及下游影响） | [help/2026-11-18-bill-import-guide.md](help/2026-11-18-bill-import-guide.md) |
 | 知道**为什么这么决策** | [architecture/v2/ADR.md](architecture/v2/ADR.md) |
@@ -30,7 +31,8 @@
 docs/
 ├── Architecture-v2.md              # 主架构（前置"可验收 API 清单"）
 ├── DATABASE.md                     # 数据库安装 / 角色模型 / 迁移 / 日常 SQL
-├── DEPLOYMENT.md                   # ★ 部署准入清单：Docker + Traefik（D-01~D-07 执行版）
+├── DEPLOYMENT.md                   # ★ 部署准入清单：Docker + 宿主 Caddy（D-01~D-07 执行版）
+├── RELEASE-1.0.md                  # v1.0 发布说明（功能亮点与产品介绍）
 ├── DEV-PLAN-v2.md                  # ★ 开发清单：一期/二期/三期 + 交付；每期本地可验证脚本
 ├── prd/
 │   └── PRD-v2.md                   # 需求基线 v2.0（28 FR + 15 NFR，每条带 API 验收）

@@ -40,7 +40,9 @@ export type IconName =
   | "dot"
   | "copy"
   | "star"
-  | "chat";
+  | "chat"
+  // 使用引导（顶栏入口，非导航项）
+  | "guide";
 
 const PATHS: Record<IconName, ReactNode> = {
   /* ── 一级分组 ─────────────────────────────── */
@@ -213,6 +215,13 @@ const PATHS: Record<IconName, ReactNode> = {
     <>
       <path d="M4 5.5h16v10.2H9l-4.5 3.4v-3.4H4z" />
       <path d="M8 9h8M8 12h5" />
+    </>
+  ),
+  // 使用引导：打开的书（区别于「报告」文档、「导入记录」档案盒）
+  guide: (
+    <>
+      <path d="M12 6.5C10 5 7 4.5 4 4.5v13c3 0 6 .5 8 2 2-1.5 5-2 8-2v-13c-3 0-6 .5-8 2z" />
+      <path d="M12 6.5v13" />
     </>
   ),
 };

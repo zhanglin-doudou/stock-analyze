@@ -1,0 +1,18 @@
+# 宿主 Caddy 站点示例（Caddy ≥ 2.7）——生产唯一入口网关。
+# 合并进宿主 Caddyfile 的站点段（替换 your.domain 与上游端口），然后：
+#   caddy validate && caddy reload
+#
+# 职责划分：Caddy 只做 TLS 与入口反代；路由（/api、探针）、限流、安全头、gzip
+# 全部在 web 容器内 nginx（infra/nginx/default.conf），不再双层网关。
+# web 容器端口只绑 127.0.0.1:8002（infra/compose/docker-compose.prod.yml）。
+
+your.domain {
+    # 不要启用 encode（gzip）：静态压缩已由 web 内 nginx 负责，
+    # 且 SSE（text/event-stream）绝不能被压缩/缓冲
+
+    reverse_proxy 127.0.0.1:8002 {
+        flush_interval -1            # SSE（chat/任务进度）逐帧透传，不攒批
+        header_up X-Real-IP {remote_host}        # 真实客户端 IP（nginx realip 还原）
+        header_up X-Forwarded-Proto {scheme}
+    }
+}

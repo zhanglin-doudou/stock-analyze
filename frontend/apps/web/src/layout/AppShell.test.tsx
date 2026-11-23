@@ -145,6 +145,13 @@ describe("AppShell 两级菜单", () => {
     expect(screen.getByRole("button", { name: "切换到浅色主题" })).toBeTruthy();
   });
 
+  it("顶栏提供使用引导入口，并携带当前路径作为返回地址", () => {
+    renderShell("/assets?period=2026-01");
+    expect(screen.getByRole("link", { name: "使用引导" }).getAttribute("href")).toBe(
+      "/guide?next=%2Fassets%3Fperiod%3D2026-01",
+    );
+  });
+
   it("当前路由有 aria-current，且同步 document.title", () => {
     renderShell("/assets");
     expect(screen.getByRole("link", { name: "资产" }).getAttribute("aria-current")).toBe("page");

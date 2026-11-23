@@ -2,7 +2,7 @@
 
 本文是 [README](../README.md) 的数据库专项文档：本地 PostgreSQL 的两种安装方式、三角色模型、迁移执行、日常 SQL 操作与故障排查。
 
-一期 schema 布局（3 个业务 schema + 1 个公共缓存 schema，由 Alembic 迁移 `0001_phase1` 创建；`0002_platform_tenant_rls` 补 platform 租户表 RLS；`0003_review_rounds` 建二期复盘表 round / round_fill / round_build_state 并同批启 RLS；`0004_review_nav` 建 `review.nav_daily`；`0005_market_cache` 建公共行情缓存 schema `market`；`0006_review_asset_daily` 建资产快照 `asset_daily` / 构建水位 `asset_build_state`；`0007_review_metrics` 建指标物化 `metric_result` / 血缘 `metric_dependency`；`0008_money_fund_bond` 增货基余额列并重写资产恒等式；`0009_metrics_period_tokens` 扩展指标 `period` 为月/年/自定义区间；`0010_asset_daily_remark` 增资产备注列；`0011_market_sectors` 建板块公共缓存 `market.sector` / `sector_member` / `benchmark_member` / `sector_bar` / `sector_pull_range` / `sector_sync_state` 六表（无 RLS、可再生）；`0022_chat_turn_event` 建助手时间线；`0023_email_verification` 建注册/找回验证码与发送节流两表（认证前置、无 RLS））：
+一期 schema 布局（3 个业务 schema + 1 个公共缓存 schema，由 Alembic 迁移 `0001_phase1` 创建；`0002_platform_tenant_rls` 补 platform 租户表 RLS；`0003_review_rounds` 建二期复盘表 round / round_fill / round_build_state 并同批启 RLS；`0004_review_nav` 建 `review.nav_daily`；`0005_market_cache` 建公共行情缓存 schema `market`；`0006_review_asset_daily` 建资产快照 `asset_daily` / 构建水位 `asset_build_state`；`0007_review_metrics` 建指标物化 `metric_result` / 血缘 `metric_dependency`；`0008_money_fund_bond` 增货基余额列并重写资产恒等式；`0009_metrics_period_tokens` 扩展指标 `period` 为月/年/自定义区间；`0010_asset_daily_remark` 增资产备注列；`0011_market_sectors` 建板块公共缓存 `market.sector` / `sector_member` / `benchmark_member` / `sector_bar` / `sector_pull_range` / `sector_sync_state` 六表（无 RLS、可再生）；`0022_chat_turn_event` 建助手时间线；`0023_email_verification` 建注册/找回验证码与发送节流两表（认证前置、无 RLS）；`0024_user_llm_prefs` 给 `platform.user_setting` 增 `llm_prefs` JSONB（助手模型偏好））：
 
 | Schema | 内容 |
 |---|---|

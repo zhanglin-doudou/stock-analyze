@@ -85,8 +85,7 @@ async def test_chat_admin_forbidden(client: httpx.AsyncClient, account_factory) 
 async def test_chat_llm_path_with_fake_provider(client: httpx.AsyncClient, user, app) -> None:
     from stock_delivery.chat.provider import FakeProvider
 
-    app.state.sa.settings.llm_provider = "glm"
-    app.state.sa.settings.glm_api_key = "test"
+    app.state.sa.settings.llm_provider = "auto"
     app.state.sa.llm = FakeProvider(
         [
             json.dumps(
@@ -157,8 +156,7 @@ async def test_chat_needs_clarification_persists(client: httpx.AsyncClient, user
     """状态 `needs_clarification` 必须能写入 32 宽的状态列（0021 回归）。"""
     from stock_delivery.chat.provider import FakeProvider
 
-    app.state.sa.settings.llm_provider = "glm"
-    app.state.sa.settings.glm_api_key = "test"
+    app.state.sa.settings.llm_provider = "auto"
     app.state.sa.llm = FakeProvider(
         [
             json.dumps(

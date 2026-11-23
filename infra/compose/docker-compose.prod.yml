@@ -1,11 +1,14 @@
-# 生产编排：Traefik（唯一入口）+ web + api×N + worker + migrate
+# 生产编排：宿主 Caddy（TLS/入口）+ web + api×N + worker + migrate
+# web 容器内 nginx 是栈内唯一前端入口：静态 SPA + /api 与探针反代 → api:8000。
+# TLS/域名/证书由宿主 Caddy 负责（示例见 infra/caddy/Caddyfile.example），
+# 不再在编排内跑网关容器；web 端口只绑 127.0.0.1，公网 80/443 归 Caddy。
 # 数据库由云主机 PostgreSQL:5432 提供，不在本编排内（见 docs/DEPLOYMENT.md P0-4）。
 #
 #   cp infra/.env.prod.example infra/.env.prod   # 填写密钥（勿提交）
 #   docker compose --env-file infra/.env.prod -f infra/compose/docker-compose.prod.yml up -d --build
-#   docker compose ... up -d --scale api=2       # 扩副本（Traefik 自动负载均衡）
+#   docker compose ... up -d --scale api=2       # 扩副本（nginx 经 Docker DNS 自动发现）
 #
-# 本地全套预演（HTTP，无 ACME）：追加 -f infra/compose/docker-compose.local.yml
+# 本地全套预演（HTTP 直连，无 Caddy）：追加 -f infra/compose/docker-compose.local.yml
 name: stock-analyze
 
 x-app: &app
@@ -30,70 +33,19 @@ x-app: &app
       max-file: "5"
 
 services:
-  traefik:
-    image: traefik:v3.3
-    restart: unless-stopped
-    ports:
-      - "80:80"
-      - "443:443"
-    environment:
-      # ACME 注册邮箱（静态配置无法插值，走 Traefik 的 TRAEFIK_* 环境变量）
-      TRAEFIK_CERTIFICATESRESOLVERS_LE_ACME_EMAIL: ${ACME_EMAIL}
-    command:
-      - --log.level=INFO
-      - --accesslog=true
-      - --accesslog.format=json
-      - --ping=true
-      - --providers.docker=true
-      - --providers.docker.exposedbydefault=false
-      - --providers.docker.network=sa-net
-      - --providers.file.directory=/etc/traefik/dynamic
-      - --providers.file.watch=true
-      - --entrypoints.web.address=:80
-      - --entrypoints.web.http.redirections.entrypoint.to=websecure
-      - --entrypoints.web.http.redirections.entrypoint.scheme=https
-      - --entrypoints.web.http.redirections.entrypoint.permanent=true
-      - --entrypoints.websecure.address=:443
-      - --entrypoints.websecure.http.tls=true
-      - --entrypoints.websecure.http.tls.certresolver=le
-      - --entrypoints.websecure.http.tls.domains[0].main=${DOMAIN:?DOMAIN 未设置}
-      # SSE 是长响应：读请求 60s 足够，空闲超时关闭避免流被掐断
-      - --entrypoints.websecure.transport.respondingTimeouts.readTimeout=60s
-      - --entrypoints.websecure.transport.respondingTimeouts.idleTimeout=0
-      - --certificatesresolvers.le.acme.storage=/letsencrypt/acme.json
-      - --certificatesresolvers.le.acme.httpchallenge=true
-      - --certificatesresolvers.le.acme.httpchallenge.entrypoint=web
-    volumes:
-      # 只读挂载 docker socket 供 provider 发现容器（生产建议换 socket-proxy，见 P1）
-      - /var/run/docker.sock:/var/run/docker.sock:ro
-      - ../traefik/dynamic:/etc/traefik/dynamic:ro
-      - sa-letsencrypt:/letsencrypt
-    networks:
-      - sa-net
-    healthcheck:
-      test: ["CMD", "traefik", "healthcheck", "--ping"]
-      interval: 15s
-      timeout: 3s
-      retries: 5
-
   web:
     image: stock-analyze/web:${TAG:-local}
     build:
       context: ../..
       dockerfile: infra/docker/Dockerfile.web
     restart: unless-stopped
+    ports:
+      # 只绑本机回环：宿主 Caddy 反代到 127.0.0.1:8002（见 infra/caddy/Caddyfile.example）
+      - "127.0.0.1:8002:80"
     networks:
       - sa-net
     mem_limit: 128m
     cpus: 0.5
-    labels:
-      traefik.enable: "true"
-      traefik.http.routers.web.rule: "Host(`${DOMAIN}`)"
-      traefik.http.routers.web.entrypoints: ${TRAEFIK_ENTRYPOINT:-websecure}
-      # 低于 api 的优先级：/api 与探针必须先命中 api
-      traefik.http.routers.web.priority: "10"
-      traefik.http.routers.web.middlewares: security-headers@file,compress@file
-      traefik.http.services.web.loadbalancer.server.port: "80"
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/"]
       interval: 15s
@@ -114,18 +66,7 @@ services:
         condition: service_completed_successfully
     mem_limit: 1g
     cpus: 2.0
-    labels:
-      traefik.enable: "true"
-      # 业务 API + 根路径探针/版本；/metrics 与 /docs 不路由（公网不可达）
-      traefik.http.routers.api.rule: "Host(`${DOMAIN}`) && (PathPrefix(`/api/`) || Path(`/healthz`) || Path(`/readyz`) || Path(`/version`))"
-      traefik.http.routers.api.entrypoints: ${TRAEFIK_ENTRYPOINT:-websecure}
-      traefik.http.routers.api.priority: "100"
-      traefik.http.routers.api.middlewares: security-headers@file,compress@file,ratelimit@file
-      traefik.http.services.api.loadbalancer.server.port: "8000"
-      # 就绪探针失败时从 LB 摘除（滚动升级期间旧实例会被自动移出）
-      traefik.http.services.api.loadbalancer.healthcheck.path: /readyz
-      traefik.http.services.api.loadbalancer.healthcheck.interval: 10s
-      traefik.http.services.api.loadbalancer.healthcheck.timeout: 3s
+    # 不发布宿主端口：只经 web 内 nginx 反代访问（/metrics、/docs 公网不可达）
     healthcheck:
       test:
         - CMD
@@ -150,9 +91,6 @@ services:
 
   # db 不在编排内：生产数据库由云主机 PostgreSQL:5432 提供。
   # 角色初始化用 infra/postgres/init-prod/00-bootstrap.sh 在云主机上手工执行（幂等）。
-
-volumes:
-  sa-letsencrypt:
 
 networks:
   sa-net:

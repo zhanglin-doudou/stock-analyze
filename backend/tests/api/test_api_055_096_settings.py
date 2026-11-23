@@ -2,7 +2,8 @@
 
 覆盖：默认视图（无行）、局部更新 + CAS 版本、无变更不 bump、If-Match 校验、
 409 版本冲突、空 body/未知键/只读键 422、阈值/窗口与 flags_hash、JSONB 整组重置、
-行情时段跨字段校验、概念过滤 `resolved`、幂等重放、admin 可用、跨用户隔离。
+行情时段跨字段校验、概念过滤 `resolved`、llm 组（目录/成员校验/成对提交，2026-11-22）、
+幂等重放、admin 可用、跨用户隔离。
 """
 
 from __future__ import annotations
@@ -304,3 +305,88 @@ async def test_patch_writes_audit_log(
     assert meta["from_version"] == 1
     assert meta["to_version"] == 2
     assert meta["changed"] == ["appearance.theme"]
+
+
+# ── llm 组（2026-11-22 供应商/模型动态切换）──────────────────
+async def test_get_settings_includes_llm_catalog(client: httpx.AsyncClient, user: Any) -> None:
+    resp = await client.get(_SETTINGS, headers=user.headers)
+    assert resp.status_code == 200, resp.text
+    llm = resp.json()["llm"]
+    assert llm["provider"] == ""
+    assert llm["model"] == ""
+    assert llm["default_provider"] == "zhipu"
+    assert llm["default_model"] == "glm-4-flash"
+    ids = [item["id"] for item in llm["providers"]]
+    assert ids == ["zhipu", "xiaomi"]
+    zhipu = llm["providers"][0]
+    assert zhipu["name"] == "智谱"
+    assert zhipu["models"] == ["glm-4.7-flash", "glm-4-flash"]
+    assert isinstance(zhipu["available"], bool)
+    xiaomi = llm["providers"][1]
+    assert xiaomi["models"] == ["mimo-v2.6-flash", "mimo-v2.6-pro"]
+    # 目录快照不得泄露内部配置
+    assert "base_url" not in zhipu
+    assert "api_key_env" not in zhipu
+
+
+async def test_patch_llm_set_reset_and_isolation(
+    client: httpx.AsyncClient,
+    account_factory: Any,
+) -> None:
+    first = await account_factory()
+    second = await account_factory()
+    resp = await _patch(client, first, {"llm": {"provider": "zhipu", "model": "glm-4-flash"}})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["version"] == 2
+    assert body["llm"]["provider"] == "zhipu"
+    assert body["llm"]["model"] == "glm-4-flash"
+
+    other = await client.get(_SETTINGS, headers=second.headers)
+    assert other.json()["llm"]["provider"] == ""
+    assert other.json()["llm"]["model"] == ""
+
+    reset = await _patch(client, first, {"llm": {"provider": None, "model": None}}, version=2)
+    assert reset.status_code == 200, reset.text
+    assert reset.json()["version"] == 3
+    assert reset.json()["llm"]["provider"] == ""
+    assert reset.json()["llm"]["model"] == ""
+
+    group_reset = await _patch(
+        client, first, {"llm": {"provider": "xiaomi", "model": "mimo-v2.6-pro"}}, version=3
+    )
+    assert group_reset.status_code == 200
+    cleared = await _patch(client, first, {"llm": None}, version=4)
+    assert cleared.status_code == 200
+    assert cleared.json()["llm"]["provider"] == ""
+
+
+async def test_patch_llm_rejects_unknown_provider_or_model(
+    client: httpx.AsyncClient, user: Any
+) -> None:
+    resp = await _patch(client, user, {"llm": {"provider": "nope", "model": "glm-4-flash"}})
+    assert resp.status_code == 422
+    problem = resp.json()
+    assert problem["code"] == "VALIDATION_ERROR"
+    assert problem["errors"][0]["field"] == "llm.provider"
+
+    resp = await _patch(client, user, {"llm": {"provider": "zhipu", "model": "mimo-v2.6-pro"}})
+    assert resp.status_code == 422
+    assert resp.json()["errors"][0]["field"] == "llm.model"
+
+
+async def test_patch_llm_requires_both_keys(client: httpx.AsyncClient, user: Any) -> None:
+    resp = await _patch(client, user, {"llm": {"provider": "zhipu"}})
+    assert resp.status_code == 422
+    assert resp.json()["errors"][0]["field"] == "llm.provider"
+
+    resp = await _patch(client, user, {"llm": {"model": "glm-4-flash"}})
+    assert resp.status_code == 422
+    assert resp.json()["errors"][0]["field"] == "llm.model"
+
+    resp = await _patch(client, user, {"llm": {"provider": "zhipu", "model": None}})
+    assert resp.status_code == 422
+    assert resp.json()["errors"][0]["field"] == "llm.model"
+
+    resp = await _patch(client, user, {"llm": {"provider": "", "model": "glm-4-flash"}})
+    assert resp.status_code == 422

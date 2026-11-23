@@ -20,12 +20,14 @@ GROUP_APPEARANCE: Final = "appearance"
 GROUP_BILL_FLAGS: Final = "bill_flags"
 GROUP_MARKET_SESSIONS: Final = "market_sessions"
 GROUP_CONCEPT_FILTERS: Final = "concept_filters"
+GROUP_LLM: Final = "llm"
 
 GROUPS: Final[tuple[str, ...]] = (
     GROUP_APPEARANCE,
     GROUP_BILL_FLAGS,
     GROUP_MARKET_SESSIONS,
     GROUP_CONCEPT_FILTERS,
+    GROUP_LLM,
 )
 
 # ── 枚举 ───────────────────────────────────────────────────
@@ -92,6 +94,12 @@ CONCEPT_NAME_MAX_LEN: Final = 64
 
 DEFAULT_CONCEPT_FILTERS: Final[dict[str, Any]] = {"mode": "off", "excluded": []}
 
+# ── 助手模型（存 llm_prefs JSONB，2026-11-22 供应商动态切换）──
+#: 供应商/模型 id 上限（形状校验；目录成员校验在 API 层对注册表做）。
+LLM_ID_MAX_LEN: Final = 64
+#: 空字符串 = 跟随部署默认（`config/llm_providers.json` 的 default_*）。
+DEFAULT_LLM_PREFS: Final[dict[str, Any]] = {"provider": "", "model": ""}
+
 
 @dataclass(frozen=True, slots=True)
 class FieldSpec:
@@ -150,6 +158,8 @@ FIELD_SPECS: Final[tuple[FieldSpec, ...]] = (
     ),
     FieldSpec(GROUP_CONCEPT_FILTERS, "mode", "jsonb", "concept_filter_prefs", "off", unit="enum"),
     FieldSpec(GROUP_CONCEPT_FILTERS, "excluded", "jsonb", "concept_filter_prefs", ()),
+    FieldSpec(GROUP_LLM, "provider", "jsonb", "llm_prefs", "", unit="enum"),
+    FieldSpec(GROUP_LLM, "model", "jsonb", "llm_prefs", "", unit="enum"),
 )
 
 #: 组 → 可写 JSONB 键白名单（typed 组由 BILL_FLAG_* 承担）。
@@ -157,6 +167,7 @@ JSONB_WRITABLE_KEYS: Final[dict[str, frozenset[str]]] = {
     GROUP_APPEARANCE: frozenset({"theme", "density", "trend"}),
     GROUP_MARKET_SESSIONS: frozenset({"sessions", "data_ready_after", "session_notice_enabled"}),
     GROUP_CONCEPT_FILTERS: frozenset({"mode", "excluded"}),
+    GROUP_LLM: frozenset({"provider", "model"}),
 }
 
 #: 组 → JSONB 列名。
@@ -164,6 +175,7 @@ JSONB_COLUMNS: Final[dict[str, str]] = {
     GROUP_APPEARANCE: "display_prefs",
     GROUP_MARKET_SESSIONS: "market_session_prefs",
     GROUP_CONCEPT_FILTERS: "concept_filter_prefs",
+    GROUP_LLM: "llm_prefs",
 }
 
 #: 组 → 只读 API 键（PATCH 传入 → 422）。
@@ -172,6 +184,7 @@ READONLY_KEYS: Final[dict[str, frozenset[str]]] = {
     GROUP_BILL_FLAGS: frozenset({"flags_hash", "is_default"}),
     GROUP_MARKET_SESSIONS: MARKET_SESSIONS_READONLY,
     GROUP_CONCEPT_FILTERS: frozenset(),
+    GROUP_LLM: frozenset(),
 }
 
 #: 顶层只读回显键（本期不开放写入口）。
@@ -194,6 +207,7 @@ __all__ = [
     "DEFAULT_BILL_FLAGS_BPS",
     "DEFAULT_CONCEPT_FILTERS",
     "DEFAULT_FLAGS_HASH",
+    "DEFAULT_LLM_PREFS",
     "DEFAULT_MARKET_SESSIONS",
     "DENSITIES",
     "FIELD_SPECS",
@@ -201,9 +215,11 @@ __all__ = [
     "GROUP_APPEARANCE",
     "GROUP_BILL_FLAGS",
     "GROUP_CONCEPT_FILTERS",
+    "GROUP_LLM",
     "GROUP_MARKET_SESSIONS",
     "JSONB_COLUMNS",
     "JSONB_WRITABLE_KEYS",
+    "LLM_ID_MAX_LEN",
     "MARKET_SESSIONS_READONLY",
     "MARKET_TIMEZONE",
     "READONLY_KEYS",

@@ -22,6 +22,7 @@ from stock_delivery.chat.runtime import ChatRuntime, to_jsonable
 from stock_delivery.chat.tools import ToolExecutor, ToolRegistry
 from stock_platform import audit
 from stock_platform.repositories.chat import ChatRepository
+from stock_platform.repositories.users import UserSettingRepository
 from stock_platform.tenant import TenantContext
 from stock_review.application.chat.facade import ChatQueryFacade
 from stock_review.application.chat.provider import BuiltinToolProvider
@@ -395,7 +396,8 @@ async def replay_turn(
                 diffs.append({"kind": "llm_call", "error": "没有 answer LLM 调用"})
             else:
                 try:
-                    result = await state.llm.complete_messages(
+                    llm, _ = await _resolve_llm(state, session, user_id)
+                    result = await llm.complete_messages(
                         purpose="answer",
                         messages=(answer_call.get("request") or {}).get("messages") or [],
                         max_tokens=state.settings.llm_max_output_tokens,
@@ -448,7 +450,21 @@ async def delete_conversation(
     return Response(status_code=204)
 
 
-def _make_runtime(
+async def _resolve_llm(state: Any, session: Any, user_id: Any) -> tuple[Any, bool]:
+    """按用户 `llm_prefs` 动态路由模型（设计 §5）。
+
+    返回 `(provider, llm_enabled)`：选择为空/无效回落默认 provider；部署
+    `llm_enabled=False` 时恒模板-only（Fake 传输）。
+    """
+    if not state.settings.llm_enabled:
+        return state.llm, False
+    setting = await UserSettingRepository(session).get_for_read(user_id)
+    prefs: dict[str, Any] = dict(setting.llm_prefs or {}) if setting is not None else {}
+    resolved = state.llm_factory.resolve(prefs) if state.llm_factory is not None else None
+    return (resolved or state.llm), True
+
+
+async def _make_runtime(
     *,
     session: Any,
     state: Any,
@@ -475,10 +491,12 @@ def _make_runtime(
         for spec in builtin.specs():
             registry.register(spec, builtin)
         executor = ToolExecutor(max_calls_per_turn=state.settings.chat_max_tool_calls)
+    llm, llm_enabled = await _resolve_llm(state, session, user_id)
     return ChatRuntime(
         repo=ChatRepository(session),
         data_port=facade,
-        llm=state.llm,
+        llm=llm,
+        llm_enabled=llm_enabled,
         clock=state.clock,
         settings=state.settings,
         user_id=user_id,
@@ -502,7 +520,7 @@ async def _run_turn(
     question: str,
 ) -> tuple[ChatRuntime, dict[str, Any]]:
     async with state.db.session(user_id=user_id, begin=True) as session:
-        runtime = _make_runtime(
+        runtime = await _make_runtime(
             session=session,
             state=state,
             user_id=user_id,
@@ -558,7 +576,7 @@ async def _stream_live_turn(
     try:
         async with state.db.session(user_id=user_id, begin=True) as session:
             repo = ChatRepository(session)
-            runtime = _make_runtime(
+            runtime = await _make_runtime(
                 session=session,
                 state=state,
                 user_id=user_id,

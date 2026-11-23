@@ -3,7 +3,7 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 import pytest
-from stock_delivery.chat.provider import GlmProvider, LlmError
+from stock_delivery.chat.provider import LlmError, OpenAiCompatProvider
 from stock_platform.config import Settings
 from structlog.testing import capture_logs
 
@@ -34,14 +34,22 @@ class _LengthLimitedClient:
         )
 
 
-def _provider() -> GlmProvider:
-    return GlmProvider(
-        Settings(
-            llm_provider="glm",
-            glm_api_key="test-key",
-            glm_model="glm-4-flash",
-        )
+def _provider(api_key: str | None = "test-key") -> OpenAiCompatProvider:
+    return OpenAiCompatProvider(
+        provider="zhipu",
+        model="glm-4-flash",
+        base_url="https://open.bigmodel.cn/api/paas/v4",
+        api_key=api_key,
+        settings=Settings(),
+        supports_thinking=True,
     )
+
+
+async def test_missing_key_raises_not_configured() -> None:
+    provider = _provider(api_key=None)
+    with pytest.raises(LlmError) as exc:
+        await provider.complete(purpose="answer", system="system", user="user", max_tokens=32)
+    assert exc.value.reason.value == "LLM_NOT_CONFIGURED"
 
 
 async def test_llm_success_logs_info(monkeypatch) -> None:
@@ -79,3 +87,4 @@ async def test_llm_failure_logs_error(monkeypatch) -> None:
     assert logs[0]["log_level"] == "error"
     assert logs[0]["status"] == "error"
     assert logs[0]["error_code"] == "LLM_RATE_LIMITED"
+    assert "test-key" not in str(logs)

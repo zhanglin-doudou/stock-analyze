@@ -412,6 +412,14 @@ export function AppShell() {
           >
             <Icon name="focus" size={16} />
           </button>
+          <a
+            className="shell-iconbtn shell-guide-link"
+            href={`/guide?next=${encodeURIComponent(location.pathname + location.search)}`}
+            aria-label="使用引导"
+            title="使用引导"
+          >
+            <Icon name="guide" size={16} />
+          </a>
           <span className="shell-status">
             <i className="shell-status-dot" aria-hidden="true" />
             本地实例
