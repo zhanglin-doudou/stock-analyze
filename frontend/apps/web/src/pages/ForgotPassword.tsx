@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { isApiProblemError } from "@sa/api-client";
 import { api } from "../client";
 import { ProblemView } from "../ui/Problem";
+import { GuideEntryLink } from "../guide/GuideEntryLink";
 
 export function ForgotPassword() {
   const navigate = useNavigate();
@@ -121,6 +122,7 @@ export function ForgotPassword() {
           <p className="muted">
             <Link to="/login">返回登录</Link>
           </p>
+          <GuideEntryLink />
         </div>
       </div>
     );
@@ -221,6 +223,7 @@ export function ForgotPassword() {
         <p className="muted">
           想起密码了？<Link to="/login">返回登录</Link>
         </p>
+        <GuideEntryLink />
       </form>
     </div>
   );

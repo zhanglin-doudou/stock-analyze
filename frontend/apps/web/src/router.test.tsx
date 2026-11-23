@@ -1,6 +1,6 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
-import { MemoryRouter, Route, Routes, useRoutes } from "react-router-dom";
+import { MemoryRouter, Route, Routes, useLocation, useRoutes } from "react-router-dom";
 import { Layout, RequireAuth, appRoutes } from "./router";
 import { pageMeta } from "./layout/navigation";
 import { clearSession, saveTokens } from "./store/session";
@@ -8,6 +8,16 @@ import { clearSession, saveTokens } from "./store/session";
 /** 用同一份路由表在 MemoryRouter 下渲染（见下方 jsdom/AbortSignal 说明）。 */
 function AppRoutes() {
   return useRoutes(appRoutes);
+}
+
+function LoginProbe() {
+  const location = useLocation();
+  return (
+    <>
+      <div>登录页占位</div>
+      <div data-testid="login-search">{location.search}</div>
+    </>
+  );
 }
 
 afterEach(() => {
@@ -58,10 +68,41 @@ describe("router / Layout（FT-09 导航与登录保护）", () => {
     expect(screen.getByRole("link", { name: "回合" }).getAttribute("aria-current")).toBeNull();
   });
 
-  it("未登录访问 /assets 跳转登录页", () => {
+  it("未登录访问根路径时整页跳转独立引导页", () => {
+    clearSession();
+    const originalLocation = window.location;
+    const replace = vi.fn();
+    Object.defineProperty(window, "location", { configurable: true, value: { replace } });
+
+    try {
+      render(
+        <MemoryRouter initialEntries={["/"]}>
+          <Routes>
+            <Route
+              path="/"
+              element={
+                <RequireAuth>
+                  <div>受保护的工作台</div>
+                </RequireAuth>
+              }
+            />
+            <Route path="/login" element={<LoginProbe />} />
+          </Routes>
+        </MemoryRouter>,
+      );
+
+      expect(replace).toHaveBeenCalledWith("/guide");
+      expect(screen.queryByText("受保护的工作台")).toBeNull();
+      expect(screen.queryByText("登录页占位")).toBeNull();
+    } finally {
+      Object.defineProperty(window, "location", { configurable: true, value: originalLocation });
+    }
+  });
+
+  it("未登录访问 /assets 跳转登录页并保留 next", () => {
     clearSession();
     render(
-      <MemoryRouter initialEntries={["/assets"]}>
+      <MemoryRouter initialEntries={["/assets?period=2026-01"]}>
         <Routes>
           <Route
             path="/assets"
@@ -71,12 +112,13 @@ describe("router / Layout（FT-09 导航与登录保护）", () => {
               </RequireAuth>
             }
           />
-          <Route path="/login" element={<div>登录页占位</div>} />
+          <Route path="/login" element={<LoginProbe />} />
         </Routes>
       </MemoryRouter>,
     );
 
     expect(screen.getByText("登录页占位")).toBeTruthy();
+    expect(screen.getByTestId("login-search").textContent).toBe("?next=%2Fassets%3Fperiod%3D2026-01");
     expect(screen.queryByText("受保护的资产页")).toBeNull();
   });
 

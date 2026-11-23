@@ -64,6 +64,11 @@ function renderPage(): void {
 }
 
 describe("Register 邮箱验证码", () => {
+  it("提供使用引导入口", () => {
+    renderPage();
+    expect(screen.getByRole("link", { name: /使用引导/ }).getAttribute("href")).toBe("/guide");
+  });
+
   it("策略开启时显示获取验证码，发送后出现验证码输入", async () => {
     renderPage();
     await waitFor(() => expect(getPolicy).toHaveBeenCalled());

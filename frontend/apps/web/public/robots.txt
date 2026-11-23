@@ -1,0 +1,7 @@
+User-agent: *
+Allow: /guide
+Allow: /$
+Allow: /assets/
+Disallow: /api/
+Disallow: /
+Sitemap: __STOCK_PUBLIC_URL__/sitemap.xml
