@@ -110,7 +110,7 @@ export function Nav() {
     },
     {
       key: "twr",
-      header: "日收益（%）",
+      header: "月度收益（%）",
       render: (row) =>
         row.blocked ? (
           <span className="muted">—</span>
@@ -265,7 +265,7 @@ export function Nav() {
 
           {/* 每日持仓分析 */}
           <hr style={{ margin: "24px 0", border: "none", borderTop: "1px solid var(--border)" }} />
-          <h2>每日持仓分析</h2>
+          <h2>月初/末持仓分析</h2>
           {(() => {
             const unblocked = result.points.filter((p) => !p.blocked);
             if (unblocked.length === 0) {
