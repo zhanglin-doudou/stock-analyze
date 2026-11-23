@@ -1,4 +1,5 @@
-import { useEffect, useState, type ReactElement } from "react";
+import { useEffect, useRef, useState, type ReactElement } from "react";
+import { createPortal } from "react-dom";
 import { api } from "../client";
 import { saveTokens } from "../store/session";
 import { useGuideAuth } from "./useGuideAuth";
@@ -31,7 +32,7 @@ const MAPPING: Array<[string, string, string]> = [
   ["日期", "trade_date", "归一为日期类型"],
   ["证券代码", "security_code", "保留前导零（如 000651）"],
   ["摘要", "summary / summary_code", "摘要原文 + 归一编码（sys_buy_stock 等）"],
-  ["（推断）", "side", "含「证券买入」→ buy，「卖出」→ sell，否则 unknown"],
+  ["买卖标志", "side", "含「证券买入」→ buy，「卖出」→ sell，否则 unknown"],
   ["成交数量", "quantity_units", "×10000 标度整数（200 股 → 20000）"],
   ["成交均价", "price_units", "×1000000 标度（37.05 → 37050000）"],
   ["发生金额", "amount_units", "带符号净额（买入为负，如 -741515）"],
@@ -39,13 +40,49 @@ const MAPPING: Array<[string, string, string]> = [
   ["资金余额", "cash_balance_units", "对账锚点"],
 ];
 
-const FEATURES = [
-  { icon: "▤", title: "看板", desc: "总资产、收益、回撤一屏总览，数据就绪自动更新。" },
-  { icon: "☰", title: "交易流水", desc: "每笔买卖、分红、划转明细可查，支持期间筛选。" },
-  { icon: "↻", title: "回合", desc: "一只股票从买到卖的完整盈亏，含执行价差洞察。" },
-  { icon: "📈", title: "净值与指标", desc: "收益率曲线 + 18 项行为指标，看清自己的交易画像。" },
-  { icon: "◔", title: "归因", desc: "收益从哪来、风险敞口在哪，板块与选股拆解。" },
-  { icon: "▦", title: "资产表", desc: "每日持仓市值与现金对账，异常状态一目了然。" },
+type Shot = { src: string; alt: string; width: number; height: number };
+
+/** 看板界面截图：用于功能卡片的轮播展示。 */
+const DASHBOARD_SHOTS: Shot[] = [
+  { src: "/guide/dashboard-1.png", alt: "看板界面截图 1", width: 2758, height: 1518 },
+  { src: "/guide/dashboard-2.png", alt: "看板界面截图 2", width: 2688, height: 1316 },
+  { src: "/guide/dashboard-3.png", alt: "看板界面截图 3", width: 2602, height: 1178 },
+  { src: "/guide/dashboard-4.png", alt: "看板界面截图 4", width: 2718, height: 1070 },
+];
+
+/** 买卖旗标：列表与旗标设置两张截图。 */
+const FLAG_SHOTS: Shot[] = [
+  { src: "/guide/trade-flag.png", alt: "买卖旗标界面截图", width: 2588, height: 956 },
+  { src: "/guide/trade-flag-setting.png", alt: "买卖旗标设置界面截图", width: 1784, height: 916 },
+];
+
+const FEATURES: Array<{ icon: string; title: string; desc: string; shots: Shot[] }> = [
+  { icon: "▤", title: "看板", desc: "总资产、收益、回撤一屏总览，数据就绪自动更新。", shots: DASHBOARD_SHOTS },
+  { icon: "⚑", title: "买卖旗标", desc: "为买卖打上抄底、追涨、卖飞等自定义旗标，按交易行为归类分析。", shots: FLAG_SHOTS },
+  {
+    icon: "↻",
+    title: "回合",
+    desc: "一只股票从买到卖的完整盈亏，含执行价差洞察。",
+    shots: [{ src: "/guide/round.png", alt: "回合分析界面截图", width: 2402, height: 1504 }],
+  },
+  {
+    icon: "📈",
+    title: "净值与指标",
+    desc: "收益率曲线 + 18 项行为指标，看清自己的交易画像。",
+    shots: [{ src: "/guide/pnl.png", alt: "净值与指标界面截图", width: 2424, height: 1452 }],
+  },
+  {
+    icon: "◔",
+    title: "归因",
+    desc: "收益从哪来、风险敞口在哪，板块与选股拆解。",
+    shots: [{ src: "/guide/attribution.png", alt: "收益归因界面截图", width: 2446, height: 1614 }],
+  },
+  {
+    icon: "▦",
+    title: "资产表",
+    desc: "每日持仓市值与现金对账，异常状态一目了然。",
+    shots: [{ src: "/guide/assets.png", alt: "资产表界面截图", width: 2748, height: 1296 }],
+  },
 ];
 
 const STEPS = [
@@ -109,6 +146,7 @@ function TopNav({
           <a href="#flow">主链路</a>
           <a href="#import">导入账单</a>
           <a href="#features">功能</a>
+          <a href="#assistant">星星助手</a>
           <a href="#faq">常见问题</a>
         </nav>
         <div className="guide-topbar-grow" />
@@ -265,6 +303,122 @@ function ImportComparison() {
   );
 }
 
+/**
+ * 功能截图轮播：左右按钮或拖拽切换，索引取模实现无限循环；单张时只展示图片。
+ * 桌面端 hover 停留 1 秒后通过 portal 在视口中央弹出一张放大预览（不受卡片 overflow 裁剪）。
+ */
+function ShotCarousel({ shots, label }: { shots: Shot[]; label: string }): ReactElement {
+  const [index, setIndex] = useState(0);
+  const [zoomed, setZoomed] = useState(false);
+  const dragStartX = useRef<number | null>(null);
+  const zoomTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const total = shots.length;
+  const hasMultiple = total > 1;
+  const shot = shots[index];
+
+  const go = (step: number): void => setIndex((i) => (i + step + total) % total);
+
+  const cancelZoomTimer = (): void => {
+    if (zoomTimer.current !== null) {
+      clearTimeout(zoomTimer.current);
+      zoomTimer.current = null;
+    }
+  };
+
+  /** hover 停留 1 秒后再弹出放大预览，避免快速划过时反复闪出。 */
+  const scheduleZoom = (): void => {
+    cancelZoomTimer();
+    zoomTimer.current = setTimeout(() => setZoomed(true), 1000);
+  };
+
+  useEffect(() => cancelZoomTimer, []);
+
+  return (
+    <div className="guide-carousel" role="group" aria-roledescription="carousel" aria-label={label}>
+      <div
+        className="guide-carousel-viewport"
+        onMouseEnter={() => {
+          if (dragStartX.current === null) scheduleZoom();
+        }}
+        onMouseLeave={() => {
+          cancelZoomTimer();
+          setZoomed(false);
+          dragStartX.current = null;
+        }}
+        onPointerDown={(e) => {
+          cancelZoomTimer();
+          dragStartX.current = e.clientX;
+          setZoomed(false);
+          e.currentTarget.setPointerCapture?.(e.pointerId);
+        }}
+        onPointerUp={(e) => {
+          const start = dragStartX.current;
+          dragStartX.current = null;
+          if (start !== null && Math.abs(e.clientX - start) >= 40) {
+            go(e.clientX < start ? 1 : -1);
+          }
+          if (e.pointerType === "mouse") scheduleZoom();
+        }}
+      >
+        <img
+          key={shot.src}
+          className="guide-carousel-img"
+          src={shot.src}
+          alt={shot.alt}
+          width={shot.width}
+          height={shot.height}
+          loading="lazy"
+          draggable={false}
+        />
+      </div>
+      {hasMultiple ? (
+        <>
+          <button
+            type="button"
+            className="guide-carousel-btn is-prev"
+            aria-label="上一张截图"
+            onClick={() => go(-1)}
+          >
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path d="M10 3 5 8l5 5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+          <button
+            type="button"
+            className="guide-carousel-btn is-next"
+            aria-label="下一张截图"
+            onClick={() => go(1)}
+          >
+            <svg viewBox="0 0 16 16" aria-hidden="true">
+              <path d="m6 3 5 5-5 5" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+          <div className="guide-carousel-dots">
+            {shots.map((s, i) => (
+              <button
+                key={s.src}
+                type="button"
+                className={`guide-carousel-dot${i === index ? " is-active" : ""}`}
+                aria-label={`第 ${i + 1} 张截图`}
+                aria-current={i === index}
+                onClick={() => setIndex(i)}
+              />
+            ))}
+          </div>
+        </>
+      ) : null}
+      {zoomed
+        ? createPortal(
+            <div className="guide-carousel-zoom" aria-hidden="true">
+              <img src={shot.src} alt="" width={shot.width} height={shot.height} />
+            </div>,
+            document.body,
+          )
+        : null}
+    </div>
+  );
+}
+
 function FeatureCards() {
   return (
     <section id="features" className="guide-section">
@@ -277,15 +431,43 @@ function FeatureCards() {
         <div className="guide-features">
           {FEATURES.map((f) => (
             <div className="guide-fcard" key={f.title}>
-              <div className="guide-fcard-shot">
-                <span><span className="guide-ph-ico" aria-hidden="true">{f.icon}</span>截图待补 · {f.title}</span>
-              </div>
+              <ShotCarousel shots={f.shots} label={`${f.title}截图`} />
               <div className="guide-fcard-body">
                 <h4>{f.title}</h4>
                 <p>{f.desc}</p>
               </div>
             </div>
           ))}
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function StarAssistantSection() {
+  return (
+    <section id="assistant" className="guide-section">
+      <div className="guide-container">
+        <div className="guide-section-head">
+          <div className="guide-section-eyebrow">AI ASSISTANT</div>
+          <h2>星星助手：直接问你的账单</h2>
+          <p>不用自己翻图表。用一句话提问，星星助手基于你的账单、回合、指标与归因作答，关键数字标注数据来源。</p>
+        </div>
+        <div className="guide-assistant-grid">
+          <ul className="guide-assistant-points">
+            <li><b>自然语言提问</b>：这个月赚了多少、哪只股票贡献最大、追涨的胜率如何。</li>
+            <li><b>只答你的数据</b>：答案取自账单证据包，不自造数字，引用可追溯到回合、旗标或归因。</li>
+            <li><b>随叫随到</b>：右下角悬浮窗随时唤起；大屏可固定到右侧，边看图边问。</li>
+            <li><b>问答可回溯</b>：历史对话自动留存，随时回看当时的结论与出处。</li>
+          </ul>
+          <div className="guide-assistant-demo" aria-label="星星助手对话示意">
+            <div className="guide-bubble is-user">这季度追涨的几笔表现怎么样？</div>
+            <div className="guide-bubble is-assistant">
+              <span className="guide-bubble-name">星星助手</span>
+              按买卖旗标筛出本季度的追涨买入，列出笔数、胜率与主要盈亏来源，关键数字标注出处，可直接跳到对应回合查看明细。
+            </div>
+            <p className="guide-assistant-hint">示意效果 · 助手仅做复盘解读，不构成投资建议</p>
+          </div>
         </div>
       </div>
     </section>
@@ -412,7 +594,7 @@ function CtaFooter({ authed, homeHref }: { authed: boolean; homeHref: string }) 
         <div className="guide-container guide-footer-inner">
           <span>© 2026 交易复盘 · 个人复盘工作台</span>
           <span className="guide-footer-links">
-            <a href="#flow">主链路</a> · <a href="#import">导入说明</a> · <a href="#features">功能</a> · <a href="#faq">常见问题</a>
+            <a href="#flow">主链路</a> · <a href="#import">导入说明</a> · <a href="#features">功能</a> · <a href="#assistant">星星助手</a> · <a href="#faq">常见问题</a>
           </span>
         </div>
         <div className="guide-container">
@@ -458,6 +640,7 @@ export function GuideApp(): ReactElement {
         <FlowDiagram />
         <ImportComparison />
         <FeatureCards />
+        <StarAssistantSection />
         <Steps />
         <Faq />
         <ComplianceNote />
