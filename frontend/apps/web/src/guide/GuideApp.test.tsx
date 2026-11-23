@@ -1,7 +1,13 @@
-import { afterEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen, within } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { GuideApp } from "./GuideApp";
 import { clearSession, saveTokens } from "../store/session";
+
+const mocks = vi.hoisted(() => ({ login: vi.fn() }));
+
+vi.mock("../client", () => ({
+  api: { auth: { login: mocks.login } },
+}));
 
 afterEach(() => {
   cleanup();
@@ -51,5 +57,53 @@ describe("GuideApp", () => {
 
     const back = await screen.findByRole("link", { name: "返回工作台" });
     expect(back.getAttribute("href")).toBe("/");
+  });
+});
+
+describe("GuideApp · demo 一键体验", () => {
+  it("未登录时在「免费注册开始」下一行提供「用demo账号体验」，点击立即以 demo 账号登录", async () => {
+    mocks.login.mockResolvedValue({ access_token: "demo-access", refresh_token: "demo-refresh" });
+    const assign = vi.fn();
+    const originalLocation = window.location;
+    Object.defineProperty(window, "location", {
+      value: { ...window.location, assign },
+      writable: true,
+      configurable: true,
+    });
+    try {
+      render(<GuideApp />);
+      fireEvent.click(screen.getByRole("button", { name: "用demo账号体验" }));
+      await waitFor(() =>
+        expect(mocks.login).toHaveBeenCalledWith({
+          email: "xingst01@demo.com",
+          password: "xingst666",
+        }),
+      );
+      expect(window.localStorage.getItem("sa.access_token")).toBe("demo-access");
+      expect(assign).toHaveBeenCalledWith("/");
+    } finally {
+      Object.defineProperty(window, "location", {
+        value: originalLocation,
+        writable: true,
+        configurable: true,
+      });
+    }
+  });
+
+  it("登录失败就地提示且不跳转", async () => {
+    mocks.login.mockRejectedValue(new Error("boom"));
+    render(<GuideApp />);
+
+    fireEvent.click(screen.getByRole("button", { name: "用demo账号体验" }));
+    expect(await screen.findByRole("alert")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "用demo账号体验" })).toBeTruthy();
+  });
+
+  it("登录后不再显示 demo 入口", async () => {
+    saveTokens({ access_token: "access-token", refresh_token: "refresh-token" });
+    render(<GuideApp />);
+
+    await screen.findByRole("link", { name: "返回工作台" });
+    expect(screen.queryByRole("button", { name: "用demo账号体验" })).toBeNull();
   });
 });
