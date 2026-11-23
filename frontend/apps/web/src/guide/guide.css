@@ -49,8 +49,11 @@
   font-size: var(--fs-sm); font-weight: 500; cursor: pointer;
   border: 1px solid transparent; transition: filter .15s, background .15s, color .15s; white-space: nowrap;
 }
-.guide-btn-primary { background: var(--accent); color: var(--accent-contrast); }
+.guide-btn-primary { background: var(--accent) }
 .guide-btn-primary:hover { filter: brightness(1.06); }
+.guide-page a.guide-btn-primary {
+ color: var(--accent-contrast);
+}
 .guide-btn-ghost { background: transparent; color: var(--text-2); border-color: var(--line); }
 .guide-btn-ghost:hover { background: var(--surface-2); color: var(--text); }
 .guide-theme-toggle {
