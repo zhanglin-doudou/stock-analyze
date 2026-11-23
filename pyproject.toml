@@ -24,6 +24,13 @@ email = ["stock-platform[email]"]
 [tool.uv]
 package = false
 
+# ── PyPI 源：默认阿里云镜像（清华源在本机返回 403，改用阿里云）────
+# 注意：默认源变更会使 uv.lock 中所有 registry 地址同步为重锁后的镜像地址。
+[[tool.uv.index]]
+name = "aliyun"
+url = "https://mirrors.aliyun.com/pypi/simple"
+default = true
+
 [tool.uv.workspace]
 members = ["backend/packages/*", "backend/services/*"]
 
