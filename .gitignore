@@ -44,6 +44,8 @@ tmp-shots/
 
 # 生产部署密钥（模板见 infra/.env.prod.example）
 infra/.env.prod
+# deploy-prod 记录的旧 TAG（deploy-fallback-prod 回滚用，机器本地状态）
+infra/.deploy-prod.old-tag
 
 # 本地 buildx 状态（沙箱内构建用）
 .buildx/

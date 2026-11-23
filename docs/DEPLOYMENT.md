@@ -373,6 +373,10 @@ sudo docker compose --env-file infra/.env.prod -f infra/compose/docker-compose.p
 - 旧镜像保留策略：磁盘上至少留最近 3 个 tag，再清 `sudo docker image prune`（勿用 `prune -a` 误删待回滚镜像）。
 - 查询历史版本：`sudo docker images stock-analyze/api` / `stock-analyze/web`。
 
+> **Makefile 等价命令（推荐）**：
+> `make deploy-prod` 等价于 ①②③——先把当前 `TAG` 记入 `infra/.deploy-prod.old-tag`（gitignore），再把 `infra/.env.prod` 的 `TAG` 改为 `git rev-parse --short HEAD`，构建 `api web` 后 `up -d --no-build`；
+> 回滚用 `make deploy-fallback-prod`：读回该文件里的旧 TAG、切 `TAG` 后 `up -d --no-build`，**不执行** `alembic downgrade`。
+
 ### 6.3 完整示例：构建 → 滚动升级 → 迁移回退（downgrade）→ 镜像回滚
 
 > 场景：`$OLD_TAG`（当前线上）→ `$NEW_TAG`（含新迁移），升级后发现问题需要回退。
