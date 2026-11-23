@@ -336,6 +336,7 @@ export function Import() {
   const [revokeNotice, setRevokeNotice] = useState("");
   const [error, setError] = useState<unknown>(null);
   const [busy, setBusy] = useState(false);
+  const [previewing, setPreviewing] = useState(false);
   const [done, setDone] = useState("");
   const [quarantineNotice, setQuarantineNotice] = useState<QuarantineRow[] | null>(null);
   const idempotency = useRef<string>("");
@@ -426,6 +427,7 @@ export function Import() {
   ): Promise<void> {
     const seq = ++previewSeq.current;
     setBusy(true);
+    setPreviewing(true);
     setError(null);
     try {
       const dto = await api.imports.preview(file, {
@@ -439,7 +441,10 @@ export function Import() {
     } catch (err) {
       if (seq === previewSeq.current) setError(err);
     } finally {
-      if (seq === previewSeq.current) setBusy(false);
+      if (seq === previewSeq.current) {
+        setBusy(false);
+        setPreviewing(false);
+      }
     }
   }
 
@@ -716,6 +721,16 @@ export function Import() {
             </Select>
           </div>
           <Uploader disabled={busy} onFile={(file) => void onFile(file)} />
+          {previewing ? (
+            <p
+              role="status"
+              aria-live="polite"
+              className="tw-flex tw-items-center tw-gap-2 tw-text-sm tw-text-muted-foreground"
+            >
+              <span className="import-spinner" aria-hidden="true" />
+              正在解析文件并生成预览，文件较大时可能需要几秒…
+            </p>
+          ) : null}
         </CardContent>
       </Card>
 
@@ -1059,8 +1074,13 @@ export function Import() {
               <Button type="button" variant="secondary" onClick={() => setStep("mapping")}>
                 修改对应关系
               </Button>
-              <Button type="button" disabled={busy || unresolvedTypes.length > 0} onClick={() => void saveTypes()}>
-                确认这些类型并继续
+              <Button
+                type="button"
+                loading={busy}
+                disabled={unresolvedTypes.length > 0}
+                onClick={() => void saveTypes()}
+              >
+                {busy ? "确认中…" : "确认这些类型并继续"}
               </Button>
             </div>
           </CardContent>

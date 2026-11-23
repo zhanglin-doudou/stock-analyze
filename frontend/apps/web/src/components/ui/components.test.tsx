@@ -48,6 +48,13 @@ describe("UI 包装组件", () => {
     expect(screen.getByText("已完成")).toBeTruthy();
   });
 
+  it("Button loading：禁用交互并标记 aria-busy，文案由调用方控制", () => {
+    render(<Button loading>确认中…</Button>);
+    const button = screen.getByRole("button", { name: "确认中…" }) as HTMLButtonElement;
+    expect(button.disabled).toBe(true);
+    expect(button.getAttribute("aria-busy")).toBe("true");
+  });
+
   it("Tag 内置色调与数字徽标：色调落 tokens、计数原样透出", () => {
     render(
       <div>

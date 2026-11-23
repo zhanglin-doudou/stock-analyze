@@ -194,6 +194,27 @@ describe("Import 导入页结果区", () => {
   });
 });
 
+describe("Import 预览 loading", () => {
+  it("选择文件后展示预览接口 loading，预览返回后消失", async () => {
+    let resolvePreview: (value: Preview) => void = () => undefined;
+    preview.mockReturnValueOnce(
+      new Promise<Preview>((resolve) => {
+        resolvePreview = resolve;
+      }),
+    );
+    renderPage();
+
+    const input = document.querySelector('input[type="file"]');
+    if (!(input instanceof HTMLInputElement)) throw new Error("找不到文件输入框");
+    fireEvent.change(input, { target: { files: [new File(["x"], "huatai_2024.xlsx")] } });
+
+    expect((await screen.findByRole("status")).textContent).toContain("正在解析文件并生成预览");
+
+    resolvePreview(makePreview());
+    await waitFor(() => expect(screen.queryByRole("status")).toBeNull());
+  });
+});
+
 const pinganPreset: ImportTemplateOut = {
   template_id: "sys:pingan",
   broker: "pingan",
